@@ -2,6 +2,8 @@
 
 <p align="center"><strong>Windows · Локальные модели и API · Источники рядом с ответом</strong></p>
 
+<p align="center"><a href="https://github.com/proovcme/LES/actions/workflows/verify.yml"><img src="https://github.com/proovcme/LES/actions/workflows/verify.yml/badge.svg" alt="Windows checks"></a></p>
+
 <p align="center"><a href="USER_GUIDE.md">Начать работу</a> · <a href="#лес-помнит">Память</a> · <a href="#для-интеграций">MCP, API и CLI</a> · <a href="https://github.com/proovcme/LES/releases">Выпуски</a></p>
 
 LES RAG — спокойное рабочее пространство для ваших документов, проектов и разговоров с ИИ.
@@ -9,6 +11,8 @@ LES RAG — спокойное рабочее пространство для в
 
 > **LES RAG 0.1.0 — первый выпуск для Windows.**
 > [Скачать установщик](https://github.com/proovcme/LES/releases/latest) · [Известные ограничения](BACKLOG.md)
+
+![Рабочее пространство LES RAG](assets/interface.jpg)
 
 ## Установка
 
