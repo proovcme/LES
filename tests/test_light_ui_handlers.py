@@ -385,12 +385,13 @@ async def test_folder_intake_failure_keeps_dataset_and_retry_reuses_id(monkeypat
         with ui.dialog() as dialog:
             name, path, parse = ui.input(value='Folder'), ui.input(value='C:/synthetic folder'), ui.switch(value=True)
             watch = ui.switch(value=watch_outcome != 'disabled')
+            browse_btn = ui.button('Выбрать папку')
         dialog.open()
         picked = {'path': ''}
         namespace = {**vars(samovar), 'api_post': post, 'api_put': put, 'api_delete': forbidden_delete,
                      '_refresh': refresh, '_add_error': lambda text: notifications.append((text, {'type': 'negative'})) if text else None, 'add_log': lambda text: None,
                      'last_api_error_text': lambda fallback: fallback,
-                     'name_in': name, 'path_in': path, 'parse_sw': parse, 'watch_sw': watch, 'picked': picked, 'add_dialog': dialog, 'on_connected': None}
+                     'name_in': name, 'path_in': path, 'parse_sw': parse, 'watch_sw': watch, 'picked': picked, 'add_dialog': dialog, 'on_connected': None, 'browse_btn': browse_btn}
         exec(compile(ast.Module(body=[factory], type_ignores=[]), samovar.__file__, 'exec'), namespace)
         await namespace['_submit_add']()
         assert dialog.value and picked['dataset_id'] == 'created-once'
@@ -401,6 +402,7 @@ async def test_folder_intake_failure_keeps_dataset_and_retry_reuses_id(monkeypat
             await namespace['_submit_add']()
         assert watch_attempts == {'enabled': 1, 'disabled': 0, 'retry': 2}[watch_outcome]
         assert attempts == 2  # Retrying watch setup never resubmits the accepted intake.
+        assert not browse_btn.enabled
         assert not dialog.value and notifications[-1][1]['type'] == 'positive'
         assert len([call for call in calls if call[0] == '/api/rag/datasets']) == 1
         assert all(call[1]['dataset_id'] == 'created-once' for call in calls if call[0] == '/api/rag/index-external')
@@ -499,6 +501,7 @@ async def test_empty_folder_requires_watch_confirmation_before_creating_dataset(
         for _ in range(5): await asyncio.sleep(0)
         assert calls==['/api/rag/external/intake-plan'] and dialog.value
         assert button.text=='Подключить под наблюдение'
+        assert button._props['aria-label'] == button.text
         await click(button)
         for _ in range(5): await asyncio.sleep(0)
         assert not dialog.value

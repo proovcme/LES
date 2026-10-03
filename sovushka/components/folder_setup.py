@@ -2,13 +2,8 @@
 from urllib.parse import quote
 from nicegui import ui
 from backend.product_edition import is_light
-from sovushka.state import api_get, api_post, api_put, add_log, last_api_error_text
+from sovushka.state import api_post, api_put, add_log, last_api_error_text
 from sovushka.uikit import action_button, section_heading, text_field
-
-def _ui_handler(coro_func, *args, **kwargs):
-    async def handler(*_event_args):
-        await coro_func(*args, **kwargs)
-    return handler
 
 def _dataset_name_from_path(value: str) -> str:
     """Return a useful default name for either a Windows or POSIX folder path."""
@@ -25,7 +20,6 @@ def open_folder_setup(add_dialog, *, pick_folder, on_done, initial_path='', on_c
         return
     add_dialog.clear()
     picked = {"path": ""}
-    browse = {"path": ""}
     auto_name = {"derived": ""}
     with add_dialog, ui.card().classes("sov-folder-connect"):
         with ui.row().classes("w-full items-center justify-between no-wrap"):
@@ -102,56 +96,6 @@ def open_folder_setup(add_dialog, *, pick_folder, on_done, initial_path='', on_c
                     compact=True,
                 )
 
-        # вложенный браузер папок (клик-навигация по серверной ФС, без печати пути)
-        with ui.dialog() as fdlg, ui.card().style("min-width:520px;max-width:92vw;"):
-            ui.label("Выбор папки").classes("sov-panel-title")
-            with ui.row().classes("items-center w-full").style("gap:8px;margin:6px 0;"):
-                fb_sel = action_button(
-                    "Выбрать эту",
-                    icon="o_check",
-                    on_click=lambda: _pick(),
-                    variant="primary",
-                    compact=True,
-                )
-                action_button(
-                    "Отмена",
-                    on_click=fdlg.close,
-                    variant="quiet",
-                    compact=True,
-                )
-                fb_path = ui.label("…").style("flex:1;text-align:right;font-size:12px;"
-                                              "color:var(--accent);word-break:break-all;")
-            fb_list = ui.column().classes("w-full").style("max-height:340px;overflow:auto;gap:2px;")
-
-        async def _nav(path=""):
-            d = await api_get(f"/api/rag/browse-external?path={quote(path, safe='')}")
-            if not isinstance(d, dict):
-                ui.notify(last_api_error_text("Не удалось открыть папку"), type="negative")
-                return
-            browse["path"] = d.get("path", "")
-            fb_path.set_text(d.get("path") or "Корни — выбери папку ниже")
-            fb_list.clear()
-            with fb_list:
-                if d.get("path"):
-                    ui.button("↑ Вверх", icon="o_arrow_upward",
-                              on_click=_ui_handler(_nav, d.get("parent") or "")
-                              ).props("flat dense no-caps").classes("w-full")
-                for e in d.get("dirs", []):
-                    is_cloud = e.get("source") == "cloud_drive"
-                    icon = "o_cloud" if is_cloud else "o_folder"
-                    suffix = f" · {e.get('provider_title')}" if is_cloud and e.get("provider_title") else ""
-                    ui.button(f"{e['name']}{suffix}   ·   {e.get('file_count', 0)} файл.", icon=icon,
-                              on_click=_ui_handler(_nav, e["path"])
-                              ).props("flat dense no-caps align=left").classes("w-full")
-                if not d.get("dirs") and d.get("path"):
-                    ui.label("Подпапок нет — можно выбрать эту.").classes("sov-muted").style("padding:6px;")
-            fb_sel.set_enabled(bool(d.get("path")))
-
-        def _pick():
-            if browse["path"]:
-                _set_path(browse["path"])
-                fdlg.close()
-
         def _set_path(value: str) -> None:
             path = str(value or "").strip().strip('"')
             old_derived = auto_name["derived"]
@@ -165,19 +109,27 @@ def open_folder_setup(add_dialog, *, pick_folder, on_done, initial_path='', on_c
                 name_in.value = derived
                 name_in.update()
 
-        async def _open_browser(*_event_args):
-            fdlg.open()
-            await _nav("")
-
         async def _open_native_folder(*_event_args):
-            path = await _pick_local_folder(
-                initial=picked["path"] or browse["path"],
-                title="Выберите папку для датасета",
-            )
-            if path:
-                _set_path(path)
+            if picked.get("browsing") or picked.get("intake_result"):
+                return
+            picked["browsing"] = True
+            browse_btn.disable()
+            browse_btn.props("loading")
+            _add_error("")
+            try:
+                path = await _pick_local_folder(
+                    initial=str(path_in.value or ""), title="Выберите папку с документами",
+                )
+                if path:
+                    _set_path(path)
+            except Exception:
+                _add_error("Не удалось открыть выбор папки. Вставьте путь из Проводника в поле выше.")
+            finally:
+                picked["browsing"] = False
+                browse_btn.enable()
+                browse_btn.props(remove="loading")
 
-        browse_btn.on("click", _open_browser)
+        browse_btn.on("click", _open_native_folder)
         path_in.on("update:model-value", lambda event: _set_path(str(event.args or "")))
 
         async def _submit_add():
@@ -199,6 +151,7 @@ def open_folder_setup(add_dialog, *, pick_folder, on_done, initial_path='', on_c
                 if picked.get('empty_confirmed_for') != pth:
                     picked['empty_confirmed_for'] = pth
                     add_button.set_text('Подключить под наблюдение')
+                    add_button.props('aria-label="Подключить под наблюдение"')
                     _add_error(detail + ' Поиск пока недоступен. Нажмите «Подключить под наблюдение», чтобы подхватить будущие файлы.')
                     return
             did = picked.get("dataset_id")
@@ -220,6 +173,7 @@ def open_folder_setup(add_dialog, *, pick_folder, on_done, initial_path='', on_c
                                               "parse_limit": 25, "background": True})
             if r and r.get("status") in ("started", "registered"):
                 picked["intake_result"] = r
+                browse_btn.disable()
                 path_in.disable()
                 parse_sw.disable()
                 if watch_sw.value:

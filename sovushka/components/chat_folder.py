@@ -11,15 +11,29 @@ def open_chat_folder(on_attached):
     async def pick_folder(*, initial='', title='Выберите папку'):
         result = await api_get('/lite-runtime/pick-folder?' + urlencode(dict(initial=initial, title=title)),
                                base=f'http://127.0.0.1:{UI_PORT}')
+        if not isinstance(result, dict) or result.get('status') not in {'selected', 'cancelled'}:
+            ui.notify('Не удалось открыть выбор папки. Вставьте путь из Проводника.', type='warning')
         return str(result.get('path') or '') if isinstance(result, dict) and result.get('status') == 'selected' else ''
 
     with ui.dialog() as dialog, panel(classes='sov-ui-dialog'):
         section_heading('Папка для чата', 'ЛЕС только читает исходники. Выберите, как использовать документы.')
         path = text_field(label='Папка', placeholder='Выберите папку или вставьте путь', classes='w-full')
         async def browse():
-            selected = await pick_folder(initial=path.value)
-            if selected: path.set_value(selected)
-        action_button('Выбрать папку', icon='o_folder_open', on_click=browse, variant='secondary')
+            if browsing['active']:
+                return
+            browsing['active'] = True
+            browse_button.disable()
+            browse_button.props('loading')
+            try:
+                selected = await pick_folder(initial=path.value)
+                if selected:
+                    path.set_value(selected)
+            finally:
+                browsing['active'] = False
+                browse_button.enable()
+                browse_button.props(remove='loading')
+        browsing = {'active': False}
+        browse_button = action_button('Выбрать папку', icon='o_folder_open', on_click=browse, variant='secondary')
         error = ui.label('').props('role=alert').classes('sov-folder-connect-error')
         async def read():
             if not path.value.strip():

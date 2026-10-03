@@ -6988,7 +6988,8 @@
         "sovushka/uikit/__init__.py",
         "sovushka/uikit/components.py",
         "sovushka/uikit/states.py",
-        "sovushka/uikit/tokens.py"
+        "sovushka/uikit/tokens.py",
+        "sovushka/windows_folder_picker.py"
       ],
       "lines": 1,
       "module": "sovushka",
@@ -7199,7 +7200,7 @@
       "inbound": [
         "sovushka/pages/chat.py"
       ],
-      "lines": 49,
+      "lines": 63,
       "module": "sovushka.components.chat_folder",
       "outbound": [
         "sovushka/__init__.py",
@@ -7420,9 +7421,10 @@
       "inbound": [
         "sovushka/components/chat_folder.py",
         "sovushka/pages/samovar.py",
+        "tests/test_light_folder_picker.py",
         "tests/test_light_ui_handlers.py"
       ],
-      "lines": 280,
+      "lines": 234,
       "module": "sovushka.components.folder_setup",
       "outbound": [
         "backend/product_edition.py",
@@ -7639,13 +7641,14 @@
       "inbound": [
         "sovushka_ng.py"
       ],
-      "lines": 493,
+      "lines": 455,
       "module": "sovushka.lite_bridge",
       "outbound": [
         "backend/http_client_policy.py",
         "sovushka/__init__.py",
         "sovushka/config.py",
         "sovushka/trust.py",
+        "sovushka/windows_folder_picker.py",
         "tools/les_runtime_control.py"
       ],
       "path": "sovushka/lite_bridge.py",
@@ -8143,6 +8146,20 @@
     },
     {
       "inbound": [
+        "sovushka/lite_bridge.py",
+        "tests/test_light_folder_picker.py"
+      ],
+      "lines": 104,
+      "module": "sovushka.windows_folder_picker",
+      "outbound": [
+        "sovushka/__init__.py"
+      ],
+      "path": "sovushka/windows_folder_picker.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
         "tests/test_sovushka_data_workspace.py"
       ],
       "lines": 491,
@@ -8588,6 +8605,18 @@
     },
     {
       "inbound": [],
+      "lines": 113,
+      "module": "tests.test_light_folder_picker",
+      "outbound": [
+        "sovushka/components/folder_setup.py",
+        "sovushka/windows_folder_picker.py"
+      ],
+      "path": "tests/test_light_folder_picker.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
       "lines": 45,
       "module": "tests.test_light_forms_boundary",
       "outbound": [
@@ -8929,7 +8958,7 @@
         "tests/test_light_model_setup.py",
         "tests/test_light_search_readiness.py"
       ],
-      "lines": 505,
+      "lines": 508,
       "module": "tests.test_light_ui_handlers",
       "outbound": [
         "sovushka/components/chat_rendering.py",
@@ -11719,12 +11748,12 @@
   "summary": {
     "dormant_candidates": 33,
     "parse_warnings": 0,
-    "product_reachable": 351,
+    "product_reachable": 352,
     "registered_api_routes": 291,
     "runtime_support": 5,
-    "test_or_tool_only": 127,
-    "tracked_python_files": 516,
-    "tracked_python_lines": 150766
+    "test_or_tool_only": 128,
+    "tracked_python_files": 518,
+    "tracked_python_lines": 150916
   },
   "warnings": []
 }

@@ -159,46 +159,8 @@ def _native_pick_folder(*, initial: str = "", title: str = "Выберите п�
         initial_dir = Path.home()
 
     if _is_windows_host():
-        def ps_quote(value: str) -> str:
-            return "'" + value.replace("'", "''") + "'"
-
-        script = "\n".join(
-            [
-                "$OutputEncoding = [System.Text.Encoding]::UTF8",
-                "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
-                "Add-Type -AssemblyName System.Windows.Forms",
-                "$owner = New-Object System.Windows.Forms.Form",
-                "$owner.ShowInTaskbar = $false",
-                "$owner.TopMost = $true",
-                "$owner.StartPosition = 'CenterScreen'",
-                "$owner.Size = New-Object System.Drawing.Size(1, 1)",
-                "$owner.Opacity = 0",
-                "$owner.Show()",
-                "$owner.Activate()",
-                "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog",
-                f"$dialog.Description = {ps_quote(title)}",
-                f"$dialog.SelectedPath = {ps_quote(str(initial_dir))}",
-                "$dialog.ShowNewFolderButton = $true",
-                "$result = $dialog.ShowDialog($owner)",
-                "$owner.Close()",
-                "$owner.Dispose()",
-                "if ($result -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($dialog.SelectedPath) }",
-            ]
-        )
-        result = subprocess.run(
-            ["powershell", "-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-Command", script],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=300,
-            check=False,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
-        )
-        if result.returncode != 0:
-            return {"status": "cancelled" if "cancel" in result.stderr.lower() else "error", "detail": result.stderr.strip()}
-        path = result.stdout.strip()
-        return {"status": "selected" if path else "cancelled", "path": path}
+        from sovushka.windows_folder_picker import pick_folder
+        return pick_folder(initial=str(initial_dir), title=title)
 
     if _is_macos_host():
         def osa_quote(value: str) -> str:

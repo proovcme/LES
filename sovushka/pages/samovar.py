@@ -192,7 +192,7 @@ def build_samovar(
         if isinstance(data, dict) and data.get("status") == "cancelled":
             return ""
         detail = last_api_error_text("Локальный выбор папки недоступен")
-        _notify(f"{detail}. Используй Обзор…", type="warning")
+        _notify(f"{detail}. Вставьте путь из Проводника в поле папки.", type="warning")
         return ""
 
     def _settings_changed() -> bool:
