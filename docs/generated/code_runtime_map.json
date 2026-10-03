@@ -1102,6 +1102,7 @@
         "proxy/services/table_query_service.py",
         "proxy/services/table_sql_service.py",
         "proxy/services/unified_construction_harness_service.py",
+        "proxy/storage/file_storage.py",
         "sovushka/config.py",
         "sovushka/state.py"
       ],
@@ -1497,7 +1498,9 @@
         "proxy/services/web_search_service.py",
         "proxy/services/workbook_tool_service.py",
         "proxy/services/workflow_checkpoint_service.py",
-        "proxy/services/workflow_plan_service.py"
+        "proxy/services/workflow_plan_service.py",
+        "proxy/storage/__init__.py",
+        "proxy/storage/file_storage.py"
       ],
       "lines": 2,
       "module": "proxy",
@@ -1596,6 +1599,7 @@
         "proxy/services/conversation_context_service.py",
         "proxy/services/external_radar_service.py",
         "proxy/services/job_service.py",
+        "proxy/storage/file_storage.py",
         "tests/test_model_connections_router.py"
       ],
       "lines": 170,
@@ -1969,7 +1973,8 @@
         "proxy/services/dataset_watch_service.py",
         "proxy/services/lexical_index_service.py",
         "proxy/services/rag_catalog_guard_service.py",
-        "proxy/services/rag_readiness_service.py"
+        "proxy/services/rag_readiness_service.py",
+        "proxy/storage/file_storage.py"
       ],
       "path": "proxy/routers/dataset_catalog.py",
       "status": "PRODUCT_REACHABLE",
@@ -1990,7 +1995,8 @@
         "proxy/security.py",
         "proxy/services/cloud_drive_service.py",
         "proxy/services/dataset_contracts.py",
-        "proxy/services/dataset_runtime.py"
+        "proxy/services/dataset_runtime.py",
+        "proxy/storage/file_storage.py"
       ],
       "path": "proxy/routers/dataset_cloud.py",
       "status": "PRODUCT_REACHABLE",
@@ -2042,7 +2048,8 @@
         "proxy/services/dataset_contracts.py",
         "proxy/services/dataset_parse_service.py",
         "proxy/services/dataset_runtime.py",
-        "proxy/services/lexical_index_service.py"
+        "proxy/services/lexical_index_service.py",
+        "proxy/storage/file_storage.py"
       ],
       "path": "proxy/routers/dataset_external.py",
       "status": "PRODUCT_REACHABLE",
@@ -2065,7 +2072,8 @@
         "proxy/security.py",
         "proxy/services/dataset_contracts.py",
         "proxy/services/dataset_parse_service.py",
-        "proxy/services/dataset_runtime.py"
+        "proxy/services/dataset_runtime.py",
+        "proxy/storage/file_storage.py"
       ],
       "path": "proxy/routers/dataset_parse.py",
       "status": "PRODUCT_REACHABLE",
@@ -2115,7 +2123,8 @@
         "proxy/services/dataset_contracts.py",
         "proxy/services/dataset_parse_service.py",
         "proxy/services/dataset_runtime.py",
-        "proxy/services/request_idempotency_service.py"
+        "proxy/services/request_idempotency_service.py",
+        "proxy/storage/file_storage.py"
       ],
       "path": "proxy/routers/dataset_uploads.py",
       "status": "PRODUCT_REACHABLE",
@@ -4058,7 +4067,8 @@
         "backend/runtime_paths.py",
         "proxy/__init__.py",
         "proxy/routers/datasets.py",
-        "proxy/services/__init__.py"
+        "proxy/services/__init__.py",
+        "proxy/storage/file_storage.py"
       ],
       "path": "proxy/services/dataset_watch_service.py",
       "status": "PRODUCT_REACHABLE",
@@ -6870,6 +6880,40 @@
         "proxy/services/__init__.py"
       ],
       "path": "proxy/services/workflow_plan_service.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "proxy/storage/file_storage.py"
+      ],
+      "lines": 1,
+      "module": "proxy.storage",
+      "outbound": [
+        "proxy/__init__.py"
+      ],
+      "path": "proxy/storage/__init__.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "proxy/routers/dataset_catalog.py",
+        "proxy/routers/dataset_cloud.py",
+        "proxy/routers/dataset_external.py",
+        "proxy/routers/dataset_parse.py",
+        "proxy/routers/dataset_uploads.py",
+        "proxy/services/dataset_watch_service.py"
+      ],
+      "lines": 147,
+      "module": "proxy.storage.file_storage",
+      "outbound": [
+        "backend/runtime_paths.py",
+        "proxy/__init__.py",
+        "proxy/config.py",
+        "proxy/storage/__init__.py"
+      ],
+      "path": "proxy/storage/file_storage.py",
       "status": "PRODUCT_REACHABLE",
       "windows_runtime_explicit": false
     },
@@ -11675,12 +11719,12 @@
   "summary": {
     "dormant_candidates": 33,
     "parse_warnings": 0,
-    "product_reachable": 349,
+    "product_reachable": 351,
     "registered_api_routes": 291,
     "runtime_support": 5,
     "test_or_tool_only": 127,
-    "tracked_python_files": 514,
-    "tracked_python_lines": 150618
+    "tracked_python_files": 516,
+    "tracked_python_lines": 150766
   },
   "warnings": []
 }

@@ -19,9 +19,9 @@
 
 | Метрика | Значение |
 | --- | --- |
-| Python-файлов под git | 514 |
-| Строк Python | 150618 |
-| PRODUCT_REACHABLE | 349 |
+| Python-файлов под git | 516 |
+| Строк Python | 150766 |
+| PRODUCT_REACHABLE | 351 |
 | RUNTIME_SUPPORT | 5 |
 | TEST_OR_TOOL_ONLY | 127 |
 | DORMANT_CANDIDATE | 33 |
