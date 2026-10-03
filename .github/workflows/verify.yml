@@ -28,7 +28,7 @@ jobs:
       - name: Prepare build tools
         run: choco install make --yes --no-progress
       - name: Install frozen Python environment
-        run: uv sync --frozen
+        run: uv sync --frozen --extra mcp
       - name: Verify code and offline behavior
         run: |
           make verify

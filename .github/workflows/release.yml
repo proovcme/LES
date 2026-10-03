@@ -23,7 +23,7 @@ jobs:
         with:
           workspaces: desktop/light/src-tauri
       - name: Install frozen build environment
-        run: uv sync --frozen
+        run: uv sync --frozen --extra mcp
       - name: Build desktop shell
         run: cargo build --locked --release --manifest-path desktop/light/src-tauri/Cargo.toml
       - name: Build pinned offline payload
