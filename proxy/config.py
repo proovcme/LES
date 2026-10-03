@@ -1,0 +1,170 @@
+"""Typed-ish runtime settings for LES Proxy v3."""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+from proxy.local_model_registry import DEFAULT_LOCAL_MLX_MODEL
+
+
+ROOT = Path(".")
+DATA_DIR = ROOT / "data"
+META_DB_PATH = DATA_DIR / "les_meta.db"
+ENV_PATH = Path(os.getenv("LES_ENV_PATH", str(ROOT / ".env"))).expanduser()
+load_dotenv(ENV_PATH, override=False)
+
+PUBLIC_ROLE = "public"
+USER_ROLE = "user"
+ADMIN_ROLE = "admin"
+
+ALLOWED_SETTINGS = {
+    "LLM_MODEL",
+    "EMBED_MODEL",
+    "EMBEDDING_MODEL",
+    "LES_EMBED_PROFILE",
+    "MLX_URL",
+    "RAG_COLLECTION_NAME",
+    "RAG_VECTOR_SIZE",
+    "LES_LLM_PROVIDER",
+    "OPENROUTER_BASE_URL",
+    "OPENROUTER_MODEL",
+    "OPENAI_BASE_URL",
+    "OPENAI_MODEL",
+    "OLLAMA_BASE_URL",
+    "OLLAMA_MODEL",
+    "LEMONADE_BASE_URL",
+    "LEMONADE_MODEL",
+    "FREETOKEN_BASE_URL",
+    "FREETOKEN_MODEL",
+    "FREETOKEN_CONTEXT_TOKENS",
+    "FREETOKEN_PROMPT_MAX_CHARS",
+    # W3.3 (ADR-9): маршрутизация локал/облако
+    "LES_CLOUD_CONSENT",            # разрешить P2-данные в облако (P0 — никогда)
+    "LES_CLOUD_PRICES",             # переопределение цен: "model:in/out,..."
+}
+DEFAULT_RAG_UPLOAD_SUFFIXES = (
+    ".pdf",
+    ".docx",
+    ".doc",
+    ".eml",
+    ".emlx",
+    ".msg",
+    ".xlsx",
+    ".xls",
+    ".csv",
+    ".json",
+    ".jsonl",
+    ".md",
+    ".txt",
+)
+
+TRUSTED_NETWORKS = tuple(
+    item.strip()
+    for item in os.getenv(
+        "TRUSTED_NETWORKS",
+        "127.0.0.1/32,::1/128",
+    ).split(",")
+    if item.strip()
+)
+TRUSTED_NETWORK_ROLE = os.getenv("TRUSTED_NETWORK_ROLE", ADMIN_ROLE)
+
+TRUSTED_PROXY_NETWORKS = tuple(
+    item.strip()
+    for item in os.getenv("TRUSTED_PROXY_NETWORKS", "127.0.0.1/32,::1/128").split(",")
+    if item.strip()
+)
+TRUSTED_PROXY_HEADER = os.getenv("TRUSTED_PROXY_HEADER", "x-les-trusted-network")
+
+CORS_ALLOWED_ORIGINS = tuple(
+    item.strip()
+    for item in os.getenv(
+        "CORS_ALLOWED_ORIGINS",
+        "http://localhost:8080,http://127.0.0.1:8080,"
+        "http://localhost:8050,http://127.0.0.1:8050,"
+        "http://localhost:8051,http://127.0.0.1:8051",
+    ).split(",")
+    if item.strip()
+)
+
+# W5.7: origin-ы доверенного контура (loopback + ZeroTier) с ЛЮБЫМ портом —
+# визуализатор :8066 и шеллы ходят в proxy кросс-доменно с любого ZT-адреса.
+CORS_ALLOWED_ORIGIN_REGEX = os.getenv(
+    "CORS_ALLOWED_ORIGIN_REGEX",
+    r"^https?://(localhost|127\.0\.0\.1|10\.195\.146\.\d{1,3})(:\d+)?$",
+)
+
+
+def docker_control_enabled() -> bool:
+    return os.getenv("LES_ENABLE_DOCKER_CONTROL", "false").lower() in {"1", "true", "yes", "on"}
+
+
+def rag_upload_suffixes() -> set[str]:
+    raw = os.getenv("RAG_UPLOAD_SUFFIXES", ",".join(DEFAULT_RAG_UPLOAD_SUFFIXES))
+    return {item.strip().lower() for item in raw.split(",") if item.strip()}
+
+
+def external_source_roots() -> list[Path]:
+    """Одобренные внешние корни для in-place индексации.
+
+    LES_EXTERNAL_SOURCE_ROOTS — список абсолютных путей через запятую. Пусто →
+    внешняя индексация выключена (fail-closed). Каждый корень резолвится (снимая
+    симлинки) — валидатор в proxy.storage.file_storage пускает абсолютный путь
+    ТОЛЬКО если он внутри одного из этих корней.
+    """
+    raw = os.getenv("LES_EXTERNAL_SOURCE_ROOTS", "")
+    roots: list[Path] = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            resolved = Path(part).expanduser().resolve(strict=False)
+        except (OSError, RuntimeError):
+            continue
+        if resolved.is_absolute() and resolved not in roots:
+            roots.append(resolved)
+    return roots
+
+
+def external_allow_any() -> bool:
+    """Локальный single-user режим: разрешить in-place индексацию ЛЮБОГО локального каталога,
+    а не только LES_EXTERNAL_SOURCE_ROOTS. По умолчанию ВКЛ (это машина оператора, Trusted Network).
+    Guard'ы resolve(strict)+isdir+анти-симлинк-эскейп остаются в коде. LES_EXTERNAL_ALLOW_ANY=0 →
+    строгий allowlist (fail-closed)."""
+    return os.getenv("LES_EXTERNAL_ALLOW_ANY", "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+def external_browse_default() -> Path:
+    """Старт браузера папок, когда корни не заданы / разрешён любой каталог."""
+    raw = os.getenv("LES_EXTERNAL_BROWSE_DEFAULT", "").strip()
+    try:
+        return Path(raw).expanduser().resolve(strict=False) if raw else Path.home()
+    except (OSError, RuntimeError):
+        return Path.home()
+
+
+def max_upload_bytes() -> int:
+    return int(os.getenv("MAX_UPLOAD_MB", "100")) * 1024 * 1024
+
+
+def max_pst_upload_bytes() -> int:
+    return int(os.getenv("MAX_PST_UPLOAD_MB", "2048")) * 1024 * 1024
+
+
+def mlx_url() -> str:
+    return os.getenv("MLX_URL", "http://127.0.0.1:8080").rstrip("/")
+
+
+def qdrant_url() -> str:
+    return os.getenv("QDRANT_URL", "http://127.0.0.1:6333").rstrip("/")
+
+
+def llm_model() -> str:
+    return os.getenv("LLM_MODEL", DEFAULT_LOCAL_MLX_MODEL)
+
+
+def embed_model() -> str:
+    return os.getenv("EMBED_MODEL", "bge-m3:latest")

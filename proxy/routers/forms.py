@@ -1,0 +1,167 @@
+"""W11.3/W19 — API типовых форм документов: дескриптор + данные объекта → документ."""
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+from typing import Any, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
+
+from proxy.security import require_user
+from proxy.services import forms_service, list_office_agent_service, list_office_service
+
+router = APIRouter(prefix="/api/forms", tags=["forms"])
+
+_MEDIA = {
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+}
+_HIDDEN_FORM_IDS = frozenset({"vor", "smeta_lsr", "ks2", "ks3", "ks6a"})
+
+
+def _require_supported_form(form_id: str) -> None:
+    if str(form_id or "").strip().casefold() in _HIDDEN_FORM_IDS:
+        raise HTTPException(404, "Форма не найдена")
+
+
+class FormGenerate(BaseModel):
+    project_id: Optional[int] = None
+    fmt: str = "docx"
+    manual: Optional[dict[str, Any]] = None
+    rows: Optional[list[list[str]]] = None
+
+
+class OfficeDraftCreate(BaseModel):
+    form_id: str
+    project_id: Optional[int] = None
+    fmt: str = "docx"
+    manual: Optional[dict[str, Any]] = None
+    dataset_id: str = ""
+    source_refs: Optional[list[dict[str, Any]]] = None
+    document_id: Optional[str] = None
+    office_ir: Optional[dict[str, Any]] = None
+    review_confirmed: bool = False
+
+
+class OfficeAgentDraft(BaseModel):
+    form_id: str
+    project_id: Optional[int] = None
+    manual: Optional[dict[str, Any]] = None
+    dataset_id: str = ""
+    source_refs: Optional[list[dict[str, Any]]] = None
+    instruction: str = ""
+
+
+@router.get("")
+async def forms_list(_user=Depends(require_user)):
+    forms = await asyncio.to_thread(forms_service.list_forms)
+    return {"forms": [item for item in forms if str(item.get("id") or "").casefold() not in _HIDDEN_FORM_IDS]}
+
+
+@router.get("/artifacts")
+async def office_artifacts(limit: int = 100, _user=Depends(require_user)):
+    """Append-only журнал созданных в Студии документов Л.И.С.Т."""
+    rows = await asyncio.to_thread(list_office_service.list_artifacts, limit=limit)
+    return {"schema": "list.office_artifact_registry.v1", "artifacts": rows}
+
+
+@router.post("/agent-draft")
+async def office_agent_draft(req: OfficeAgentDraft, _user=Depends(require_user)):
+    """Подготовить reviewable IR по выбранным файлам; офисный файл не создаётся."""
+    _require_supported_form(req.form_id)
+    try:
+        return await list_office_agent_service.prepare_document_ir(
+            req.form_id,
+            project_id=req.project_id,
+            manual=req.manual or {},
+            dataset_id=req.dataset_id,
+            source_refs=req.source_refs or [],
+            instruction=req.instruction,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except list_office_agent_service.OfficeAgentUnavailable as exc:
+        raise HTTPException(503, f"Л.Е.С. не подготовил валидный черновик: {exc}") from exc
+
+
+@router.post("/artifacts")
+async def office_artifact_create(req: OfficeDraftCreate, _user=Depends(require_user)):
+    """Создать новую draft-ревизию, не изменяя файлы-основания."""
+    _require_supported_form(req.form_id)
+    try:
+        return await asyncio.to_thread(
+            list_office_service.create_draft,
+            req.form_id,
+            req.fmt,
+            project_id=req.project_id,
+            manual=req.manual or {},
+            dataset_id=req.dataset_id,
+            source_refs=req.source_refs or [],
+            document_id=req.document_id,
+            office_ir=req.office_ir,
+            review_confirmed=req.review_confirmed,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/artifacts/{revision_id}/download")
+async def office_artifact_download(revision_id: str, _user=Depends(require_user)):
+    """Отдать ревизию только при совпадении её сохранённого SHA-256."""
+    try:
+        result = await asyncio.to_thread(list_office_service.artifact_file, revision_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if result is None:
+        raise HTTPException(404, "Ревизия не найдена или повреждена")
+    target, manifest = result
+    fmt = str(manifest.get("format") or target.suffix.lstrip("."))
+    return FileResponse(
+        target,
+        media_type=_MEDIA.get(fmt, "application/octet-stream"),
+        filename=str((manifest.get("artifact") or {}).get("filename") or target.name),
+    )
+
+
+@router.get("/{form_id}/fields")
+async def forms_fields(form_id: str, project_id: Optional[int] = None, _user=Depends(require_user)):
+    """Поля формы с разрешёнными из объекта значениями (0 LLM); needs_input — ручной ввод."""
+    _require_supported_form(form_id)
+    resolved = await asyncio.to_thread(forms_service.resolve_fields, form_id, project_id, None)
+    if resolved is None:
+        raise HTTPException(404, f"Форма {form_id!r} не найдена")
+    return resolved
+
+
+@router.post("/{form_id}/generate")
+async def forms_generate(form_id: str, req: FormGenerate, _user=Depends(require_user)):
+    """Сгенерировать документ. html — инлайн-превью; docx/xlsx — путь + /download."""
+    _require_supported_form(form_id)
+    try:
+        result = await asyncio.to_thread(
+            forms_service.generate,
+            form_id,
+            req.fmt,
+            project_id=req.project_id,
+            manual=req.manual or {},
+            rows=req.rows,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if result.get("path"):
+        result["download"] = f"/api/forms/{form_id}/download?path={Path(result['path']).name}"
+    return result
+
+
+@router.get("/{form_id}/download")
+async def forms_download(form_id: str, path: str = Query(...), _user=Depends(require_user)):
+    """Отдать ранее сгенерированный файл (по имени, в каталоге выдачи — path-guard)."""
+    _require_supported_form(form_id)
+    out_dir = forms_service._output_dir().resolve()
+    target = (out_dir / Path(path).name).resolve()
+    if out_dir not in target.parents or not target.is_file():
+        raise HTTPException(404, "Файл не найден")
+    fmt = target.suffix.lstrip(".")
+    return FileResponse(target, media_type=_MEDIA.get(fmt, "application/octet-stream"), filename=target.name)

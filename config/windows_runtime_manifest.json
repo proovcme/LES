@@ -1,0 +1,32 @@
+{
+  "schema": "les.windows-runtime-manifest.v1",
+  "include_prefixes": [
+    "backend/",
+    "proxy/",
+    "sovushka/",
+    "config/",
+    "qdrant_visualizer/",
+    "installers/windows/light/"
+  ],
+  "include_files": [
+    "LICENSE",
+    "README.md",
+    "lemonade_host.py",
+    "mlx_host.py",
+    "proxy_server.py",
+    "pyproject.toml",
+    "sovushka_ng.py",
+    "tools/__init__.py",
+    "tools/backup_suharik.py",
+    "tools/build_rag_contract_sibling.py",
+    "tools/install_les.py",
+    "tools/les_doctor.py",
+    "tools/les_runtime_control.py",
+    "tools/lesctl.py",
+    "tools/live_workbook_acceptance.py",
+    "tools/reindex_datasets_guarded.py",
+    "tools/windows_runtime.py",
+    "tools/windows_update_engine.py",
+    "uv.lock"
+  ]
+}

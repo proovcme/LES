@@ -1,0 +1,110 @@
+"""Цитаты из источников: конкретные фрагменты норм под ответом (дедуп, обрезка)."""
+from types import SimpleNamespace as N
+
+from proxy.routers.chat import _generation_token_budget, _local_context_budget, clean_visible_text, source_excerpts
+from proxy.services.saferag_service import source_map_for_context
+
+
+def test_dedup_truncate_skip_empty():
+    chunks = [
+        N(content="Ширина путей эвакуации 1,2 м " * 50, doc_name="NTD/СП 4.13130.docx", score=0.81, meta={"dataset_id": "ds1"}),
+        N(content="", doc_name="empty.docx", score=0.5, meta={}),
+        N(content="Ширина путей эвакуации 1,2 м " * 50, doc_name="NTD/СП 4.13130.docx", score=0.79, meta={}),  # дубль
+        N(content="Дымоудаление по СП 7.13130", doc_name="NTD/СП 7.13130.docx", score=0.7, meta={"dataset_id": "ds2"}),
+    ]
+    ex = source_excerpts(chunks, max_n=6, max_chars=100)
+    assert len(ex) == 2  # пустой пропущен, дубль дедуплицирован
+    assert ex[0]["doc"] == "NTD/СП 4.13130.docx"
+    assert ex[0]["text"].endswith("…")  # длинный обрезан
+    assert ex[0]["score"] == 0.81 and ex[0]["dataset_id"] == "ds1"
+    assert ex[1]["doc"] == "NTD/СП 7.13130.docx"
+
+
+def test_max_n_limit():
+    chunks = [N(content=f"фрагмент {i}", doc_name=f"d{i}.docx", score=0.5, meta={}) for i in range(10)]
+    assert len(source_excerpts(chunks, max_n=3)) == 3
+
+
+def test_empty_input():
+    assert source_excerpts([]) == []
+    assert source_excerpts(None) == []
+
+
+def test_short_text_not_truncated():
+    ex = source_excerpts([N(content="короткий пункт", doc_name="d.docx", score=0.6, meta={})], max_chars=700)
+    assert ex[0]["text"] == "короткий пункт"  # без многоточия
+
+
+def test_clean_visible_text_strips_cjk_garbage():
+    assert clean_visible_text("Документы 其它 系统 связи") == "Документы связи"
+
+
+def test_source_map_matches_context_numbering_and_limit():
+    chunks = [
+        N(
+            content="первый фрагмент",
+            doc_name="СП 1.docx",
+            doc_id="doc-1",
+            score=0.81,
+            meta={"dataset_id": "ds1", "page": 7, "source_ref": "СП 1.docx#p7"},
+        ),
+        N(content="второй фрагмент " * 20, doc_name="СП 2.docx", score=0.7, meta={}),
+    ]
+
+    full = source_map_for_context(chunks, max_chars=2000, include_metadata=True)
+
+    assert [item["label"] for item in full] == ["Источник 1", "Источник 2"]
+    assert full[0]["doc_name"] == "СП 1.docx"
+    assert full[0]["doc_id"] == "doc-1"
+    assert full[0]["page"] == 7
+    assert full[0]["dataset_id"] == "ds1"
+    assert full[0]["source_ref"] == "СП 1.docx#p7"
+
+    limited = source_map_for_context(chunks, max_chars=180, include_metadata=True)
+    assert len(limited) == 1
+    assert limited[0]["label"] == "Источник 1"
+
+
+def test_context_budget_does_not_drop_sources_for_local_model(monkeypatch):
+    monkeypatch.delenv("RAG_MODEL_CONTEXT_CHARS", raising=False)
+    cloud = _local_context_budget(local_big=False, big_context=True)
+    local = _local_context_budget(local_big=True, big_context=False)
+
+    assert local == cloud
+    assert local["context_chars_limit"] == 120000
+    assert local["context_max_chunks"] == 0
+    assert local["focus_max_chunks"] == 0
+    assert local["context_window_chars"] == 4000
+
+
+def test_context_budget_bounds_freetoken_evidence_and_windows(monkeypatch):
+    monkeypatch.setenv("FREETOKEN_CONTEXT_TOKENS", "8253")
+    monkeypatch.delenv("FREETOKEN_PROMPT_MAX_CHARS", raising=False)
+    monkeypatch.delenv("FREETOKEN_PROMPT_CHARS_PER_TOKEN", raising=False)
+    monkeypatch.delenv("FREETOKEN_FOCUS_MAX_CHUNKS", raising=False)
+    monkeypatch.delenv("FREETOKEN_CONTEXT_MAX_CHUNKS", raising=False)
+    monkeypatch.delenv("FREETOKEN_EVIDENCE_MAX_CHARS", raising=False)
+    monkeypatch.delenv("FREETOKEN_CONTEXT_WINDOW_CHARS", raising=False)
+
+    budget = _local_context_budget(
+        local_big=True,
+        big_context=False,
+        provider="freetoken",
+    )
+
+    assert budget == {
+        "focus_max_chunks": 0,
+        "context_max_chunks": 0,
+        "context_chars_limit": 14106,
+        "context_window_chars": 1800,
+    }
+
+
+def test_local_generation_budget_does_not_cap_broad_forms(monkeypatch):
+    monkeypatch.delenv("RAG_LOCAL_CHAT_MAX_TOKENS", raising=False)
+
+    assert _generation_token_budget(max_tokens=8192, local_big=True, attempt=1, intent="default") == 8192
+    assert _generation_token_budget(max_tokens=8192, local_big=True, attempt=1, intent="full") == 8192
+    assert _generation_token_budget(max_tokens=1024, local_big=True, attempt=1, intent="brief") == 1024
+    assert _generation_token_budget(max_tokens=8192, local_big=False, attempt=1, intent="default") == 8192
+    assert _generation_token_budget(max_tokens=8192, local_big=True, attempt=2, intent="default") == 2048

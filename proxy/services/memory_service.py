@@ -1,0 +1,553 @@
+"""Рабочая память Л.Е.С. — заметки оператора и ретрив по истории (W16.1 + W16.3, LES3_PLAN).
+
+ADR-11: «запомни: …» — детерминированная regex-команда, recall — лексический
+скоринг по пересечению слов (SQL + python), LLM не участвует. Хранение —
+в метабазе рядом с chat_history и les_tasks.
+"""
+
+from __future__ import annotations
+
+import logging
+import json
+import os
+import re
+import sqlite3
+import time
+from pathlib import Path
+from typing import Any
+
+from backend.rag_config import rag_meta_db_path
+
+logger = logging.getLogger(__name__)
+
+# «запомни: …», «запомни, что …» — разделитель обязателен, иначе перехватим
+# обычные вопросы вида «запомни ли ты прошлый разговор?»
+REMEMBER_RE = re.compile(
+    r"^\s*запомни\s*(?:[:,—-]\s*(?:что\s+)?|что\s+)(?P<text>.{3,1000})$",
+    re.IGNORECASE | re.DOTALL,
+)
+# «заметки», «что ты помнишь», «покажи заметки», «мои заметки»
+LIST_NOTES_RE = re.compile(
+    r"^\s*(?:(?:покажи|мои)\s+заметки|заметки|что\s+ты\s+помнишь)\s*\??\s*$",
+    re.IGNORECASE,
+)
+# «забудь заметку 5», «удали заметку 5»
+FORGET_NOTE_RE = re.compile(
+    r"^\s*(?:забудь|удали)\s+заметку\s*[№#]?\s*(?P<id>\d+)\s*$",
+    re.IGNORECASE,
+)
+
+_BAD_FEEDBACK = ("bad_answer", "incorrect", "wrong_dataset", "bad_source")
+_STOPWORDS = frozenset(
+    "что как это для при или если того этом быть есть какой какие каких "
+    "может можно нужно надо есть ли по на из в с к у и а но не да же ещё еще "
+    "тебе меня него ним них там тут вот так уже только очень всех весь вся".split()
+)
+_WORD_RE = re.compile(r"[а-яёa-z0-9]{4,}", re.IGNORECASE)
+
+
+def _connect() -> sqlite3.Connection:
+    conn = sqlite3.connect(rag_meta_db_path())
+    conn.row_factory = sqlite3.Row
+    conn.execute("BEGIN IMMEDIATE")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS les_notes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            text TEXT NOT NULL,
+            dataset_filter TEXT NOT NULL DEFAULT '',
+            created_at REAL NOT NULL
+        )
+        """
+    )
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(les_notes)")}
+    for col, ddl in (
+        ("project_id", "ALTER TABLE les_notes ADD COLUMN project_id INTEGER NOT NULL DEFAULT 0"),
+        ("auto", "ALTER TABLE les_notes ADD COLUMN auto INTEGER NOT NULL DEFAULT 0"),
+        ("enabled", "ALTER TABLE les_notes ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1"),
+        ("source_session_id", "ALTER TABLE les_notes ADD COLUMN source_session_id TEXT"),
+    ):
+        if col not in columns:
+            conn.execute(ddl)
+    conn.commit()
+    return conn
+
+
+def _connect_read_only() -> sqlite3.Connection:
+    path = Path(rag_meta_db_path()).resolve()
+    conn = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def create_note(text: str, dataset_filter: str = "", project_id: int = 0, auto: bool = False,
+                *, source_session_id: str | None = None) -> dict[str, Any]:
+    now = time.time()
+    with _connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO les_notes(text, dataset_filter, project_id, auto, created_at, source_session_id) VALUES (?,?,?,?,?,?)",
+            (text.strip(), dataset_filter, int(project_id), 1 if auto else 0, now, source_session_id),
+        )
+        conn.commit()
+        note_id = cur.lastrowid
+    logger.info("[MEMORY] %sзаметка #%s: %s", "авто-" if auto else "", note_id, text[:80])
+    try:  # W17.2: детерминированные рёбра из текста заметки (НТД/[[вики]]/элемент), 0 LLM
+        from proxy.services.edge_service import derive_edges_from_text
+        derive_edges_from_text("note", str(note_id), text, provenance=f"note#{note_id}")
+    except Exception as edge_err:
+        logger.warning("[EDGES] derive note#%s skipped: %s", note_id, edge_err)
+    return {"id": note_id, "text": text.strip(), "dataset_filter": dataset_filter,
+            "project_id": int(project_id), "created_at": now, "enabled": True,
+            "source_session_id": source_session_id}
+
+
+def list_notes(limit: int = 50, project_id: int | None = None) -> list[dict[str, Any]]:
+    with _connect() as conn:
+        if project_id is not None:  # Q3: фильтр по объекту (None → все)
+            rows = conn.execute(
+                "SELECT * FROM les_notes WHERE project_id=? ORDER BY id DESC LIMIT ?",
+                (int(project_id), limit),
+            ).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM les_notes ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+    return [dict(row) for row in rows]
+
+
+def project_note_items(*, limit: int = 5, project_id: int | None = None,
+                       explicit_only: bool = False) -> list[dict[str, Any]]:
+    """Read notes for typed projection without schema creation or other writes."""
+    if not Path(rag_meta_db_path()).is_file():
+        return []
+    try:
+        with _connect_read_only() as conn:
+            table = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='les_notes'"
+            ).fetchone()
+            if not table:
+                return []
+            columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(les_notes)")}
+            clauses = []
+            params: list[Any] = []
+            if "project_id" in columns:
+                clauses.append("project_id IN (0, ?)")
+                params.append(int(project_id or 0))
+            if "enabled" in columns:
+                clauses.append("enabled=1")
+            if explicit_only and "auto" in columns:
+                clauses.append("auto=0")
+            where = " WHERE " + " AND ".join(clauses) if clauses else ""
+            rows = conn.execute(
+                "SELECT * FROM les_notes" + where + " ORDER BY id DESC LIMIT ?",
+                (*params, max(0, int(limit))),
+            ).fetchall()
+    except sqlite3.OperationalError:
+        if not Path(rag_meta_db_path()).exists():
+            return []
+        raise
+    return [dict(row) for row in rows]
+
+
+def validate_note_text(text: str) -> str:
+    text = text.strip()
+    if not text or len(text) > 2000:
+        raise ValueError("Текст заметки должен содержать от 1 до 2000 символов")
+    return text
+
+
+def update_note(note_id: int, *, project_id: int, text: str | None = None,
+                enabled: bool | None = None) -> dict[str, Any] | None:
+    """Edit only an explicitly addressed scope; never move a note between projects."""
+    if text is not None:
+        text = validate_note_text(text)
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE les_notes SET text=COALESCE(?, text), enabled=COALESCE(?, enabled), "
+            "auto=CASE WHEN ? THEN 0 ELSE auto END "
+            "WHERE id=? AND project_id=?",
+            (text, int(enabled) if enabled is not None else None,
+             text is not None or enabled is not None, note_id, project_id),
+        )
+        row = conn.execute("SELECT * FROM les_notes WHERE id=? AND project_id=?",
+                           (note_id, project_id)).fetchone()
+    return dict(row) if row else None
+
+
+def delete_note(note_id: int, *, project_id: int | None = None) -> bool:
+    with _connect() as conn:
+        if project_id is None:  # Compatibility for the explicit legacy delete command.
+            cur = conn.execute("DELETE FROM les_notes WHERE id=?", (note_id,))
+        else:
+            cur = conn.execute("DELETE FROM les_notes WHERE id=? AND project_id=?", (note_id, project_id))
+        conn.commit()
+    return cur.rowcount > 0
+
+
+def _keywords(text: str) -> set[str]:
+    # Грубый стемминг срезом до 6 символов: «корпуса»/«корпусу» → «корпус».
+    # Для recall-скоринга по пересечению этого достаточно (ADR-11: без моделей).
+    words = {w.lower() for w in _WORD_RE.findall(text)} - _STOPWORDS
+    return {w[:6] for w in words}
+
+
+def _overlap_score(query_words: set[str], text: str) -> float:
+    if not query_words:
+        return 0.0
+    text_words = _keywords(text)
+    if not text_words:
+        return 0.0
+    hit = len(query_words & text_words)
+    return hit / len(query_words)
+
+
+def recall_context(
+    question: str,
+    *,
+    max_notes: int = 3,
+    max_history: int = 1,
+    min_score: float = 0.34,
+    history_rows: int = 300,
+) -> str:
+    """Лексический recall: релевантные заметки оператора + прошлые удачные ответы.
+
+    Возвращает готовый текстовый блок для промпта ('' — нечего подмешивать).
+    Детерминированно: пересечение значимых слов, без эмбеддингов и LLM.
+    """
+    query_words = _keywords(question)
+    if not query_words:
+        return ""
+
+    scored_notes = [
+        (score, note)
+        for note in project_note_items(limit=200)
+        if (score := _overlap_score(query_words, note["text"])) >= min_score
+    ]
+    scored_notes.sort(key=lambda pair: -pair[0])
+
+    scored_history: list[tuple[float, dict[str, Any]]] = []
+    try:
+        with _connect() as conn:
+            rows = conn.execute(
+                "SELECT id, question, answer, feedback_status FROM chat_history "
+                "WHERE success=1 AND crag_status IN ('VERIFIED','DETERMINISTIC') "
+                f"AND feedback_status NOT IN ({','.join('?' * len(_BAD_FEEDBACK))}) "
+                "AND question != ? ORDER BY id DESC LIMIT ?",
+                (*_BAD_FEEDBACK, question.strip(), history_rows),
+            ).fetchall()
+        for row in rows:
+            score = _overlap_score(query_words, row["question"])
+            if score >= max(min_score, 0.5):  # к истории строже: совпадение по смыслу вопроса
+                scored_history.append((score, dict(row)))
+        scored_history.sort(key=lambda pair: -pair[0])
+    except sqlite3.OperationalError:  # chat_history ещё не создана (свежая база)
+        pass
+
+    parts: list[str] = []
+    for _, note in scored_notes[:max_notes]:
+        # Типизация (Codex §12, пет-размер): различаем «сказал оператор» vs «распознала система»
+        # по существующему флагу auto. Авто-заметка рискованнее (система угадала факт).
+        kind = "распознала система" if note.get("auto") else "сказал оператор"
+        parts.append(f"- Заметка ({kind}, НЕПРОВЕРЕНО) #{note['id']}: {note['text'][:400]}")
+    for _, row in scored_history[:max_history]:
+        parts.append(
+            f"- Из истории (на вопрос «{row['question'][:150]}» ранее отвечено): {row['answer'][:600]}"
+        )
+    if not parts:
+        return ""
+    # Память — непроверенный ФОН, не основание (Codex §12): не источник чисел/норм, не перебивает контекст.
+    return ("Рабочая память (НЕПРОВЕРЕННЫЙ ввод оператора и прошлые ответы — фон, НЕ основание: "
+            "не используй как источник чисел/норм/пунктов и не противоречь нормативу из контекста):\n"
+            + "\n".join(parts))
+
+
+def session_memory_items(session_id: str, *, max_turns: int = 6, max_content_chars: int = 700) -> list[dict[str, str]]:
+    """Return bounded, addressable dialogue turns from the current session."""
+    if not (session_id or "").strip():
+        return []
+    from proxy.services.conversation_context_service import get_context
+    context = get_context(session_id)
+    if not context['enabled']: return []
+    cutoff = max(context['cutoff_id'], context['through_id'] if context['summary'] else 0)
+    try:
+        with _connect_read_only() as conn:
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(chat_history)")}
+            attachment = "attachment_context" if "attachment_context" in columns else "''"
+            trace = "retrieval_trace_json" if "retrieval_trace_json" in columns else "'{}'"
+            rows = conn.execute(
+                f"SELECT id, question, answer, {attachment} AS attachment_context, "
+                f"{trace} AS retrieval_trace_json FROM chat_history WHERE session_id=? AND id>? "
+                "ORDER BY id DESC LIMIT ?",
+                (session_id.strip(), cutoff, max_turns),
+            ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    rows = list(reversed(rows))
+    return [
+        {
+            "turn_id": f"chat:{row['id']}",
+            "question": str(row["question"] or "").strip()[:max_content_chars],
+            "answer": str(row["answer"] or "").strip()[:max_content_chars],
+            "attachment_context": str(row["attachment_context"] or "")[:max_content_chars],
+            "web_sources": _history_web_sources(row["retrieval_trace_json"]),
+        }
+        for row in rows
+        if str(row["question"] or "").strip() or str(row["answer"] or "").strip()
+    ]
+
+
+def _history_web_sources(raw: str) -> str:
+    """Preserve actual prior tool URLs, never infer citations from answer text."""
+    try:
+        trace = json.loads(raw or "{}")
+    except (TypeError, ValueError):
+        return ""
+    if not isinstance(trace, dict):
+        return ""
+    results = (trace.get("tool_loop") or {}).get("results") or []
+    urls = []
+    for result in results:
+        if not isinstance(result, dict):
+            continue
+        for source in result.get("sources") or []:
+            if isinstance(source, dict):
+                url = str(source.get("url") or "")
+                if url.startswith(("https://", "http://")) and url not in urls:
+                    urls.append(url)
+    return "\n".join(urls[:12])
+
+
+def session_memory(session_id: str, *, max_turns: int = 6, max_chars: int = 6000) -> str:
+    """Serialize the typed dialogue view for legacy prompt callers."""
+    turns = session_memory_items(session_id, max_turns=max_turns, max_content_chars=max_chars)
+    from proxy.services.conversation_context_service import summary_record
+    summary = summary_record(session_id)
+    summary_text = ('Сводка прежнего разговора (не источник доказательств):\n' + summary['text'] + '\n\n') if summary else ''
+    if not turns:
+        return summary_text[:max_chars]
+    header = "Предыдущий разговор в этой сессии (помни контекст диалога):\n"
+    parts: list[str] = []
+    remaining = max(0, max_chars - len(header) - len(summary_text))
+    for row in reversed(turns):
+        turn = []
+        q = row["question"]
+        a = row["answer"]
+        if q:
+            turn.append(f"Пользователь: {q}")
+        if row.get("attachment_context"):
+            turn.append("Вложение этого сообщения:\n" + row["attachment_context"])
+        if a:
+            turn.append(f"Л.Е.С.: {a}")
+        if row.get("web_sources"):
+            turn.append("Веб-источники этого ответа:\n" + row["web_sources"])
+        text = "\n".join(turn)
+        if len(text) > remaining:
+            if not parts:
+                parts.append(text[:remaining])
+            break
+        parts.append(text)
+        remaining -= len(text) + 2
+    return (summary_text + header + "\n\n".join(reversed(parts)))[:max_chars]
+
+
+def session_dialogue_messages(session_id: str, *, max_chars: int = 6000) -> list[dict[str, str]]:
+    """Native role history, bounded by complete recent turns rather than prose impersonation."""
+    turns = session_memory_items(session_id, max_content_chars=max_chars)
+    batches = []
+    remaining = max_chars
+    for row in reversed(turns):
+        user = row["question"]
+        if row.get("attachment_context"):
+            user += "\n\nВложение этого сообщения:\n" + row["attachment_context"]
+        answer = row["answer"]
+        if row.get("web_sources"):
+            answer += "\n\nВеб-источники этого ответа:\n" + row["web_sources"]
+        size = len(user) + len(answer)
+        if size > remaining:
+            break
+        batches.append([{"role": "user", "content": user}, {"role": "assistant", "content": answer}])
+        remaining -= size
+    return [message for batch in reversed(batches) for message in batch]
+
+
+def session_user_questions(session_id: str, *, max_turns: int = 6) -> list[str]:
+    """Последние вопросы пользователя в текущей сессии, в хронологическом порядке."""
+    if not (session_id or "").strip():
+        return []
+    from proxy.services.conversation_context_service import prompt_cutoff
+    cutoff = prompt_cutoff(session_id)
+    if cutoff is None: return []
+    try:
+        with _connect_read_only() as conn:
+            rows = conn.execute(
+                "SELECT question FROM chat_history WHERE session_id=? AND id>? "
+                "ORDER BY id DESC LIMIT ?",
+                (session_id.strip(), cutoff, max_turns),
+            ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    out: list[str] = []
+    for row in reversed(rows):
+        q = " ".join(str(row["question"] or "").split())
+        if q:
+            out.append(q)
+    return out
+
+
+def session_recent_retrieval_traces(session_id: str, *, max_turns: int = 6) -> list[dict[str, Any]]:
+    """Последние retrieval_trace текущей сессии, в хронологическом порядке.
+
+    Это память не текста модели, а параметров уже выполненных инструментов: массы, объёмы,
+    выбранные шаблоны, статусы. Нужна для продолжений вида «учти высотные работы», где
+    пользователь ссылается на предыдущий расчёт без повторного вложения.
+    """
+    if not (session_id or "").strip():
+        return []
+    from proxy.services.conversation_context_service import prompt_cutoff
+    cutoff = prompt_cutoff(session_id)
+    if cutoff is None: return []
+    try:
+        with _connect_read_only() as conn:
+            rows = conn.execute(
+                "SELECT retrieval_trace_json FROM chat_history WHERE session_id=? AND id>? "
+                "ORDER BY id DESC LIMIT ?",
+                (session_id.strip(), cutoff, max_turns),
+            ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    traces: list[dict[str, Any]] = []
+    for row in reversed(rows):
+        raw = str(row["retrieval_trace_json"] or "").strip()
+        if not raw:
+            continue
+        try:
+            trace = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(trace, dict) and trace:
+            traces.append(trace)
+    return traces
+
+
+# ── Авто-заметки: ЛЕС сам сохраняет утверждения-факты (без «запомни:»), 0 LLM ──
+
+# Начала вопросов/команд — НЕ факт (это запрос, даже без «?»).
+_NON_FACT_STARTS = (
+    "что", "как", "какой", "кака", "каки", "како", "где", "когда", "почему", "зачем",
+    "сколько", "кто", "чей", "чем", "куда", "можно ли", "нужно ли", "есть ли",
+    "сделай", "покажи", "сверь", "сверить", "найди", "дай ", "сформируй", "построй",
+    "переведи", "посчитай", "выведи", "выгруз", "выгрузи", "запиши", "удали", "забудь",
+    "добавь", "создай",
+    "открой", "сгенерируй", "сравни", "проверь", "проанализируй", "расскажи", "опиши",
+    "перечисли", "напомни", "помоги", "объясни",
+)
+# Маркеры утверждения-факта (связки/атрибуты) — без них в авто-заметку не берём,
+# иначе запрос без «?» («требования к серверным сп 485») ложно уйдёт в факт.
+_FACT_MARKERS = (
+    " — ", " – ", " - ", " это ", "называ", " зов", "равно", "составля", "являет",
+    "отвечает за", "ответствен", "контакт", "телефон", "адрес", " у нас ", " у меня ",
+    " наш ", " наша ", " наше ", " наши ", "договор", "срок ", "дедлайн", "бюджет",
+)
+# Слова-запросы где угодно в тексте → это ПРОСЬБА, не факт («Котельная — справка по объекту»).
+# Иначе паттерн «X — Y» ложно уходит в авто-заметку.
+_REQUEST_ANYWHERE = (
+    "справк", "сводк", "сделай", "покажи", "дай ", "оформи", "подготов", "сформир",
+    "выведи", "выгруз", "составь", "перечисли", "рассчита", "посчита", "сгенер", "напиши",
+    "без пропусков", "полную таблицу",
+)
+
+
+def strip_output_directive(text: str, output_directive: str | None = None) -> str:
+    """Срезать форматную директиву ответа (`output_directive`), если клиент приклеил
+    её к тексту вопроса.
+
+    `output_directive` — формат/стиль ответа (см. ChatRequest), идёт ТОЛЬКО в
+    генерацию, не в заметки/роутинг/ретрив. Старые/сторонние клиенты могли клеить
+    её прямо в текст вопроса без разделителя («…по объектуОтветь развёрнуто…») —
+    тогда мусор-шаблон утекал в авто-заметку. Здесь срезаем директиву-суффикс,
+    чтобы в заметку шёл только чистый вопрос/факт.
+    """
+    t = (text or "").strip()
+    d = (output_directive or "").strip()
+    if d and t.endswith(d):
+        t = t[: -len(d)].strip()
+    return t
+
+
+def autonote_enabled() -> bool:
+    return os.getenv("LES_AUTONOTE_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
+
+
+def looks_like_fact(text: str) -> bool:
+    """Похоже ли сообщение на утверждение-факт для авто-заметки. Консервативно (precision)."""
+    t = (text or "").strip()
+    if len(t) < 8 or "?" in t:
+        return False
+    low = t.lower()
+    if any(low.startswith(w) for w in _NON_FACT_STARTS):
+        return False
+    if any(m in low for m in _REQUEST_ANYWHERE):  # запрос где угодно → не факт
+        return False
+    if len([w for w in _WORD_RE.findall(t) if w.lower() not in _STOPWORDS]) < 2:
+        return False
+    return any(m in low for m in _FACT_MARKERS)
+
+
+def maybe_autonote(question: str, dataset_filter: str = "", project_id: int = 0,
+                   output_directive: str | None = None) -> dict[str, Any] | None:
+    """Авто-заметка из утверждения-факта (не вопрос, не команда, есть маркер). Без LLM.
+
+    `output_directive` (формат/стиль ответа) в текст заметки НЕ попадает — срезаем,
+    если клиент приклеил её к вопросу.
+    """
+    clean = strip_output_directive(question, output_directive)
+    if not autonote_enabled() or not looks_like_fact(clean):
+        return None
+    note = create_note(clean.rstrip("."), dataset_filter=dataset_filter or "",
+                       project_id=project_id, auto=True)
+    return {
+        "answer": (f"✎ Принял к сведению (авто-заметка #{note['id']}): {note['text']}\n"
+                   f"Забыть: «забудь заметку {note['id']}» · отключить авто-память: LES_AUTONOTE_ENABLED=false"),
+        "operation": "note_autocreate",
+        "count": 1,
+        "note_id": note["id"],
+    }
+
+
+def maybe_handle_memory_command(question: str, dataset_filter: str = "", project_id: int = 0,
+                                output_directive: str | None = None) -> dict[str, Any] | None:
+    """Детерминированный обработчик команд заметок из чата (ADR-11: без LLM).
+    В режиме объекта (project_id>0) заметки создаются и перечисляются в рамках объекта.
+    `output_directive` (формат/стиль ответа) срезаем — в текст «запомни:»-заметки не идёт."""
+    text = strip_output_directive(question, output_directive)
+
+    match = REMEMBER_RE.match(text)
+    if match:
+        note = create_note(match.group("text").strip().rstrip("."), dataset_filter=dataset_filter or "", project_id=project_id)
+        return {
+            "answer": f"✎ Запомнил (заметка #{note['id']}): {note['text']}\nЗабыть: «забудь заметку {note['id']}»",
+            "operation": "note_create",
+            "count": 1,
+            "note_id": note["id"],
+        }
+
+    match = FORGET_NOTE_RE.match(text)
+    if match:
+        note_id = int(match.group("id"))
+        ok = delete_note(note_id, project_id=project_id)
+        return {
+            "answer": f"✓ Заметка #{note_id} удалена." if ok else f"Заметки #{note_id} нет.",
+            "operation": "note_delete",
+            "count": 1 if ok else 0,
+        }
+
+    match = LIST_NOTES_RE.match(text)
+    if match:
+        notes = list_notes(limit=30, project_id=project_id)
+        if not notes:
+            answer = "Заметок пока нет. Создать: «запомни: …»"
+        else:
+            answer = "**Заметки оператора:**\n" + "\n".join(
+                f"✎ #{n['id']} {n['text'][:200]}" for n in notes
+            )
+        return {"answer": answer, "operation": "notes_list", "count": len(notes)}
+
+    return None

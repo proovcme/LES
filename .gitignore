@@ -1,0 +1,15 @@
+.venv/
+.test-tmp/
+.pytest_cache/
+__pycache__/
+*.pyc
+.env
+data/
+storage/
+logs/
+RAG_Content/
+artifacts/
+dist/
+**/target/
+*.egg-info/
+.nicegui/

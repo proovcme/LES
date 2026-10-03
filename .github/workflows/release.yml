@@ -1,0 +1,44 @@
+name: LES RAG candidate package
+# Manual candidate artifact; never an automatic public release.
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: les-rag-candidate
+  cancel-in-progress: false
+jobs:
+  package:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    env:
+      PYTHONUTF8: '1'
+      UV_FROZEN: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.13.12'
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/light/src-tauri
+      - name: Install frozen build environment
+        run: uv sync --frozen
+      - name: Build desktop shell
+        run: cargo build --locked --release --manifest-path desktop/light/src-tauri/Cargo.toml
+      - name: Build pinned offline payload
+        run: uv run python tools/build_light_package.py --output dist/payload --desktop-exe desktop/light/src-tauri/target/release/les-light.exe
+      - name: Validate packaged files
+        run: pwsh -NoProfile -File installers/windows/light/package.ps1 -Mode Validate -Source dist/payload
+      - name: Build offline and web installers
+        shell: pwsh
+        run: |
+          $nsis = 'C:/Program Files (x86)/NSIS/makensis.exe'
+          if (-not (Test-Path -LiteralPath $nsis)) { choco install nsis --yes --no-progress }
+          uv run python tools/build_light_installers.py --payload dist/payload --output dist/installers --makensis $nsis
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LES-RAG-candidate-${{ github.sha }}
+          path: dist/installers
+          if-no-files-found: error
+          retention-days: 14

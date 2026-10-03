@@ -1,0 +1,1812 @@
+
+import asyncio
+import fastapi as ds_fastapi
+import os
+import proxy.routers.dataset_catalog as ds_dataset_catalog
+import proxy.routers.dataset_document_ops as ds_dataset_document_ops
+import proxy.routers.dataset_external as ds_dataset_external
+import proxy.routers.dataset_parse as ds_dataset_parse
+import proxy.routers.dataset_search as ds_dataset_search
+import proxy.routers.dataset_uploads as ds_dataset_uploads
+import proxy.routers.dataset_watch as ds_dataset_watch
+import proxy.services.chat_attachment_read_service as ds_chat_attachment_read_service
+import proxy.services.dataset_contracts as ds_dataset_contracts
+import proxy.services.dataset_parse_service as ds_dataset_parse_service
+import proxy.services.dataset_runtime as ds_dataset_runtime
+import asyncio
+import sqlite3
+from collections import deque
+from dataclasses import dataclass
+from io import BytesIO
+from pathlib import Path
+import pytest
+from fastapi import UploadFile, HTTPException
+
+from proxy.routers import datasets
+
+
+@pytest.mark.parametrize('free,swap,minimum,blocked', [
+    (7.19, 5.2, 8, True), (8, 5.2, 8, False), (11, 91, 8, True),
+    (12, 91, 8, False), (7.19, 5.2, 6, False), (None, 0, 8, True),
+])
+def test_parser_memory_policy_uses_operation_threshold(free, swap, minimum, blocked):
+    from backend.parse_admission import parse_memory_block_reason
+    reason = parse_memory_block_reason(free, swap, minimum)
+    assert bool(reason) is blocked
+    if reason:
+        assert 'ram_free_gb' not in reason and 'parse rejected' not in reason
+
+
+def test_rag_readiness_route_is_registered():
+    assert any(route.path == "/api/rag/readiness" for route in datasets.router.routes)
+
+
+def test_create_dataset_http_body_and_legacy_query(monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from types import SimpleNamespace
+    backend = FakeBackend()
+    monkeypatch.setattr(ds_dataset_runtime, 'get_dataset_state', lambda: SimpleNamespace(backend=backend))
+    application = FastAPI()
+    application.include_router(datasets.router)
+    application.dependency_overrides[datasets.require_admin] = lambda: object()
+    name = 'Документы проекта #& 🌲'
+    with TestClient(application) as client:
+        route = next(r.path for r in application.routes if getattr(r, 'endpoint', None) == ds_dataset_catalog.create_dataset)
+        for body, query in [({'name': name}, {}), ({}, {'name': name})]:
+            response = client.post(route, json=body, params=query)
+            assert response.status_code == 200, response.text
+            assert response.json()['name'] == name
+        assert client.post(route, json={'name': ''}, params={'name': name}).status_code == 400
+
+
+@dataclass
+class Dataset:
+    id: str
+    name: str
+    status: str = "IDLE"
+    doc_count: int = 0
+    chunk_count: int = 0
+
+
+@dataclass
+class Chunk:
+    content: str
+    doc_id: str
+    doc_name: str
+    score: float
+    meta: dict
+
+
+class FakeBackend:
+    def __init__(self):
+        self.datasets = [Dataset("ds-1", "NTD_Index", doc_count=3, chunk_count=7)]
+        self.uploads = []
+        self.parses = []
+        self.pending_files = {}
+        self.document_errors = []
+        self.parse_error = None
+
+    async def list_datasets(self):
+        return self.datasets
+
+    async def create_dataset(self, name):
+        dataset_id = f"ds-{len(self.datasets) + 1}"
+        self.datasets.append(Dataset(dataset_id, name))
+        return dataset_id
+
+    async def upload_file(self, dataset_id, file_path, relative_path=None):
+        self.uploads.append((dataset_id, file_path.name, relative_path))
+        return f"doc-{len(self.uploads)}"
+
+    async def register_external_file(self, dataset_id, source_path, file_name):
+        self.uploads.append((dataset_id, source_path.name, file_name))
+        self.pending_files[dataset_id] = int(self.pending_files.get(dataset_id, 0)) + 1
+        return f"doc-{len(self.uploads)}"
+
+    async def parse_dataset(self, dataset_id, limit=None):
+        if self.parse_error is not None:
+            raise self.parse_error
+        self.parses.append((dataset_id, limit))
+        pending = max(0, int(self.pending_files.get(dataset_id, 0)) - int(limit or 0))
+        self.pending_files[dataset_id] = pending
+        return {"status": "completed", "chunks": 0, "remaining_pending": pending, "errors": 0}
+
+    async def mark_document_error(self, dataset_id, document_id, error):
+        self.document_errors.append((dataset_id, document_id, error))
+
+    async def health(self):
+        return True
+
+    async def health_snapshot(self):
+        return {
+            "datasets": [
+                {
+                    "id": dataset.id,
+                    "name": dataset.name,
+                    "pending_files": self.pending_files.get(dataset.id, 0),
+                }
+                for dataset in self.datasets
+            ]
+        }
+
+    async def retrieve(self, question, dataset_ids=None, top_k=5, doc_filter=None):
+        return [
+            Chunk(
+                content=f"{question} result",
+                doc_id="doc-1",
+                doc_name="СП 3.13130.docx",
+                score=0.73,
+                meta={"doc_type": "NORMATIVE", "content_type": "text"},
+            )
+        ][:top_k]
+
+    async def retrieve_native_hybrid(self, question, dataset_ids=None, top_k=5, doc_filter=None):
+        return await self.retrieve(question, dataset_ids=dataset_ids, top_k=top_k, doc_filter=doc_filter)
+
+
+class FakeJobService:
+    def create(self, *args, **kwargs):
+        return {"id": "job-1", "started_at": "2026-05-21T00:00:00"}
+
+    def update(self, *args, **kwargs):
+        return {}
+
+
+def test_schedule_reader_after_parse_only_when_dataset_complete(monkeypatch):
+    calls = []
+
+    def fake_schedule(dataset_id, **kwargs):
+        calls.append((dataset_id, kwargs))
+        return {"scheduled": True, "dataset_id": dataset_id}
+
+    monkeypatch.setattr(ds_dataset_parse_service, "schedule_dataset_reader_pass", fake_schedule)
+
+    assert ds_dataset_parse_service._schedule_reader_after_parse(
+        "ds-1",
+        reason="test",
+        parse_result={"status": "completed", "errors": 0, "remaining_pending": 0},
+    ) == {"scheduled": True, "dataset_id": "ds-1"}
+    assert ds_dataset_parse_service._schedule_reader_after_parse(
+        "ds-1",
+        reason="test",
+        parse_result={"status": "completed", "errors": 0, "remaining_pending": 2},
+    ) is None
+    assert ds_dataset_parse_service._schedule_reader_after_parse(
+        "ds-1",
+        reason="test",
+        parse_result={"status": "partial", "errors": 0, "remaining_pending": 0},
+    ) is None
+    assert ds_dataset_parse_service._schedule_reader_after_parse(
+        "ds-1",
+        reason="test",
+        parse_result={"status": "completed", "errors": 1, "remaining_pending": 0},
+    ) is None
+
+    assert calls == [("ds-1", {"reason": "test", "force": True, "require_enabled": True})]
+
+
+def _upload(filename: str, content: bytes) -> UploadFile:
+    return UploadFile(file=BytesIO(content), filename=filename)
+
+
+def test_external_intake_plan_keeps_maps_out_of_accepted_count(tmp_path):
+    root = tmp_path / "ns"
+    root.mkdir()
+    (root / ".DS_Store").write_bytes(b"mac")
+    for name in (
+        "22_27-05-22-Р-ЭОМ.1_19.04.2025.pdf",
+        "27_05_22_Р_ЭОМ.1 изм_7 Система бесперебойного гарантированного электропитания.pdf",
+        "27_05-22-Р-ЭОМ.1 Изм.8.3 полный.pdf",
+        "27_05-22-Р-ЭОМ.1_19.06.2025.pdf",
+    ):
+        (root / name).write_bytes(b"%PDF-1.7\n")
+    (root / "LES.md").write_text("# НС", encoding="utf-8")
+    (root / "00_dataset_map.md").write_text("# Карта", encoding="utf-8")
+
+    plan = ds_dataset_external._external_intake_plan(root, dataset_name="НС_Проект")
+
+    assert plan["will_create"] == {"dataset": "НС_Проект"}
+    assert plan["accepted_count"] == 4
+    assert plan["skipped_count"] == 1
+    assert plan["skipped"][0]["file_name"] == ".DS_Store"
+    assert plan["skipped"][0]["reason"] == "hidden/system"
+    assert plan["maps"] == [
+        {"file_name": "LES.md", "status": "existing"},
+        {"file_name": "00_dataset_map.md", "status": "existing"},
+    ]
+    assert "ЭОМ" in plan["disciplines"]
+    assert "missing_for_estimate" not in plan
+    assert plan["role_counts"] == {"документ": 4}
+    assert plan["source_state"] == "documents"
+
+
+@pytest.mark.parametrize('content, expected', [(None, 'empty'), ('unknown.bin', 'unsupported_only'), ('source.txt', 'documents')])
+def test_external_plan_distinguishes_empty_and_unsupported(tmp_path, content, expected):
+    if content:
+        (tmp_path / content).write_text('Some document content', encoding='utf-8')
+    plan = ds_dataset_external._external_intake_plan(tmp_path, dataset_name='Test')
+    assert plan['source_state'] == expected
+    assert plan['accepted_count'] == (1 if expected == 'documents' else 0)
+
+
+def test_external_plan_access_failure_is_not_empty(tmp_path, monkeypatch):
+    from backend import external_scan
+    def inaccessible(*args, **kwargs):
+        kwargs['onerror'](PermissionError('Access denied'))
+        return iter(())
+    monkeypatch.setattr(external_scan.os, 'walk', inaccessible)
+    with pytest.raises(PermissionError):
+        ds_dataset_external._external_intake_plan(tmp_path, dataset_name='Test')
+
+
+def test_external_intake_plan_skips_raw_cad_bim_sources(tmp_path):
+    root = tmp_path / "cad"
+    root.mkdir()
+    (root / "projection.json").write_text('{"ok": true}', encoding="utf-8")
+    for name in ("model.dwg", "model.rvt", "model.ifc", "model.ifczip"):
+        (root / name).write_bytes(b"raw cad/bim")
+
+    plan = ds_dataset_external._external_intake_plan(root, dataset_name="CAD_BIM_Index")
+
+    assert plan["accepted_count"] == 1
+    assert plan["accepted"][0]["file_name"] == "projection.json"
+    assert {
+        (item["file_name"], item["reason"], item.get("suffix"))
+        for item in plan["skipped"]
+    } == {
+        ("model.dwg", "unsupported_suffix", ".dwg"),
+        ("model.rvt", "unsupported_suffix", ".rvt"),
+        ("model.ifc", "unsupported_suffix", ".ifc"),
+        ("model.ifczip", "unsupported_suffix", ".ifczip"),
+    }
+
+
+class FakeHTTPResponse:
+    def __init__(self, status_code: int = 200):
+        self.status_code = status_code
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(f"http {self.status_code}")
+
+
+@pytest.fixture()
+def dataset_state(monkeypatch):
+    previous = ds_dataset_runtime._state
+    backend = FakeBackend()
+    ds_dataset_runtime.set_dataset_state(
+        ds_dataset_runtime.DatasetRouterState(
+            rag_backend=backend,
+            job_service=FakeJobService(),
+            job_tracker={},
+            log_history=deque(maxlen=10),
+            parse_semaphore=asyncio.Semaphore(1),
+            sync_parse_semaphore=asyncio.Semaphore(1),
+        )
+    )
+    yield backend
+    ds_dataset_runtime._state = previous
+
+
+@pytest.mark.asyncio
+async def test_dataset_list_and_create_use_configured_state(dataset_state):
+    assert await ds_dataset_catalog.list_datasets(_user=object()) == [Dataset("ds-1", "NTD_Index", doc_count=3, chunk_count=7)]
+
+    created = await ds_dataset_catalog.create_dataset("Mail_Index", _admin=object())
+
+    assert created == {"id": "ds-2", "name": "Mail_Index"}
+
+
+@pytest.mark.asyncio
+async def test_list_documents_returns_file_status_rows(tmp_path, monkeypatch, dataset_state):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RAG_META_DB_PATH", str(tmp_path / "data" / "les_meta.db"))
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    with sqlite3.connect(data_dir / "les_meta.db") as conn:
+        conn.execute("CREATE TABLE datasets (id TEXT PRIMARY KEY, name TEXT, status TEXT, chunk_count INTEGER DEFAULT 0)")
+        conn.execute(
+            """
+            CREATE TABLE documents (
+                id TEXT PRIMARY KEY,
+                dataset_id TEXT,
+                file_name TEXT,
+                status TEXT,
+                file_size INTEGER,
+                chunk_count INTEGER DEFAULT 0,
+                domain TEXT DEFAULT '',
+                route_dataset TEXT DEFAULT '',
+                doc_type TEXT DEFAULT '',
+                content_type TEXT DEFAULT '',
+                complexity TEXT DEFAULT '',
+                pipeline TEXT DEFAULT '',
+                source_path TEXT DEFAULT '',
+                last_error TEXT DEFAULT ''
+            )
+            """
+        )
+        conn.execute("INSERT INTO datasets (id, name, status) VALUES ('ds-1', 'NTD_FIRE_Index', 'IDLE')")
+        conn.execute(
+            """
+            INSERT INTO documents
+            (id, dataset_id, file_name, status, file_size, chunk_count, domain, route_dataset, doc_type, content_type, complexity, pipeline, source_path)
+            VALUES ('doc-1', 'ds-1', 'NTD/SP.docx', 'INDEXED', 2048, 12, 'NTD_FIRE', 'NTD_FIRE_Index', 'NORMATIVE', 'text', 'simple', 'markdown', '/ext/NTD/SP.docx')
+            """
+        )
+
+    result = await ds_dataset_catalog.list_documents(status="INDEXED", q="fire", _user=object())
+
+    assert result["total"] == 1
+    assert result["summary"]["INDEXED"] == {"files": 1, "chunks": 12}
+    assert result["documents"][0]["dataset_name"] == "NTD_FIRE_Index"
+    assert result["documents"][0]["file_name"] == "NTD/SP.docx"
+    assert result["documents"][0]["route_dataset"] == "NTD_FIRE_Index"
+    assert result["documents"][0]["chunk_count"] == 12
+    assert result["documents"][0]["source_path"] == "/ext/NTD/SP.docx"
+
+
+@pytest.mark.asyncio
+async def test_list_sources_maps_folders_to_existing_datasets(tmp_path, monkeypatch, dataset_state):
+    monkeypatch.chdir(tmp_path)
+    source = tmp_path / "RAG_Content" / "NTD" / "sub"
+    source.mkdir(parents=True)
+    (source / "doc.pdf").write_text("x")
+    claude = tmp_path / "RAG_Content" / "CLAUDE"
+    claude.mkdir()
+    (claude / "conversations.json").write_text("{}", encoding="utf-8")
+    uuid_like = tmp_path / "RAG_Content" / "123e4567-e89b-12d3-a456-426614174000"
+    uuid_like.mkdir()
+    (uuid_like / "skip.pdf").write_text("x")
+
+    sources = await ds_dataset_catalog.list_sources(_user=object())
+
+    assert sources == [
+        {
+            "folder": "NTD",
+            "source_files": 1,
+            "dataset_id": "ds-1",
+            "dataset_status": "IDLE",
+            "indexed_files": 3,
+            "pending_files": 0,
+            "error_files": 0,
+            "missing_files": 0,
+            "chunk_count": 7,
+        }
+    ]
+
+
+def test_metadb_list_datasets_counts_pending_as_files(tmp_path):
+    from backend.qdrant_adapter import MetaDB
+
+    db = MetaDB(str(tmp_path / "data" / "les_meta.db"))
+    dataset_id = db.create_dataset("913")
+    db.add_document(dataset_id, "913/doc.txt", file_mtime=1.0, file_size=12, source_path="/tmp/doc.txt")
+
+    row = db.list_datasets()[0]
+
+    assert row.name == "913"
+    assert row.doc_count == 1
+    assert row.files == 1
+    assert row.indexed_files == 0
+    assert row.pending_files == 1
+
+
+def test_light_metadb_dataset_counts_exclude_temporary_office_files(tmp_path, monkeypatch):
+    from backend.qdrant_adapter import MetaDB
+
+    monkeypatch.setenv("LES_PRODUCT_EDITION", "light")
+    db = MetaDB(str(tmp_path / "data" / "les_meta.db"))
+    dataset_id = db.create_dataset("project")
+    db.add_document(dataset_id, "folder/~$draft.docx", file_mtime=1.0, file_size=20)
+    db.add_document(dataset_id, "folder/report.pdf", file_mtime=1.0, file_size=20)
+    db.update_document_status(dataset_id, "folder/~$draft.docx", "INDEXED", 4)
+    db.update_document_status(dataset_id, "folder/report.pdf", "INDEXED", 3)
+
+    row = db.list_datasets()[0]
+
+    assert row.doc_count == row.files == row.indexed_files == 1
+    assert row.chunk_count == 3
+
+
+def test_metadb_requeues_existing_pdf_with_systemic_mojibake(tmp_path):
+    from backend.qdrant_adapter import MetaDB
+    from proxy.services.lexical_index_service import LexicalIndex
+
+    db_path = tmp_path / "data" / "les_meta.db"
+    db = MetaDB(str(db_path))
+    dataset_id = db.create_dataset("NS")
+    db.add_document(dataset_id, "project.pdf", file_mtime=1.0, file_size=12)
+    db.update_document_status(dataset_id, "project.pdf", "INDEXED", 3)
+    lexical = LexicalIndex(db_path=str(db_path))
+    with lexical.connect() as conn:
+        now = 1.0
+        for index, text in enumerate((
+            "ÐÐ»Ð°Ð½ ÑÑÐ°Ð¶Ð° Ð¸ ÑÐ¸ÑÑ",
+            "Ð¡ÑÐµÐ¼Ð° ÑÐ»ÐµÐºÑÑÐ¾ÑÐ½Ð°Ð±Ð¶ÐµÐ½Ð¸Ñ",
+            "ÐÐ°Ð±ÐµÐ»ÑÐ½ÑÐµ ÑÑÐ°ÑÑÑ",
+        )):
+            conn.execute(
+                "INSERT INTO lexical_chunks(collection,point_id,dataset_id,doc_name,text,content_hash,updated_at) "
+                "VALUES(?,?,?,?,?,?,?)",
+                ("les_rag", f"p{index}", dataset_id, "project.pdf", text, f"h{index}", now),
+            )
+
+    names = db.requeue_corrupt_pdf_text_documents(dataset_id)
+
+    assert names == ["project.pdf"]
+    assert db.get_pending_files(dataset_id) == ["project.pdf"]
+
+
+@pytest.mark.asyncio
+async def test_retrieve_debug_reports_advisory_route_without_applying_it(dataset_state):
+    dataset_state.datasets[0].name = "NTD_FIRE_Index"
+    result = await ds_dataset_search.retrieve_debug(
+        ds_dataset_contracts.RetrievalDebugRequest(question="ширина путей эвакуации"),
+        _user=object(),
+    )
+
+    assert result["dataset_ids"] is None
+    assert result["query_route"]["dataset_filter"] == "NTD_FIRE"
+    assert result["embedding"]["collection"]
+    assert result["embedding"]["meta_db"]
+    assert result["chunks"][0]["doc_name"] == "СП 3.13130.docx"
+    assert result["chunks"][0]["doc_type"] == "NORMATIVE"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("doc_name", "content", "forbidden"),
+    [
+        ("СП 7.13130.docx", "исходный фрагмент", "дымоудаление"),
+        ("ГОСТ Р 59639.docx", "исходный фрагмент", "СП 3.13130"),
+        ("СП 60.13330.docx", "исходный фрагмент", "кондиционирование"),
+    ],
+)
+async def test_retrieve_debug_never_injects_expected_terms(
+    dataset_state,
+    doc_name,
+    content,
+    forbidden,
+):
+    dataset_state.datasets[0].name = "NTD_FIRE_Index"
+
+    async def retrieve(question, dataset_ids=None, top_k=5, doc_filter=None):
+        return [
+            Chunk(
+                content=content,
+                doc_id="doc-integrity",
+                doc_name=doc_name,
+                score=0.73,
+                meta={"doc_type": "NORMATIVE", "content_type": "text"},
+            )
+        ]
+
+    dataset_state.retrieve = retrieve
+
+    result = await ds_dataset_search.retrieve_debug(
+        ds_dataset_contracts.RetrievalDebugRequest(question="нейтральный запрос"),
+        _user=object(),
+    )
+
+    chunk = result["chunks"][0]
+    assert chunk["doc_name"] == doc_name
+    assert chunk["preview"] == content
+    assert forbidden not in chunk["doc_name"]
+    assert forbidden not in chunk["preview"]
+
+
+@pytest.mark.asyncio
+async def test_search_returns_ranked_chunks_without_generation(dataset_state):
+    dataset_state.datasets[0].name = "NTD_FIRE_Index"
+    result = await ds_dataset_search.search(
+        ds_dataset_contracts.SearchRequest(query="ширина путей эвакуации", top_k=3, include_trace=True),
+        _user=object(),
+    )
+
+    assert result["query"] == "ширина путей эвакуации"
+    assert result["dataset_filter"] is None
+    assert result["dataset_ids"] is None
+    assert result["route"]["reason"] == "all_corpus"
+    assert result["count"] == 1
+    assert result["chunks"][0]["rank"] == 1
+    assert result["chunks"][0]["doc_name"] == "СП 3.13130.docx"
+    assert result["chunks"][0]["content"].startswith("ширина путей эвакуации")
+    assert "СП 1.13130" not in result["chunks"][0]["content"]
+    assert result["chunks"][0]["metadata"]["doc_type"] == "NORMATIVE"
+    assert result["retrieval_trace"]
+    assert result["embedding"]["collection"]
+
+
+@pytest.mark.asyncio
+async def test_search_accepts_question_alias(dataset_state):
+    dataset_state.datasets[0].name = "NTD_FIRE_Index"
+    result = await ds_dataset_search.search(
+        ds_dataset_contracts.SearchRequest(question="ширина путей эвакуации", top_k=3),
+        _user=object(),
+    )
+
+    assert result["query"] == "ширина путей эвакуации"
+    assert result["dataset_filter"] is None
+    assert result["route"]["reason"] == "all_corpus"
+    assert result["chunks"][0]["doc_id"] == "doc-1"
+
+
+@pytest.mark.asyncio
+async def test_search_marks_explicit_dataset_filter(dataset_state):
+    result = await ds_dataset_search.search(
+        ds_dataset_contracts.SearchRequest(query="ширина путей эвакуации", dataset_filter="NTD", top_k=3),
+        _user=object(),
+    )
+
+    assert result["dataset_filter"] == "NTD"
+    assert result["route"]["reason"] == "explicit_filter"
+
+
+@pytest.mark.asyncio
+async def test_search_resolves_artel_filter_to_artel_index(dataset_state):
+    dataset_state.datasets = [Dataset("artel", "ARTEL_Index", doc_count=1, chunk_count=1)]
+
+    result = await ds_dataset_search.search(
+        ds_dataset_contracts.SearchRequest(query="металлический шкаф управления ADSK_Наименование", dataset_filter="ARTEL", top_k=3),
+        _user=object(),
+    )
+
+    assert result["dataset_filter"] == "ARTEL"
+    assert result["dataset_ids"] == ["artel"]
+    assert result["route"]["reason"] == "explicit_filter"
+
+
+@pytest.mark.asyncio
+async def test_search_requires_query_or_question(dataset_state):
+    with pytest.raises(ds_fastapi.HTTPException) as exc:
+        await ds_dataset_search.search(ds_dataset_contracts.SearchRequest(), _user=object())
+
+    assert exc.value.status_code == 400
+    assert "query or question" in exc.value.detail
+
+
+@pytest.mark.asyncio
+async def test_pending_parse_datasets_uses_priority_before_pending_count(dataset_state):
+    dataset_state.datasets = [
+        Dataset("other", "NTD_OTHER_Index"),
+        Dataset("fire", "NTD_FIRE_Index"),
+        Dataset("electrical", "NTD_ELECTRICAL_Index"),
+    ]
+    dataset_state.pending_files = {"other": 100, "fire": 1, "electrical": 5}
+
+    queue = await ds_dataset_parse_service.pending_parse_datasets(ds_dataset_runtime.get_dataset_state())
+
+    assert [item["dataset_name"] for item in queue] == [
+        "NTD_FIRE_Index",
+        "NTD_ELECTRICAL_Index",
+        "NTD_OTHER_Index",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_smart_plan_groups_files_by_document_route(tmp_path, monkeypatch, dataset_state):
+    monkeypatch.chdir(tmp_path)
+    source = tmp_path / "RAG_Content" / "mixed"
+    source.mkdir(parents=True)
+    (source / "fire.txt").write_text("СП 1.13130 пожарная безопасность эвакуация", encoding="utf-8")
+
+    result = await ds_dataset_watch.smart_plan(_user=object())
+
+    assert result["total_files"] == 1
+    assert result["datasets"][0]["dataset"] == "NTD_FIRE_Index"
+    assert result["rejected_total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_sync_smart_registers_files_in_routed_datasets(tmp_path, monkeypatch, dataset_state):
+    monkeypatch.chdir(tmp_path)
+    source = tmp_path / "RAG_Content" / "mixed"
+    source.mkdir(parents=True)
+    (source / "pp87.txt").write_text("Постановление 87 градостроительный кодекс", encoding="utf-8")
+
+    result = await ds_dataset_watch.sync_smart(ds_dataset_contracts.SmartSyncRequest(), _admin=object())
+
+    assert result["files"] == 1
+    assert result["datasets"][0]["dataset_name"] == "GKRF_Index"
+    assert dataset_state.uploads == [("ds-2", "pp87.txt", "mixed/pp87.txt")]
+
+
+@pytest.mark.asyncio
+async def test_folder_watch_status_reports_new_files(tmp_path, monkeypatch, dataset_state):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RAG_META_DB_PATH", str(tmp_path / "data" / "les_meta.db"))
+    source = tmp_path / "RAG_Content" / "mixed"
+    source.mkdir(parents=True)
+    (source / "fire.txt").write_text("СП 1.13130 пожарная безопасность эвакуация", encoding="utf-8")
+
+    result = await ds_dataset_watch.folder_watch_status(_user=object())
+
+    assert result["status"] == "ok"
+    assert result["counts"]["new"] == 1
+    assert result["pending_changes"] == 1
+    assert result["samples"][0]["state"] == "new"
+    assert result["samples"][0]["relative_path"] == "mixed/fire.txt"
+    assert result["samples"][0]["dataset_name"] == "NTD_FIRE_Index"
+
+
+@pytest.mark.asyncio
+async def test_folder_watch_status_marks_known_files_unchanged(tmp_path, monkeypatch, dataset_state):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RAG_META_DB_PATH", str(tmp_path / "data" / "les_meta.db"))
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    source = tmp_path / "RAG_Content" / "mixed"
+    source.mkdir(parents=True)
+    file_path = source / "fire.txt"
+    file_path.write_text("СП 1.13130 пожарная безопасность эвакуация", encoding="utf-8")
+    stat = file_path.stat()
+    with sqlite3.connect(data_dir / "les_meta.db") as conn:
+        conn.execute("CREATE TABLE datasets (id TEXT PRIMARY KEY, name TEXT)")
+        conn.execute(
+            """
+            CREATE TABLE documents (
+                id TEXT PRIMARY KEY,
+                dataset_id TEXT,
+                file_name TEXT,
+                status TEXT,
+                file_mtime REAL,
+                file_size INTEGER,
+                chunk_count INTEGER DEFAULT 0,
+                last_error TEXT DEFAULT ''
+            )
+            """
+        )
+        conn.execute("INSERT INTO datasets (id, name) VALUES ('ds-fire', 'NTD_FIRE_Index')")
+        conn.execute(
+            """
+            INSERT INTO documents (id, dataset_id, file_name, status, file_mtime, file_size, chunk_count)
+            VALUES ('doc-fire', 'ds-fire', 'mixed/fire.txt', 'INDEXED', ?, ?, 12)
+            """,
+            (stat.st_mtime, stat.st_size),
+        )
+
+    result = await ds_dataset_watch.folder_watch_status(_user=object())
+
+    assert result["counts"] == {"new": 0, "changed": 0, "route_changed": 0, "unchanged": 1}
+    assert result["pending_changes"] == 0
+    assert result["samples"] == []
+
+
+@pytest.mark.asyncio
+async def test_folder_watch_status_accepts_legacy_basename_match(tmp_path, monkeypatch, dataset_state):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RAG_META_DB_PATH", str(tmp_path / "data" / "les_meta.db"))
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    source = tmp_path / "RAG_Content" / "mixed"
+    source.mkdir(parents=True)
+    file_path = source / "fire.txt"
+    file_path.write_text("СП 1.13130 пожарная безопасность эвакуация", encoding="utf-8")
+    stat = file_path.stat()
+    with sqlite3.connect(data_dir / "les_meta.db") as conn:
+        conn.execute("CREATE TABLE datasets (id TEXT PRIMARY KEY, name TEXT)")
+        conn.execute(
+            """
+            CREATE TABLE documents (
+                id TEXT PRIMARY KEY,
+                dataset_id TEXT,
+                file_name TEXT,
+                status TEXT,
+                file_mtime REAL,
+                file_size INTEGER,
+                chunk_count INTEGER DEFAULT 0,
+                last_error TEXT DEFAULT ''
+            )
+            """
+        )
+        conn.execute("INSERT INTO datasets (id, name) VALUES ('ds-fire', 'NTD_FIRE_Index')")
+        conn.execute(
+            """
+            INSERT INTO documents (id, dataset_id, file_name, status, file_mtime, file_size)
+            VALUES ('doc-fire', 'ds-fire', 'fire.txt', 'INDEXED', ?, ?)
+            """,
+            (stat.st_mtime, stat.st_size),
+        )
+
+    result = await ds_dataset_watch.folder_watch_status(_user=object())
+
+    assert result["counts"] == {"new": 0, "changed": 0, "route_changed": 0, "unchanged": 1}
+    assert result["samples"] == []
+
+
+@pytest.mark.asyncio
+async def test_folder_watch_status_reports_route_changed_files(tmp_path, monkeypatch, dataset_state):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RAG_META_DB_PATH", str(tmp_path / "data" / "les_meta.db"))
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    source = tmp_path / "RAG_Content" / "mixed"
+    source.mkdir(parents=True)
+    file_path = source / "fire.txt"
+    file_path.write_text("СП 1.13130 пожарная безопасность эвакуация", encoding="utf-8")
+    stat = file_path.stat()
+    with sqlite3.connect(data_dir / "les_meta.db") as conn:
+        conn.execute("CREATE TABLE datasets (id TEXT PRIMARY KEY, name TEXT)")
+        conn.execute(
+            """
+            CREATE TABLE documents (
+                id TEXT PRIMARY KEY,
+                dataset_id TEXT,
+                file_name TEXT,
+                status TEXT,
+                file_mtime REAL,
+                file_size INTEGER,
+                chunk_count INTEGER DEFAULT 0,
+                last_error TEXT DEFAULT ''
+            )
+            """
+        )
+        conn.execute("INSERT INTO datasets (id, name) VALUES ('ds-old', 'NTD_STRUCTURAL_Index')")
+        conn.execute(
+            """
+            INSERT INTO documents (id, dataset_id, file_name, status, file_mtime, file_size)
+            VALUES ('doc-fire', 'ds-old', 'mixed/fire.txt', 'INDEXED', ?, ?)
+            """,
+            (stat.st_mtime, stat.st_size),
+        )
+
+    result = await ds_dataset_watch.folder_watch_status(_user=object())
+
+    assert result["counts"] == {"new": 0, "changed": 0, "route_changed": 1, "unchanged": 0}
+    assert result["pending_changes"] == 1
+    assert result["samples"][0]["state"] == "route_changed"
+    assert result["samples"][0]["dataset_name"] == "NTD_FIRE_Index"
+    assert result["samples"][0]["current"]["dataset_name"] == "NTD_STRUCTURAL_Index"
+
+
+@pytest.mark.asyncio
+async def test_folder_reindex_plan_groups_route_changed_files(tmp_path, monkeypatch, dataset_state):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RAG_META_DB_PATH", str(tmp_path / "data" / "les_meta.db"))
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    source = tmp_path / "RAG_Content" / "mixed"
+    source.mkdir(parents=True)
+    file_path = source / "fire.txt"
+    file_path.write_text("СП 1.13130 пожарная безопасность эвакуация", encoding="utf-8")
+    stat = file_path.stat()
+    with sqlite3.connect(data_dir / "les_meta.db") as conn:
+        conn.execute("CREATE TABLE datasets (id TEXT PRIMARY KEY, name TEXT)")
+        conn.execute(
+            """
+            CREATE TABLE documents (
+                id TEXT PRIMARY KEY,
+                dataset_id TEXT,
+                file_name TEXT,
+                status TEXT,
+                file_mtime REAL,
+                file_size INTEGER,
+                chunk_count INTEGER DEFAULT 0,
+                last_error TEXT DEFAULT ''
+            )
+            """
+        )
+        conn.execute("INSERT INTO datasets (id, name) VALUES ('ds-old', 'NTD_STRUCTURAL_Index')")
+        conn.execute(
+            """
+            INSERT INTO documents (id, dataset_id, file_name, status, file_mtime, file_size, chunk_count)
+            VALUES ('doc-fire', 'ds-old', 'mixed/fire.txt', 'INDEXED', ?, ?, 9)
+            """,
+            (stat.st_mtime, stat.st_size),
+        )
+
+    result = await ds_dataset_watch.folder_reindex_plan(_user=object())
+
+    assert result["pending_route_changes"] == 1
+    assert result["apply_supported"] is False
+    assert result["groups"][0]["current_dataset_name"] == "NTD_STRUCTURAL_Index"
+    assert result["groups"][0]["target_dataset_name"] == "NTD_FIRE_Index"
+    assert result["groups"][0]["files"] == 1
+    assert result["samples"][0]["current_doc_id"] == "doc-fire"
+    assert result["samples"][0]["current_chunk_count"] == 9
+
+
+@pytest.mark.asyncio
+async def test_folder_watch_scan_registers_without_parsing(tmp_path, monkeypatch, dataset_state):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RAG_META_DB_PATH", str(tmp_path / "data" / "les_meta.db"))
+    source = tmp_path / "RAG_Content" / "mixed"
+    source.mkdir(parents=True)
+    (source / "pp87.txt").write_text("Постановление 87 градостроительный кодекс", encoding="utf-8")
+
+    result = await ds_dataset_watch.folder_watch_scan(ds_dataset_contracts.FolderWatchRequest(), _admin=object())
+
+    assert result["status"] == "registered"
+    assert result["before"]["pending_changes"] == 1
+    assert result["sync"]["files"] == 1
+    assert result["sync"]["parse_started"] is False
+    assert dataset_state.uploads == [("ds-2", "pp87.txt", "mixed/pp87.txt")]
+    assert dataset_state.parses == []
+
+
+@pytest.mark.asyncio
+async def test_folder_watch_scan_skips_unchanged_files(tmp_path, monkeypatch, dataset_state):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RAG_META_DB_PATH", str(tmp_path / "data" / "les_meta.db"))
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    source = tmp_path / "RAG_Content" / "mixed"
+    source.mkdir(parents=True)
+    indexed_file = source / "indexed_fire.txt"
+    new_file = source / "new_fire.txt"
+    indexed_file.write_text("СП 1.13130 пожарная безопасность эвакуация", encoding="utf-8")
+    new_file.write_text("СП 2.13130 пожарная безопасность огнестойкость", encoding="utf-8")
+    stat = indexed_file.stat()
+    with sqlite3.connect(data_dir / "les_meta.db") as conn:
+        conn.execute("CREATE TABLE datasets (id TEXT PRIMARY KEY, name TEXT)")
+        conn.execute(
+            """
+            CREATE TABLE documents (
+                id TEXT PRIMARY KEY,
+                dataset_id TEXT,
+                file_name TEXT,
+                status TEXT,
+                file_mtime REAL,
+                file_size INTEGER,
+                chunk_count INTEGER DEFAULT 0,
+                last_error TEXT DEFAULT ''
+            )
+            """
+        )
+        conn.execute("INSERT INTO datasets (id, name) VALUES ('ds-fire', 'NTD_FIRE_Index')")
+        conn.execute(
+            """
+            INSERT INTO documents (id, dataset_id, file_name, status, file_mtime, file_size)
+            VALUES ('doc-fire', 'ds-fire', 'mixed/indexed_fire.txt', 'INDEXED', ?, ?)
+            """,
+            (stat.st_mtime, stat.st_size),
+        )
+
+    result = await ds_dataset_watch.folder_watch_scan(ds_dataset_contracts.FolderWatchRequest(), _admin=object())
+
+    assert result["before"]["counts"] == {"new": 1, "changed": 0, "route_changed": 0, "unchanged": 1}
+    assert result["sync"]["files"] == 1
+    assert result["sync"]["skipped_route_changed"] == 0
+    assert dataset_state.uploads == [("ds-2", "new_fire.txt", "mixed/new_fire.txt")]
+
+
+@pytest.mark.asyncio
+async def test_folder_watch_scan_skips_route_changed_files(tmp_path, monkeypatch, dataset_state):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RAG_META_DB_PATH", str(tmp_path / "data" / "les_meta.db"))
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    source = tmp_path / "RAG_Content" / "mixed"
+    source.mkdir(parents=True)
+    file_path = source / "fire.txt"
+    file_path.write_text("СП 1.13130 пожарная безопасность эвакуация", encoding="utf-8")
+    stat = file_path.stat()
+    with sqlite3.connect(data_dir / "les_meta.db") as conn:
+        conn.execute("CREATE TABLE datasets (id TEXT PRIMARY KEY, name TEXT)")
+        conn.execute(
+            """
+            CREATE TABLE documents (
+                id TEXT PRIMARY KEY,
+                dataset_id TEXT,
+                file_name TEXT,
+                status TEXT,
+                file_mtime REAL,
+                file_size INTEGER,
+                chunk_count INTEGER DEFAULT 0,
+                last_error TEXT DEFAULT ''
+            )
+            """
+        )
+        conn.execute("INSERT INTO datasets (id, name) VALUES ('ds-old', 'NTD_STRUCTURAL_Index')")
+        conn.execute(
+            """
+            INSERT INTO documents (id, dataset_id, file_name, status, file_mtime, file_size)
+            VALUES ('doc-fire', 'ds-old', 'mixed/fire.txt', 'INDEXED', ?, ?)
+            """,
+            (stat.st_mtime, stat.st_size),
+        )
+
+    result = await ds_dataset_watch.folder_watch_scan(ds_dataset_contracts.FolderWatchRequest(), _admin=object())
+
+    assert result["before"]["counts"] == {"new": 0, "changed": 0, "route_changed": 1, "unchanged": 0}
+    assert result["sync"]["files"] == 0
+    assert result["sync"]["skipped_route_changed"] == 1
+    assert dataset_state.uploads == []
+
+
+@pytest.mark.asyncio
+async def test_external_dataset_check_reports_deleted_files(tmp_path, monkeypatch, dataset_state):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RAG_META_DB_PATH", str(tmp_path / "data" / "les_meta.db"))
+    monkeypatch.setenv("LES_EXTERNAL_ALLOW_ANY", "1")
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    source = tmp_path / "external" / "913"
+    source.mkdir(parents=True)
+    missing = source / "gone.txt"
+    missing.write_text("СП 1.13130 пожарная безопасность эвакуация", encoding="utf-8")
+    stat = missing.stat()
+    file_name = missing.resolve().relative_to(source.parent.resolve()).as_posix()
+    missing.unlink()
+    with sqlite3.connect(data_dir / "les_meta.db") as conn:
+        conn.execute("CREATE TABLE datasets (id TEXT PRIMARY KEY, name TEXT, status TEXT)")
+        conn.execute(
+            """
+            CREATE TABLE documents (
+                id TEXT PRIMARY KEY,
+                dataset_id TEXT,
+                file_name TEXT,
+                status TEXT,
+                file_mtime REAL,
+                file_size INTEGER,
+                chunk_count INTEGER DEFAULT 0,
+                source_path TEXT DEFAULT '',
+                last_error TEXT DEFAULT '',
+                file_hash TEXT
+            )
+            """
+        )
+        conn.execute("INSERT INTO datasets (id, name, status) VALUES ('ds-913', '913', 'IDLE')")
+        conn.execute(
+            """
+            INSERT INTO documents (id, dataset_id, file_name, status, file_mtime, file_size, source_path)
+            VALUES ('doc-gone', 'ds-913', ?, 'INDEXED', ?, ?, ?)
+            """,
+            (file_name, stat.st_mtime, stat.st_size, str(missing.resolve())),
+        )
+    dataset_state.datasets.append(Dataset("ds-913", "913"))
+
+    result = await ds_dataset_external.check_external_dataset(
+        ds_dataset_contracts.ExternalDatasetSyncRequest(path=str(source), dataset_id="ds-913"),
+        _admin=object(),
+    )
+
+    assert result["counts"]["deleted"] == 1
+    assert result["samples"]["deleted"][0]["file_name"] == file_name
+
+
+@pytest.mark.asyncio
+async def test_folder_watch_rejects_unsafe_source_root(dataset_state):
+    with pytest.raises(ds_fastapi.HTTPException) as exc:
+        await ds_dataset_watch.folder_watch_status(source_root="../RAG_Content", _user=object())
+
+    assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_sync_folder_rejects_claude_source(tmp_path, monkeypatch, dataset_state):
+    monkeypatch.chdir(tmp_path)
+    source = tmp_path / "RAG_Content" / "CLAUDE"
+    source.mkdir(parents=True)
+    (source / "conversations.json").write_text("{}", encoding="utf-8")
+
+    with pytest.raises(ds_fastapi.HTTPException) as exc:
+        await ds_dataset_parse.sync_folder("CLAUDE", _admin=object())
+
+    assert exc.value.status_code == 400
+    assert dataset_state.uploads == []
+
+
+@pytest.mark.asyncio
+async def test_sync_folder_filters_unsupported_files(tmp_path, monkeypatch, dataset_state):
+    monkeypatch.chdir(tmp_path)
+    async def _admit(state, **kwargs):
+        return None
+
+    monkeypatch.setattr(ds_dataset_parse_service, "assert_parse_admission", _admit)
+    source = tmp_path / "RAG_Content" / "NTD"
+    source.mkdir(parents=True)
+    (source / ".DS_Store").write_text("noise")
+    (source / "doc.txt").write_text("СП 1.13130 пожарная безопасность", encoding="utf-8")
+
+    result = await ds_dataset_parse.sync_folder("NTD", _admin=object())
+
+    assert result["new_files"] == 1
+    assert result["rejected_files"] == 1
+    assert result["rejected_reasons"] == {"unsupported_suffix": 1}
+    assert dataset_state.uploads == [("ds-1", "doc.txt", "doc.txt")]
+
+
+@pytest.mark.asyncio
+async def test_upload_smart_routes_file_to_classified_dataset(tmp_path, monkeypatch, dataset_state):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "data").mkdir()
+    (tmp_path / "storage" / "datasets").mkdir(parents=True)
+
+    result = await ds_dataset_uploads.upload_file_smart(
+        file=_upload(
+            "local_smeta.csv",
+            (
+                "№,Наименование работ,Ед.изм.,Кол-во,Цена,Сумма\n"
+                "1,Монтаж кабеля,м,12,100,1200\n"
+            ).encode("utf-8"),
+        ),
+        parse=False,
+        _admin=object(),
+    )
+
+    assert result["status"] == "registered"
+    assert result["dataset_name"] == "TABLE_SMETA_Index"
+    assert result["dataset_created"] is True
+    assert result["route"]["doc_type"] == "SMETA"
+    assert result["route"]["pipeline"] == "parquet"
+    assert result["intake"]["file_name"] == "local_smeta.csv"
+    assert dataset_state.uploads[0][0] == "ds-2"
+    assert dataset_state.uploads[0][1].endswith("_local_smeta.csv")
+    assert dataset_state.uploads[0][2] == "local_smeta.csv"
+
+
+@pytest.mark.asyncio
+async def test_upload_background_parse_failure_is_persisted(tmp_path, monkeypatch, dataset_state):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "storage" / "datasets").mkdir(parents=True)
+    dataset_state.parse_error = RuntimeError("index contract missing")
+    tasks = []
+
+    async def _admit(state, **kwargs):
+        return None
+
+    monkeypatch.setattr(ds_dataset_parse_service, "assert_parse_admission", _admit)
+    monkeypatch.setattr(asyncio, "create_task", tasks.append)
+
+    response = await ds_dataset_uploads.upload_file(
+        "ds-1",
+        file=_upload("release-smoke.txt", b"release smoke"),
+        _admin=object(),
+    )
+    assert response == {"doc_id": "doc-1", "status": "queued"}
+    assert len(tasks) == 1
+
+    await tasks[0]
+
+    assert dataset_state.document_errors == [
+        (
+            "ds-1",
+            "doc-1",
+            "BACKGROUND_PARSE_FAILED [RuntimeError]: index contract missing",
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('mode', ['read', 'quick'])
+async def test_attach_read_returns_text_context(tmp_path, monkeypatch, dataset_state, mode):
+    monkeypatch.chdir(tmp_path)
+    result = await ds_dataset_uploads.attach_chat_file(
+        file=_upload("note.txt", "Прочитай меня как задание".encode("utf-8")),
+        mode=mode,
+        _admin=object(),
+    )
+
+    assert result["mode"] == "read"
+    assert result["name"] == "note.txt"
+    assert "Прочитай меня" in result["text"]
+    assert result["attachment_id"].startswith("read_")
+    from proxy.services.chat_attachment_service import resolve_read_attachment
+
+    saved_path, metadata = resolve_read_attachment(result["attachment_id"])
+    assert saved_path.read_bytes() == "Прочитай меня как задание".encode("utf-8")
+    assert metadata["original_name"] == "note.txt"
+    assert dataset_state.uploads == []
+
+
+@pytest.mark.asyncio
+async def test_attach_quick_pdf_is_promoted_to_read(tmp_path, monkeypatch, dataset_state):
+    monkeypatch.chdir(tmp_path)
+    calls = []
+
+    async def fake_prepare(temp_path, original_name, **_kwargs):
+        calls.append(original_name)
+        return {
+            "attachment_id": "read_abcdef123456",
+            "mode": "read",
+            "name": original_name,
+            "chars": 11,
+            "text": "pdf context",
+            "truncated": False,
+        }
+
+    monkeypatch.setattr(ds_chat_attachment_read_service, "_prepare_read_attachment", fake_prepare)
+    result = await ds_dataset_uploads.attach_chat_file(
+        file=_upload("ВОР монтаж.pdf", b"%PDF-1.4 fake"),
+        mode="quick",
+        _admin=object(),
+    )
+
+    assert result["mode"] == "read"
+    assert result["attachment_id"].startswith("read_")
+    assert calls == ["ВОР монтаж.pdf"]
+    assert dataset_state.uploads == []
+
+
+@pytest.mark.asyncio
+async def test_attach_read_rejects_pdf_without_text_instead_of_legacy_placeholder(tmp_path, monkeypatch, dataset_state):
+    monkeypatch.chdir(tmp_path)
+    import backend.converter
+    monkeypatch.setattr(backend.converter, 'convert_to_markdown', lambda _: '')
+    monkeypatch.setattr(ds_chat_attachment_read_service, '_format_tabular_attachment_context', lambda *_args, **_kwargs: None)
+    with pytest.raises(HTTPException) as error:
+        await ds_dataset_uploads.attach_chat_file(file=_upload('scan.pdf', b'%PDF-1.4'), mode='read', _admin=object())
+    assert error.value.status_code == 422
+    assert 'Не удалось прочитать' in error.value.detail
+
+
+@pytest.mark.asyncio
+async def test_attach_read_converter_error_is_controlled(tmp_path, monkeypatch, dataset_state):
+    monkeypatch.chdir(tmp_path)
+
+    def broken_converter(_path):
+        raise ValueError("битый файл")
+
+    import backend.converter
+
+    monkeypatch.setattr(backend.converter, "convert_to_markdown", broken_converter)
+
+    with pytest.raises(ds_fastapi.HTTPException) as exc:
+        await ds_dataset_uploads.attach_chat_file(
+            file=_upload("broken.txt", b"not really readable"),
+            mode="read",
+            _admin=object(),
+        )
+
+    assert exc.value.status_code == 422
+    assert "Не удалось прочитать файл" in exc.value.detail
+    assert "broken.txt" in exc.value.detail
+    assert dataset_state.uploads == []
+
+
+@pytest.mark.asyncio
+async def test_upload_smart_rejects_empty_file(tmp_path, monkeypatch, dataset_state):
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(ds_fastapi.HTTPException) as exc:
+        await ds_dataset_uploads.upload_file_smart(file=_upload("empty.txt", b""), parse=False, _admin=object())
+
+    assert exc.value.status_code == 400
+    assert dataset_state.uploads == []
+
+
+@pytest.mark.asyncio
+async def test_parse_scheduler_runs_pending_batches(monkeypatch, dataset_state):
+    dataset_state.pending_files["ds-1"] = 3
+
+    async def _admit(state, **kwargs):
+        return None
+
+    unloads = []
+
+    async def _unload():
+        unloads.append(True)
+        return {"ok": True}
+
+    async def _memory():
+        return {"ram_free_gb": 16.0, "swap_pct": 0.0, "raw": {}}
+
+    monkeypatch.setattr(ds_dataset_parse_service, "assert_parse_admission", _admit)
+    monkeypatch.setattr(ds_dataset_parse_service, "parse_memory_state", _memory)
+
+    result = await ds_dataset_parse.parse_scheduler(
+        ds_dataset_contracts.ParseSchedulerRequest(
+            batch_limit=2,
+            max_batches=3,
+            cooldown_sec=0,
+            unload_before_start=False,
+            background=False,
+        ),
+        _admin=object(),
+    )
+
+    assert result["status"] == "completed"
+    assert result["batches_run"] == 2
+    assert result["remaining_pending"] == 0
+    assert result["stop_reason"] == ""
+    assert dataset_state.parses == [("ds-1", 2), ("ds-1", 2)]
+    assert unloads == []
+
+
+@pytest.mark.asyncio
+async def test_global_parse_scheduler_waits_for_shared_parse_semaphore(monkeypatch, dataset_state):
+    """Auto-resume must not parse the document already owned by upload parsing."""
+    dataset_state.pending_files["ds-1"] = 1
+    state = ds_dataset_runtime.get_dataset_state()
+    state.parse_semaphore = asyncio.Semaphore(0)
+
+    async def _admit(state, **kwargs):
+        return None
+
+    async def _memory():
+        return {"ram_free_gb": 16.0, "swap_pct": 0.0, "raw": {}}
+
+    monkeypatch.setattr(ds_dataset_parse_service, "assert_parse_admission", _admit)
+    monkeypatch.setattr(ds_dataset_parse_service, "parse_memory_state", _memory)
+
+    task = asyncio.create_task(
+        ds_dataset_parse_service.run_parse_scheduler(
+            state,
+            ds_dataset_contracts.ParseSchedulerRequest(
+                batch_limit=1,
+                max_batches=1,
+                cooldown_sec=0,
+                unload_between_batches=False,
+                unload_before_start=False,
+                unload_after_finish=False,
+            ),
+        )
+    )
+    await asyncio.sleep(0.02)
+    assert dataset_state.parses == []
+
+    state.parse_semaphore.release()
+    result = await asyncio.wait_for(task, timeout=1)
+    assert result["status"] == "completed"
+    assert dataset_state.parses == [("ds-1", 1)]
+
+
+@pytest.mark.asyncio
+async def test_parse_batch_background_reports_partial_large_queue(monkeypatch, dataset_state):
+    dataset_state.pending_files["ds-1"] = 251
+
+    async def _admit(state, **kwargs):
+        return None
+
+    monkeypatch.setattr(ds_dataset_parse_service, "assert_parse_admission", _admit)
+
+    response = await ds_dataset_parse.parse_dataset_batch(
+        "ds-1",
+        limit=25,
+        background=True,
+        _admin=object(),
+    )
+    await asyncio.sleep(0.05)
+
+    job = ds_dataset_runtime.get_dataset_state().job_tracker[response["job_id"]]
+    assert job["status"] == "PARTIAL"
+    assert job["processed"] == 25
+    assert "осталось pending=226" in job["message"]
+    assert dataset_state.parses == [("ds-1", 25)]
+
+
+@pytest.mark.asyncio
+async def test_repair_detects_encoding_damage_and_starts_parse_job(monkeypatch, dataset_state):
+    class RepairDB:
+        def requeue_error_documents(self, dataset_id):
+            assert dataset_id == "ds-1"
+            return 1
+
+        def requeue_corrupt_pdf_text_documents(self, dataset_id):
+            assert dataset_id == "ds-1"
+            return ["project.pdf"]
+
+        def update_dataset_status(self, dataset_id, status):
+            assert (dataset_id, status) == ("ds-1", "IDLE")
+
+    dataset_state.db = RepairDB()
+    dataset_state.pending_files["ds-1"] = 2
+
+    async def _admit(state, **kwargs):
+        return None
+
+    monkeypatch.setattr(ds_dataset_parse_service, "assert_parse_admission", _admit)
+
+    result = await ds_dataset_document_ops.repair_dataset("ds-1", _admin=object())
+    await asyncio.sleep(0.05)
+
+    assert result["requeued"] == 2
+    assert result["errors_requeued"] == 1
+    assert result["encoding_documents"] == ["project.pdf"]
+    assert result["job_id"] == "job-1"
+    assert dataset_state.parses == [("ds-1", 2)]
+
+
+@pytest.mark.asyncio
+async def test_integrity_repair_starts_visible_job_for_only_requeued_files(monkeypatch, dataset_state):
+    class IntegrityDB:
+        def update_dataset_status(self, dataset_id, status):
+            assert (dataset_id, status) == ("ds-1", "IDLE")
+
+    dataset_state.db = IntegrityDB()
+    dataset_state.pending_files["ds-1"] = 2
+    dataset_state.audit_dataset_integrity = lambda dataset_id, repair=False: {
+        "dataset_id": dataset_id,
+        "state": "repairable",
+        "label": "Найдены исправимые повреждения",
+        "repaired": 2,
+        "requeued": 2 if repair else 0,
+    }
+
+    async def _admit(state, **kwargs):
+        return None
+
+    monkeypatch.setattr(ds_dataset_parse_service, "assert_parse_admission", _admit)
+    result = await ds_dataset_document_ops.repair_dataset_integrity("ds-1", _admin=object())
+    await asyncio.sleep(0.05)
+
+    assert result["job_id"] == "job-1"
+    assert result["label"] == "Исправление запущено: 2 файла"
+    assert dataset_state.parses == [("ds-1", 2)]
+
+
+@pytest.mark.asyncio
+async def test_parse_batch_waiting_for_semaphore_is_reported_as_queued(monkeypatch, dataset_state):
+    dataset_state.pending_files["ds-1"] = 1
+    state = ds_dataset_runtime.get_dataset_state()
+    state.parse_semaphore = asyncio.Semaphore(0)
+
+    async def _admit(state, **kwargs):
+        return None
+
+    monkeypatch.setattr(ds_dataset_parse_service, "assert_parse_admission", _admit)
+
+    response = await ds_dataset_parse.parse_dataset_batch(
+        "ds-1",
+        limit=1,
+        background=True,
+        _admin=object(),
+    )
+    await asyncio.sleep(0.01)
+
+    job = state.job_tracker[response["job_id"]]
+    assert job["status"] == "QUEUED"
+    assert job["message"].startswith("Ожидает очереди:")
+    assert dataset_state.parses == []
+
+    state.parse_semaphore.release()
+    await asyncio.sleep(0.05)
+    assert job["status"] == "COMPLETED"
+
+
+@pytest.mark.asyncio
+async def test_dataset_parse_drain_continues_until_dataset_empty(monkeypatch, dataset_state):
+    dataset_state.pending_files["ds-1"] = 60
+    state = ds_dataset_runtime.get_dataset_state()
+
+    async def _admit(state, **kwargs):
+        return None
+
+    monkeypatch.setattr(ds_dataset_parse_service, "assert_parse_admission", _admit)
+
+    result = await ds_dataset_parse_service.run_dataset_parse_drain(
+        state,
+        dataset_id="ds-1",
+        dataset_name="NTD_Index",
+        batch_limit=25,
+        max_batches=3,
+        job_id=None,
+    )
+
+    assert result["status"] == "completed"
+    assert result["batches_run"] == 3
+    assert result["processed_files"] == 60
+    assert result["remaining_pending"] == 0
+    assert dataset_state.parses == [("ds-1", 25), ("ds-1", 25), ("ds-1", 25)]
+
+
+@pytest.mark.asyncio
+async def test_dataset_parse_drain_stops_at_max_batches(monkeypatch, dataset_state):
+    dataset_state.pending_files["ds-1"] = 80
+    state = ds_dataset_runtime.get_dataset_state()
+
+    async def _admit(state, **kwargs):
+        return None
+
+    monkeypatch.setattr(ds_dataset_parse_service, "assert_parse_admission", _admit)
+
+    result = await ds_dataset_parse_service.run_dataset_parse_drain(
+        state,
+        dataset_id="ds-1",
+        dataset_name="NTD_Index",
+        batch_limit=25,
+        max_batches=2,
+        job_id=None,
+    )
+
+    assert result["status"] == "partial"
+    assert result["batches_run"] == 2
+    assert result["processed_files"] == 50
+    assert result["remaining_pending"] == 30
+    assert result["stop_reason"] == "max_batches=2 reached"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('auto_split', [False, True])
+async def test_index_external_starts_dataset_scoped_parse_drain(tmp_path, monkeypatch, dataset_state, auto_split):
+    root = tmp_path / "913"
+    root.mkdir()
+    for idx in range(3):
+        (root / f"doc_{idx}.txt").write_text(f"Документ {idx}", encoding="utf-8")
+
+    async def _admit(state, **kwargs):
+        return None
+
+    import proxy.services.les_md_service as les_md_service
+
+    monkeypatch.setattr(ds_dataset_parse_service, "assert_parse_admission", _admit)
+    monkeypatch.setattr(les_md_service, "read_and_bind", lambda *_args, **_kwargs: {"found": False})
+    monkeypatch.setenv("LES_AUTO_PIPELINES", "0")
+
+    result = await ds_dataset_external.index_external(
+        ds_dataset_contracts.IndexExternalRequest(
+            path=str(root),
+            dataset_id="ds-1",
+            parse=True,
+            parse_limit=2,
+            auto_split=auto_split,
+        ),
+        _admin=object(),
+    )
+    await asyncio.sleep(0.05)
+
+    parse_job = result["parse_job"]
+    job = ds_dataset_runtime.get_dataset_state().job_tracker[parse_job["job_id"]]
+    assert result["status"] == "registered"
+    assert result["registered_files"] == 3
+    assert result["parse_started"] is True
+    assert result["dataset_map"] is None
+    assert result["split_large_pdfs"] == 0
+    assert sorted(path.name for path in root.iterdir()) == ['doc_0.txt', 'doc_1.txt', 'doc_2.txt']
+    assert [(root / f'doc_{idx}.txt').read_text(encoding='utf-8') for idx in range(3)] == [f'Документ {idx}' for idx in range(3)]
+    assert parse_job["type"] == "rag_parse_drain"
+    assert parse_job["batch_limit"] == 2
+    assert parse_job["max_batches"] == 2
+    assert job["status"] == "COMPLETED"
+    assert job["processed"] == 3
+    assert dataset_state.pending_files["ds-1"] == 0
+    assert dataset_state.parses == [("ds-1", 2), ("ds-1", 2)]
+    assert dataset_state.uploads == [
+        ("ds-1", "doc_0.txt", Path(root.name, "doc_0.txt").as_posix()),
+        ("ds-1", "doc_1.txt", Path(root.name, "doc_1.txt").as_posix()),
+        ("ds-1", "doc_2.txt", Path(root.name, "doc_2.txt").as_posix()),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_parse_scheduler_background_rejects_before_queueing(monkeypatch, dataset_state):
+    async def _reject(state, **kwargs):
+        raise ds_fastapi.HTTPException(status_code=503, detail="Qdrant is not healthy")
+
+    monkeypatch.setattr(ds_dataset_parse_service, "assert_parse_admission", _reject)
+
+    with pytest.raises(ds_fastapi.HTTPException) as exc:
+        await ds_dataset_parse.parse_scheduler(
+            ds_dataset_contracts.ParseSchedulerRequest(background=True),
+            _admin=object(),
+        )
+
+    assert exc.value.status_code == 503
+    assert ds_dataset_runtime.get_dataset_state().job_tracker == {}
+    assert dataset_state.parses == []
+
+
+@pytest.mark.asyncio
+async def test_parse_scheduler_rejects_duplicate_active_job(monkeypatch, dataset_state):
+    state = ds_dataset_runtime.get_dataset_state()
+    state.job_tracker["active-job"] = {
+        "type": "rag_parse_scheduler",
+        "status": "PARSING",
+        "message": "Batch 1/25: NTD pending=10",
+    }
+
+    async def _admit(*args, **kwargs):
+        pytest.fail("duplicate scheduler should be rejected before admission")
+
+    monkeypatch.setattr(ds_dataset_parse_service, "assert_parse_admission", _admit)
+
+    with pytest.raises(ds_fastapi.HTTPException) as exc:
+        await ds_dataset_parse.parse_scheduler(
+            ds_dataset_contracts.ParseSchedulerRequest(background=True),
+            _admin=object(),
+        )
+
+    assert exc.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_parse_scheduler_passes_request_memory_guard(monkeypatch, dataset_state):
+    dataset_state.pending_files["ds-1"] = 1
+    seen = {}
+
+    async def _admit(state, *, min_free_gb, max_swap_pct):
+        seen["min_free_gb"] = min_free_gb
+        seen["max_swap_pct"] = max_swap_pct
+
+    async def _memory():
+        return {"ram_free_gb": 16.0, "swap_pct": 0.0, "raw": {}}
+
+    monkeypatch.setattr(ds_dataset_parse_service, "assert_parse_admission", _admit)
+    monkeypatch.setattr(ds_dataset_parse_service, "parse_memory_state", _memory)
+
+    result = await ds_dataset_parse.parse_scheduler(
+        ds_dataset_contracts.ParseSchedulerRequest(
+            batch_limit=1,
+            max_batches=1,
+            cooldown_sec=0,
+            unload_before_start=False,
+            min_free_gb=4,
+            max_swap_pct=75,
+            unload_between_batches=False,
+            background=False,
+        ),
+        _admin=object(),
+    )
+
+    assert result["status"] == "completed"
+    assert seen == {"min_free_gb": 4.0, "max_swap_pct": 75.0}
+
+
+@pytest.mark.asyncio
+async def test_parse_scheduler_stops_after_batch_when_swap_rises(monkeypatch, dataset_state):
+    dataset_state.pending_files["ds-1"] = 3
+
+    async def _admit(state, **kwargs):
+        return None
+
+    async def _memory():
+        return {"ram_free_gb": 16.0, "swap_pct": 80.0, "raw": {}}
+
+    monkeypatch.setattr(ds_dataset_parse_service, "assert_parse_admission", _admit)
+    monkeypatch.setattr(ds_dataset_parse_service, "parse_memory_state", _memory)
+
+    result = await ds_dataset_parse.parse_scheduler(
+        ds_dataset_contracts.ParseSchedulerRequest(
+            batch_limit=1,
+            max_batches=3,
+            cooldown_sec=0,
+            unload_before_start=False,
+            unload_between_batches=False,
+            post_batch_max_swap_pct=60,
+            background=False,
+        ),
+        _admin=object(),
+    )
+
+    assert result["batches_run"] == 1
+    assert result["remaining_pending"] == 2
+    assert "post-batch memory guard: swap_pct=80.0 > 60.0" == result["stop_reason"]
+
+
+@pytest.mark.asyncio
+async def test_parse_scheduler_never_unloads_a_provider_model(monkeypatch, dataset_state):
+    import httpx
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **k: pytest.fail("Scheduler must not manage provider models"))
+    dataset_state.pending_files["ds-1"] = 1
+    unloads = []
+
+    async def _admit(state, **kwargs):
+        return None
+
+    async def _memory():
+        return {"ram_free_gb": 16.0, "swap_pct": 0.0, "raw": {}}
+
+    async def _unload():
+        unloads.append(True)
+        return {"ok": True}
+
+    monkeypatch.setattr(ds_dataset_parse_service, "assert_parse_admission", _admit)
+    monkeypatch.setattr(ds_dataset_parse_service, "parse_memory_state", _memory)
+
+    result = await ds_dataset_parse.parse_scheduler(
+        ds_dataset_contracts.ParseSchedulerRequest(
+            batch_limit=1,
+            max_batches=1,
+            cooldown_sec=0,
+            unload_before_start=False,
+            unload_between_batches=True,
+            warm_embedder=True,
+            unload_after_finish=True,
+            background=False,
+        ),
+        _admin=object(),
+    )
+
+    assert result["batches_run"] == 1
+    assert "unload" not in result["batches"][0]
+    assert result["final_unload"] is None
+    assert unloads == []
+
+
+@pytest.mark.asyncio
+async def test_set_dataset_name_and_group_user_permission(monkeypatch):
+    class DummyBackend:
+        def __init__(self):
+            self.groups = {}
+            self.names = {}
+        async def set_dataset_group(self, dataset_id: str, group_name: str):
+            self.groups[dataset_id] = group_name
+        async def set_dataset_name(self, dataset_id: str, name: str):
+            self.names[dataset_id] = name
+
+    dummy = DummyBackend()
+    @dataclass
+    class State:
+        backend: object
+    monkeypatch.setattr(ds_dataset_runtime, "get_dataset_state", lambda: State(backend=dummy))
+
+    res_grp = await ds_dataset_catalog.set_dataset_group("ds-10", group="Проекты", payload=ds_dataset_contracts.DatasetGroupPayload(group="Проекты"), _user=object())
+    assert res_grp == {"id": "ds-10", "group_name": "Проекты"}
+    assert dummy.groups["ds-10"] == "Проекты"
+
+    res_nm = await ds_dataset_catalog.set_dataset_name("ds-10", name="Новый Датасет", payload=ds_dataset_contracts.DatasetNamePayload(name="Новый Датасет"), _user=object())
+    assert res_nm == {"id": "ds-10", "name": "Новый Датасет"}
+    assert dummy.names["ds-10"] == "Новый Датасет"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("new_name", ["Лес 🌲", "'\" / \\ : * ? < > | &", "<script>alert(1)</script>", "'; DROP TABLE documents; --"])
+async def test_rename_keeps_dataset_identity_and_document_rows(tmp_path, monkeypatch, new_name):
+    from backend.qdrant_adapter import MetaDB
+    from types import SimpleNamespace
+
+    db = MetaDB(str(tmp_path / "meta.db"))
+    dataset_id = db.create_dataset("Before")
+    other_id = db.create_dataset(new_name)
+    db.add_document(dataset_id, "drawing.pdf", source_path="C:/Documents/drawing.pdf")
+    with db._get_conn() as conn:
+        before = [dict(row) for row in conn.execute("SELECT * FROM documents WHERE dataset_id=?", (dataset_id,))]
+
+    async def rename(identifier, value):
+        db.set_dataset_name(identifier, value)
+
+    monkeypatch.setattr(ds_dataset_runtime, "get_dataset_state", lambda: SimpleNamespace(backend=SimpleNamespace(set_dataset_name=rename)))
+    result = await ds_dataset_catalog.set_dataset_name(dataset_id, payload=ds_dataset_contracts.DatasetNamePayload(name=new_name), _user=object())
+    assert result == {"id": dataset_id, "name": new_name}
+    with db._get_conn() as conn:
+        assert conn.execute("SELECT name FROM datasets WHERE id=?", (dataset_id,)).fetchone()[0] == new_name
+        assert conn.execute("SELECT name FROM datasets WHERE id=?", (other_id,)).fetchone()[0] == new_name
+        assert dataset_id != other_id
+        assert [dict(row) for row in conn.execute("SELECT * FROM documents WHERE dataset_id=?", (dataset_id,))] == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["", "   ", "x" * 121, "bad\x00name", "bad\nname"])
+@pytest.mark.parametrize("operation", ["create", "rename"])
+async def test_invalid_dataset_name_rejected_before_backend_write(monkeypatch, name, operation):
+    monkeypatch.setattr(ds_dataset_runtime, "get_dataset_state", lambda: pytest.fail("invalid name must not reach storage"))
+    with pytest.raises(ds_fastapi.HTTPException) as error:
+        if operation == "create":
+            await ds_dataset_catalog.create_dataset(req=ds_dataset_contracts.CreateDatasetRequest(name=name), _admin=object())
+        else:
+            await ds_dataset_catalog.set_dataset_name("ds", payload=ds_dataset_contracts.DatasetNamePayload(name=name), _user=object())
+    assert error.value.status_code == 400
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ['Лес 🌲 " # & %20 < > / \\', '%00', '%2520', 'x' * 120])
+async def test_create_preserves_literal_name(dataset_state, name):
+    result = await ds_dataset_catalog.create_dataset(req=ds_dataset_contracts.CreateDatasetRequest(name=name), _admin=object())
+    assert result['name'] == name
+
+
+def test_external_file_create_change_rename_delete_and_restore(tmp_path, monkeypatch):
+    from backend.qdrant_adapter import MetaDB
+    import os
+
+    root = tmp_path / "Документы"
+    root.mkdir()
+    db_path = tmp_path / "meta.db"
+    db = MetaDB(str(db_path))
+    monkeypatch.setattr(ds_dataset_external, "rag_meta_db_path", lambda: str(db_path))
+    dataset_id = db.create_dataset("Files")
+    file = root / "чертёж 🟢.txt"
+    file.write_text("first", encoding="utf-8")
+    diff = ds_dataset_external._external_dataset_diff(dataset_id, root)
+    assert diff["counts"]["new"] == 1
+
+    def register(path):
+        stat = path.stat()
+        return db.add_document(dataset_id, path.relative_to(root.parent).as_posix(), file_mtime=stat.st_mtime, file_size=stat.st_size, source_path=str(path))
+
+    original_id, _, _ = register(file)
+    assert ds_dataset_external._external_dataset_diff(dataset_id, root)["pending_changes"] == 0
+    file.write_text("updated content", encoding="utf-8")
+    assert ds_dataset_external._external_dataset_diff(dataset_id, root)["counts"]["changed"] == 1
+    assert register(file) == (original_id, False, True)
+    before_time = file.stat().st_mtime
+    file.write_text("another content", encoding="utf-8")
+    os.utime(file, (before_time, before_time + 0.25))
+    assert ds_dataset_external._external_dataset_diff(dataset_id, root)["counts"]["changed"] == 1
+    assert register(file) == (original_id, False, True)
+    renamed = file.with_name("новое имя.txt")
+    file.rename(renamed)
+    diff = ds_dataset_external._external_dataset_diff(dataset_id, root)
+    assert (diff["counts"]["new"], diff["counts"]["deleted"]) == (1, 1)
+    ds_dataset_external._mark_external_missing(dataset_id, diff["_files"]["deleted"])
+    new_id, _, _ = register(renamed)
+    stat = renamed.stat()
+    content = renamed.read_bytes()
+    renamed.unlink()
+    diff = ds_dataset_external._external_dataset_diff(dataset_id, root)
+    ds_dataset_external._mark_external_missing(dataset_id, diff["_files"]["deleted"])
+    renamed.write_bytes(content)
+    os.utime(renamed, (stat.st_atime, stat.st_mtime))
+    assert register(renamed) == (new_id, False, True)
+    with db._get_conn() as conn:
+        assert conn.execute("SELECT status FROM documents WHERE id=?", (new_id,)).fetchone()[0] == "PENDING"
+
+
+def test_external_change_with_same_size_and_mtime_uses_indexed_fingerprint(tmp_path, monkeypatch):
+    from backend.qdrant_adapter import MetaDB, _sha256_file
+    import os
+    root = tmp_path / 'watched'
+    root.mkdir()
+    file = root / 'same.txt'
+    file.write_bytes(b'original')
+    stat = file.stat()
+    db_path = tmp_path / 'meta.db'
+    db = MetaDB(str(db_path))
+    monkeypatch.setattr(ds_dataset_external, 'rag_meta_db_path', lambda: str(db_path))
+    dataset_id = db.create_dataset('Files')
+    name = file.relative_to(root.parent).as_posix()
+    doc_id, _, _ = db.add_document(dataset_id, name, file_mtime=stat.st_mtime, file_size=stat.st_size, source_path=str(file))
+    db.update_document_status(dataset_id, name, 'INDEXED', 1)
+    db.set_document_source_fingerprint(dataset_id, name, file_hash=_sha256_file(file), file_mtime=stat.st_mtime, file_size=stat.st_size)
+    assert ds_dataset_external._external_dataset_diff(dataset_id, root)['pending_changes'] == 0
+    file.write_bytes(b'modified')
+    os.utime(file, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+    diff = ds_dataset_external._external_dataset_diff(dataset_id, root)
+    assert diff['counts']['changed'] == 1
+    assert diff['_files']['changed'][0]['content_changed'] is True
+    assert db.add_document(dataset_id, name, file_mtime=stat.st_mtime, file_size=stat.st_size, source_path=str(file), force_reindex=True) == (doc_id, False, True)
+    with db._get_conn() as conn:
+        assert conn.execute('SELECT status FROM documents WHERE id=?', (doc_id,)).fetchone()[0] == 'PENDING'
+
+
+@pytest.mark.parametrize("failure", ["missing_root", "denied_subfolder", "broken_registry"])
+def test_external_scan_failure_never_becomes_empty_success(tmp_path, monkeypatch, failure):
+    root = tmp_path / "source"
+    if failure != "missing_root":
+        root.mkdir()
+    if failure == "denied_subfolder":
+        def incomplete_walk(path, *, onerror, followlinks):
+            yield str(path), [], []
+            onerror(PermissionError("folder access denied"))
+        monkeypatch.setattr(os, "walk", incomplete_walk)
+    if failure == "broken_registry":
+        db_path = tmp_path / "broken.db"
+        db_path.write_text("not SQLite", encoding="utf-8")
+        monkeypatch.setattr(ds_dataset_external, "rag_meta_db_path", lambda: str(db_path))
+    with pytest.raises(ds_fastapi.HTTPException) as error:
+        ds_dataset_external._external_dataset_diff("ds", root)
+    assert error.value.status_code == (503 if failure == "broken_registry" else 409)
+
+
+def test_external_scan_never_deletes_missing_files_from_other_root(tmp_path, monkeypatch):
+    root = tmp_path / "observed"
+    root.mkdir()
+    monkeypatch.setattr(ds_dataset_external, "_external_dataset_docs", lambda _: {"foreign.txt": {"file_name": "foreign.txt", "source_path": str(tmp_path / "another" / "missing.txt")}})
+    assert ds_dataset_external._external_dataset_diff("ds", root)["pending_changes"] == 0
+
+
+@pytest.mark.asyncio
+async def test_light_memory_guard_uses_real_os_memory(monkeypatch):
+    from types import SimpleNamespace
+    import psutil
+    monkeypatch.setenv("LES_PRODUCT_EDITION", "light")
+    monkeypatch.setattr(psutil, "virtual_memory", lambda: SimpleNamespace(available=256 * 1024 ** 2))
+    monkeypatch.setattr(psutil, "swap_memory", lambda: SimpleNamespace(percent=96, used=4 * 1024 ** 3))
+    result = await ds_dataset_parse_service.parse_memory_state()
+    assert result["ram_free_gb"] == 0.25
+    assert result["state"] == "CRITICAL"
+    assert result["source"] == "operating_system"
+
+
+@pytest.mark.asyncio
+async def test_light_memory_probe_failure_never_means_unlimited_ram(monkeypatch):
+    import psutil
+    monkeypatch.setenv("LES_PRODUCT_EDITION", "light")
+
+    def fail():
+        raise OSError("probe unavailable")
+
+    monkeypatch.setattr(psutil, "virtual_memory", fail)
+    with pytest.raises(ds_fastapi.HTTPException) as error:
+        await ds_dataset_parse_service.parse_memory_state()
+    assert error.value.status_code == 503
+
+
+def test_scan_capacity_limit_is_explicit_not_partial_success(tmp_path):
+    for index in range(3):
+        (tmp_path / f"{index}.txt").write_text("content")
+    with pytest.raises(ds_fastapi.HTTPException) as error:
+        ds_dataset_external._external_supported_files(tmp_path, max_files=2)
+    assert error.value.status_code == 413

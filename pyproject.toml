@@ -1,0 +1,100 @@
+[project]
+name = "les-v2"
+version = "0.1.0"
+description = "Л.Е.С. — Локальная Экспертная Система"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+
+dependencies = [
+    # ── API сервер ───────────────────────────────────────────────
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",        # [standard] = uvloop + httptools
+    "pydantic>=2.9.0",
+    "pydantic-settings>=2.5.0",
+    "python-multipart>=0.0.9",
+    "sse-starlette>=2.1.0",
+    "httpx>=0.27.0",
+    "psutil>=5.9.0",
+    # ── RAG / Qdrant ─────────────────────────────────────────────
+    "qdrant-client>=1.11.0",
+    "llama-index-core>=0.10.0",
+    "llama-index-vector-stores-qdrant>=0.2.0",
+    "llama-index-embeddings-openai>=0.1.0",
+    "llama-index-embeddings-ollama>=0.1.0",
+    # ── Конвертация документов ───────────────────────────────────
+    "pypdfium2==5.8.0",
+    "mammoth>=1.8.0",
+    "openpyxl>=3.1.0",
+    "pandas>=2.0.0",
+    "tabulate==0.10.0",               # pandas.to_markdown for CSV/XLS(X)
+    "xlrd>=2.0.1",
+    "pyarrow>=16.0.0",
+    "python-oxmsg==0.0.2",
+    "pdfplumber>=0.11.0",
+    "Pillow>=10.0.0",
+    "markitdown>=0.0.1",
+    "langextract>=1.1.0",
+    "ezdxf>=1.3.0",
+    # ── Сметные агенты (RAG/расчёт остаются в LES) ────────────────
+    "qwen-agent==0.0.34",
+    # qwen-agent 0.0.34 imports audio helpers from its core package but does not
+    # declare SoundFile in the minimal extra.
+    "soundfile>=0.12.1",
+    "google-adk==2.5.0",
+    # ── UI ───────────────────────────────────────────────────────
+    "nicegui>=2.0.0",
+    # ── Утилиты ──────────────────────────────────────────────────
+    "python-dotenv>=1.0.0",
+    "aiofiles>=23.0.0",
+    "python-docx>=1.2.0",
+]
+
+[project.optional-dependencies]
+mac-mlx = [
+    "mlx-lm>=0.22.0",
+    "mlx-vlm>=0.3.11",
+    "sentence-transformers>=3.0.0",
+    "torch>=2.2.0",
+    "torchvision>=0.17.0",
+    "coremltools>=9.0",
+]
+windows-reranker = [
+    "sentence-transformers>=3.0.0",
+    "torch>=2.2.0",
+    "FlagEmbedding>=1.3.5",
+]
+parsers = [
+    "docling>=2.101.0",
+]
+desktop = [
+    # Тонкий нативный шелл (окно + трей) поверх веб-UI Совушки (tools/les_shell.py).
+    "pywebview>=5.0",
+    "pystray>=0.19",
+    "Pillow>=10.0",
+]
+mail-pst = [
+    # Архивы Outlook .pst (Windows). C-сборка libpff (self-contained, нужен компилятор).
+    "libpff-python>=20231205",
+]
+mcp = [
+    # MCP-сервер ЛЕС (tools/les_mcp_server.py): инструменты ЛЕС наружу по Model Context Protocol.
+    "mcp>=1.0.0",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.0", "pytest-asyncio>=1.0", "pytest-subtests>=0.14"]
+
+[project.scripts]
+les-install = "tools.install_les:main"
+les-runtime = "tools.les_runtime_control:main"
+lesctl = "tools.lesctl:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["backend", "proxy", "proxy.routers", "proxy.services", "proxy.storage", "sovushka", "tools"]
+include = ["mlx_host.py", "lemonade_host.py", "proxy_server.py", "sovushka_ng.py"]
+
+[tool.uv]

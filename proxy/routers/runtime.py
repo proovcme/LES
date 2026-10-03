@@ -1,0 +1,920 @@
+"""Runtime, status, mode, warmup and metrics routes for LES Proxy."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import os
+import sqlite3
+import subprocess
+import time
+from dataclasses import dataclass
+from typing import Any
+
+import httpx
+from backend.system_memory import system_memory_snapshot
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
+
+from backend.http_client_policy import trust_env_for_url
+from backend.light_qdrant_connection import qdrant_client_options
+from backend.metrics_collector import DB_PATH, heartbeats
+from backend.rag_config import index_contract_status, rag_meta_db_path, rag_runtime_config
+from backend.runtime_paths import mutable_path
+from proxy.config import docker_control_enabled, mlx_url
+from proxy.local_model_registry import DEFAULT_LOCAL_MLX_MODEL
+from proxy.security import require_admin, require_root_admin
+from proxy.services.resource_governor import (
+    active_parse_priority_order,
+    current_runtime_profile,
+    enter_chat_mode,
+    enter_indexing_mode,
+    is_indexing_mode,
+    normalize_runtime_profile,
+)
+from proxy.services.runtime_admission import (
+    count_active_jobs,
+    evaluate_chat_admission,
+    evaluate_memory_pressure,
+)
+from proxy.services.runtime_dispatcher import DEFAULT_DATASETS, DispatcherError, RuntimeDispatcher
+from proxy.services.version_service import version_info
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api", tags=["runtime"])
+
+
+def summarize_phases(phases: list[dict]) -> dict[str, float]:
+    """W0.1: среднее по каждой фазе латентности за накопленные запросы."""
+    if not phases:
+        return {}
+    totals: dict[str, float] = {}
+    counts: dict[str, int] = {}
+    for entry in phases:
+        for key, value in entry.items():
+            if isinstance(value, (int, float)):
+                totals[key] = totals.get(key, 0.0) + float(value)
+                counts[key] = counts.get(key, 0) + 1
+    return {key: round(totals[key] / counts[key], 3) for key in totals}
+
+
+class ModeRequest(BaseModel):
+    mode: str
+    model: str
+    runtime_profile: str | None = None
+
+
+class IndexingModeRequest(BaseModel):
+    enabled: bool = True
+    reason: str = "manual"
+    unload_models: bool = True
+    dataset_priority_order: list[str] | None = None
+
+
+class DispatcherReindexRequest(BaseModel):
+    datasets: list[str] = Field(default_factory=lambda: list(DEFAULT_DATASETS), min_length=1, max_length=20)
+    parse_method: str = Field(default="scheduler", pattern="^(scheduler|batch)$")
+    min_free_gb: float = Field(default=4.0, ge=0.5, le=64.0)
+    max_swap_pct: float = Field(default=85.0, ge=0.0, le=100.0)
+    post_min_free_gb: float = Field(default=3.0, ge=0.5, le=64.0)
+    post_max_swap_pct: float | None = Field(default=None, ge=0.0, le=100.0)
+    memory_wait_sec: float = Field(default=86400.0, ge=0.0, le=604800.0)
+    memory_poll_sec: float = Field(default=30.0, ge=1.0, le=3600.0)
+    cooldown_sec: float = Field(default=90.0, ge=0.0, le=3600.0)
+    parse_timeout: float = Field(default=3600.0, ge=60.0, le=86400.0)
+    unload_between_docs: bool = True
+    auth_smoke_after: bool = True
+    reset_state: bool = False
+
+
+class DispatcherPauseRequest(BaseModel):
+    reason: str = Field(default="operator", max_length=200)
+
+
+class DispatcherRouteChangeRequest(BaseModel):
+    source_root: str = "RAG_Content"
+    dry_run: bool = True
+    max_docs: int = Field(default=0, ge=0, le=500)
+    min_free_gb: float = Field(default=4.0, ge=0.5, le=64.0)
+    max_swap_pct: float = Field(default=85.0, ge=0.0, le=100.0)
+    post_min_free_gb: float = Field(default=3.0, ge=0.5, le=64.0)
+    post_max_swap_pct: float = Field(default=85.0, ge=0.0, le=100.0)
+    memory_wait_sec: float = Field(default=86400.0, ge=0.0, le=604800.0)
+    memory_poll_sec: float = Field(default=30.0, ge=1.0, le=3600.0)
+    cooldown_sec: float = Field(default=90.0, ge=0.0, le=3600.0)
+    parse_timeout: float = Field(default=3600.0, ge=60.0, le=86400.0)
+
+
+@dataclass
+class RuntimeRouterState:
+    rag_backend: Any
+    current_mode: dict
+    metrics_cache: dict
+    chat_metrics: dict
+    crag_stats: dict
+    error_counts: dict
+    llm_semaphore: asyncio.Semaphore
+    llm_concurrency: int
+    proxy_start: float
+    job_service: Any = None
+    job_tracker: dict[str, Any] | None = None
+
+    @property
+    def backend(self):
+        return self.rag_backend() if callable(self.rag_backend) else self.rag_backend
+
+
+_state: RuntimeRouterState | None = None
+DEFAULT_OPENAI_MODEL = "gpt-5.4"
+
+
+def set_runtime_state(state: RuntimeRouterState) -> None:
+    global _state
+    _state = state
+
+
+def get_runtime_state() -> RuntimeRouterState:
+    if _state is None:
+        raise RuntimeError("runtime router state is not configured")
+    return _state
+
+
+def chat_admission_for_state(state: RuntimeRouterState):
+    active_reindex_jobs = 0
+    try:
+        active_reindex_jobs = 1 if dispatcher_for_state(state).reindex_status_payload().get("running") else 0
+    except Exception:
+        active_reindex_jobs = 0
+    return evaluate_chat_admission(
+        current_mode=state.current_mode,
+        metrics_cache=state.metrics_cache,
+        active_jobs=count_active_jobs(state.job_service, state.job_tracker) + active_reindex_jobs,
+    )
+
+
+def _effective_mode_payload(mode: dict[str, Any] | None, admission: Any) -> dict[str, Any]:
+    payload = dict(mode or {})
+    payload["chat_generation"] = "allowed" if admission.allowed else "paused"
+    payload["chat_generation_reason"] = admission.reason
+    policy = getattr(admission, "indexing_chat_policy", None)
+    if policy:
+        payload["indexing_chat_policy"] = policy
+    return payload
+
+
+def _provider_status() -> dict[str, str]:
+    """Describe the explicit role snapshot without probing another local engine."""
+    from proxy.services.model_connection_contracts import ConnectionRole
+    from proxy.services.model_connection_registry_service import ModelConnectionRegistry
+
+    empty = {"provider": "unassigned", "base_url": "", "model": ""}
+    try:
+        registry = ModelConnectionRegistry()
+        binding = registry.get_role_binding(ConnectionRole.ANSWER)
+        if binding is None:
+            return empty
+        revision = registry.get_revision(binding.connection_revision_id)
+        if not registry.get_connection(revision.connection_id).enabled:
+            return empty
+        return {
+            "provider": revision.extension_type or "openai-compatible",
+            "base_url": revision.base_url,
+            "model": revision.model_id,
+        }
+    except Exception:
+        logger.exception("Unable to read the assigned model status")
+        return {**empty, "provider": "unavailable"}
+
+
+
+def dispatcher_for_state(state: RuntimeRouterState) -> RuntimeDispatcher:
+    return RuntimeDispatcher(current_mode=state.current_mode, metrics_cache=state.metrics_cache)
+
+
+def _dispatcher_error(error: DispatcherError) -> HTTPException:
+    detail: Any = {"message": error.detail}
+    if error.payload:
+        detail["dispatcher"] = error.payload
+    return HTTPException(status_code=error.status_code, detail=detail)
+
+
+@router.get("/health")
+async def health():
+    backend = get_runtime_state().backend
+    if not backend:
+        return {"status": "starting", "backend": "none"}
+    timeout = max(0.05, min(float(os.getenv("LES_HEALTH_TIMEOUT_SEC", "2")), 15.0))
+    health_error_code = "RAG_UNAVAILABLE"
+    try:
+        ok = await asyncio.wait_for(backend.health(), timeout=timeout)
+    except TimeoutError:
+        logger.warning("[HEALTH] backend probe timed out after %.1fs", timeout)
+        ok = False
+        health_error_code = "RAG_HEALTH_TIMEOUT"
+    except Exception as error:
+        logger.warning("[HEALTH] backend probe failed: %s", error)
+        ok = False
+    response = {"status": "ok" if ok else "error", "backend": "qdrant_llama"}
+    if not ok:
+        response["rag"] = {
+            "status": "unavailable",
+            "error_code": health_error_code,
+            "index_contract": index_contract_status(),
+        }
+    elif hasattr(backend, "health_snapshot"):
+        try:
+            snapshot = await asyncio.wait_for(
+                backend.health_snapshot(),
+                timeout=timeout,
+            )
+            response["rag"] = snapshot
+            rag_status = snapshot.get("status")
+            if ok and rag_status in {"empty", "not_indexed", "degraded"}:
+                response["status"] = "degraded"
+            elif rag_status in {"unavailable", "unknown", "error"}:
+                response["status"] = "error"
+        except TimeoutError:
+            logger.warning("[HEALTH] RAG snapshot timed out after %.1fs", timeout)
+            response["status"] = "error"
+            response["rag"] = {
+                "status": "unavailable",
+                "error_code": "RAG_HEALTH_TIMEOUT",
+                "index_contract": index_contract_status(),
+            }
+        except Exception as error:
+            logger.warning("[HEALTH] RAG snapshot failed: %s", error)
+            response["status"] = "error"
+            response["rag"] = {
+                "status": "unknown",
+                "error_code": "RAG_HEALTH_FAILED",
+                "error": str(error),
+                "index_contract": index_contract_status(),
+            }
+    response["embedding"] = rag_runtime_config()
+    return response
+
+
+@router.get("/version")
+async def version():
+    """v0.19: единый version-объект ЛЕС (product/harness/schema + git + флаги + runtime-divergence).
+    Без секретов, без падений — git недоступен → 'unknown'."""
+    return version_info()
+
+
+async def _live_datasets_and_projects():
+    """Живые датасеты (backend) + проекты (registry) + связи project→dataset. Без падений."""
+    from proxy.services import project_service as ps
+    datasets: list[dict] = []
+    try:
+        backend = get_runtime_state().backend
+        if backend:
+            raw = list(await backend.list_datasets() or [])
+            for d in raw:
+                if isinstance(d, dict):
+                    datasets.append(d)
+                else:   # DatasetInfo (dataclass) → dict
+                    datasets.append({
+                        "id": getattr(d, "id", ""), "name": getattr(d, "name", ""),
+                        "file_count": getattr(d, "doc_count", 0),
+                        "chunk_count": getattr(d, "chunk_count", 0),
+                        "source_type": getattr(d, "group_name", "") or "dataset",
+                        "qdrant_status": "indexed" if getattr(d, "chunk_count", 0) else "unknown",
+                        "dataset_scope": getattr(d, "dataset_scope", "user") or "user",
+                        "module_id": getattr(d, "module_id", "") or "",
+                    })
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[SCOPE] list_datasets failed: %s", e)
+    projects, links = [], {}
+    try:
+        projects = ps.build_registry().get("projects", [])
+        links = {int(p["id"]): ps.project_dataset_ids(int(p["id"])) for p in projects}
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[SCOPE] registry failed: %s", e)
+    return datasets, projects, links
+
+
+@router.get("/scope/options")
+async def scope_options_endpoint(_admin=Depends(require_admin)):
+    """v0.21: всё для ScopeSelector — проекты, ВСЕ датасеты, непривязанные, системные (с reason).
+    Админский датасет ОБЯЗАН быть здесь (ничего не скрываем молча)."""
+    from proxy.services.scope_service import scope_options
+    datasets, projects, links = await _live_datasets_and_projects()
+    return scope_options(datasets, projects, links)
+
+
+@router.post("/scope/resolve")
+async def scope_resolve_endpoint(payload: dict, _admin=Depends(require_admin)):
+    """v0.21: request-поля (scope/project_id/dataset_ids/dataset_filter) → нормализованный Scope с
+    resolved_dataset_ids. Явный scope приоритетнее legacy. Не теряет область молча."""
+    from proxy.services.scope_service import resolve_scope
+    datasets, _projects, _links = await _live_datasets_and_projects()
+    return resolve_scope(
+        scope=payload.get("scope"), project_id=payload.get("project_id"),
+        dataset_ids=payload.get("dataset_ids"), dataset_filter=payload.get("dataset_filter"),
+        label=payload.get("label"), dataset_catalog=datasets)
+
+
+@router.post("/warmup")
+async def warmup_models(_admin=Depends(require_admin)):
+    state = get_runtime_state()
+    admission = chat_admission_for_state(state)
+    if not admission.allowed:
+        raise HTTPException(status_code=admission.status_code, detail=admission.reason)
+    mlx_url = os.getenv("MLX_URL", "http://127.0.0.1:8080").rstrip("/")
+    results = {}
+    async with httpx.AsyncClient(
+        trust_env=trust_env_for_url(mlx_url),
+        timeout=120.0,
+    ) as client:
+        for name, model in [
+            ("main", os.getenv("LLM_MODEL", DEFAULT_LOCAL_MLX_MODEL)),
+            ("val", os.getenv("MLX_VAL_MODEL", "mlx-community/Qwen3-4B-4bit")),
+        ]:
+            try:
+                started = time.time()
+                response = await client.post(
+                    f"{mlx_url}/v1/chat/completions",
+                    json={
+                        "model": model,
+                        "messages": [{"role": "user", "content": "/no_think\n1"}],
+                        "max_tokens": 1,
+                        "temperature": 0.0,
+                    },
+                )
+                response.raise_for_status()
+                results[name] = {"status": "ok", "elapsed": round(time.time() - started, 1)}
+            except Exception as e:
+                results[name] = {"status": "error", "msg": str(e)}
+    logger.info("[WARMUP] %s", results)
+    return {"status": "done", "models": results}
+
+
+@router.get("/mode")
+async def get_mode():
+    return get_runtime_state().current_mode
+
+
+@router.post("/mode")
+async def set_mode(req: ModeRequest, _admin=Depends(require_admin)):
+    state = get_runtime_state()
+    state.current_mode["mode"] = req.mode
+    state.current_mode["model"] = req.model
+    if req.runtime_profile:
+        state.current_mode["runtime_profile"] = normalize_runtime_profile(req.runtime_profile)
+    logger.info("[MODE] Switched to %s / %s", req.mode, req.model)
+    return state.current_mode
+
+
+async def _unload_mlx_models() -> dict[str, Any]:
+    try:
+        target_url = mlx_url()
+        async with httpx.AsyncClient(
+            trust_env=trust_env_for_url(target_url),
+            timeout=15.0,
+        ) as client:
+            response = await client.post(f"{target_url}/api/unload_all", json={})
+        result: Any
+        try:
+            result = response.json()
+        except ValueError:
+            result = response.text[:500]
+        return {"ok": response.status_code == 200, "status_code": response.status_code, "result": result}
+    except Exception as error:
+        return {"ok": False, "error": str(error)}
+
+
+async def _host_memory() -> dict[str, Any]:
+    memory = await asyncio.to_thread(system_memory_snapshot)
+    return {**memory, "ram_total_gb": memory["ram_total"],
+            "ram_used_gb": memory["ram_used"], "source": memory["memory_source"]}
+
+
+@router.get("/indexing-mode")
+async def get_indexing_mode():
+    state = get_runtime_state()
+    admission = chat_admission_for_state(state)
+    memory_pressure = evaluate_memory_pressure(state.metrics_cache)
+    effective_mode = _effective_mode_payload(state.current_mode, admission)
+    return {
+        "active": is_indexing_mode(state.current_mode),
+        "mode": effective_mode,
+        "raw_mode": state.current_mode,
+        "runtime_profile": current_runtime_profile(state.current_mode),
+        "memory_state": memory_pressure.payload(),
+        "chat_generation_allowed": admission.allowed,
+        "chat_generation_reason": admission.reason,
+        "chat_admission": admission.payload(),
+        "dataset_priority_order": active_parse_priority_order(state.current_mode),
+    }
+
+
+async def _live_snapshot() -> dict:
+    """W5.2: единый снимок для push-канала — то, что раньше опрашивалось
+    отдельными поллерами (metrics/status/indexing/jobs) + прогресс реиндекса
+    для прогресс-бара САМОВАРа. Любой сбой ветки не роняет снимок целиком."""
+    from proxy.routers.jobs import get_jobs_summary
+
+    snap: dict = {}
+    for key, coro in (
+        ("metrics", get_metrics()),
+        ("status", get_status()),
+        ("indexing_mode", get_indexing_mode()),
+        ("jobs_summary", get_jobs_summary(limit=120, active_only=False, _user=None)),
+    ):
+        try:
+            snap[key] = await coro
+        except Exception as err:  # noqa: BLE001
+            snap[key] = {"error": str(err)}
+    try:
+        state = get_runtime_state()
+        snap["reindex"] = await asyncio.to_thread(dispatcher_for_state(state).reindex_status_payload)
+    except Exception as err:  # noqa: BLE001
+        snap["reindex"] = {"error": str(err)}
+    return snap
+
+
+@router.get("/live")
+async def live_stream():
+    """W5.2: push-канал (SSE). Каждые LES_LIVE_INTERVAL_SEC секунд (деф. 3)
+    шлёт событие `snapshot` со сводкой метрик/статуса/индексации/задач — заменяет
+    частый поллинг bg_loop одним долгоживущим соединением. Доступность совпадает
+    с /metrics и /status (открыт на localhost, key-gated через лайт-мост)."""
+    try:
+        interval = max(1.0, float(os.getenv("LES_LIVE_INTERVAL_SEC", "3")))
+    except ValueError:
+        interval = 3.0
+
+    async def gen():
+        while True:
+            snap = await _live_snapshot()
+            yield f"event: snapshot\ndata: {json.dumps(snap, ensure_ascii=False)}\n\n"
+            await asyncio.sleep(interval)
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
+    )
+
+
+@router.post("/indexing-mode")
+async def set_indexing_mode(req: IndexingModeRequest, _admin=Depends(require_admin)):
+    state = get_runtime_state()
+    unload = None
+    if req.enabled:
+        enter_indexing_mode(
+            state.current_mode,
+            reason=req.reason,
+            priority_order=req.dataset_priority_order,
+        )
+        if req.unload_models:
+            unload = await _unload_mlx_models()
+    else:
+        enter_chat_mode(state.current_mode, reason=req.reason)
+
+    memory = await _host_memory()
+    memory_state = evaluate_memory_pressure(memory).payload()
+    logger.info("[RESOURCE] indexing_mode=%s reason=%s", req.enabled, req.reason)
+    return {
+        "active": is_indexing_mode(state.current_mode),
+        "mode": state.current_mode,
+        "runtime_profile": current_runtime_profile(state.current_mode),
+        "memory_state": memory_state,
+        "unload": unload,
+        "memory": memory,
+        "dataset_priority_order": active_parse_priority_order(state.current_mode),
+    }
+
+
+@router.get("/runtime/dispatcher/status")
+async def runtime_dispatcher_status(_admin=Depends(require_admin)):
+    state = get_runtime_state()
+    dispatcher = dispatcher_for_state(state)
+    return await asyncio.to_thread(dispatcher.status_payload)
+
+
+@router.get("/runtime/dispatcher/reindex/status")
+async def runtime_dispatcher_reindex_status(_admin=Depends(require_admin)):
+    """Cheap live reindex state without process/service memory diagnostics."""
+    state = get_runtime_state()
+    dispatcher = dispatcher_for_state(state)
+    return await asyncio.to_thread(dispatcher.reindex_status_payload)
+
+
+@router.post("/runtime/dispatcher/reindex/start")
+async def runtime_dispatcher_reindex_start(req: DispatcherReindexRequest, _admin=Depends(require_admin)):
+    state = get_runtime_state()
+    dispatcher = dispatcher_for_state(state)
+    try:
+        return await asyncio.to_thread(
+            dispatcher.start_reindex,
+            datasets=req.datasets,
+            parse_method=req.parse_method,
+            min_free_gb=req.min_free_gb,
+            max_swap_pct=req.max_swap_pct,
+            post_min_free_gb=req.post_min_free_gb,
+            post_max_swap_pct=req.post_max_swap_pct,
+            memory_wait_sec=req.memory_wait_sec,
+            memory_poll_sec=req.memory_poll_sec,
+            cooldown_sec=req.cooldown_sec,
+            parse_timeout=req.parse_timeout,
+            unload_between_docs=req.unload_between_docs,
+            auth_smoke_after=req.auth_smoke_after,
+            reset_state=req.reset_state,
+        )
+    except DispatcherError as error:
+        raise _dispatcher_error(error) from error
+
+
+@router.post("/runtime/dispatcher/reindex/pause")
+async def runtime_dispatcher_reindex_pause(req: DispatcherPauseRequest, _admin=Depends(require_admin)):
+    state = get_runtime_state()
+    dispatcher = dispatcher_for_state(state)
+    try:
+        return await asyncio.to_thread(dispatcher.pause_reindex, reason=req.reason)
+    except DispatcherError as error:
+        raise _dispatcher_error(error) from error
+
+
+@router.post("/runtime/dispatcher/reindex/resume")
+async def runtime_dispatcher_reindex_resume(req: DispatcherReindexRequest, _admin=Depends(require_admin)):
+    state = get_runtime_state()
+    dispatcher = dispatcher_for_state(state)
+    try:
+        return await asyncio.to_thread(
+            dispatcher.resume_reindex,
+            datasets=req.datasets,
+            parse_method=req.parse_method,
+            min_free_gb=req.min_free_gb,
+            max_swap_pct=req.max_swap_pct,
+            post_min_free_gb=req.post_min_free_gb,
+            post_max_swap_pct=req.post_max_swap_pct,
+            memory_wait_sec=req.memory_wait_sec,
+            memory_poll_sec=req.memory_poll_sec,
+            cooldown_sec=req.cooldown_sec,
+            parse_timeout=req.parse_timeout,
+            unload_between_docs=req.unload_between_docs,
+            auth_smoke_after=req.auth_smoke_after,
+            reset_state=req.reset_state,
+        )
+    except DispatcherError as error:
+        raise _dispatcher_error(error) from error
+
+
+@router.get("/runtime/dispatcher/route-changes/status")
+async def runtime_dispatcher_route_changes_status(_admin=Depends(require_admin)):
+    state = get_runtime_state()
+    dispatcher = dispatcher_for_state(state)
+    return await asyncio.to_thread(dispatcher.route_change_status_payload)
+
+
+@router.post("/runtime/dispatcher/route-changes/start")
+async def runtime_dispatcher_route_changes_start(req: DispatcherRouteChangeRequest, _admin=Depends(require_admin)):
+    state = get_runtime_state()
+    dispatcher = dispatcher_for_state(state)
+    try:
+        return await asyncio.to_thread(
+            dispatcher.start_route_change_reindex,
+            source_root=req.source_root,
+            dry_run=req.dry_run,
+            max_docs=req.max_docs,
+            min_free_gb=req.min_free_gb,
+            max_swap_pct=req.max_swap_pct,
+            post_min_free_gb=req.post_min_free_gb,
+            post_max_swap_pct=req.post_max_swap_pct,
+            memory_wait_sec=req.memory_wait_sec,
+            memory_poll_sec=req.memory_poll_sec,
+            cooldown_sec=req.cooldown_sec,
+            parse_timeout=req.parse_timeout,
+        )
+    except DispatcherError as error:
+        raise _dispatcher_error(error) from error
+
+
+@router.post("/runtime/dispatcher/route-changes/pause")
+async def runtime_dispatcher_route_changes_pause(req: DispatcherPauseRequest, _admin=Depends(require_admin)):
+    state = get_runtime_state()
+    dispatcher = dispatcher_for_state(state)
+    try:
+        return await asyncio.to_thread(dispatcher.pause_route_change_reindex, reason=req.reason)
+    except DispatcherError as error:
+        raise _dispatcher_error(error) from error
+
+
+@router.post("/runtime/dispatcher/mlx/unload")
+async def runtime_dispatcher_mlx_unload(_admin=Depends(require_admin)):
+    unload = await _unload_mlx_models()
+    state = get_runtime_state()
+    dispatcher = dispatcher_for_state(state)
+    status = await asyncio.to_thread(dispatcher.status_payload)
+    return {"status": "ok" if unload.get("ok") else "error", "unload": unload, "dispatcher": status}
+
+
+@router.get("/status")
+async def get_status():
+    state = get_runtime_state()
+    provider_status = await asyncio.to_thread(_provider_status)
+
+    containers = []
+    if docker_control_enabled():
+        try:
+            result = await asyncio.to_thread(
+                subprocess.run,
+                ["docker", "ps", "--format", "{{.Names}}\t{{.Status}}\t{{.Image}}"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            for line in result.stdout.strip().splitlines():
+                parts = line.split("\t")
+                if len(parts) >= 3:
+                    containers.append(
+                        {
+                            "name": parts[0],
+                            "status": parts[1],
+                            "image": parts[2],
+                            "ok": "Up" in parts[1],
+                        }
+                    )
+        except Exception as e:
+            logger.warning("Docker ps error: %s", e)
+
+    admission = chat_admission_for_state(state)
+    memory_pressure = evaluate_memory_pressure(state.metrics_cache)
+    effective_mode = _effective_mode_payload(state.current_mode, admission)
+    return {
+        "mode": effective_mode,
+        "raw_mode": state.current_mode,
+        "runtime_profile": current_runtime_profile(state.current_mode),
+        "memory_state": memory_pressure.payload(),
+        "mlx": {"models": [], "count": 0, "status": "not_probed"},
+        "containers": containers,
+        "proxy": {
+            "uptime_sec": int(time.time() - state.proxy_start),
+            "version": "2.1",
+            "port": 8050,
+            "llm_url": provider_status["base_url"],
+            "llm_model": provider_status["model"],
+            "llm_provider": provider_status,
+        },
+        "chat_admission": admission.payload(),
+        "embedding": rag_runtime_config(),
+    }
+
+
+@router.get("/metrics")
+async def get_metrics():
+    state = get_runtime_state()
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute("SELECT * FROM metrics ORDER BY id DESC LIMIT 60").fetchall()
+
+    rag_stats = {"datasets": 0, "files": 0, "chunks": 0, "status": "unknown"}
+    try:
+        with sqlite3.connect(rag_meta_db_path()) as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM datasets")
+            rag_stats["datasets"] = cur.fetchone()[0] or 0
+            cur.execute("SELECT COUNT(*) FROM documents")
+            rag_stats["files"] = cur.fetchone()[0] or 0
+        backend = state.backend
+        if backend:
+            collection = await backend.aclient.get_collection(backend.collection_name)
+            rag_stats["chunks"] = collection.points_count or 0
+            rag_stats["status"] = "ready" if rag_stats["chunks"] > 0 else "indexing"
+    except Exception as e:
+        logger.warning("RAG stats error: %s", e)
+        rag_stats["status"] = "error"
+
+    crag_total = max(1, sum(state.crag_stats.values()))
+    crag_verified = state.crag_stats.get("verified", 0)
+    crag_no_data = state.crag_stats.get("no_data", 0)
+    crag_hallucination = state.crag_stats.get("hallucination", 0)
+    crag_unvalidated = state.crag_stats.get("unvalidated", 0)
+    cache_total = max(1, state.chat_metrics.get("cache_hit", 0) + state.chat_metrics.get("cache_miss", 0))
+    retrieval_total = max(1, state.chat_metrics.get("retrieval_good", 0) + state.chat_metrics.get("retrieval_weak", 0))
+    ram_used = rows[0]["ram_used"] if rows else 0
+    ram_total = state.metrics_cache.get("ram_total", rows[0]["ram_total"] if rows else 0)
+    ram_free = state.metrics_cache.get("ram_free_gb")
+    if ram_free is None:
+        ram_free = max(0, ram_total - ram_used)
+    latest = rows[0] if rows else {}
+    latest_keys = set(latest.keys()) if hasattr(latest, "keys") else set()
+    llm_ram = latest["llm_ram"] if "llm_ram" in latest_keys else 0
+    return {
+        "system": {
+            "cpu": latest["cpu"] if rows else 0,
+            "ram_used": ram_used,
+            "ram_free_gb": ram_free,
+            "ram_total": ram_total,
+            "swap_used": state.metrics_cache.get("swap_used_gb", latest["swap_used"] if rows else 0),
+            "swap_total": state.metrics_cache.get("swap_total_gb", 0),
+            "swap_pct": state.metrics_cache.get("swap_pct", 0),
+            "disk_used": latest["disk_used"] if rows else 0,
+            "disk_total": latest["disk_total"] if rows else 0,
+            "llm_ram": llm_ram,
+            "network_ok": latest["network_ok"] if rows else 0,
+        },
+        "pipeline": {
+            "latency_search": state.chat_metrics["latency_search"][-10:],
+            "latency_gen": state.chat_metrics["latency_gen"][-10:],
+            "latency_phases": state.chat_metrics.get("latency_phases", [])[-10:],
+            "latency_phases_avg": summarize_phases(state.chat_metrics.get("latency_phases", [])),
+            "tokens": state.chat_metrics["tokens"][-10:],
+            "crag_pass_rate": crag_verified / crag_total,
+            "crag_verified_rate": crag_verified / crag_total,
+            "crag_nodata_rate": crag_no_data / crag_total,
+            "crag_halluc_rate": crag_hallucination / crag_total,
+            "crag_unvalidated_rate": crag_unvalidated / crag_total,
+            "cache_hit_rate": state.chat_metrics.get("cache_hit", 0) / cache_total,
+            "retrieval_good_rate": state.chat_metrics.get("retrieval_good", 0) / retrieval_total,
+            "total_requests": sum(state.crag_stats.values()),
+        },
+        "queue": {"llm_waiting": max(0, state.llm_concurrency - state.llm_semaphore._value)},
+        "errors": dict(state.error_counts),
+        "heartbeats": heartbeats,
+        "rag": rag_stats,
+        "embedding": rag_runtime_config(),
+        # W3.3: расходы облака накопительно за аптайм proxy (токены/$).
+        "cost": {
+            "cloud_requests": state.chat_metrics.get("cloud_requests", 0),
+            "cloud_prompt_tokens": state.chat_metrics.get("cloud_prompt_tokens", 0),
+            "cloud_completion_tokens": state.chat_metrics.get("cloud_completion_tokens", 0),
+            "cloud_cost_usd": round(state.chat_metrics.get("cloud_cost_usd", 0.0), 4),
+            "cloud_cost_by_model": dict(state.chat_metrics.get("cloud_cost_by_model", {})),
+        },
+    }
+
+
+@router.get("/backup/status")
+async def get_backup_status(_admin=Depends(require_admin)):
+    """
+    Returns lists of existing SQLite backups and Qdrant snapshots.
+    """
+    from datetime import datetime
+    from pathlib import Path
+    from backend.rag_config import embed_profile_name, rag_collection_name
+    from qdrant_client import QdrantClient
+    
+    # 1. SQLite backups
+    profile = embed_profile_name()
+    backup_dir = mutable_path("storage/backups")
+    sqlite_backups = []
+    if backup_dir.exists():
+        pattern = f"les_meta_{profile}_*.db"
+        for p in sorted(backup_dir.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True):
+            sqlite_backups.append({
+                "name": p.name,
+                "path": str(p),
+                "size_bytes": p.stat().st_size,
+                "created_at": datetime.fromtimestamp(p.stat().st_mtime).isoformat(),
+            })
+
+    # 2. Qdrant snapshots
+    qdrant_snapshots = []
+    collection_name = rag_collection_name()
+    try:
+        qdrant_url = os.getenv("QDRANT_URL", "http://127.0.0.1:6333")
+        client = QdrantClient(url=qdrant_url, timeout=5.0, **qdrant_client_options(qdrant_url))
+        if client.collection_exists(collection_name):
+            snaps = client.list_snapshots(collection_name)
+            # Sort newest first
+            snaps_sorted = sorted(snaps, key=lambda s: s.creation_time or "", reverse=True)
+            for s in snaps_sorted:
+                qdrant_snapshots.append({
+                    "name": s.name,
+                    "size_bytes": s.size,
+                    "created_at": s.creation_time,
+                })
+    except Exception as e:
+        logger.warning("Failed to list Qdrant snapshots for status: %s", e)
+
+    return {
+        "sqlite_backups": sqlite_backups,
+        "qdrant_snapshots": qdrant_snapshots,
+        "collection_name": collection_name,
+        "profile": profile,
+    }
+
+
+class BackupDeleteRequest(BaseModel):
+    type: str  # "sqlite" or "qdrant"
+    name: str
+
+
+@router.post("/backup/create")
+async def create_backup(_admin=Depends(require_admin)):
+    """
+    Triggers both SQLite and Qdrant backups.
+    """
+    from tools.backup_suharik import run_sqlite_backup, run_qdrant_backup
+    
+    def _run():
+        sqlite_ok, sqlite_res = run_sqlite_backup()
+        qdrant_ok, qdrant_res = run_qdrant_backup()
+        return sqlite_ok, sqlite_res, qdrant_ok, qdrant_res
+
+    sqlite_ok, sqlite_res, qdrant_ok, qdrant_res = await asyncio.to_thread(_run)
+    return {
+        "sqlite": {"ok": sqlite_ok, "result": sqlite_res},
+        "qdrant": {"ok": qdrant_ok, "result": qdrant_res},
+    }
+
+
+@router.post("/backup/delete")
+async def delete_backup(req: BackupDeleteRequest, _admin=Depends(require_root_admin)):
+    """
+    Deletes a specific SQLite backup file or Qdrant snapshot.
+    """
+    from pathlib import Path
+    if req.type == "sqlite":
+        backup_dir = mutable_path("storage/backups")
+        target_path = (backup_dir / req.name).resolve()
+        # Security check: must be inside backup_dir
+        if not str(target_path).startswith(str(backup_dir.resolve())):
+            raise HTTPException(status_code=400, detail="Invalid backup file path")
+        if target_path.exists():
+            target_path.unlink()
+            return {"status": "ok", "message": f"SQLite backup {req.name} deleted"}
+        raise HTTPException(status_code=404, detail="SQLite backup not found")
+    elif req.type == "qdrant":
+        from backend.rag_config import rag_collection_name
+        from qdrant_client import QdrantClient
+        collection_name = rag_collection_name()
+        qdrant_url = os.getenv("QDRANT_URL", "http://127.0.0.1:6333")
+        client = QdrantClient(url=qdrant_url, timeout=10.0, **qdrant_client_options(qdrant_url))
+        try:
+            client.delete_snapshot(collection_name, req.name)
+            return {"status": "ok", "message": f"Qdrant snapshot {req.name} deleted"}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to delete Qdrant snapshot: {e}")
+    else:
+        raise HTTPException(status_code=400, detail="Invalid backup type")
+
+
+def _backup_roots():
+    from pathlib import Path
+    les_home = os.getenv("LES_HOME") or str(Path(__file__).resolve().parents[2])
+    return [
+        Path(os.getenv("BACKUP_ROOT", "/Volumes/Data/les_backups")).resolve(),
+        (Path(les_home) / "storage" / "backups").resolve(),
+    ], les_home
+
+
+@router.get("/backup/archives")
+async def list_backup_archives(_admin=Depends(require_admin)):
+    """Полные off-disk архивы (Qdrant-снапшоты + SQLite + .env) от backup_runtime.sh — для восстановления."""
+    from datetime import datetime
+
+    roots, _ = _backup_roots()
+    archives, seen = [], set()
+    for root in roots:
+        if not root.exists():
+            continue
+        for d in sorted(root.glob("*"), key=lambda p: p.name, reverse=True):
+            if not d.is_dir() or str(d) in seen:
+                continue
+            seen.add(str(d))
+            snaps = sorted(p.name for p in d.glob("*.snapshot"))
+            has_db = (d / "les_meta_qwen.db").exists()
+            if not snaps and not has_db:
+                continue
+            size = sum(p.stat().st_size for p in d.rglob("*") if p.is_file())
+            archives.append({
+                "path": str(d), "name": d.name, "snapshots": snaps, "has_sqlite": has_db,
+                "size_bytes": size,
+                "created_at": datetime.fromtimestamp(d.stat().st_mtime).isoformat(),
+            })
+    return {"archives": archives}
+
+
+class BackupRestoreRequest(BaseModel):
+    archive_path: str
+    with_env: bool = False
+
+
+@router.post("/backup/restore")
+async def restore_backup(req: BackupRestoreRequest, _admin=Depends(require_root_admin)):
+    """Запускает restore_runtime.sh ОТЦЕПЛЕННО (скрипт сам остановит/поднимет proxy).
+    ОПАСНО: перезаписывает живой индекс и метабазу. .env не трогается без with_env."""
+    import subprocess
+    from pathlib import Path
+
+    roots, les_home = _backup_roots()
+    target = Path(req.archive_path).resolve()
+    if not any(str(target).startswith(str(r)) for r in roots) or not target.is_dir():
+        raise HTTPException(status_code=400, detail="archive_path вне известных бэкап-папок")
+    script = (Path(les_home) / "tools" / "restore_runtime.sh").resolve()
+    if not script.exists():
+        raise HTTPException(status_code=500, detail="restore_runtime.sh не найден")
+    args = ["/bin/bash", str(script), str(target)]
+    if req.with_env:
+        args.append("--env")
+    log = open("/tmp/les_restore.log", "ab")  # noqa: SIM115 — живёт у отцеплённого процесса
+    subprocess.Popen(args, stdout=log, stderr=log, start_new_session=True, cwd=les_home)
+    logger.warning("[СУХАРИК] RESTORE запущен из %s (with_env=%s)", target.name, req.with_env)
+    return {"status": "launched", "archive": target.name,
+            "note": "Восстановление в фоне; сервис перезапустится. Лог: /tmp/les_restore.log"}

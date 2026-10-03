@@ -1,0 +1,55 @@
+/* Forest workspace: one palette and readable working surfaces. */
+:root {--sov-ui-radius-card:16px;--sov-ui-radius-control:12px;}
+.sov-chat-workspace .sov-chat-topbar {padding:16px 28px;min-height:80px;}
+.sov-chat-workspace .sov-chat-thread {max-width:1000px;padding:28px!important;}
+.sov-chat-workspace .sov-chat-empty {max-width:660px;width:100%;padding:24px 12px;}
+.sov-chat-workspace .sov-chat-empty-title {font-size:clamp(32px,3.2vw,46px);line-height:1.1;letter-spacing:-.045em;color:var(--text);}
+.sov-chat-workspace .sov-chat-empty-copy {max-width:500px;color:var(--dim);line-height:1.7;}
+.sov-chat-workspace .sov-composer {max-width:1000px;padding:18px!important;margin-bottom:20px;box-shadow:0 8px 28px color-mix(in srgb,var(--text) 5%,transparent)!important;}
+.sov-project-navigation {background:var(--bg-panel);padding:24px 14px;}
+.sov-project-navigation .sov-project-nav-row {border-radius:12px!important;}
+.sov-workspace-title {font-size:22px;letter-spacing:-.025em;}
+.sov-datasets-page {max-width:1320px;padding:28px;gap:20px!important;}
+.sov-datasets-hero {background:transparent!important;border:0!important;box-shadow:none!important;padding:12px 0 16px;}
+.sov-datasets-hero__title {font-size:clamp(30px,3vw,44px);font-weight:650;letter-spacing:-.04em;}
+.sov-datasets-hero__detail {font-size:14px;line-height:1.65;max-width:650px;}
+.sov-dataset-summary {background:var(--bg-panel)!important;border-radius:16px;}
+.sov-dataset-registry-panel {padding:24px!important;}
+.sov-dataset-toolbar {gap:16px;}
+.sov-dataset-row {padding:20px!important;border-radius:14px;background:var(--bg-panel);}
+.sov-dataset-row__name {font-size:16px;line-height:1.4;}
+.sov-dataset-row__head {gap:12px;}
+.sov-dataset-row .sov-ui-button .q-btn__content {flex-wrap:nowrap;gap:8px;}
+.sov-folder-connect,.sov-model-dialog {border-radius:20px!important;background:var(--bg-panel);}
+@media(max-width:700px){.sov-datasets-page{padding:16px 12px;gap:12px!important;}.sov-dataset-registry-panel{padding:14px!important;}.sov-dataset-row{padding:14px!important;}.sov-chat-workspace .sov-chat-thread{padding:16px!important;}.sov-chat-workspace .sov-chat-topbar{padding:12px 16px;min-height:64px;}.sov-chat-workspace .sov-composer{padding:12px!important;margin-bottom:12px;}.sov-chat-workspace .sov-chat-empty{padding:16px 0;}}
+/* Working layout: documents first, processing and readiness alongside them. */
+.sov-workspace-eyebrow {font-size:12px;font-weight:650;letter-spacing:.16em;color:var(--dim);}
+.sov-conversation-heading {width:100%;padding:24px 28px 12px;align-items:center;justify-content:space-between;gap:12px;flex-shrink:0;}
+.sov-conversation-title {font-size:28px;font-weight:650;letter-spacing:-.035em;}
+.sov-chat-workspace .sov-chat-topbar {min-height:56px;padding-top:8px;padding-bottom:12px;border-bottom:var(--sov-ui-border);}
+.sov-chat-workspace .sov-artifacts-panel {padding:24px 20px;background:var(--bg-panel);border-left:var(--sov-ui-border);}
+.sov-chat-workspace .sov-artifact-empty {padding:28px 8px;line-height:1.7;}
+.sov-datasets-page {display:grid!important;grid-template-columns:minmax(0,1fr) 300px;grid-template-areas:"hero hero" "registry summary" "registry processing";align-items:start;width:100%;margin:0;max-width:none;}
+.sov-chat-workspace .sov-composer {max-width:none!important;}
+.sov-scope-files-note {font-size:14px;line-height:1.5;white-space:normal;}
+.sov-datasets-hero {grid-area:hero;width:100%;}
+.sov-dataset-registry-panel {grid-area:registry;min-width:0;}
+.sov-datasets-page .sov-dataset-row {grid-template-columns:minmax(0,1fr);grid-template-areas:"head" "facts" "progress" "note" "actions";row-gap:14px;}
+.sov-datasets-page .sov-dataset-row__actions {justify-content:flex-start;flex-wrap:wrap;}
+.sov-dataset-summary {grid-area:summary;display:flex;flex-direction:column;align-items:stretch;padding:20px!important;gap:20px;}
+.sov-dataset-summary__copy {width:100%;border:0!important;padding:0!important;}
+.sov-dataset-summary__metrics {display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;width:100%;}
+.sov-dataset-summary__metric {border:0!important;padding:0!important;min-width:0;}
+.sov-dataset-summary__value {font-size:26px;}
+.sov-datasets-page > .sov-dataset-disclosure {grid-area:processing;background:var(--bg-panel);border-radius:16px;min-width:0;}
+.sov-dataset-settings__grid {grid-template-columns:1fr!important;}
+.sov-model-connection {width:100%;min-width:0;padding:24px!important;gap:14px!important;}
+.sov-model-identity {overflow-wrap:anywhere;font-weight:600;}
+.sov-model-check-summary {font-size:15px;line-height:1.6;max-width:80ch;color:var(--text);}
+.sov-model-details {color:var(--dim);font-size:14px;}
+.sov-model-role-grid {display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr));width:100%;gap:12px;}
+.sov-model-role {width:100%;min-width:0;}
+@media(min-width:1001px){.sov-chat-workspace.sov-chat-shell:not(.sov-artifacts-collapsed){grid-template-columns:220px minmax(0,1fr) 6px minmax(280px,var(--sov-artifacts-w,340px));}}
+@media(max-width:1100px){.sov-datasets-page{grid-template-columns:minmax(0,1fr);grid-template-areas:"hero" "summary" "registry" "processing";}.sov-dataset-summary__metrics{grid-template-columns:repeat(3,minmax(0,1fr));}}
+@media(max-width:1000px){.sov-forest-auto-sources .sov-artifacts-panel,.sov-forest-auto-sources .sov-resize-divider{display:none!important;}.sov-conversation-heading{padding:16px;}.sov-conversation-title{font-size:24px;}}
+@media(max-width:700px){.sov-model-role-grid{grid-template-columns:1fr;}.sov-model-connection{padding:16px!important;}.sov-dataset-summary__metrics{grid-template-columns:repeat(2,minmax(0,1fr));}}

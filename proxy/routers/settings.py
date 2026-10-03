@@ -1,0 +1,593 @@
+"""Settings routes for LES Proxy."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+import subprocess
+from pathlib import Path
+from typing import Optional
+
+import httpx
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
+from backend.product_edition import is_light
+
+from proxy.config import docker_control_enabled
+from proxy.security import require_admin, require_user
+from proxy.local_model_registry import (
+    DEFAULT_LOCAL_MLX_MODEL,
+    LOCAL_MLX_MODEL_CHOICES,
+)
+from proxy.services.llm_transport_profile_service import provider_prompt_max_chars
+from proxy.services.freetoken_cache_profile_service import reconcile_freetoken_cache
+from proxy.services.runtime_config_registry_service import (
+    RuntimeConfigRegistryError,
+    registry_snapshot,
+    update_factors,
+)
+from proxy.services.web_research_config_service import (
+    capture_web_research_config,
+    probe_web_research_services,
+    web_research_status,
+)
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api/settings", tags=["settings"])
+
+ENV_PATH = Path(os.getenv("LES_ENV_PATH", ".env")).expanduser()
+DEFAULT_OPENAI_MODEL = "gpt-5.4"
+
+# Совместимый alias оставлен для API/UI; источник истины — local_model_registry.
+MLX_MODEL_CHOICES = LOCAL_MLX_MODEL_CHOICES
+
+
+def _current_mlx_model() -> str:
+    """Активная локальная модель: имя в запросах proxy (LLM_MODEL), затем старт хоста (MLX_MODEL)."""
+    return os.getenv("LLM_MODEL", "").strip() or os.getenv("MLX_MODEL", "").strip()
+
+
+def _persist_env(updates: dict[str, str]) -> None:
+    """Идемпотентно обновляет ключи в .env (заменяет существующие, дописывает новые)."""
+    env_lines = ENV_PATH.read_text(encoding="utf-8").splitlines() if ENV_PATH.exists() else []
+    new_lines: list[str] = []
+    seen: set[str] = set()
+    for line in env_lines:
+        key = line.split("=")[0].strip()
+        if key in updates:
+            new_lines.append(f"{key}={updates[key]}")
+            seen.add(key)
+        else:
+            new_lines.append(line)
+    for key, val in updates.items():
+        if key not in seen:
+            new_lines.append(f"{key}={val}")
+    ENV_PATH.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+
+
+class SettingsRequest(BaseModel):
+    llm_model: Optional[str] = None
+    embed_model: Optional[str] = None
+    mlx_url: Optional[str] = None
+    cloud_consent: Optional[bool] = None  # W3.3: согласие на облако для данных P2
+    openrouter_base_url: Optional[str] = None
+    openrouter_model: Optional[str] = None
+    openrouter_models: Optional[str] = None  # цепочка фолбэка (через запятую)
+    openrouter_api_key: Optional[str] = None
+    openrouter_api_key_clear: Optional[bool] = None
+    openai_base_url: Optional[str] = None
+    openai_model: Optional[str] = None
+    openai_models: Optional[str] = None  # цепочка фолбэка (через запятую)
+    smeta_document_provider: Optional[str] = None
+    smeta_document_model: Optional[str] = None
+    smeta_document_fallback_model: Optional[str] = None
+    smeta_agent_engine: Optional[str] = None
+    smeta_google_model: Optional[str] = None
+    google_api_key: Optional[str] = None
+    google_api_key_clear: Optional[bool] = None
+    openai_api_key: Optional[str] = None
+    openai_api_key_clear: Optional[bool] = None
+    llm_provider: Optional[str] = None
+    ollama_base_url: Optional[str] = None
+    ollama_model: Optional[str] = None
+    ollama_api_key: Optional[str] = None
+    ollama_api_key_clear: Optional[bool] = None
+    lemonade_base_url: Optional[str] = None
+    lemonade_model: Optional[str] = None
+    lemonade_api_key: Optional[str] = None
+    lemonade_api_key_clear: Optional[bool] = None
+    freetoken_base_url: Optional[str] = None
+    freetoken_model: Optional[str] = None
+    freetoken_context_tokens: Optional[int] = None
+    freetoken_prompt_max_chars: Optional[int] = None
+    mail_imap_host: Optional[str] = None
+    mail_imap_port: Optional[int] = None
+    mail_imap_ssl: Optional[bool] = None
+    mail_imap_login: Optional[str] = None
+    mail_imap_password: Optional[str] = None
+    mail_imap_folders: Optional[str] = None
+    mail_imap_checkpoint_dir: Optional[str] = None
+    mail_imap_storage_root: Optional[str] = None
+    mail_attachment_ocr_enabled: Optional[bool] = None
+    mail_tesseract_bin: Optional[str] = None
+    mail_ocr_lang: Optional[str] = None
+    mail_attachment_vlm_enabled: Optional[bool] = None
+    mail_vlm_url: Optional[str] = None
+    mail_vlm_model: Optional[str] = None
+
+
+class RuntimeRegistryUpdateRequest(BaseModel):
+    updates: dict[str, str]
+    danger_confirmations: list[str] = Field(default_factory=list)
+
+
+@router.get("/runtime-registry")
+async def get_runtime_registry(_admin=Depends(require_admin)):
+    """Return every discovered runtime factor without exposing secret values."""
+    try:
+        return await asyncio.to_thread(registry_snapshot)
+    except (OSError, UnicodeError, RuntimeConfigRegistryError) as exc:
+        raise HTTPException(503, detail=f"RUNTIME_CONFIG_REGISTRY_UNAVAILABLE: {exc}") from exc
+
+
+@router.put("/runtime-registry")
+async def put_runtime_registry(
+    req: RuntimeRegistryUpdateRequest,
+    _admin=Depends(require_admin),
+):
+    """Persist guarded changes atomically; Danger factors require exact confirmation."""
+    try:
+        return await asyncio.to_thread(
+            update_factors,
+            req.updates,
+            danger_confirmations=set(req.danger_confirmations),
+        )
+    except RuntimeConfigRegistryError as exc:
+        raise HTTPException(422, detail=str(exc)) from exc
+
+
+@router.get("/web-research")
+async def get_web_research_settings(_admin=Depends(require_admin)):
+    """Return selected providers without contacting or crawling anything."""
+    return web_research_status(capture_web_research_config())
+
+
+@router.post("/web-research/probe")
+async def probe_web_research_settings(_admin=Depends(require_admin)):
+    """Explicit bounded health probe; it never submits a page URL."""
+    config = capture_web_research_config()
+    return await asyncio.to_thread(probe_web_research_services, config)
+
+
+@router.get("")
+async def get_settings(_user=Depends(require_user)):
+    try:
+        light = is_light()
+        mlx_url = os.getenv("MLX_URL", "http://127.0.0.1:8080") if not light else ""
+        available = []
+        if not light:
+            try:
+                async with httpx.AsyncClient(timeout=3.0) as client:
+                    r = await client.get(f"{mlx_url}/api/tags")
+                    if r.status_code == 200:
+                        available = [m["name"] for m in r.json().get("models", [])]
+            except Exception:
+                pass
+
+        result = {
+            "llm_model": os.getenv("LLM_MODEL", DEFAULT_LOCAL_MLX_MODEL),
+            "embed_model": os.getenv("EMBED_MODEL", "bge-m3:latest"),
+            "mlx_url": mlx_url,
+            "available_models": available,
+            "mlx_main_model": _current_mlx_model(),
+            "mlx_model_choices": MLX_MODEL_CHOICES,
+            "cloud_consent": _env_bool("LES_CLOUD_CONSENT", "false"),
+            "providers": _provider_settings_payload(),
+            "mail": _mail_settings_payload(),
+        }
+        if not light:
+            result.update({
+                "smeta_document_provider": os.getenv("LES_SMETA_DOCUMENT_PROVIDER", "").strip(),
+                "smeta_document_model": os.getenv("LES_SMETA_DOCUMENT_MODEL", "").strip(),
+                "smeta_document_fallback_model": os.getenv("LES_SMETA_DOCUMENT_FALLBACK_MODEL", "qwen3.5:9b").strip(),
+                "smeta_agent_engine": os.getenv("LES_SMETA_AGENT_ENGINE", "native").strip(),
+                "smeta_google_model": os.getenv("LES_SMETA_GOOGLE_MODEL", "gemini-3.5-flash").strip(),
+                "google_api_key_set": bool(os.getenv("GOOGLE_API_KEY", "")),
+            })
+        return result
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@router.post("")
+async def save_settings(req: SettingsRequest, restart: bool = False, _admin=Depends(require_admin)):
+    if is_light() and _request_fields_set(req).intersection({
+        "smeta_document_provider", "smeta_document_model", "smeta_document_fallback_model",
+        "smeta_agent_engine", "smeta_google_model", "google_api_key", "google_api_key_clear",
+    }):
+        raise HTTPException(400, "Сметные настройки в LES RAG недоступны")
+    env_lines = []
+    if ENV_PATH.exists():
+        env_lines = ENV_PATH.read_text(encoding="utf-8").splitlines()
+
+    updates = {}
+    if req.llm_model:
+        updates["LLM_MODEL"] = req.llm_model
+    if req.embed_model:
+        updates["EMBED_MODEL"] = req.embed_model
+    if req.mlx_url:
+        updates["MLX_URL"] = req.mlx_url
+    updates.update(_provider_updates(req))
+    updates.update(_mail_updates(req))
+
+    for key, val in updates.items():
+        if "\n" in str(val) or "\r" in str(val):
+            raise HTTPException(400, f"Недопустимое значение {key}")
+    if req.smeta_document_provider is not None and req.smeta_document_provider.strip().lower() not in {
+        "", "local", "mlx", "openai", "openrouter", "ollama", "lemonade",
+    }:
+        raise HTTPException(400, "Недопустимый провайдер документной сметы")
+    if req.smeta_agent_engine is not None and req.smeta_agent_engine.strip().lower() not in {
+        "native", "qwen_agent", "google_adk",
+    }:
+        raise HTTPException(400, "Недопустимый движок сметчика")
+    if req.mlx_url and not req.mlx_url.startswith(("http://", "https://")):
+        raise HTTPException(400, "MLX_URL должен начинаться с http:// или https://")
+    for field, env_key in (
+        (req.openrouter_base_url, "OPENROUTER_BASE_URL"),
+        (req.openai_base_url, "OPENAI_BASE_URL"),
+        (req.ollama_base_url, "OLLAMA_BASE_URL"),
+        (req.lemonade_base_url, "LEMONADE_BASE_URL"),
+        (req.freetoken_base_url, "FREETOKEN_BASE_URL"),
+    ):
+        if field and not field.startswith(("http://", "https://")):
+            raise HTTPException(400, f"{env_key} должен начинаться с http:// или https://")
+    if "MAIL_VLM_URL" in updates and updates["MAIL_VLM_URL"]:
+        if not updates["MAIL_VLM_URL"].startswith(("http://", "https://")):
+            raise HTTPException(400, "MAIL_VLM_URL должен начинаться с http:// или https://")
+    if restart and not docker_control_enabled():
+        raise HTTPException(403, "Docker control disabled")
+
+    new_lines = []
+    updated_keys = set()
+    for line in env_lines:
+        key = line.split("=")[0].strip()
+        if key in updates:
+            new_lines.append(f"{key}={updates[key]}")
+            updated_keys.add(key)
+        else:
+            new_lines.append(line)
+    for key, val in updates.items():
+        if key not in updated_keys:
+            new_lines.append(f"{key}={val}")
+
+    ENV_PATH.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+    public_updates = _redact_sensitive_updates(updates)
+    logger.info("[SETTINGS] Updated: %s", public_updates)
+
+    for key, val in updates.items():
+        os.environ[key] = val
+
+    if restart:
+        async def _restart():
+            await asyncio.sleep(1)
+            try:
+                await asyncio.to_thread(
+                    subprocess.run,
+                    ["docker", "compose", "restart", "proxy"],
+                    cwd="/app",
+                    capture_output=True,
+                    timeout=30,
+                )
+            except Exception as e:
+                logger.warning("[SETTINGS] Restart failed: %s", e)
+
+        asyncio.create_task(_restart())
+
+    return {"status": "saved", "updated": public_updates, "restarting": restart}
+
+
+def _redact_sensitive_updates(updates: dict[str, str]) -> dict[str, str]:
+    return {
+        key: ("***" if key.endswith(("PASSWORD", "API_KEY", "TOKEN", "SECRET")) else value)
+        for key, value in updates.items()
+    }
+
+
+def _env_bool(name: str, default: str = "false") -> bool:
+    return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _provider_settings_payload() -> dict[str, object]:
+    active = os.getenv("LES_LLM_PROVIDER", "mlx")
+    freetoken_base = os.getenv("FREETOKEN_BASE_URL", "http://127.0.0.1:1919/v1")
+    freetoken_context = int(os.getenv("FREETOKEN_CONTEXT_TOKENS", "8253") or "8253")
+    cache = (
+        reconcile_freetoken_cache(freetoken_base, freetoken_context)
+        if active.strip().casefold() == "freetoken"
+        else {
+            "status": "inactive",
+            "desired_kv_tokens": freetoken_context,
+            "effective_kv_tokens": None,
+        }
+    )
+    return {
+        "active": active,
+        "effective": _effective_provider_payload(active),
+        "openrouter": {
+            "base_url": os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
+            "model": os.getenv("OPENROUTER_MODEL", ""),
+            "models": os.getenv("OPENROUTER_MODELS", ""),
+            "api_key_set": bool(os.getenv("OPENROUTER_API_KEY", "")),
+        },
+        "openai_compatible": {
+            "base_url": os.getenv("OPENAI_BASE_URL", ""),
+            "model": os.getenv("OPENAI_MODEL", "").strip() or os.getenv("LES_DEFAULT_OPENAI_MODEL", DEFAULT_OPENAI_MODEL),
+            "configured_model": os.getenv("OPENAI_MODEL", ""),
+            "models": os.getenv("OPENAI_MODELS", ""),
+            "api_key_set": bool(os.getenv("OPENAI_API_KEY", "")),
+        },
+        "ollama": {
+            "base_url": os.getenv("OLLAMA_BASE_URL", os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")),
+            "model": os.getenv("OLLAMA_MODEL", ""),
+            "api_key_set": bool(os.getenv("OLLAMA_API_KEY", "")),
+        },
+        "lemonade": {
+            "base_url": os.getenv("LEMONADE_BASE_URL", "http://127.0.0.1:13305/api/v1"),
+            "model": os.getenv("LEMONADE_MODEL", ""),
+            "api_key_set": bool(os.getenv("LEMONADE_API_KEY", "")),
+        },
+        "freetoken": {
+            "base_url": freetoken_base,
+            "model": os.getenv("FREETOKEN_MODEL", "").strip() or os.getenv("LLM_MODEL", "").strip(),
+            "context_tokens": freetoken_context,
+            "prompt_max_chars": provider_prompt_max_chars("freetoken"),
+            "cache": cache,
+        },
+    }
+
+
+def _effective_provider_payload(configured_provider: str | None = None) -> dict[str, object]:
+    """Provider actually used by chat generation, with no secrets exposed."""
+    configured = (configured_provider or os.getenv("LES_LLM_PROVIDER", "mlx")).strip().lower() or "mlx"
+    try:
+        from proxy.routers.chat import _llm_runtime
+
+        runtime = _llm_runtime()
+        provider = runtime.provider
+        model = runtime.model
+        chat_url = runtime.chat_url
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "configured_provider": configured,
+            "provider": "unknown",
+            "model": "",
+            "chat_url_set": False,
+            "fallback": False,
+            "reason": f"{type(exc).__name__}: {str(exc)[:160]}",
+        }
+    reason = ""
+    if configured in {"openai", "openai-compatible", "openai_compatible", "openrouter"} and provider == "mlx":
+        reason = "cloud_provider_without_api_key_fell_back_to_mlx"
+    return {
+        "configured_provider": configured,
+        "provider": provider,
+        "model": model,
+        "chat_url_set": bool(chat_url),
+        "fallback": provider != configured and not (
+            configured in {"openai-compatible", "openai_compatible"} and provider == "openai-compatible"
+        ),
+        "reason": reason,
+    }
+
+
+def _mail_settings_payload() -> dict[str, object]:
+    password_set = bool(os.getenv("MAIL_IMAP_PASSWORD", ""))
+    return {
+        "imap_host": os.getenv("MAIL_IMAP_HOST", ""),
+        "imap_port": int(os.getenv("MAIL_IMAP_PORT", "993") or "993"),
+        "imap_ssl": os.getenv("MAIL_IMAP_SSL", "true").strip().lower() in {"1", "true", "yes", "on"},
+        "imap_login": os.getenv("MAIL_IMAP_LOGIN", ""),
+        "imap_password_set": password_set,
+        "imap_folders": os.getenv("MAIL_IMAP_FOLDERS", "INBOX"),
+        "imap_checkpoint_dir": os.getenv("MAIL_IMAP_CHECKPOINT_DIR", "data/mail_imap_checkpoints"),
+        "imap_storage_root": os.getenv("MAIL_IMAP_STORAGE_ROOT", "RAG_Content/MAIL/IMAP"),
+        "attachment_ocr_enabled": os.getenv("MAIL_ATTACHMENT_OCR_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
+        "tesseract_bin": os.getenv("MAIL_TESSERACT_BIN", "tesseract"),
+        "ocr_lang": os.getenv("MAIL_OCR_LANG", "rus+eng"),
+        "attachment_vlm_enabled": os.getenv("MAIL_ATTACHMENT_VLM_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"},
+        "vlm_url": os.getenv("MAIL_VLM_URL", ""),
+        "vlm_model": os.getenv("MAIL_VLM_MODEL", ""),
+    }
+
+
+def _request_fields_set(req: BaseModel) -> set[str]:
+    """Pydantic v2 uses model_fields_set, v1 uses __fields_set__."""
+    fields = getattr(req, "model_fields_set", None)
+    if fields is None:
+        fields = getattr(req, "__fields_set__", set())
+    return {str(field) for field in (fields or set())}
+
+
+def _provider_updates(req: SettingsRequest) -> dict[str, str]:
+    fields = _request_fields_set(req)
+    updates: dict[str, str] = {}
+    string_map = {
+        "llm_provider": "LES_LLM_PROVIDER",
+        "openrouter_base_url": "OPENROUTER_BASE_URL",
+        "openrouter_model": "OPENROUTER_MODEL",
+        "openrouter_models": "OPENROUTER_MODELS",
+        "openai_base_url": "OPENAI_BASE_URL",
+        "openai_model": "OPENAI_MODEL",
+        "openai_models": "OPENAI_MODELS",
+        "smeta_document_provider": "LES_SMETA_DOCUMENT_PROVIDER",
+        "smeta_document_model": "LES_SMETA_DOCUMENT_MODEL",
+        "smeta_document_fallback_model": "LES_SMETA_DOCUMENT_FALLBACK_MODEL",
+        "smeta_agent_engine": "LES_SMETA_AGENT_ENGINE",
+        "smeta_google_model": "LES_SMETA_GOOGLE_MODEL",
+        "ollama_base_url": "OLLAMA_BASE_URL",
+        "ollama_model": "OLLAMA_MODEL",
+        "lemonade_base_url": "LEMONADE_BASE_URL",
+        "lemonade_model": "LEMONADE_MODEL",
+        "freetoken_base_url": "FREETOKEN_BASE_URL",
+        "freetoken_model": "FREETOKEN_MODEL",
+    }
+    for field, env_key in string_map.items():
+        if field in fields:
+            updates[env_key] = str(getattr(req, field) or "").strip()
+
+    int_map = {
+        "freetoken_context_tokens": "FREETOKEN_CONTEXT_TOKENS",
+        "freetoken_prompt_max_chars": "FREETOKEN_PROMPT_MAX_CHARS",
+    }
+    for field, env_key in int_map.items():
+        if field in fields:
+            value = getattr(req, field)
+            if value is not None and value <= 0:
+                raise HTTPException(400, f"{env_key} должен быть положительным")
+            updates[env_key] = "" if value is None else str(value)
+
+    if "openrouter_api_key" in fields and req.openrouter_api_key:
+        updates["OPENROUTER_API_KEY"] = req.openrouter_api_key.strip()
+    if req.openrouter_api_key_clear:
+        updates["OPENROUTER_API_KEY"] = ""
+
+    if "openai_api_key" in fields and req.openai_api_key:
+        updates["OPENAI_API_KEY"] = req.openai_api_key.strip()
+    if req.openai_api_key_clear:
+        updates["OPENAI_API_KEY"] = ""
+
+    if "ollama_api_key" in fields and req.ollama_api_key:
+        updates["OLLAMA_API_KEY"] = req.ollama_api_key.strip()
+    if req.ollama_api_key_clear:
+        updates["OLLAMA_API_KEY"] = ""
+
+    if "lemonade_api_key" in fields and req.lemonade_api_key:
+        updates["LEMONADE_API_KEY"] = req.lemonade_api_key.strip()
+    if req.lemonade_api_key_clear:
+        updates["LEMONADE_API_KEY"] = ""
+
+    if "google_api_key" in fields and req.google_api_key:
+        updates["GOOGLE_API_KEY"] = req.google_api_key.strip()
+    if req.google_api_key_clear:
+        updates["GOOGLE_API_KEY"] = ""
+
+    if "cloud_consent" in fields:
+        updates["LES_CLOUD_CONSENT"] = "true" if req.cloud_consent else "false"
+
+    return updates
+
+
+def _mail_updates(req: SettingsRequest) -> dict[str, str]:
+    fields = _request_fields_set(req)
+    updates: dict[str, str] = {}
+    string_map = {
+        "mail_imap_host": "MAIL_IMAP_HOST",
+        "mail_imap_login": "MAIL_IMAP_LOGIN",
+        "mail_imap_folders": "MAIL_IMAP_FOLDERS",
+        "mail_imap_checkpoint_dir": "MAIL_IMAP_CHECKPOINT_DIR",
+        "mail_imap_storage_root": "MAIL_IMAP_STORAGE_ROOT",
+        "mail_tesseract_bin": "MAIL_TESSERACT_BIN",
+        "mail_ocr_lang": "MAIL_OCR_LANG",
+        "mail_vlm_url": "MAIL_VLM_URL",
+        "mail_vlm_model": "MAIL_VLM_MODEL",
+    }
+    for field, env_key in string_map.items():
+        if field in fields:
+            updates[env_key] = str(getattr(req, field) or "").strip()
+
+    if "mail_imap_password" in fields and req.mail_imap_password:
+        updates["MAIL_IMAP_PASSWORD"] = req.mail_imap_password
+
+    if "mail_imap_port" in fields:
+        port = int(req.mail_imap_port or 0)
+        if port < 1 or port > 65535:
+            raise HTTPException(400, "MAIL_IMAP_PORT должен быть от 1 до 65535")
+        updates["MAIL_IMAP_PORT"] = str(port)
+
+    bool_map = {
+        "mail_imap_ssl": "MAIL_IMAP_SSL",
+        "mail_attachment_ocr_enabled": "MAIL_ATTACHMENT_OCR_ENABLED",
+        "mail_attachment_vlm_enabled": "MAIL_ATTACHMENT_VLM_ENABLED",
+    }
+    for field, env_key in bool_map.items():
+        if field in fields:
+            updates[env_key] = "true" if bool(getattr(req, field)) else "false"
+
+    return updates
+
+
+# ── Режимы работы: local / cloud / mix (один переключатель) ──
+
+@router.get("/presets")
+async def list_presets(_user=Depends(require_user)):
+    """Список режимов + текущий. Режим согласованно ставит чат-LLM, скан-OCR и приёмку ИД."""
+    from proxy.services.preset_service import PRESETS, _materialize_preset, current_preset, describe
+    return {
+        "current": current_preset(),
+        "presets": [{"name": n, "desc": describe(n), "env": _materialize_preset(n, PRESETS[n])} for n in PRESETS],
+    }
+
+
+class PresetRequest(BaseModel):
+    name: str
+
+
+@router.post("/preset")
+async def set_preset(req: PresetRequest, _admin=Depends(require_admin)):
+    """Применить режим (local|cloud|mix или рус-алиас). Пишет .env + os.environ, действует сразу."""
+    from proxy.services.preset_service import apply_preset
+    try:
+        return await asyncio.to_thread(apply_preset, req.name)
+    except ValueError as err:
+        raise HTTPException(400, str(err))
+
+
+# ── Локальная MLX-модель: лёгкий 4B (основной) ↔ тяжёлый 9B (резерв) ──
+
+class MlxModelRequest(BaseModel):
+    model: str
+
+
+@router.post("/mlx-model")
+async def set_mlx_model(req: MlxModelRequest, _admin=Depends(require_admin)):
+    """Переключить локальную модель чата вживую: пишет .env (MLX_MODEL стартовый +
+    LLM_MODEL имя запросов) и дёргает MLX-host /api/switch_model — без рестарта процесса."""
+    model = (req.model or "").strip()
+    if model not in MLX_MODEL_CHOICES:
+        raise HTTPException(400, f"Неизвестная MLX-модель: {model}")
+
+    # Сначала применить вживую. Занятый host отвечает 409: активную генерацию не прерываем
+    # и persisted configuration не рассинхронизируем с реально загруженной моделью.
+    mlx_url = os.getenv("MLX_URL", "http://127.0.0.1:8080").rstrip("/")
+    switched_live = False
+    detail = ""
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            r = await client.post(f"{mlx_url}/api/switch_model", json={"target": "main", "model": model})
+            if r.status_code == 409:
+                raise HTTPException(409, "Модель занята генерацией; повторите переключение после ответа")
+            if r.status_code != 200:
+                raise HTTPException(502, f"MLX host отклонил переключение: HTTP {r.status_code}")
+            switched_live = r.status_code == 200
+            detail = r.text[:200]
+    except HTTPException:
+        raise
+    except Exception as exc:  # host недоступен — persist ниже, настройка подхватится при старте
+        detail = str(exc)[:200]
+
+    # Host переключён или недоступен: persist для следующего старта.
+    await asyncio.to_thread(_persist_env, {"MLX_MODEL": model, "LLM_MODEL": model})
+    os.environ["MLX_MODEL"] = model
+    os.environ["LLM_MODEL"] = model
+
+    logger.info("[SETTINGS] MLX main model → %s (live=%s)", model, switched_live)
+    return {
+        "status": "ok",
+        "model": model,
+        "label": MLX_MODEL_CHOICES[model],
+        "switched_live": switched_live,
+        "detail": detail,
+    }

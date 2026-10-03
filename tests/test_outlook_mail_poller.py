@@ -1,0 +1,260 @@
+from pathlib import Path
+
+import asyncio
+from io import BytesIO
+import json
+from types import SimpleNamespace
+
+import pytest
+from fastapi import UploadFile
+from starlette.requests import Request
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_outlook_sidecar_is_read_only_resumable_and_uploads_unicode_msg():
+    source = (ROOT / "clients/outlook_mail_poller/LesMailPoller.cs").read_text(encoding="utf-8")
+
+    assert "session.Stores" in source
+    assert "new int[] { 3, 16, 23 }" in source
+    assert "item.SaveAs(temp, 9)" in source
+    assert "InternetMessageIdSchema" in source
+    assert 'fields["store_id"]' in source
+    assert 'fields["entry_id"]' in source
+    assert "RegisterStore(storeId, storeLabel);" in source
+    assert '"/collector/register-store"' in source
+    assert source.index("RegisterStore(storeId, storeLabel);") < source.index(
+        "ScanFolder(root, storeId, storeLabel"
+    )
+    assert "SaveCursor(storeId, folderId, cursor)" in source
+    assert "incremental.Count - 1" in source
+    assert "if (!RegisterItemAt(" in source
+    assert "NewestEntryIds" in source
+    assert "OldestEntryIds" in source
+    assert "BackfillComplete" in source
+    assert "cursor.BackfillComplete || registered >= BatchLimit || RunBudgetExceeded()" in source
+    assert "cursor.BackfillComplete = true;" in source
+    assert '--self-test-cursor' in source
+    assert "CursorSelfTest()" in source
+    assert "duration_ms=" in source
+    assert "private const int BatchLimit = 10;" in source
+    assert "RunBudgetMilliseconds = 12000" in source
+    assert "HardStopMilliseconds = 15000" in source
+    assert "Environment.Exit(0)" in source
+    assert "run forced stop duration_ms=" in source
+    assert "RunBudgetExceeded()" in source
+    assert "if (!Register(" in source
+    assert "GetItemFromID(entryId, storeId)" in source
+    assert "item.Delete(" not in source
+    assert "item.Move(" not in source
+    assert ".UnRead =" not in source
+
+
+@pytest.mark.asyncio
+async def test_light_collector_runs_only_on_explicit_request_in_own_state(monkeypatch, tmp_path):
+    from proxy.routers import mail
+    collector = tmp_path / 'LesLightMailPoller.exe'
+    collector.write_bytes(b'test fixture')
+    monkeypatch.setattr(mail, '_outlook_collector_path', lambda: collector)
+    monkeypatch.setenv('LES_WINDOWS_STATE_ROOT', str(tmp_path / 'state'))
+    launches = []
+    monkeypatch.setattr(mail.subprocess, 'Popen', lambda command, **kw: launches.append((command, kw)))
+    request = Request({'type':'http', 'scheme':'http', 'server':('127.0.0.1', 57123),
+                       'client':('127.0.0.1', 12345), 'path':'/api/mail/collector/run', 'headers':[]})
+    assert launches == []
+    result = await mail.run_outlook_collector(request, _admin=object())
+    assert result == {'status':'started', 'mode':'manual', 'hard_limit_seconds':15}
+    assert launches[0][0] == [str(collector)]
+    assert Path(launches[0][1]['env']['LES_MAIL_STATE_ROOT']) == tmp_path / 'state/mail'
+    assert launches[0][1]['creationflags'] == mail.subprocess.CREATE_NO_WINDOW
+
+
+def test_mail_has_a_dedicated_offline_and_windows_static_release_gate():
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    release = (ROOT / "tools/build_light_package.py").read_text(encoding="utf-8")
+
+    assert "test-mail:" in makefile
+    assert "test_mail_registry_service.py" in makefile
+    assert "test_outlook_mail_poller.py" in makefile
+    assert "def stage_mail_collector" in release
+    assert "native/mail/LesLightMailPoller.exe" in release
+
+
+def test_mail_ui_is_read_only_and_scopes_chat_to_the_mailbox_dataset():
+    header = (ROOT / "sovushka/components/header.py").read_text(encoding="utf-8")
+    page = (ROOT / "sovushka/pages/mail.py").read_text(encoding="utf-8")
+    shell = (ROOT / "sovushka_ng.py").read_text(encoding="utf-8")
+
+    assert 'tab_refs["mail"] = ui.tab("Почта"' in header
+    assert '[(tab_mail, lambda: build_mail())] if tab_mail else []' in shell
+    assert '[(tab_mail_settings, lambda: build_mail_settings())] if tab_mail_settings else []' in shell
+    assert "/api/mail/accounts" in page
+    assert "/api/mail/messages" in page
+    assert "Открыть в Outlook" in page
+    assert 'f"ds:{account[\'dataset_id\']}"' in page
+    assert '"target_file"' in page
+    assert "Ответить" not in page
+    assert "Переслать" not in page
+    assert "Забрать новые письма" in page
+    assert "/api/mail/collector/run" in page
+    router = (ROOT / "proxy/routers/mail.py").read_text(encoding="utf-8")
+    collector_run = router.split('@router.post("/collector/run")', maxsplit=1)[1].split(
+        '@router.post("/messages/{message_id}/open")', maxsplit=1
+    )[0]
+    assert "subprocess.Popen" in collector_run
+    assert "schtasks" not in collector_run
+    assert "появятся автоматически" in page
+
+
+@pytest.mark.asyncio
+async def test_outlook_store_discovery_creates_mailbox_before_first_message(monkeypatch):
+    from proxy.routers import mail
+
+    calls: list[tuple[str, str]] = []
+
+    async def ensure(store_id: str, store_label: str):
+        calls.append((store_id, store_label))
+        return {
+            "id": "account",
+            "dataset_id": "dataset",
+            "dataset_name": "MAIL_Engineering_deadbeef_Index",
+        }
+
+    monkeypatch.setattr(mail, "_ensure_outlook_store_account", ensure)
+    request = Request({"type": "http", "client": ("127.0.0.1", 50000), "headers": []})
+
+    result = await mail.register_outlook_store(
+        request=request,
+        store_id="store",
+        store_label="Engineering",
+        _internal=object(),
+    )
+
+    assert calls == [("store", "Engineering")]
+    assert result == {
+        "status": "ready",
+        "account_id": "account",
+        "dataset_id": "dataset",
+        "dataset_name": "MAIL_Engineering_deadbeef_Index",
+    }
+
+
+@pytest.mark.asyncio
+async def test_outlook_snapshot_upload_is_queued_without_waiting_for_rag(monkeypatch, tmp_path):
+    from proxy.routers import mail
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+    marks: list[tuple[str, str, str]] = []
+    parses: list[tuple[str, str]] = []
+
+    class Backend:
+        async def upload_file(self, dataset_id, raw_path, *, relative_path):
+            started.set()
+            await release.wait()
+            return "rag-doc"
+
+    class Registry:
+        def register_message(self, **kwargs):
+            return {"id": "message"}, True
+
+        def mark_indexed(self, message_id, *, rag_doc_id="", status="registered"):
+            marks.append((message_id, rag_doc_id, status))
+
+    monkeypatch.setattr(mail, "get_dataset_state", lambda: SimpleNamespace(backend=Backend()))
+    monkeypatch.setattr(mail, "get_mail_registry", lambda: Registry())
+    monkeypatch.setattr(
+        mail,
+        "_schedule_mailbox_parse",
+        lambda account_id, dataset_id: parses.append((account_id, dataset_id)),
+    )
+    mail._outlook_upload_queues.clear()
+    mail._outlook_upload_tasks.clear()
+    mail._outlook_queued_manifests.clear()
+    raw_path = tmp_path / "message.msg"
+    raw_path.write_bytes(b"snapshot")
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "account_id": "account",
+                "dataset_id": "dataset",
+                "store_id": "store",
+                "entry_id": "entry",
+                "folder_id": "folder",
+                "folder_path": "Inbox",
+                "internet_message_id": "",
+                "received_at": "",
+                "raw_path": str(raw_path),
+                "relative_path": "outlook/message.msg",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("LES_MAIL_STATE_ROOT", str(tmp_path))
+
+    queue_depth, worker = mail._queue_outlook_spool_manifest(
+        account_id="account",
+        dataset_id="dataset",
+        manifest_path=manifest_path,
+    )
+
+    assert queue_depth == 1
+    await asyncio.wait_for(started.wait(), timeout=1)
+    assert not worker.done()
+    assert marks == [("message", "", "queued")]
+
+    release.set()
+    await asyncio.wait_for(worker, timeout=1)
+    assert marks == [
+        ("message", "", "queued"),
+        ("message", "rag-doc", "registered"),
+    ]
+    assert parses == [("account", "dataset")]
+    assert not manifest_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_outlook_intake_persists_spool_before_exact_registry(monkeypatch, tmp_path):
+    from proxy.routers import mail
+
+    async def account(*_args, **_kwargs):
+        return {"id": "account", "dataset_id": "dataset"}
+
+    queued: list[Path] = []
+
+    def queue_manifest(*, account_id, dataset_id, manifest_path):
+        queued.append(manifest_path)
+        return 1, asyncio.create_task(asyncio.sleep(0))
+
+    monkeypatch.setenv("LES_MAIL_STATE_ROOT", str(tmp_path))
+    monkeypatch.setattr(mail, "_ensure_outlook_store_account", account)
+    monkeypatch.setattr(mail, "_queue_outlook_spool_manifest", queue_manifest)
+    monkeypatch.setattr(
+        mail,
+        "get_mail_registry",
+        lambda: (_ for _ in ()).throw(AssertionError("registry must run after HTTP intake")),
+    )
+    request = Request({"type": "http", "client": ("127.0.0.1", 50000), "headers": []})
+    upload = UploadFile(filename="message.eml", file=BytesIO(b"Subject: Test\r\n\r\nBody"))
+
+    result = await mail.import_outlook_message(
+        request=request,
+        message=upload,
+        store_id="store",
+        entry_id="entry",
+        store_label="Outlook",
+        folder_id="folder",
+        folder_path="Inbox",
+        internet_message_id="",
+        received_at="",
+        _internal=object(),
+    )
+
+    assert result["status"] == "accepted"
+    assert result["index_status"] == "queued"
+    assert result["queue_depth"] == 1
+    assert len(queued) == 1
+    payload = json.loads(queued[0].read_text(encoding="utf-8"))
+    assert Path(payload["raw_path"]).read_bytes() == b"Subject: Test\r\n\r\nBody"

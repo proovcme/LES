@@ -1,0 +1,1124 @@
+"""Fast deterministic document routing for ingestion."""
+
+from __future__ import annotations
+
+import csv
+import os
+import re
+import zipfile
+from dataclasses import dataclass, field
+from xml.etree import ElementTree
+from pathlib import Path
+from typing import Any
+
+
+TABLE_SUFFIXES = {".xlsx", ".xlsm", ".xls", ".csv"}
+PDF_SUFFIXES = {".pdf", ".p7m"}                       # .p7m разворачивается в PDF в конвертере
+IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp"}
+EMAIL_SUFFIXES = {".eml", ".emlx", ".msg"}
+CAD_BIM_SUFFIXES = {".dwg", ".rvt", ".ifc", ".ifczip"}
+
+
+@dataclass
+class DocumentProbe:
+    path: Path
+    suffix: str
+    size_bytes: int
+    page_count: int = 0
+    text_sample: str = ""
+    has_text_layer: bool = True
+    has_tables: bool = False
+    table_count_hint: int = 0
+    sheet_count: int = 0
+    row_count_hint: int = 0
+    column_count_hint: int = 0
+    needs_ocr: bool = False
+    signals: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class DocumentRoute:
+    domain: str
+    dataset_name: str
+    doc_type: str
+    content_type: str
+    complexity: str
+    pipeline: str
+    metadata: dict[str, Any]
+
+
+def _sample_limit() -> int:
+    try:
+        return max(1, int(os.getenv("DOC_ROUTER_SAMPLE_PAGES", "3")))
+    except ValueError:
+        return 3
+
+
+def probe_document(path: Path) -> DocumentProbe:
+    suffix = path.suffix.lower()
+    stat = path.stat()
+    if suffix in PDF_SUFFIXES:
+        return _probe_pdf(path, stat.st_size)
+    if suffix in TABLE_SUFFIXES:
+        return _probe_table(path, stat.st_size)
+    if suffix == ".docx":
+        return _probe_docx(path, stat.st_size)
+    return _probe_text_like(path, stat.st_size)
+
+
+def route_document(path: Path) -> DocumentRoute:
+    return classify_document(probe_document(path))
+
+
+def classify_document(probe: DocumentProbe) -> DocumentRoute:
+    doc_type = _classify_doc_type(probe)
+    domain = _classify_domain(probe, doc_type)
+    content_type = _classify_content_type(probe)
+    complexity = _classify_complexity(probe, content_type)
+    pipeline = _select_pipeline(probe, content_type, complexity)
+    doc_passport = _extract_document_passport_probe(probe, doc_type)
+    dataset_name = f"{domain}_Index"
+    return DocumentRoute(
+        domain=domain,
+        dataset_name=dataset_name,
+        doc_type=doc_type,
+        content_type=content_type,
+        complexity=complexity,
+        pipeline=pipeline,
+        metadata={
+            "domain": domain,
+            "dataset_name": dataset_name,
+            "doc_type": doc_type,
+            "content_type": content_type,
+            "complexity": complexity,
+            "pipeline": pipeline,
+            "has_tables": probe.has_tables,
+            "needs_ocr": probe.needs_ocr,
+            "page_count": probe.page_count,
+            "sheet_count": probe.sheet_count,
+            "row_count_hint": probe.row_count_hint,
+            "column_count_hint": probe.column_count_hint,
+            "doc_passport": doc_passport,
+        },
+    )
+
+
+def _extract_document_passport_probe(probe: DocumentProbe, doc_type: str) -> dict[str, Any]:
+    text = probe.text_sample or ""
+    name = probe.path.name
+
+    doc_number = ""
+    num_match = re.search(r"(?:№|№\s*|номер\s+|договор\s+№\s*|акта?\s+№\s*)([A-Za-z0-9а-яА-Я/\-\.]{1,30})", text, re.IGNORECASE)
+    if not num_match:
+        num_match = re.search(r"(?:№|№\s*|номер\s+|договор\s+№\s*|акта?\s+№\s*)([A-Za-z0-9а-яА-Я/\-\.]{1,30})", name, re.IGNORECASE)
+    if num_match:
+        doc_number = num_match.group(1).strip(".,")
+
+    doc_date = ""
+    date_match = re.search(r"\b(\d{1,2}\.\d{1,2}\.\d{4}|\d{1,2}\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\s+\d{4})\b", text, re.IGNORECASE)
+    if not date_match:
+        date_match = re.search(r"\b(\d{1,2}\.\d{1,2}\.\d{4})\b", name)
+    if date_match:
+        doc_date = date_match.group(1)
+
+    parties = []
+    text_lower = text.lower()
+    for role_name, key in [
+        ("Заказчик", "заказчик"),
+        ("Подрядчик", "подрядчик"),
+        ("Исполнитель", "исполнитель"),
+        ("Поставщик", "поставщик"),
+        ("Покупатель", "покупатель"),
+        ("Арендодатель", "арендодатель"),
+        ("Арендатор", "арендатор"),
+    ]:
+        if key in text_lower:
+            parties.append(role_name)
+
+    amount_summary = ""
+    amount_match = re.search(r"\b(\d{1,3}(?:[\s\xa0]\d{3})*(?:[,\.]\d{2})?\s*(?:руб|рублей|рубля|руб\.|eur|usd))\b", text, re.IGNORECASE)
+    if amount_match:
+        amount_summary = amount_match.group(1)
+
+    return {
+        "doc_title": name,
+        "doc_number": doc_number,
+        "doc_date": doc_date,
+        "contracting_parties": parties,
+        "amount_summary": amount_summary,
+    }
+
+
+def _probe_pdf(path: Path, size_bytes: int) -> DocumentProbe:
+    probe = DocumentProbe(path=path, suffix=".pdf", size_bytes=size_bytes)
+    try:
+        import pdfplumber
+
+        doc = pdfplumber.open(path)
+        try:
+            probe.page_count = len(doc.pages)
+            sample_text = []
+            text_pages = 0
+            table_count = 0
+            for page_no in range(min(_sample_limit(), len(doc.pages))):
+                page = doc.pages[page_no]
+                text = page.extract_text() or ""
+                if text.strip():
+                    text_pages += 1
+                    sample_text.append(text[:2000])
+                finder = getattr(page, "find_tables", None)
+                if finder:
+                    try:
+                        table_count += len(finder() or [])
+                    except Exception:
+                        pass
+            probe.text_sample = "\n".join(sample_text)[:6000]
+            probe.has_text_layer = text_pages > 0
+            probe.needs_ocr = not probe.has_text_layer and probe.page_count > 0
+            probe.has_tables = table_count > 0 or _text_has_table_signals(probe.text_sample)
+            probe.table_count_hint = table_count
+        finally:
+            doc.close()
+    except Exception as e:
+        probe.signals["probe_error"] = str(e)
+    return probe
+
+
+def _probe_table(path: Path, size_bytes: int) -> DocumentProbe:
+    probe = DocumentProbe(path=path, suffix=path.suffix.lower(), size_bytes=size_bytes, has_tables=True)
+    try:
+        if probe.suffix == ".csv":
+            with open(path, encoding="utf-8-sig", newline="") as f:
+                reader = csv.reader(f)
+                rows = []
+                for idx, row in enumerate(reader):
+                    rows.append(row)
+                    if idx >= 20:
+                        break
+            probe.sheet_count = 1
+            probe.row_count_hint = max(0, len(rows) - 1)
+            probe.column_count_hint = max((len(row) for row in rows), default=0)
+            probe.text_sample = "\n".join(",".join(row) for row in rows[:5])
+        else:
+            import openpyxl
+
+            wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+            try:
+                probe.sheet_count = len(wb.sheetnames)
+                samples = []
+                rows_total = 0
+                max_cols = 0
+                for sheet_name in wb.sheetnames[:3]:
+                    ws = wb[sheet_name]
+                    rows_total += ws.max_row or 0
+                    max_cols = max(max_cols, ws.max_column or 0)
+                    for row in ws.iter_rows(min_row=1, max_row=min(ws.max_row or 0, 5), values_only=True):
+                        samples.append(" | ".join("" if v is None else str(v) for v in row))
+                probe.row_count_hint = rows_total
+                probe.column_count_hint = max_cols
+                probe.text_sample = "\n".join(samples)[:6000]
+            finally:
+                wb.close()
+    except UnicodeDecodeError:
+        try:
+            with open(path, encoding="cp1251", newline="") as f:
+                reader = csv.reader(f)
+                rows = [row for _, row in zip(range(20), reader)]
+            probe.sheet_count = 1
+            probe.row_count_hint = max(0, len(rows) - 1)
+            probe.column_count_hint = max((len(row) for row in rows), default=0)
+            probe.text_sample = "\n".join(",".join(row) for row in rows[:5])
+        except Exception as e:
+            probe.signals["probe_error"] = str(e)
+    except Exception as e:
+        probe.signals["probe_error"] = str(e)
+    return probe
+
+
+def _probe_docx(path: Path, size_bytes: int) -> DocumentProbe:
+    probe = DocumentProbe(path=path, suffix=".docx", size_bytes=size_bytes)
+    try:
+        with zipfile.ZipFile(path) as docx:
+            xml_names = [
+                name
+                for name in docx.namelist()
+                if name == "word/document.xml"
+                or (name.startswith("word/header") and name.endswith(".xml"))
+            ]
+            samples = []
+            for name in xml_names:
+                raw_xml = docx.read(name)
+                if name == "word/document.xml":
+                    probe.table_count_hint = len(re.findall(rb"<w:tbl(?:\s|>)", raw_xml))
+                root = ElementTree.fromstring(raw_xml)
+                for node in root.iter():
+                    if node.tag.endswith("}t") and node.text:
+                        samples.append(node.text)
+                        if sum(len(item) for item in samples) >= 6000:
+                            break
+                if sum(len(item) for item in samples) >= 6000:
+                    break
+            probe.text_sample = " ".join(samples)[:6000]
+            probe.has_text_layer = bool(probe.text_sample.strip())
+            probe.has_tables = probe.table_count_hint > 0 or _text_has_table_signals(probe.text_sample)
+    except Exception as e:
+        probe.signals["probe_error"] = str(e)
+        return _probe_text_like(path, size_bytes)
+    return probe
+
+
+def _probe_text_like(path: Path, size_bytes: int) -> DocumentProbe:
+    probe = DocumentProbe(path=path, suffix=path.suffix.lower(), size_bytes=size_bytes)
+    try:
+        probe.text_sample = path.read_text(encoding="utf-8", errors="ignore")[:6000]
+        probe.has_tables = _text_has_table_signals(probe.text_sample)
+    except Exception as e:
+        probe.signals["probe_error"] = str(e)
+    return probe
+
+
+def _classify_doc_type(probe: DocumentProbe) -> str:
+    text = f"{probe.path.name}\n{probe.text_sample}".lower()
+    name = probe.path.name.lower()
+    if _smeta_ru_norm_domain(probe.path):
+        return "NORMATIVE"
+    if _is_artel_fop_source(probe):
+        return "FOP_PROFILE"
+    if _is_artel_revit_model_guide_source(probe):
+        return "REVIT_MODEL_GUIDE"
+    if _is_artel_revit_api_symbol_map_source(probe):
+        return "REVIT_API_SYMBOL_MAP"
+    if _is_artel_revit_api_sdk_source(probe):
+        return "REVIT_API_SDK_DOC"
+    if _is_artel_revit_api_source(probe):
+        return "REVIT_API_REFERENCE"
+    if _is_artel_family_guide_source(probe):
+        return "FAMILY_GUIDE"
+    if _is_artel_learning_case_source(probe):
+        return "LEARNING_CASE"
+    if _is_cad_bim_source(probe):
+        return "CAD_BIM"
+    if probe.suffix in EMAIL_SUFFIXES:
+        return "EMAIL"
+    if _looks_like_book(probe):
+        return "BOOK"
+    if _is_estimate_norm_source(name):
+        return "NORMATIVE"
+    normative_name_prefixes = ("гост", "сп ", "снип", "санпин", "постановление", "приказ")
+    if name.startswith(normative_name_prefixes):
+        return "NORMATIVE"
+    if probe.suffix in PDF_SUFFIXES and _has_project_design_signal(text):
+        return "DOCUMENT"
+    if probe.suffix not in TABLE_SUFFIXES and _has_strong_normative_signal(text):
+        return "NORMATIVE"
+    has_price_amount = any(token in text for token in ("цена", "сумма", "стоимость", "расценка"))
+    has_position_qty = (
+        any(token in text for token in ("позиция", "поз.", "поз,", "поз "))
+        and any(token in text for token in ("кол-во", "количество", "ед.изм", "единица"))
+    )
+    if any(token in text for token in ("кс-2", "кс2", "акт о приемке", "акт о приёмке")):
+        return "KS2"
+    if any(token in text for token in ("аоср", "скрытых работ", "освидетельствования")):
+        return "AOSR"
+    if (
+        not _has_project_design_signal(text)
+        and any(token in text for token in ("постановление", "федеральный закон", "приказ росстандарта", "свод правил"))
+    ):
+        return "NORMATIVE"
+    if _has_explicit_smeta_signal(probe, text, name):
+        return "SMETA"
+    if has_position_qty and not has_price_amount:
+        return "SPEC"
+    if any(token in text for token in ("спецификация", "ведомость оборудования", "масса единицы")):
+        return "SPEC"
+    if has_price_amount and probe.has_tables and probe.suffix not in PDF_SUFFIXES:
+        return "SMETA"
+    if not _has_project_design_signal(text) and any(token in text for token in ("гост", "сп ", "снип", "санпин", "норматив", "постановление")):
+        return "NORMATIVE"
+    if _has_addendum_signal(text, name):
+        return "ADDENDUM"
+    if _has_invoice_bill_signal(text, name):
+        return "INVOICE_BILL"
+    if _has_general_act_signal(text, name):
+        return "ACT_GENERAL"
+    if _has_contract_signal(text, name):
+        return "CONTRACT"
+    if _has_tz_tor_signal(text, name):
+        return "TZ_TOR"
+    if _has_letter_signal(text, name):
+        return "LETTER"
+    if _has_passport_cert_signal(text, name):
+        return "PASSPORT_CERT"
+    if _has_drawing_signal(text, name):
+        return "DRAWING"
+    if probe.suffix in TABLE_SUFFIXES:
+        return "TABLE"
+    return "DOCUMENT"
+
+
+def _has_addendum_signal(text: str, name: str) -> bool:
+    if any(token in name for token in ("допсоглашение", "доп_соглашение", "доп.соглашение", "доп соглашение", "дополнительное соглашение")):
+        return True
+    if any(token in text for token in ("дополнительное соглашение", "доп. соглашение", "доп соглашение", "допсоглашение")):
+        return True
+    if "приложение к договору" in text or "приложение №" in text or "приложение к контракту" in text:
+        return True
+    return False
+
+
+def _has_invoice_bill_signal(text: str, name: str) -> bool:
+    if any(token in name for token in ("счет-фактура", "счет_фактура", "счет на оплату", "счет_на_оплату", "упд", "счет №", "счет_№")):
+        return True
+    if any(token in text for token in ("счет на оплату", "счёт на оплату", "счет-фактура", "счёт-фактура", "универсальный передаточный документ")):
+        return True
+    if re.search(r"\bупд\b", text) or re.search(r"\bупд\b", name):
+        return True
+    return False
+
+
+def _has_general_act_signal(text: str, name: str) -> bool:
+    if any(token in text for token in (
+        "акт выполненных работ", "акт выполненных услуг", "акт приёма-передачи", "акт приема-передачи",
+        "акт сдачи-приемки", "акт сдачи-приёмки", "акт оказанных услуг", "акт оказания услуг",
+        "акт сверки", "акт приемки-передачи", "акт приёмки-передачи", "акт передачи"
+    )):
+        return True
+    if any(token in name for token in ("акт_выполненных", "акт_приема", "акт_приёмка", "акт_сверки", "акт_приема_передачи")):
+        return True
+    if re.search(r"(^|[^а-яa-z])акт\s*(№|\d|выполненных|оказанных|приема|приёмки|сверки)", name):
+        return True
+    return False
+
+
+def _has_contract_signal(text: str, name: str) -> bool:
+    strong_name = any(token in name for token in ("договор", "контракт", "agreement", "contract"))
+    if strong_name:
+        return True
+    strong_text = (
+        "договор подряда" in text
+        or "договор поставки" in text
+        or "договор аренды" in text
+        or "договор возмездного оказания" in text
+        or "договор купли-продажи" in text
+        or "муниципальный контракт" in text
+        or "государственный контракт" in text
+        or "договор генерального подряда" in text
+    )
+    if strong_text:
+        return True
+    contract_anchors = (
+        "предмет договора",
+        "настоящий договор",
+        "настоящий контракт",
+        "права и обязанности сторон",
+        "адреса и реквизиты сторон",
+        "адреса, реквизиты и подписи сторон",
+    )
+    if any(token in text for token in contract_anchors):
+        return True
+    return False
+
+
+def _has_tz_tor_signal(text: str, name: str) -> bool:
+    if any(token in name for token in ("техзадание", "тех_задание", "тех.задание", "техническое_задание", "техническое задание")):
+        return True
+    if re.search(r"(^|[^а-яa-z])тз\s*(№|\d|_|\.|\b)", name):
+        return True
+    if any(token in text for token in ("техническое задание", "задание на проектирование", "задание на закупку", "задание на выполнение работ", "технические требования")):
+        return True
+    return False
+
+
+def _has_letter_signal(text: str, name: str) -> bool:
+    if any(token in name for token in ("письмо", "протокол", "уведомление", "обращение", "исх_", "вх_")):
+        return True
+    if any(token in text for token in ("исходящее письмо", "входящее письмо", "официальное письмо", "протокол совещания", "протокол рассмотрения", "уведомление №", "исх. №")):
+        return True
+    return False
+
+
+def _has_passport_cert_signal(text: str, name: str) -> bool:
+    if any(token in name for token in ("паспорт", "сертификат", "формуляр", "руководство_эксплуатации")):
+        return True
+    if any(token in text for token in ("паспорт изделия", "паспорт оборудования", "паспорт качества", "сертификат соответствия", "сертификат качества", "руководство по эксплуатации", "инструкция по эксплуатации", "паспорт объекта")):
+        return True
+    return False
+
+
+def _has_drawing_signal(text: str, name: str) -> bool:
+    if probe_suffix_drawing := name.endswith((".dwg", ".dxf", ".dwf")):
+        return True
+    if any(token in name for token in ("чертеж", "чертёж", "схема", "план_этажа", "генплан")):
+        return True
+    if any(token in text for token in ("сборочный чертеж", "сборочный чертёж", "однолинейная схема", "план этажа", "схема подсоединения", "рабочие чертежи")):
+        return True
+    return False
+
+
+def _has_explicit_smeta_signal(probe: DocumentProbe, text: str, name: str) -> bool:
+    """Avoid routing ordinary design PDFs to TABLE_SMETA on weak words.
+
+    Project PDFs often contain words like "смета затрат" or price-like table
+    boilerplate in notes/title blocks. A PDF becomes SMETA only when the file
+    name or text has explicit estimate/norm-source signals.
+    """
+    strong_terms = (
+        "локальный сметный",
+        "локальная смета",
+        "локальный сметный расчет",
+        "локальный сметный расчёт",
+        "сметный расчет",
+        "сметный расчёт",
+        "гранд-смет",
+        "гранд смет",
+        "расценка",
+    )
+    if any(token in text for token in strong_terms):
+        return True
+    if re.search(r"(^|[^а-яa-z])(гэсн|фер|тер)\s*\d", text):
+        return True
+    if probe.suffix in TABLE_SUFFIXES and "смета" in text:
+        return True
+    if probe.suffix in PDF_SUFFIXES:
+        return bool(re.search(r"(^|[^а-яa-z])смет[аы]?([^а-яa-z]|$)", name))
+    return "смета" in text
+
+
+def _is_estimate_norm_source(name: str) -> bool:
+    n = name.casefold().replace("ё", "е").strip()
+    if re.match(r"^(гэсн|гэснм|гэснр|гэснп|гэснмр|фер|тер)\b", n):
+        return True
+    return bool(re.match(r"^(гэсн|гэснм|гэснр|гэснп|гэснмр|фер|тер)\s*81-0[2356]-", n))
+
+
+def _has_strong_normative_signal(text: str) -> bool:
+    if any(token in text for token in ("национальный стандарт", "межгосударственный стандарт", "свод правил")):
+        return True
+    return bool(re.search(r"\b(гост|гост\s*р|сп|снип|санпин)\s*(?:iec|iso|р)?\s*\d", text))
+
+
+def _has_project_design_signal(text: str) -> bool:
+    """Detect ordinary project/design PDFs that contain normative references."""
+    has_stage = any(token in text for token in ("рабочая документация", "проектная документация"))
+    has_project_anchor = any(token in text for token in ("заказчик", "объект", "центр обработки данных", "шифр", "главный инженер проекта"))
+    return bool(has_stage and has_project_anchor)
+
+
+def _classify_domain(probe: DocumentProbe, doc_type: str) -> str:
+    text = f"{' '.join(probe.path.parts)}\n{probe.text_sample}".casefold()
+    name = probe.path.name.casefold()
+    if _is_smeta_service_source(probe.path):
+        return "SMETA_SERVICE"
+    smeta_ru_norm_domain = _smeta_ru_norm_domain(probe.path)
+    if smeta_ru_norm_domain:
+        return smeta_ru_norm_domain
+
+    if (
+        doc_type
+        in {
+            "LEARNING_CASE",
+            "FOP_PROFILE",
+            "FAMILY_GUIDE",
+            "REVIT_API_REFERENCE",
+            "REVIT_MODEL_GUIDE",
+            "REVIT_API_SYMBOL_MAP",
+            "REVIT_API_SDK_DOC",
+        }
+        or _is_artel_source(probe)
+        or _is_artel_fop_source(probe)
+    ):
+        return "ARTEL"
+
+    if doc_type == "CAD_BIM" or _is_cad_bim_source(probe):
+        return "CAD_BIM"
+
+    if doc_type == "EMAIL" or probe.suffix in EMAIL_SUFFIXES:
+        return "MAIL"
+    if doc_type == "BOOK" or _looks_like_book(probe):
+        return "BOOKS"
+    if doc_type == "NORMATIVE" and _is_estimate_norm_source(name):
+        return "NTD_CONSTRUCTION"
+
+    if any(token in name for token in ("гкрф", "градостроительный кодекс", "постановление 87", "пп 87", "pp87")):
+        return "GKRF"
+    if "постановление 87" in text and "градостро" in text:
+        return "GKRF"
+    if (
+        ("постановление 87" in text or "пп 87" in text)
+        and "состав" in text
+        and "раздел" in text
+        and "проектн" in text
+    ):
+        return "GKRF"
+    if "87" in name and "постановлен" in name:
+        return "GKRF"
+
+    if doc_type in {"KS2", "AOSR", "SMETA", "SPEC", "TABLE"} or (
+        doc_type in {"CONTRACT", "ACT_GENERAL", "ADDENDUM", "INVOICE_BILL", "TZ_TOR", "LETTER", "PASSPORT_CERT", "DRAWING"} and probe.suffix in TABLE_SUFFIXES
+    ):
+        return f"TABLE_{doc_type}"
+
+    if _is_industrial_chimney_norm(text, name):
+        return "NTD_STRUCTURAL"
+
+    if _has_any(name, _FIRE_TOKENS):
+        return "NTD_FIRE"
+    if _has_any(name, _ELECTRICAL_TOKENS):
+        return "NTD_ELECTRICAL"
+    if _is_spds_norm(name, text):
+        return "NTD_SPDS"
+    if _has_any(name, _GEOTECH_TOKENS):
+        return "NTD_GEOTECH"
+    if _has_any(name, _TRANSPORT_TOKENS):
+        return "NTD_TRANSPORT"
+    if _has_any(name, _HVAC_TOKENS):
+        return "NTD_HVAC"
+    if _has_any(name, _WATER_TOKENS):
+        return "NTD_WATER"
+    if _has_any(name, _PIPELINE_TOKENS):
+        return "NTD_PIPELINES"
+    if _has_any(name, _BIM_OPERATION_TOKENS):
+        return "NTD_BIM_OPERATION"
+    if _has_any(name, _CONSTRUCTION_TOKENS):
+        return "NTD_CONSTRUCTION"
+    if _has_any(name, _MATERIALS_TOKENS):
+        return "NTD_MATERIALS"
+    if _has_any(name, _ARCH_URBAN_TOKENS):
+        return "NTD_ARCH_URBAN"
+    if _has_any(name, _SAFETY_TOKENS):
+        return "NTD_SAFETY"
+    if _has_any(name, _STRUCTURAL_TOKENS):
+        return "NTD_STRUCTURAL"
+
+    if _has_any(text, _FIRE_TEXT_TOKENS):
+        return "NTD_FIRE"
+    if _has_any(text, _ELECTRICAL_TEXT_TOKENS):
+        return "NTD_ELECTRICAL"
+    if _has_any(text, _GEOTECH_TEXT_TOKENS):
+        return "NTD_GEOTECH"
+    if _has_any(text, _TRANSPORT_TEXT_TOKENS):
+        return "NTD_TRANSPORT"
+    if _has_any(text, _HVAC_TEXT_TOKENS):
+        return "NTD_HVAC"
+    if _has_any(text, _WATER_TEXT_TOKENS):
+        return "NTD_WATER"
+    if _has_any(text, _PIPELINE_TEXT_TOKENS):
+        return "NTD_PIPELINES"
+    if _has_any(text, _BIM_OPERATION_TEXT_TOKENS):
+        return "NTD_BIM_OPERATION"
+    if _has_any(text, _CONSTRUCTION_TEXT_TOKENS):
+        return "NTD_CONSTRUCTION"
+    if _has_any(text, _MATERIALS_TEXT_TOKENS):
+        return "NTD_MATERIALS"
+    if _has_any(text, _ARCH_URBAN_TEXT_TOKENS):
+        return "NTD_ARCH_URBAN"
+    if _has_any(text, _SAFETY_TEXT_TOKENS):
+        return "NTD_SAFETY"
+    if _has_any(text, _STRUCTURAL_TEXT_TOKENS):
+        return "NTD_STRUCTURAL"
+
+    # Backward-compatible broad buckets kept for older abbreviated filenames.
+    if any(
+        token in name
+        for token in (
+            "13130",
+            "пожар",
+            "пожаротуш",
+            "огнев",
+            "огнестойк",
+            "огнезащит",
+            "огнепреград",
+            "эвакуац",
+            "эвакуа",
+            "противодым",
+            "противопожар",
+            "пожарной безопасности",
+            "дымоудален",
+        )
+    ):
+        return "NTD_FIRE"
+    if any(
+        token in name
+        for token in (
+            "пуэ",
+            "iec",
+            "мэк",
+            "электр",
+            "кабел",
+            "заземл",
+            "молниезащит",
+            "освещен",
+            "напряжен",
+            "светиль",
+            "выключател",
+            "предохранител",
+            "низковоль",
+            "электроустанов",
+        )
+    ):
+        return "NTD_ELECTRICAL"
+    if any(
+        token in name
+        for token in (
+            "конструкц",
+            "нагрузк",
+            "фундамент",
+            "основан",
+            "железобетон",
+            "бетон",
+            "грунт",
+            "здани",
+            "сооруж",
+            "сейсми",
+        )
+    ):
+        return "NTD_STRUCTURAL"
+    if doc_type == "NORMATIVE" and (
+        "электроустановки" in text
+        or "пожарной безопасности" in text
+        or ("пожарн" in text and "безопас" in text)
+    ):
+        if "пожарной безопасности" in text or ("пожарн" in text and "безопас" in text):
+            return "NTD_FIRE"
+        return "NTD_ELECTRICAL"
+    if doc_type == "NORMATIVE":
+        return "NTD_GENERAL"
+    if _is_ntd_source(probe):
+        return "NTD_GENERAL"
+    return "DOCS_OTHER"
+
+
+def _smeta_ru_norm_domain(path: Path) -> str:
+    parts = [part.casefold() for part in path.parts]
+    try:
+        index = parts.index("smeta_ru_norm")
+    except ValueError:
+        return ""
+    if index + 1 >= len(parts):
+        return "TABLE_SMETA"
+    category = re.sub(r"[^a-z0-9]+", "_", parts[index + 1]).strip("_").upper()
+    if not category or category.startswith("00_"):
+        return "TABLE_SMETA"
+    return f"SMETA_RU_NORM_{category}"
+
+
+def _is_smeta_service_source(path: Path) -> bool:
+    parts = {part.casefold() for part in path.parts}
+    return "smeta_service" in parts
+
+
+_FIRE_TOKENS = (
+    "13130",
+    "59637",
+    "59638",
+    "59639",
+    "59640",
+    "пожар",
+    "пожаротуш",
+    "огнев",
+    "огнестойк",
+    "огнезащит",
+    "огнепреград",
+    "эвакуац",
+    "эвакуа",
+    "противодым",
+    "противопожар",
+    "дымоудален",
+    "взрывопожар",
+    "огн.",
+    "горюч",
+    "воспламен",
+    "пенного пожаротушения",
+)
+_FIRE_TEXT_TOKENS = (
+    "пожарной безопасности",
+    "требования пожарной безопасности",
+    "огнестойкости",
+    "пожарная опасность",
+)
+
+_ELECTRICAL_TOKENS = (
+    "эом",
+    "пуэ",
+    "iec",
+    "мэк",
+    "электр",
+    "кабел",
+    "заземл",
+    "молниезащит",
+    "освещен",
+    "напряжен",
+    "светиль",
+    "выключател",
+    "предохранител",
+    "низковоль",
+    "электроустанов",
+    "60364",
+    "50571",
+    "30331",
+    "60079",
+    "31610",
+    "60968",
+    "61008",
+)
+_ELECTRICAL_TEXT_TOKENS = ("электроустановки", "электрические сети", "электроснабжение")
+
+_SPDS_TOKENS = (
+    "гост 21.",
+    "гост р 21.",
+    "спдс",
+    "система проектной документации",
+    "проектной документации для строитель",
+    "рабочая документация",
+)
+
+_GEOTECH_TOKENS = (
+    "грунт",
+    "геотехник",
+    "основан",
+    "фундамент",
+    "сейсми",
+    "землетряс",
+    "оползн",
+    "карст",
+    "мерзлот",
+    "подпорн",
+    "геофизик",
+)
+_GEOTECH_TEXT_TOKENS = ("механика грунтов", "основания зданий", "основания и фундаменты")
+
+_TRANSPORT_TOKENS = (
+    "дорог",
+    "мост",
+    "тоннел",
+    "метрополитен",
+    "железн",
+    "аэродром",
+    "улиц",
+    "транспорт",
+    "габарит",
+    "путепровод",
+    "биопереход",
+)
+_TRANSPORT_TEXT_TOKENS = ("автомобильные дороги", "железные дороги", "мосты и трубы")
+
+_HVAC_TOKENS = (
+    "отоп",
+    "вентиля",
+    "кондицион",
+    "теплов",
+    "теплоснаб",
+    "воздух",
+    "дымоудален",
+    "шум",
+    "акуст",
+    "микроклимат",
+)
+_HVAC_TEXT_TOKENS = ("отопление вентиляция", "тепловые сети", "защита от шума")
+
+_WATER_TOKENS = (
+    "водоснаб",
+    "водоотвед",
+    "канализац",
+    "гидротех",
+    "мелиоратив",
+    "водопропуск",
+    "водоочист",
+    "очистн",
+    "морские причаль",
+    "гидроаэродром",
+)
+_WATER_TEXT_TOKENS = ("системы водоснабжения", "гидротехнические сооружения")
+
+_PIPELINE_TOKENS = (
+    "трубопровод",
+    "промыслов",
+    "магистральн",
+    "газопровод",
+    "нефтепровод",
+    "морские трубопроводы",
+)
+_PIPELINE_TEXT_TOKENS = ("магистральные трубопроводы", "промысловые трубопроводы")
+
+_BIM_OPERATION_TOKENS = (
+    "информационное моделирован",
+    "bim",
+    "обследован",
+    "мониторинг",
+    "эксплуатац",
+    "техническ",
+    "технич",
+    "надзор",
+)
+_BIM_OPERATION_TEXT_TOKENS = ("информационная модель", "техническое состояние")
+
+_CONSTRUCTION_TOKENS = (
+    "организация строительства",
+    "производства работ",
+    "приемк",
+    "приёмк",
+    "земляные работы",
+    "изоляционные и отделочные",
+    "механизация строительства",
+    "свароч",
+    "снип iii",
+    "iii-",
+)
+_CONSTRUCTION_TEXT_TOKENS = ("правила производства и приемки", "организация строительного производства")
+
+_MATERIALS_TOKENS = (
+    "материал",
+    "издел",
+    "изоляц",
+    "опалуб",
+    "полы",
+    "стены",
+    "покрыт",
+    "пластмасс",
+    "ограждающ",
+    "панел",
+    "кровл",
+    "тепловая изоля",
+)
+_MATERIALS_TEXT_TOKENS = ("материалы строительные", "строительные материалы")
+
+_ARCH_URBAN_TOKENS = (
+    "жил",
+    "обществен",
+    "градостро",
+    "планировк",
+    "территор",
+    "доступность",
+    "учрежден",
+    "образователь",
+    "детск",
+    "больниц",
+    "спорт",
+    "парк",
+    "общежит",
+    "полици",
+    "наемные дома",
+    "малоэтаж",
+    "высотн",
+)
+_ARCH_URBAN_TEXT_TOKENS = ("жилые здания", "общественные здания", "городская среда")
+
+_SAFETY_TOKENS = (
+    "12.",
+    "ссбт",
+    "безопасност",
+    "охрана труда",
+    "опасн",
+    "защитные сооружения",
+    "гражданск",
+    "аварийн",
+    "химическ",
+)
+_SAFETY_TEXT_TOKENS = ("система стандартов безопасности труда", "защитные сооружения гражданской обороны")
+
+_STRUCTURAL_TOKENS = (
+    "конструкц",
+    "нагрузк",
+    "железобетон",
+    "бетон",
+    "стальные конструкции",
+    "каменные конструкции",
+    "деревянн",
+    "сооруж",
+    "резервуар",
+    "силос",
+    "дымовые трубы",
+)
+_STRUCTURAL_TEXT_TOKENS = ("строительные конструкции", "несущие конструкции")
+
+
+def _has_any(haystack: str, tokens: tuple[str, ...]) -> bool:
+    return any(token in haystack for token in tokens)
+
+
+def _is_spds_norm(name: str, text: str) -> bool:
+    if _has_any(name, ("гост 21.", "гост р 21.", "спдс")):
+        return True
+    if _has_any(name, ("система проектной документации", "проектной документации для строитель")):
+        return True
+    return "гост 21" in text and _has_any(text, _SPDS_TOKENS)
+
+
+def _is_ntd_source(probe: DocumentProbe) -> bool:
+    return any(part.casefold() == "ntd" for part in probe.path.parts)
+
+
+def _is_books_source(probe: DocumentProbe) -> bool:
+    return any(part.casefold() == "books" for part in probe.path.parts)
+
+
+def _looks_like_book(probe: DocumentProbe) -> bool:
+    name = probe.path.name.casefold()
+    return _is_books_source(probe) or (
+        probe.suffix in PDF_SUFFIXES
+        and probe.page_count >= 200
+        and any(token in name for token in ("рук-во", "руководство", "пособие", "справочник", "учебник", "book"))
+    )
+
+
+def _is_industrial_chimney_norm(text: str, name: str) -> bool:
+    haystack = f"{name}\n{text}"
+    chimney_phrases = (
+        "трубы промышленные дымовые",
+        "промышленные дымовые трубы",
+        "дымовые промышленные трубы",
+        "дымовая промышленная труба",
+        "дымовых промышленных труб",
+        "smoke stack",
+        "smokestack",
+        "industrial chimney",
+    )
+    if any(phrase in haystack for phrase in chimney_phrases):
+        return True
+    return "дымовые" in haystack and "труб" in haystack and "противодым" not in haystack
+
+
+def _classify_content_type(probe: DocumentProbe) -> str:
+    if _is_artel_fop_source(probe):
+        return "text"
+    if _is_artel_source(probe):
+        return "text"
+    if _is_cad_bim_source(probe):
+        return "cad_bim"
+    if probe.suffix in EMAIL_SUFFIXES:
+        return "email"
+    if probe.needs_ocr:
+        return "scan"
+    if probe.suffix in TABLE_SUFFIXES:
+        return "table"
+    if probe.suffix in PDF_SUFFIXES and _looks_like_book(probe):
+        return "mixed"
+    if probe.suffix in PDF_SUFFIXES and probe.has_tables:
+        return "mixed"
+    if probe.suffix == ".docx" and probe.has_tables:
+        return "mixed"
+    return "text"
+
+
+def _classify_complexity(probe: DocumentProbe, content_type: str) -> str:
+    if probe.needs_ocr:
+        return "needs_ocr"
+    if probe.size_bytes > 50 * 1024 * 1024 or probe.page_count > 200:
+        return "heavy"
+    if content_type in ("table", "mixed") or probe.row_count_hint > 2000:
+        return "structured"
+    return "simple"
+
+
+def _select_pipeline(probe: DocumentProbe, content_type: str, complexity: str) -> str:
+    if complexity == "needs_ocr":
+        return "markdown_needs_ocr"
+    if content_type == "cad_bim":
+        return "json_graph_projection"
+    if probe.suffix in TABLE_SUFFIXES:
+        return "parquet"
+    if probe.suffix in PDF_SUFFIXES and content_type == "mixed":
+        return "markdown_pdf_tables"
+    return "markdown"
+
+
+def _is_cad_bim_source(probe: DocumentProbe) -> bool:
+    parts = {part.casefold() for part in probe.path.parts}
+    return probe.suffix in CAD_BIM_SUFFIXES or "cad_bim" in parts
+
+
+def _is_artel_source(probe: DocumentProbe) -> bool:
+    parts = {part.casefold() for part in probe.path.parts}
+    text = f"{probe.path.name}\n{probe.text_sample}".casefold()
+    return (
+        "artel" in parts
+        or "artel familylearningcase" in text
+        or "artel.family_learning_case.v1" in text
+        or ("familylearningcase" in text and ("rfa" in text or "revit" in text))
+    )
+
+
+def _is_artel_learning_case_source(probe: DocumentProbe) -> bool:
+    parts = {part.casefold() for part in probe.path.parts}
+    text = f"{probe.path.name}\n{probe.text_sample}".casefold()
+    return (
+        "family_learning_cases" in parts
+        or "artel familylearningcase" in text
+        or "artel.family_learning_case.v1" in text
+        or ("familylearningcase" in text and ("rfa" in text or "revit" in text))
+    )
+
+
+def _is_artel_fop_source(probe: DocumentProbe) -> bool:
+    parts = {part.casefold() for part in probe.path.parts}
+    text = f"{probe.path.name}\n{probe.text_sample}".casefold()
+    if "family_learning_cases" in parts or "familylearningcase" in text:
+        return False
+    return (
+        "fop_profiles" in parts
+        or ("artel fop shared parameter profile" in text)
+        or ("revit shared parameter file" in text and ("adsk_" in text or "фоп" in text))
+    )
+
+
+def _is_artel_revit_api_source(probe: DocumentProbe) -> bool:
+    parts = {part.casefold() for part in probe.path.parts}
+    text = f"{probe.path.name}\n{probe.text_sample}".casefold()
+    return (
+        "revit_api" in parts
+        or "artel revit api reference" in text
+        or ("document type: revit_api_reference" in text)
+        or ("revit api" in text and "familymanager" in text and "filteredElementCollector".casefold() in text)
+    )
+
+
+def _is_artel_revit_model_guide_source(probe: DocumentProbe) -> bool:
+    parts = {part.casefold() for part in probe.path.parts}
+    text = f"{probe.path.name}\n{probe.text_sample}".casefold()
+    return (
+        "revit_model_guides" in parts
+        or "artel revit model guide" in text
+        or ("document type: revit_model_guide" in text)
+        or ("understanding revit's data model" in text and "categories, families" in text)
+    )
+
+
+def _is_artel_revit_api_symbol_map_source(probe: DocumentProbe) -> bool:
+    parts = {part.casefold() for part in probe.path.parts}
+    text = f"{probe.path.name}\n{probe.text_sample}".casefold()
+    return (
+        "revit_api_symbol_map" in parts
+        or "artel revit api symbol map" in text
+        or ("document type: revit_api_symbol_map" in text)
+        or ("schema: artel.revit_api_symbol_map" in text)
+    )
+
+
+def _is_artel_revit_api_sdk_source(probe: DocumentProbe) -> bool:
+    parts = {part.casefold() for part in probe.path.parts}
+    text = f"{probe.path.name}\n{probe.text_sample}".casefold()
+    return (
+        "revit_api_sdk" in parts
+        or "revit_api_sdk_docs" in parts
+        or "artel revit api sdk doc" in text
+        or ("document type: revit_api_sdk_doc" in text)
+        or ("source kind: revit sdk chm" in text)
+    )
+
+
+def _is_artel_family_guide_source(probe: DocumentProbe) -> bool:
+    parts = {part.casefold() for part in probe.path.parts}
+    text = f"{probe.path.name}\n{probe.text_sample}".casefold()
+    if "family_guides" in parts:
+        return True
+    if "руководство по созданию семейств" in text and "autodesk revit" in text:
+        return True
+    return False
+
+
+def _text_has_table_signals(text: str) -> bool:
+    lower = text.lower()
+    keywords = ("наименование", "кол-во", "количество", "ед.изм", "сумма", "цена", "поз.")
+    keyword_hits = sum(1 for keyword in keywords if keyword in lower)
+    numeric_lines = sum(1 for line in text.splitlines() if len(re.findall(r"\d+[,.]?\d*", line)) >= 3)
+    return keyword_hits >= 2 or numeric_lines >= 3

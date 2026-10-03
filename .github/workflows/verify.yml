@@ -1,0 +1,41 @@
+name: LES RAG checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: les-rag-checks-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 40
+    env:
+      PYTHONUTF8: '1'
+      UV_FROZEN: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.13.12'
+          enable-cache: true
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/light/src-tauri
+      - name: Prepare build tools
+        run: choco install make --yes --no-progress
+      - name: Install frozen Python environment
+        run: uv sync --frozen
+      - name: Verify code and offline behavior
+        run: |
+          make verify
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          make test
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          make test-mail
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Build Windows desktop shell
+        run: cargo build --locked --release --manifest-path desktop/light/src-tauri/Cargo.toml

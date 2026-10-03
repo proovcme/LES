@@ -1,0 +1,4 @@
+interface:
+  display_name: "LES Light — разработка"
+  short_description: "Единый интерфейс, надёжность и проверка LES Light"
+  default_prompt: "Используй $les-light для работы над LES Light с соблюдением границ продукта и честной проверкой результата."

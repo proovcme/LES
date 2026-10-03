@@ -1,0 +1,13 @@
+{
+  "schema": "les.light-runtime.v1",
+  "application_name": "LES RAG",
+  "application_id": "me.ovc.les-light",
+  "application_directory": "LES Light",
+  "state_directory": "LES Light",
+  "github_repository": "proovcme/LES",
+  "qdrant": {
+    "version": "1.19.1",
+    "url": "https://github.com/qdrant/qdrant/releases/download/v1.19.1/qdrant-x86_64-pc-windows-msvc.zip",
+    "sha256": "9b6f69bd85f6abed4bc13f943099f55c6ffd55f5dd90388635320d8fbb569eb0"
+  }
+}

@@ -1,0 +1,195 @@
+"""Команды чата (/-палитра) — W11.17.
+
+«Как у взрослых»: набор именованных команд, которые ЛЕС понимает и исполняет. Часть —
+создаёт документы (спецификация/ВОР/смета/акт) через сервис форм; часть — алиасы к
+естественно-языковым интентам (сводка/сверка); МСП (MS Project) — заглушка. 0 LLM на разбор.
+
+Команда возвращает один из вариантов:
+- {"answer": str, "command": {...}}  — детерминированный ответ (+ опц. действие для GUI);
+- {"rewrite": str}                   — переформулировать вопрос и пропустить через обычный конвейер.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+# Назначение документов — чтобы машина «понимала», что это такое (краткая суть).
+_DOC_PURPOSE = {
+    "ks2": "акт о приёмке выполненных работ; экспорт из ЛСР всегда помечается черновиком",
+    "ks3": "справка о стоимости; накопительные суммы требуют истории проекта",
+    "ks6a": "журнал учёта выполненных работ только из confirmed объёмов проекта",
+    "spec_gost21110": "перечень оборудования, изделий и материалов для комплектации и монтажа",
+    "vor": "наименования и объёмы строительно-монтажных работ (основа для сметы)",
+    "smeta_lsr": "стоимость работ и затрат по объекту (локальный сметный расчёт)",
+    "aosr": "освидетельствование скрытых работ перед закрытием (исполнительная документация)",
+}
+
+_FILLED_FORM_SOURCES = {
+    "ks2": "last_lsr",
+    "ks3": "last_lsr",
+    "ks6a": "field_journal",
+}
+
+# Реестр команд. kind: form | rewrite | info | help.
+COMMANDS: tuple[dict[str, Any], ...] = (
+    {"cmd": "/кс-2", "aliases": ("/кс2", "/ks2"), "kind": "filled_form", "form": "ks2",
+     "title": "КС-2 (черновик из ЛСР)", "desc": "Проектный черновик КС-2 из ЛСР текущей сессии"},
+    {"cmd": "/кс-3", "aliases": ("/кс3", "/ks3"), "kind": "filled_form", "form": "ks3",
+     "title": "КС-3 (черновик за период)", "desc": "Черновик КС-3 без вымышленных накопительных итогов"},
+    {"cmd": "/кс-6а", "aliases": ("/кс-6a", "/кс6а", "/кс6a", "/ks6a"),
+     "kind": "filled_form", "form": "ks6a", "title": "КС-6а (confirmed объёмы)",
+     "desc": "КС-6а из подтверждённого журнала выбранного проекта"},
+    {"cmd": "/спецификация", "aliases": ("/спека", "/spec"), "kind": "form", "form": "spec_gost21110",
+     "title": "Спецификация (ГОСТ 21.110)", "desc": "Бланк спецификации оборудования/материалов"},
+    {"cmd": "/вор", "aliases": ("/ведомость",), "kind": "form", "form": "vor",
+     "title": "Ведомость объёмов работ", "desc": "Бланк ВОР (наименования работ + объёмы)"},
+    {"cmd": "/смета", "aliases": ("/лср", "/smeta"), "kind": "form", "form": "smeta_lsr",
+     "title": "Локальная смета (ЛСР)", "desc": "Бланк сметы по Методике 421/пр"},
+    {"cmd": "/акт", "aliases": ("/аоср", "/aosr"), "kind": "form", "form": "aosr",
+     "title": "Акт скрытых работ (АОСР)", "desc": "Акт освидетельствования скрытых работ"},
+    {"cmd": "/сводка", "aliases": ("/тэп",), "kind": "rewrite", "rewrite": "дай сводку проекта",
+     "title": "Сводка проекта", "desc": "Стадия, ТЭП, состав документов"},
+    {"cmd": "/сверка", "aliases": ("/сверь",), "kind": "rewrite", "rewrite": "сверь ведомости и акты, где расхождения",
+     "title": "Сверка документов", "desc": "ВОР ↔ КС-2 ↔ смета ↔ ИД по количествам"},
+    {"cmd": "/мсп", "aliases": ("/mcp", "/mcp-server", "/мсп-сервер"), "kind": "info",
+     "title": "Подключения MCP", "desc": "Сведения о подключении внешних инструментов"},
+    {"cmd": "/исполнительная", "aliases": ("/ид", "/объём-ид", "/asbuilt"), "kind": "asbuilt",
+     "title": "Смонтированный объём из ИД", "desc": "Приёмка объёмов из сканов исполнительных схем/чек-листов"},
+    {"cmd": "/проекты", "aliases": ("/реестр", "/объекты", "/карта"), "kind": "rewrite",
+     "rewrite": "реестр проектов", "title": "Реестр проектов", "desc": "Общая карта всех объектов и папок ЛЕС"},
+    {"cmd": "/режим", "aliases": ("/mode", "/режимы"), "kind": "stripslash",
+     "title": "Режим работы", "desc": "local / cloud / mix — переключить чат+OCR+приёмку (напр. /режим облако)"},
+    {"cmd": "/команды", "aliases": ("/help", "/?", "/команда"), "kind": "help",
+     "title": "Список команд", "desc": "Показать все команды"},
+)
+
+_BY_NAME: dict[str, dict[str, Any]] = {}
+for _c in COMMANDS:
+    _BY_NAME[_c["cmd"]] = _c
+    for _a in _c.get("aliases", ()):
+        _BY_NAME[_a] = _c
+
+LIGHT_COMMANDS = frozenset({"/сводка", "/мсп", "/проекты", "/команды"})
+
+
+def _visible_commands() -> tuple[dict[str, Any], ...]:
+    from backend.product_edition import is_light
+
+    return tuple(c for c in COMMANDS if not is_light() or c["cmd"] in LIGHT_COMMANDS)
+
+
+def is_command(question: str) -> bool:
+    return (question or "").strip().startswith("/")
+
+
+def list_commands() -> list[dict[str, str]]:
+    """Для GUI-палитры: команда + ярлык + описание (без алиасов и внутренних полей)."""
+    return [{"cmd": c["cmd"], "title": c["title"], "desc": c["desc"]} for c in _visible_commands()]
+
+
+def _explain_doc(form_id: str) -> str:
+    from proxy.services.forms_service import load_descriptor
+
+    d = load_descriptor(form_id) or {}
+    title = d.get("title", form_id)
+    basis = d.get("legal_basis", "")
+    purpose = _DOC_PURPOSE.get(form_id, "")
+    cols = d.get("columns", []) or []
+    parts = [f"**{title}**"]
+    if form_id in _FILLED_FORM_SOURCES:
+        if form_id == "ks6a":
+            parts.append("Заполняется только из confirmed журнала выбранного проекта.")
+        else:
+            parts.append(
+                "Экспорт из ЛСР создаётся только как явно помеченный черновик; "
+                "он не подтверждает фактическое выполнение."
+            )
+    if purpose:
+        parts.append(f"Назначение: {purpose}.")
+    if basis:
+        parts.append(f"Основание: {basis}.")
+    if cols:
+        parts.append("Графы: " + " · ".join(cols) + ".")
+    if form_id not in _FILLED_FORM_SOURCES:
+        parts.append("⚠️ Это ПУСТОЙ бланк (шаблон, без данных проекта) — xlsx скачается; docx/html — Инструменты → Формы.")
+    if form_id in ("vor", "spec_gost21110"):
+        build = ("«сделай ВОР из спецификации»" if form_id == "vor"
+                 else "индексируй спецификации и спроси по ним")
+        parts.append(f"Чтобы заполнить ИЗ ДАННЫХ проекта (а не пустой бланк) — {build} "
+                     "(нужны проиндексированные спецификации/ведомости).")
+    return "\n".join(parts)
+
+
+def _help_text() -> str:
+    lines = ["Команды ЛЕС (можно набрать в чате или выбрать в «/»-меню):"]
+    for c in _visible_commands():
+        al = (" · " + ", ".join(c["aliases"])) if c.get("aliases") else ""
+        lines.append(f"  {c['cmd']}{al} — {c['desc']}")
+    return "\n".join(lines)
+
+
+def handle_command(question: str, *, project_id: int | None = None) -> dict[str, Any] | None:
+    """Разобрать и исполнить команду. None — если это не команда."""
+    text = (question or "").strip()
+    if not text.startswith("/"):
+        return None
+    token = text.split()[0].lower()
+    entry = _BY_NAME.get(token)
+    if entry is None:  # токен мог слипнуться («/командыответь») — берём известную команду как префикс
+        prefix = max((c for c in _BY_NAME if token.startswith(c)), key=len, default="")
+        if prefix:
+            entry = _BY_NAME[prefix]
+    if entry is None:
+        return {"answer": f"Неизвестная команда «{token}». Набери /команды — покажу список.",
+                "command": {"action": "unknown"}}
+    from backend.product_edition import is_light
+    if is_light() and entry["cmd"] not in LIGHT_COMMANDS:
+        return {"answer": "Этой команды нет в LES RAG. Наберите /команды, чтобы увидеть доступные действия.",
+                "command": {"action": "unknown"}}
+
+    kind = entry["kind"]
+    if kind == "filled_form":
+        form_id = entry["form"]
+        return {
+            "answer": _explain_doc(form_id),
+            "command": {
+                "action": "generate_filled_form",
+                "form_id": form_id,
+                "fmt": "xlsx",
+                "title": entry["title"],
+                "source": _FILLED_FORM_SOURCES[form_id],
+                "project_id": project_id,
+            },
+        }
+    if kind == "rewrite":
+        return {"rewrite": entry["rewrite"]}
+    if kind == "stripslash":  # «/режим облако» → «режим облако» → ловит NL-канал (с аргументом)
+        return {"rewrite": text.lstrip("/")}
+    if kind == "help":
+        return {"answer": _help_text(), "command": {"action": "help", "commands": list_commands()}}
+    if kind == "info":
+        return {
+            "answer": "MCP подключается в разделе «Настройки → Профили → Внешние инструменты». "
+                      "Добавьте адрес сервера, проверьте список и разрешите нужные инструменты, "
+                      "затем выберите их в профиле. Поддерживаются HTTP и локальные программы MCP, инструменты чтения. "
+                      "Вход OAuth, ключи и действия с изменением данных пока недоступны.",
+            "command": {"action": "mcp_info", "transports": ["streamable_http", "stdio"]},
+        }
+    if kind == "asbuilt":
+        return {
+            "answer": ("Приёмка смонтированного объёма из исполнительных схем/чек-листов (сканов).\n"
+                       "Скажи в чате с путём, например:\n"
+                       "  • «вытащи смонтированный объём из указанной папки с исполнительными схемами»\n"
+                       "  • добавь «облаком» — медленнее, но точнее на плотных таблицах.\n"
+                       "Конвейер: разворот → найти таблицу → прочитать → строки в журнал объёмов "
+                       "(status=pending, проверишь перед зачётом). Потом спроси «свод по L5»."),
+            "command": {"action": "asbuilt_help", "feature": "asbuilt_intake"},
+        }
+    if kind == "form":
+        form_id = entry["form"]
+        return {
+            "answer": _explain_doc(form_id),
+            "command": {"action": "generate_form", "form_id": form_id, "fmt": "xlsx",
+                        "title": entry["title"]},
+        }
+    return None

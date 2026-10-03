@@ -1,0 +1,370 @@
+/* Tools: a single operator hierarchy. Prompt editing is a secondary disclosure. */
+.sov-tools-page {
+  max-width: 1160px;
+}
+
+.sov-tools-hero__row .sov-ui-section-heading,
+.sov-tools-section__head .sov-ui-section-heading {
+  min-width: 0;
+  flex: 1;
+}
+
+.sov-tools-section {
+  gap: 12px;
+}
+
+.sov-tools-summary {
+  margin-top: 2px;
+}
+
+.sov-tools-fgis {
+  width: 100%;
+  padding: 12px;
+}
+
+.sov-tools-fgis__head {
+  width: 100%;
+  min-width: 0;
+  gap: var(--sov-ui-icon-gap);
+  align-items: center;
+  flex-wrap: nowrap;
+}
+
+.sov-tools-state-icon {
+  width: var(--sov-ui-icon-column);
+  flex: 0 0 var(--sov-ui-icon-column);
+  font-size: 20px;
+}
+
+.sov-tools-state-icon--accent { color: var(--accent); }
+.sov-tools-state-icon--ok { color: var(--ok); }
+.sov-tools-state-icon--error { color: var(--err); }
+.sov-tools-state-icon--muted { color: var(--dim); }
+
+.sov-tools-fgis__title {
+  min-width: 0;
+  flex: 1;
+  color: var(--text);
+  font-size: var(--sov-ui-font-size-control);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.sov-tools-metrics {
+  width: 100%;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.sov-tools-log {
+  height: 180px;
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--sov-ui-radius-control);
+  color: var(--text);
+  background: var(--bg);
+  font-family: var(--sov-ui-font-code);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.sov-tools-source-list,
+.sov-tools-prompt-list {
+  gap: 8px !important;
+}
+
+.sov-tools-source {
+  width: 100%;
+  min-width: 0;
+  padding: 12px;
+}
+
+.sov-tools-source__row {
+  width: 100%;
+  min-width: 0;
+  gap: var(--sov-ui-icon-gap);
+  align-items: flex-start;
+  flex-wrap: nowrap;
+}
+
+.sov-tools-source__icon {
+  width: var(--sov-ui-icon-column);
+  flex: 0 0 var(--sov-ui-icon-column);
+  color: var(--accent);
+  font-size: 20px;
+}
+
+.sov-tools-source__copy,
+.sov-tools-required-doc__copy {
+  min-width: 0;
+  flex: 1;
+  gap: 3px !important;
+}
+
+.sov-tools-source__identity {
+  width: 100%;
+  min-width: 0;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.sov-tools-source__title,
+.sov-tools-required-doc__title {
+  color: var(--text);
+  font-size: var(--sov-ui-font-size-body);
+  font-weight: 800;
+  line-height: 1.3;
+  text-wrap: pretty;
+}
+
+.sov-tools-source__domain,
+.sov-tools-source__meta,
+.sov-tools-layer__detail,
+.sov-tools-prompt__runtime {
+  color: var(--dim);
+  font-size: var(--sov-ui-font-size-meta);
+  line-height: 1.42;
+  overflow-wrap: anywhere;
+}
+
+.sov-tools-source__line {
+  color: var(--text);
+  font-size: var(--sov-ui-font-size-control);
+  line-height: 1.42;
+  overflow-wrap: anywhere;
+}
+
+.sov-tools-source__meta--strong {
+  font-weight: 750;
+}
+
+.sov-tools-source__actions {
+  flex: 0 0 auto;
+  gap: 4px;
+  align-items: center;
+}
+
+.sov-tools-required-doc {
+  width: 100%;
+  padding: 9px 0;
+  border-top: 1px solid var(--border);
+}
+
+.sov-tools-required-doc__row {
+  width: 100%;
+  min-width: 0;
+  gap: 10px;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: nowrap;
+}
+
+.sov-tools-layer {
+  width: 100%;
+  min-width: 0;
+  padding: 6px 8px;
+  gap: var(--sov-ui-icon-gap);
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--sov-ui-radius-control);
+  flex-wrap: nowrap;
+}
+
+.sov-tools-layer__icon {
+  width: var(--sov-ui-icon-column);
+  flex: 0 0 var(--sov-ui-icon-column);
+  font-size: 17px;
+}
+
+.sov-tools-layer__title {
+  min-width: 0;
+  flex: 1;
+  color: var(--text);
+  font-size: var(--sov-ui-font-size-control);
+  font-weight: 750;
+}
+
+.sov-tools-layer__state {
+  flex: 0 0 auto;
+  font-size: var(--sov-ui-font-size-meta);
+  font-weight: 800;
+}
+
+.sov-tools-layer--ok .sov-tools-layer__icon,
+.sov-tools-layer--ok .sov-tools-layer__state { color: var(--ok); }
+.sov-tools-layer--accent .sov-tools-layer__icon,
+.sov-tools-layer--accent .sov-tools-layer__state { color: var(--accent); }
+.sov-tools-layer--warn .sov-tools-layer__icon,
+.sov-tools-layer--warn .sov-tools-layer__state { color: var(--warn); }
+.sov-tools-layer--error .sov-tools-layer__icon,
+.sov-tools-layer--error .sov-tools-layer__state { color: var(--err); }
+.sov-tools-layer--muted .sov-tools-layer__icon,
+.sov-tools-layer--muted .sov-tools-layer__state { color: var(--dim); }
+
+.sov-tools-prompt {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--sov-ui-radius-control);
+  color: var(--text);
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
+}
+
+.sov-tools-prompt__meta {
+  width: 100%;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.sov-tools-prompt__editor {
+  margin-top: 8px;
+  gap: 8px !important;
+}
+
+.sov-tools-prompt .sov-prompt-textarea textarea {
+  color: var(--text);
+  font-family: var(--sov-ui-font);
+  font-size: var(--sov-ui-font-size-control);
+  line-height: 1.5;
+}
+
+/* Checklist review: dense engineering workbench, not a dashboard.
+   Existing surfaces and controls carry the hierarchy; accent is reserved for
+   the one primary action and semantic states. */
+.sov-checklist {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sov-ui-space-4);
+}
+
+.sov-checklist__head,
+.sov-checklist__run,
+.sov-checklist__reports,
+.sov-checklist-dialog__actions {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: var(--sov-ui-space-2);
+}
+
+.sov-checklist__head {
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.sov-checklist__setup {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--sov-ui-space-3);
+}
+
+.sov-checklist__field,
+.sov-checklist-dialog__input {
+  width: 100%;
+  min-width: 0;
+}
+
+.sov-checklist__run {
+  flex-wrap: wrap;
+}
+
+.sov-checklist__status,
+.sov-checklist__reports-label,
+.sov-checklist-dialog__meta,
+.sov-checklist-dialog__note {
+  color: var(--dim);
+  font-size: var(--sov-ui-font-size-meta);
+  line-height: 1.45;
+}
+
+.sov-checklist__summary {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: var(--sov-ui-space-2);
+  flex-wrap: wrap;
+}
+
+.sov-checklist__reports {
+  flex-wrap: wrap;
+}
+
+.sov-checklist__table {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  border: var(--sov-ui-border);
+  border-radius: var(--sov-ui-radius-control);
+}
+
+.sov-checklist__table .q-table th {
+  color: var(--dim);
+  font-size: var(--sov-ui-font-size-meta);
+  font-weight: 700;
+}
+
+.sov-checklist__table .q-table td {
+  color: var(--text);
+  font-size: var(--sov-ui-font-size-control);
+  vertical-align: top;
+}
+
+.sov-checklist__table .q-table tbody tr {
+  cursor: pointer;
+}
+
+.sov-checklist__table .q-table tbody tr:focus-within,
+.sov-checklist__table .q-table tbody tr:hover {
+  background: color-mix(in srgb, var(--accent) 6%, var(--card-bg));
+}
+
+.sov-checklist-dialog {
+  width: min(720px, calc(100vw - 32px));
+  max-height: min(86vh, 820px);
+  overflow-y: auto;
+  gap: var(--sov-ui-space-3) !important;
+}
+
+.sov-checklist-dialog__title {
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 750;
+  line-height: 1.35;
+  text-wrap: balance;
+}
+
+.sov-checklist-dialog__evidence {
+  width: 100%;
+  min-width: 0;
+  gap: var(--sov-ui-space-2) !important;
+}
+
+.sov-checklist-dialog__source {
+  width: 100%;
+  padding: var(--sov-ui-space-2) var(--sov-ui-space-3);
+  overflow-wrap: anywhere;
+  border: var(--sov-ui-border);
+  border-radius: var(--sov-ui-radius-control);
+  background: var(--bg-mod);
+  color: var(--text);
+  font-size: var(--sov-ui-font-size-meta);
+  line-height: 1.5;
+}
+
+.sov-checklist-dialog__details {
+  width: 100%;
+  color: var(--text);
+}
+
+.sov-checklist-dialog__actions {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+

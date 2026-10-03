@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 500" fill="none" role="img" aria-label="Лес в лёгком тумане">
+  <defs>
+    <linearGradient id="sky" x1="480" y1="0" x2="480" y2="500" gradientUnits="userSpaceOnUse"><stop stop-color="#FAFBF6" stop-opacity="0"/><stop offset="1" stop-color="#DCEAD5" stop-opacity=".85"/></linearGradient>
+    <linearGradient id="ground" x1="480" y1="330" x2="480" y2="500" gradientUnits="userSpaceOnUse"><stop stop-color="#DAE9D0"/><stop offset="1" stop-color="#BDD5AD"/></linearGradient>
+    <linearGradient id="pine" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#5B8768"/><stop offset="1" stop-color="#285A40"/></linearGradient>
+    <linearGradient id="leaf" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#A8C68F"/><stop offset="1" stop-color="#5A9564"/></linearGradient>
+    <filter id="mist"><feGaussianBlur stdDeviation="13"/></filter>
+    <g id="pineTree"><path d="M0 0v126" stroke="#456349" stroke-width="8" stroke-linecap="round"/><path d="M0-8-35 62h17l-29 47h94L18 62h17L0-8Z" fill="url(#pine)"/><path d="M0 5-21 57M0 21l27 55" stroke="#79A47D" stroke-opacity=".24" stroke-width="3"/></g>
+    <g id="roundTree"><path d="M0 48v80" stroke="#6C7652" stroke-width="9" stroke-linecap="round"/><circle cy="27" r="51" fill="url(#leaf)"/><circle cx="-26" cy="43" r="32" fill="#85B27B"/><circle cx="26" cy="42" r="35" fill="#78A971"/><circle cx="-14" cy="7" r="18" fill="#C6D9A4" opacity=".48"/></g>
+  </defs>
+  <path d="M0 0h960v500H0z" fill="url(#sky)"/>
+  <path d="M0 350c155-104 273-97 416-43 181-87 361-72 544 37v156H0V350Z" fill="#DCE9D4" opacity=".75"/>
+  <path d="M0 396c127-56 277-63 405-24 193-67 365-45 555 30v98H0V396Z" fill="url(#ground)"/>
+  <g opacity=".31" filter="url(#mist)"><path d="M-10 339c151-28 287-5 411 15 191-29 359-18 575 17" stroke="#FAFBF6" stroke-width="52"/></g>
+  <g opacity=".34"><use href="#pineTree" transform="translate(85 225) scale(.66)"/><use href="#pineTree" transform="translate(168 197) scale(.77)"/><use href="#pineTree" transform="translate(267 211) scale(.67)"/><use href="#pineTree" transform="translate(738 209) scale(.72)"/><use href="#pineTree" transform="translate(859 223) scale(.65)"/></g>
+  <g><use href="#roundTree" transform="translate(163 273) scale(.85)"/><use href="#pineTree" transform="translate(270 240) scale(1.04)"/><use href="#pineTree" transform="translate(371 215) scale(1.18)"/><use href="#roundTree" transform="translate(563 277) scale(.88)"/><use href="#pineTree" transform="translate(680 228) scale(1.12)"/><use href="#roundTree" transform="translate(825 285) scale(.81)"/></g>
+  <path d="M403 500c30-52 98-83 185-107 47-13 86-29 112-53" stroke="#F6F4DE" stroke-width="34" stroke-linecap="round" opacity=".88"/>
+  <path d="M0 468c113-31 239-32 336-14M651 470c96-28 205-27 309-3" stroke="#7FA56F" stroke-width="5" opacity=".22"/>
+  <g fill="#6C9B65" opacity=".68"><ellipse cx="57" cy="423" rx="23" ry="7"/><ellipse cx="313" cy="468" rx="19" ry="5"/><ellipse cx="746" cy="450" rx="29" ry="7"/><ellipse cx="894" cy="414" rx="21" ry="6"/></g>
+</svg>
