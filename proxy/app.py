@@ -306,6 +306,10 @@ async def startup():
         ensure_chat_history_schema(conn)
         conn.commit()
         conn.close()
+        from proxy.services.chat_durability_service import interrupt
+        restored = await asyncio.to_thread(interrupt)
+        if restored:
+            logger.info("[INIT] Restored %s interrupted chat requests", restored)
     except Exception as e:
         logger.error("[INIT] Failed to init chat_history table: %s", e)
 
@@ -732,6 +736,8 @@ def create_app():
         fastapi_app.include_router(memory_router)
     fastapi_app.on_event("startup")(startup)
     fastapi_app.on_event("shutdown")(shutdown_memory_runtime)
+    from proxy.services.background_summary_service import stop as stop_summaries
+    fastapi_app.on_event("shutdown")(stop_summaries)
     async def stop_dataset_watch():
         task = getattr(fastapi_app.state, "dataset_watch_task", None)
         if task is not None:

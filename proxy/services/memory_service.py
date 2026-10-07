@@ -272,10 +272,11 @@ def session_memory_items(session_id: str, *, max_turns: int = 6, max_content_cha
             columns = {row[1] for row in conn.execute("PRAGMA table_info(chat_history)")}
             attachment = "attachment_context" if "attachment_context" in columns else "''"
             trace = "retrieval_trace_json" if "retrieval_trace_json" in columns else "'{}'"
+            completed = " AND COALESCE(crag_status,'') NOT IN ('IN_PROGRESS','INTERRUPTED')" if 'crag_status' in columns else ''
             rows = conn.execute(
                 f"SELECT id, question, answer, {attachment} AS attachment_context, "
                 f"{trace} AS retrieval_trace_json FROM chat_history WHERE session_id=? AND id>? "
-                "ORDER BY id DESC LIMIT ?",
+                + completed + " ORDER BY id DESC LIMIT ?",
                 (session_id.strip(), cutoff, max_turns),
             ).fetchall()
     except sqlite3.OperationalError:

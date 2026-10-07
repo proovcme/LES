@@ -130,6 +130,17 @@ def _augment_model_tool_args(
 
 
 def _compact_tool_result_for_prompt(payload: dict[str, Any], *, max_chars: int = 7000) -> dict[str, Any]:
+    # Skill pages and extension schemas must remain whole: cutting their JSON or
+    # text would silently skip instructions while retaining a later next_offset.
+    # The context governor admits or rejects whole objects at the outer boundary.
+    tool = str(payload.get('tool') or '')
+    structured_extension = tool.startswith('use_extensions_') or tool in {
+        'list_installed_skills', 'read_installed_skill', 'run_skill_calculation', 'read_skill_calculation'}
+    if structured_extension:
+        result = payload.get('result') or {}
+        if isinstance(result, dict) and result.get('schema') == 'les_tool_result_v1':
+            result = {key: result[key] for key in ('tool', 'status', 'result', 'sources', 'missing', 'warnings') if key in result}
+        return {'tool': tool, 'status': payload.get('status'), 'result': result}
     keep = {
         "tool": payload.get("tool"),
         "status": payload.get("status"),

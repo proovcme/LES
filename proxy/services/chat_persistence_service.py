@@ -122,16 +122,9 @@ def save_chat_history(
     success_value = _history_success(crag_status, answer) if success is None else int(bool(success))
     with sqlite3.connect(rag_meta_db_path()) as conn:
         ensure_chat_history_schema(conn)
-        cur = conn.execute(
-            "INSERT INTO chat_history "
-            "("
-            "question, answer, sources, crag_status, latency_sec, tokens, session_id, "
-            "route_channel, route_reason, requested_dataset_filter, effective_dataset_filter, "
-            "resolved_dataset_ids, resolved_dataset_names, source_dataset_ids, source_dataset_names, "
-            "source_dataset_mismatch, query_route_json, retrieval_trace_json, artifact_json, retrieval_quality, "
-            "cache_type, validation_enabled, success, attachment_context"
-            ") "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        from proxy.services.chat_durability_service import write_history_row
+        history_id = write_history_row(conn,
+            ['question', 'answer', 'sources', 'crag_status', 'latency_sec', 'tokens', 'session_id', 'route_channel', 'route_reason', 'requested_dataset_filter', 'effective_dataset_filter', 'resolved_dataset_ids', 'resolved_dataset_names', 'source_dataset_ids', 'source_dataset_names', 'source_dataset_mismatch', 'query_route_json', 'retrieval_trace_json', 'artifact_json', 'retrieval_quality', 'cache_type', 'validation_enabled', 'success', 'attachment_context'],
             (
                 question,
                 answer,
@@ -159,7 +152,6 @@ def save_chat_history(
                 attachment_context or "",
             ),
         )
-        history_id = int(cur.lastrowid)
     try:
         update_chat_profile(
             session_id=session_id,
@@ -198,7 +190,7 @@ def _persist_recovered_stream_history(
             question=req.question,
             answer=str(payload.get("answer") or ""),
             sources=sources,
-            crag_status=str(payload.get("crag_status") or "UNVALIDATED"),
+            crag_status="INTERRUPTED" if payload.get("partial") else str(payload.get("crag_status") or "UNVALIDATED"),
             latency_sec=0.0,
             tokens=int(
                 ((payload.get("retrieval_trace") or {}).get("stream_recovery") or {}).get(

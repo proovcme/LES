@@ -16,6 +16,7 @@ import webbrowser
 import httpx
 
 from backend.light_processes import InstanceLock, attach_lifetime_job
+from backend.light_health_monitor import HealthMonitor
 from backend.light_qdrant_runtime import LightQdrantRuntime, free_port, port_is_free
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -52,6 +53,7 @@ class LightStack:
         self.api_port, self.ui_port = 0, 0
         self.instance_id = ""
         self.read_only = read_only
+        self.health_monitor = HealthMonitor()
 
     def spawn(self, command, environment, log_name):
         log = (self.state / "logs" / log_name).open("ab")
@@ -79,6 +81,7 @@ class LightStack:
         raise InterruptedError("Запуск отменён")
 
     def start(self, stop):
+        self.health_monitor = HealthMonitor()
         for attempt in range(3):
             self.qdrant.start()
             self.instance_id = secrets.token_urlsafe(24)
@@ -105,7 +108,12 @@ class LightStack:
                 # Restart the pair so UI cannot retain a stale API address.
 
     def failed(self):
-        return any(child.poll() is not None for child in self.children) or self.qdrant._process is None or self.qdrant._process.poll() is not None
+        if any(child.poll() is not None for child in self.children) or self.qdrant._process is None or self.qdrant._process.poll() is not None:
+            return True
+        return self.health_monitor.failed(
+            f'http://127.0.0.1:{self.api_port}/api/light/instance',
+            f'http://127.0.0.1:{self.ui_port}/healthz', self.instance_id,
+            self.qdrant.url, self.qdrant.api_key)
 
     def stop(self):
         for process in reversed(self.children):
@@ -167,7 +175,7 @@ def run(args):
                 pass
             if stop.is_set():
                 break
-            write_status(state, "recovering", "Служба остановилась. Восстанавливаю приложение…", launcher_pid=os.getpid())
+            write_status(state, "recovering", "Служба остановилась или перестала отвечать. Восстанавливаю приложение…", launcher_pid=os.getpid())
             stack.stop()
             now = time.monotonic()
             restart_times = [stamp for stamp in restart_times if now - stamp < 300]

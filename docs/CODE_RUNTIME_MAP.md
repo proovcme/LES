@@ -19,11 +19,11 @@
 
 | Метрика | Значение |
 | --- | --- |
-| Python-файлов под git | 518 |
-| Строк Python | 150916 |
-| PRODUCT_REACHABLE | 352 |
+| Python-файлов под git | 529 |
+| Строк Python | 151710 |
+| PRODUCT_REACHABLE | 357 |
 | RUNTIME_SUPPORT | 5 |
-| TEST_OR_TOOL_ONLY | 128 |
+| TEST_OR_TOOL_ONLY | 134 |
 | DORMANT_CANDIDATE | 33 |
 | Зарегистрированных API-маршрутов | 291 |
 | Ошибок разбора | 0 |
@@ -42,7 +42,7 @@
 | proxy/services/checklist_review_service.py | 1518 | 1 |
 | proxy/routers/mail.py | 1502 | 4 |
 | proxy/services/cad_bim_graph.py | 1425 | 2 |
-| proxy/services/tool_harness_service.py | 1380 | 8 |
+| proxy/services/tool_harness_service.py | 1396 | 12 |
 | proxy/services/retrieval_service.py | 1368 | 8 |
 | proxy/services/context_memory_service.py | 1175 | 8 |
 | sovushka/pages/samovar.py | 1143 | 3 |
@@ -67,7 +67,7 @@
 
 ### `proxy/routers/chat.py`
 
-Статус: `PRODUCT_REACHABLE`; строк: 452.
+Статус: `PRODUCT_REACHABLE`; строк: 466.
 
 | Импортируемый символ | Потребители |
 | --- | --- |

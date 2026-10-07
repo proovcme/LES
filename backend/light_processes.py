@@ -38,7 +38,7 @@ class InstanceLock:
             self.stream = None
 
 
-def attach_lifetime_job():
+def attach_lifetime_job(*, memory_bytes=None, process_limit=None, cpu_seconds=None):
     """Join a Windows job; OS closes its handle when this launcher dies.
 
     Children inherit the job. Keep the returned handle for the entire process
@@ -73,6 +73,15 @@ def attach_lifetime_job():
         raise ctypes.WinError(ctypes.get_last_error())
     limits = ExtendedLimits()
     limits.basic.flags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    if memory_bytes is not None:
+        limits.basic.flags |= 0x100  # JOB_OBJECT_LIMIT_PROCESS_MEMORY
+        limits.process_memory = memory_bytes
+    if process_limit is not None:
+        limits.basic.flags |= 0x8  # JOB_OBJECT_LIMIT_ACTIVE_PROCESS
+        limits.basic.active = process_limit
+    if cpu_seconds is not None:
+        limits.basic.flags |= 0x2  # JOB_OBJECT_LIMIT_PROCESS_TIME
+        limits.basic.process_time = cpu_seconds * 10_000_000
     if not kernel.SetInformationJobObject(handle, 9, ctypes.byref(limits), ctypes.sizeof(limits)):
         error = ctypes.WinError(ctypes.get_last_error())
         kernel.CloseHandle(handle)

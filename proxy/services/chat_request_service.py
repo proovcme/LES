@@ -54,6 +54,15 @@ from proxy.services import chat_runtime
 logger = logging.getLogger(__name__)
 
 async def _run_chat_with_provider(req: chat_request_contracts.ChatRequest, token_sink=None):
+    from backend.product_edition import is_light
+    if not is_light():
+        return await _run_chat_bound(req, token_sink)
+    from proxy.services.background_summary_service import foreground_request
+    async with foreground_request(req.session_id):
+        return await _run_chat_bound(req, token_sink)
+
+
+async def _run_chat_bound(req: chat_request_contracts.ChatRequest, token_sink=None):
     """Bind a provider to this asyncio context only, then reliably remove it."""
     try:
         from backend.product_edition import is_light
@@ -634,8 +643,6 @@ async def _run_chat(req: chat_request_contracts.ChatRequest, token_sink=None):
         raise HTTPException(status_code=admission.status_code, detail=detail)
 
     if is_light() and req.session_id:
-        from proxy.services.conversation_context_service import summarize
-        await summarize(req.session_id)
         session_block = session_memory(req.session_id)
 
     if use_semantic_cache:

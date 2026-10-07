@@ -184,6 +184,10 @@ class ToolHarness:
         else:
             from proxy.services.mcp_connection_service import register_tools
             register_tools(self._registry)
+            from proxy.services.installed_skill_service import register_tools as register_skills
+            register_skills(self._registry)
+            from proxy.services.skill_compute_service import register_tools as register_compute
+            register_compute(self._registry)
         self._executor = TrustedExecutor(
             self._registry,
             scope_resolver=resolve_authoritative_dataset_scope,
@@ -264,6 +268,18 @@ class ToolHarness:
         available = runtime_available
         if available is None:
             available = self.directly_executable_tool_names()
+        # Small models must still be able to reach explicitly selected extensions.
+        # Load their individual schemas on demand, not all into every request.
+        extensions = [name for name in profile_tools if name in available
+                      and (item := self._registry.get(name))
+                      and item.contract.category in {'mcp', 'skills'}
+                      and item.contract.effect in {EffectClass.READ, EffectClass.COMPUTE}]
+        definition_limit = min(max(1, int(limit)), 12 if model_preset in {'qwen-35b', 'qwen-35b-extended'} else 5)
+        if extensions and len(profile_tools) > definition_limit:
+            from proxy.services.extension_tool_service import register_extension_access
+            access = register_extension_access(self, extensions)
+            profile_tools = (access,) + tuple(name for name in profile_tools if name not in extensions)
+            available = frozenset((*available, access))
         requested_limit = max(1, int(limit))
         result = CapabilityBroker(self._registry).shortlist(
             BrokerRequest(

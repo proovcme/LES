@@ -209,6 +209,10 @@ async def get_chat_history(limit: int = 40, session_id: Optional[str] = None, _u
             artifact_payload = _json_object(artifact)
             if artifact_payload:
                 meta["artifact"] = artifact_payload
+            if crag_status in {'IN_PROGRESS', 'INTERRUPTED'}:
+                meta.update(partial=True, completion_status='interrupted' if crag_status == 'INTERRUPTED' else 'in_progress')
+                notice = 'Ответ прерван. Сохранён полученный текст; запрос можно повторить.' if crag_status == 'INTERRUPTED' else 'Ответ ещё формируется.'
+                answer = (answer or '') + '\n\n' + notice
             if feedback_status:
                 meta["feedback"] = feedback_status
             messages.append(

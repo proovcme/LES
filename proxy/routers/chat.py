@@ -385,7 +385,11 @@ async def chat_stream(req: chat_request_contracts.ChatRequest, _user=Depends(req
         "sources_payload": {},
     }
 
+    from proxy.services import chat_durability_service as durable
+    history_id = None
+
     async def sink(ev: dict) -> None:
+        await asyncio.to_thread(durable.checkpoint, history_id, ev.get('event'), ev.get('data'))
         event = ev.get("event")
         if event == "token" and ev.get("data"):
             stream_state["tokens"] += 1
@@ -398,7 +402,11 @@ async def chat_stream(req: chat_request_contracts.ChatRequest, _user=Depends(req
         await queue.put(ev)
 
     async def runner() -> None:
+        nonlocal history_id
+        binding = None
         try:
+            history_id = await asyncio.to_thread(durable.begin, req)
+            binding = durable._history_id.set(history_id)
             await sink({"event": "progress", "data": {"stage": "prepare", "label": "Подготавливаю запрос"}})
             result = decorate_payload(await chat_request_service._run_chat_with_provider(req, token_sink=sink))
             if stream_state["tokens"] == 0:
@@ -424,7 +432,13 @@ async def chat_stream(req: chat_request_contracts.ChatRequest, _user=Depends(req
                 public = public_error_payload(status_code=500, detail=str(e))
                 await queue.put({"event": "error", "data": {"status": 500, **public}})
         finally:
-            await queue.put(None)
+            try:
+                if history_id is not None:
+                    await asyncio.to_thread(durable.interrupt, history_id)
+            finally:
+                if binding is not None:
+                    durable._history_id.reset(binding)
+                await queue.put(None)
 
     async def event_source():
         task = asyncio.create_task(runner())
