@@ -11,3 +11,5 @@ export function chunkMatches(doc,chunk) { const m=chunk.metadata||{}; return Str
 export function treePosition(doc,index,count) { const angle=index*2.399963229728653,radius=Math.sqrt((index+.5)/Math.max(count,1)); return {x:Math.cos(angle)*radius,z:Math.sin(angle)*radius,height:24+hash(doc.id)%20}; }
 
 export function documentStatus(doc) { return doc.status === "INDEXED" && !Number(doc.chunks) ? "Текст для поиска отсутствует" : ({INDEXED:"Готов к поиску",PENDING:"Ожидает обработки",ERROR:"Нужна проверка",MISSING:"Файл не найден",SKIPPED:"Пропущен"}[doc.status] || "Статус не указан"); }
+
+export function counted(n,one,few,many){const v=Math.abs(Number(n)),last=v%10,teen=v%100;return `${n} ${teen>=11&&teen<=14?many:last===1?one:last>=2&&last<=4?few:many}`}

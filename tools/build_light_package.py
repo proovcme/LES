@@ -63,6 +63,7 @@ CODE_FILES = {"sovushka_ng.py", "pyproject.toml", "uv.lock", "tools/__init__.py"
               "tools/backup_suharik.py", "tools/les_doctor.py", "tools/les_runtime_control.py", "tools/lesctl.py",
               "proxy/services/mcp_connection_service.py", "proxy/routers/mcp_connections.py",
                 "backend/local_reranker.py", "backend/index_replacement.py", "backend/sparse_index.py",
+                "backend/bm25_store.py", "backend/bm25_hybrid.py", "backend/sparse_legacy.py",
                 "backend/inference/bm25_weighted.py",
                 "tools/rebuild_sparse_index.py",
               "proxy/services/chat_section_context_service.py",

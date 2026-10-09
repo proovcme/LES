@@ -1,190 +1,156 @@
-"""Recoverable, model-free BM25 projection of the current Qdrant corpus.
-
-The replacement journal is the publication fence. Reweighting only touches the
-named sparse vector; point identities, payloads and dense vectors stay intact.
-"""
-from contextlib import closing, contextmanager
-from collections import Counter
+"""Versioned lexical projection with incremental BM25 statistics and recovery."""
+from contextlib import contextmanager
 from dataclasses import asdict
-from functools import lru_cache
-import json
 import logging
-import math
-import os
-import sqlite3
 import uuid
 
 from qdrant_client import models
-from backend.inference.bm25_sparse import encode_bm25, _term_id
-from backend.inference.lexical_tokens import CURRENT_TOKENIZER, LEGACY_TOKENIZER, tokenize_current
+from backend import bm25_store, sparse_legacy
 from backend.inference.bm25_weighted import BM25Profile
+from backend.inference.lexical_tokens import CURRENT_TOKENIZER
 from backend.interface import EmbeddingContractError
+from backend.sparse_legacy import read_contract, _save_contract, _physical_collection
 
 LOG = logging.getLogger(__name__)
-SCHEMA = "les.sparse-index.v1"
+STORAGE = "sqlite-postings"
 
 
-def _physical_collection(client, name):
-    return next((entry.collection_name for entry in client.get_aliases().aliases
-                 if entry.alias_name == name), name)
+def _points(client, journal, scope):
+    if scope and "ids" in scope:
+        ids = scope["ids"]
+        for start in range(0, len(ids), 128):
+            yield client.retrieve(journal.collection, ids=ids[start:start + 128],
+                                  with_payload=True, with_vectors=False)
+        return
+    conditions = []
+    if scope:
+        match = (models.MatchAny(any=scope["datasets"]) if "datasets" in scope
+                 else models.MatchValue(value=scope["dataset"]))
+        conditions.append(models.FieldCondition(key="dataset_id", match=match))
+        if "file" in scope:
+            conditions.append(models.FieldCondition(key="file_name", match=models.MatchValue(value=scope["file"])))
+    offset = None
+    while True:
+        points, offset = client.scroll(journal.collection, offset=offset, limit=256,
+            scroll_filter=models.Filter(must=conditions) if conditions else None,
+            with_payload=["text", "dataset_id", "file_name", "node_role", "ancestor_ids"], with_vectors=False)
+        yield points
+        if offset is None:
+            break
 
 
-def read_contract(journal):
-    path = journal.directory / "sparse.json"
-    if not path.exists():
-        return None
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-        if (value["schema"] != SCHEMA or value["mode"] not in {"bm25", "tf"}
-                or value["tokenizer"] not in {LEGACY_TOKENIZER, CURRENT_TOKENIZER}
-                or (value["mode"] == "tf" and value["tokenizer"] != LEGACY_TOKENIZER)
-                or value["idf"] != ("exact-corpus" if value["mode"] == "bm25" else "qdrant")):
-            raise ValueError("Unknown sparse contract")
-        if value["mode"] == "bm25":
-            BM25Profile(**value["profile"])
-        return value
-    except (ValueError, KeyError, TypeError) as error:
-        raise EmbeddingContractError("INDEX_SPARSE_CONTRACT_INVALID") from error
-
-
-def _save_contract(journal, value):
-    path = journal.directory / "sparse.json"
-    temporary = path.with_suffix(".tmp")
-    with temporary.open("w", encoding="utf-8") as stream:
-        json.dump(value, stream, ensure_ascii=False)
-        stream.flush()
-        os.fsync(stream.fileno())
-    os.replace(temporary, path)
-
-
-def rebuild_locked(client, journal, *, mode="bm25", vector_name="bm25_sparse"):
-    """Caller owns journal.lease(); interrupted writes remain unreadable.
-
-    Two bounded passes through a disk spool avoid keeping the corpus in RAM.
-    Mean length is recomputed over every point, including hierarchy navigation,
-    IDF uses the same live population, without Qdrant's delayed deletion stats.
-    Empty text has length zero.
-    """
-    if mode not in {"bm25", "tf"}:
+def rebuild_locked(client, journal, *, mode="bm25", vector_name="bm25_sparse", incremental=False):
+    """Caller owns the lease. A crash keeps reads blocked until recovery completes."""
+    if mode == "tf":
+        return sparse_legacy.rebuild_locked(client, journal, mode=mode, vector_name=vector_name)
+    if mode != "bm25":
         raise ValueError("Unknown sparse mode")
-    info = client.get_collection(journal.collection)
-    config = info.config.params.sparse_vectors or {}
-    if vector_name not in config:
-        raise EmbeddingContractError("INDEX_SPARSE_CONTRACT_INVALID")
-    journal.directory.mkdir(parents=True, exist_ok=True)
-    # Mark before any vector write, also when re-entering after a crash.
+    scopes = journal.sparse_changes() if incremental else []
+    full = not scopes or any(scope is None for scope in scopes)
     journal._save(dict(phase="sparse_refresh", mode=mode, vector_name=vector_name,
                        revision=uuid.uuid4().hex))
-    spool = journal.directory / "sparse-spool.sqlite"
-    count = total_length = 0
-    LOG.info("[BM25] Preparing lexical weights for %s", journal.collection)
-    with closing(sqlite3.connect(spool)) as db:
-        db.execute("DROP TABLE IF EXISTS terms")
-        db.execute("CREATE TABLE terms (id TEXT PRIMARY KEY, body TEXT, length INTEGER)")
-        db.execute("DROP TABLE IF EXISTS frequencies")
-        db.execute("CREATE TABLE frequencies (term INTEGER PRIMARY KEY, df INTEGER NOT NULL)")
-        offset = None
-        while True:
-            points, offset = client.scroll(journal.collection, limit=128, offset=offset,
-                                           with_payload=["text"], with_vectors=False)
-            for point in points:
-                text = str((point.payload or {}).get("text") or "")
-                terms = (dict(Counter(_term_id(term) for term in tokenize_current(text)))
-                         if mode == "bm25" else encode_bm25(text))
-                length = int(sum(terms.values()))
-                db.execute("INSERT INTO terms VALUES (?, ?, ?)",
-                           (json.dumps(point.id), json.dumps(terms), length))
-                db.executemany("INSERT INTO frequencies VALUES (?, 1) ON CONFLICT(term) DO UPDATE SET df=df+1",
-                               ((term,) for term in terms))
-                count += 1
-                total_length += length
-            db.commit()
-            LOG.info("[BM25] Read lexical statistics for %s fragments", count)
-            if offset is None:
-                break
-        profile = BM25Profile(total_length / count if total_length and count else 1.0)
-        modifier = models.Modifier.NONE if mode == "bm25" else models.Modifier.IDF
-        if config[vector_name].modifier != modifier:
-            client.update_collection(journal.collection, sparse_vectors_config={
-                vector_name: models.SparseVectorParams(modifier=modifier)})
-
-        @lru_cache(maxsize=8192)
-        def inverse_frequency(term):
-            df = db.execute("SELECT df FROM frequencies WHERE term=?", (term,)).fetchone()[0]
-            return math.log(1 + (count - df + .5) / (df + .5))
-
-        cursor = db.execute("SELECT id, body, length FROM terms ORDER BY id")
-        updated = 0
-        while rows := cursor.fetchmany(128):
-            batch = []
-            for point_id, body, length in rows:
-                terms = {int(key): float(value) for key, value in json.loads(body).items()}
-                if mode == "bm25":
-                    norm = profile.k1 * (1 - profile.b + profile.b * length / profile.average_length)
-                    terms = {term: inverse_frequency(term) * (profile.k1 + 1) * tf / (tf + norm)
-                             for term, tf in terms.items()}
-                batch.append(models.PointVectors(id=json.loads(point_id), vector={
-                    vector_name: models.SparseVector(indices=list(terms), values=list(terms.values()))}))
-            client.update_vectors(journal.collection, points=batch, wait=True)
-            updated += len(batch)
-            LOG.info("[BM25] Lexical weights %s/%s", updated, count)
-    # Publication happens only after Qdrant acknowledged every batch.
     revision = uuid.uuid4().hex
-    value = dict(schema=SCHEMA, mode=mode, vector_name=vector_name,
-                 physical_collection=_physical_collection(client, journal.collection),
-                 tokenizer=CURRENT_TOKENIZER if mode == "bm25" else LEGACY_TOKENIZER,
-                 idf="exact-corpus" if mode == "bm25" else "qdrant", points=count,
-                 total_length=total_length, profile=asdict(profile), revision=revision)
+    touched = 0
+    with bm25_store.connect(journal, create=True) as db, db:
+        db.execute("BEGIN IMMEDIATE")
+        if full:
+            bm25_store.reset(db)
+        for scope in ([None] if full else scopes):
+            if scope:
+                bm25_store.clear_scope(db, scope)
+            for points in _points(client, journal, scope):
+                bm25_store.put(db, points)
+                touched += len(points)
+                LOG.info("[BM25] %s lexical records: %s", "Migrating" if full else "Updating", touched)
+        db.execute("DELETE FROM frequencies WHERE df=0")
+        db.execute("UPDATE corpus SET revision=? WHERE id=1", (revision,))
+        count, length, _ = db.execute("SELECT n, length, revision FROM corpus WHERE id=1").fetchone()
+        if count != int(client.count(journal.collection, exact=True).count):
+            raise EmbeddingContractError("INDEX_SPARSE_STALE")
+    profile = BM25Profile(length / count if count and length else 1.)
+    value = dict(schema="les.sparse-index.v2", mode=mode, storage=STORAGE,
+        vector_name=vector_name, physical_collection=_physical_collection(client, journal.collection),
+        tokenizer=CURRENT_TOKENIZER, idf="exact-corpus", points=count, total_length=length,
+        profile=asdict(profile), revision=revision)
     _save_contract(journal, value)
-    journal._save(dict(phase="idle", revision=revision))
-    spool.unlink(missing_ok=True)
+    journal.publish_sparse(revision)
+    LOG.info("[BM25] Published %s fragments; read %s changed records", count, touched)
     return value
 
 
 def ensure_current(client, journal, *, vector_name="bm25_sparse", mode=None):
-    """Refresh once after a corpus change, before its first hybrid query."""
     with journal.lease():
+        contract = read_contract(journal)
         pending = journal.pending()
+        target = mode or (pending or contract or {}).get("mode", "bm25")
         if pending:
             if pending["phase"] not in {"sparse_refresh", "sparse_dirty"}:
                 raise EmbeddingContractError("INDEX_RECOVERY_REQUIRED")
-            recovered = rebuild_locked(client, journal, mode=pending.get("mode", "bm25"),
-                                       vector_name=pending.get("vector_name", vector_name))
-            if mode is None or recovered["mode"] == mode:
-                return recovered
-        stamp = journal.read_stamp()
-        contract = read_contract(journal)
-        target = mode or (contract["mode"] if contract else "bm25")
-        count = int(client.count(journal.collection, exact=True).count)
-        config = client.get_collection(journal.collection).config.params.sparse_vectors or {}
-        expected_modifier = models.Modifier.NONE if target == "bm25" else models.Modifier.IDF
-        if (contract and contract["revision"] == stamp and contract["mode"] == target
-                and contract["tokenizer"] == (CURRENT_TOKENIZER if target == "bm25" else LEGACY_TOKENIZER)
-                and contract["vector_name"] == vector_name and contract["points"] == count
-                and contract.get("physical_collection") == _physical_collection(client, journal.collection)
-                and vector_name in config and config[vector_name].modifier == expected_modifier):
-            return contract
-        return rebuild_locked(client, journal, mode=target, vector_name=vector_name)
+            return rebuild_locked(client, journal, mode=target, vector_name=vector_name)
+        if target == "tf":
+            # Avoid acquiring the lease twice; legacy writes are only for explicit rollback.
+            if contract and contract["mode"] == "tf" and contract["revision"] == journal.read_stamp():
+                if (contract["points"] == int(client.count(journal.collection, exact=True).count)
+                        and contract.get("physical_collection") == _physical_collection(client, journal.collection)
+                        and client.get_collection(journal.collection).config.params.sparse_vectors[vector_name].modifier
+                            == models.Modifier.IDF):
+                    return contract
+            return rebuild_locked(client, journal, mode="tf", vector_name=vector_name)
+        if target != "bm25":
+            raise ValueError("Unknown sparse mode")
+        valid = (contract and contract.get("storage") == STORAGE
+            and contract["tokenizer"] == CURRENT_TOKENIZER and contract["vector_name"] == vector_name
+            and contract.get("physical_collection") == _physical_collection(client, journal.collection)
+            and (journal.directory / "bm25.sqlite").is_file())
+        if valid:
+            count, length, revision = bm25_store.metadata(journal)
+            valid = (count == contract["points"] and length == contract["total_length"]
+                     and revision == contract["revision"])
+            if valid and revision == journal.read_stamp():
+                if count == int(client.count(journal.collection, exact=True).count):
+                    return contract
+                valid = False  # Untracked change: full repair.
+        return rebuild_locked(client, journal, vector_name=vector_name, incremental=bool(valid))
 
 
 def encode_query(journal, text):
-    contract = read_contract(journal)
-    if not contract or contract["revision"] != journal.read_stamp():
-        raise EmbeddingContractError("INDEX_SPARSE_STALE")
-    if contract["mode"] == "bm25":
-        if contract["tokenizer"] == CURRENT_TOKENIZER:
-            return {_term_id(term): 1.0 for term in tokenize_current(text)}
-        return BM25Profile(**contract["profile"]).query(text)
-    return encode_bm25(text)
+    contract = read_contract(journal) or {}
+    if contract.get("storage") == STORAGE:
+        # Dynamic scores cannot be encoded as one vector. Never query stale legacy weights.
+        if contract["revision"] != journal.read_stamp():
+            raise EmbeddingContractError("INDEX_SPARSE_STALE")
+        raise EmbeddingContractError("INDEX_SPARSE_QUERY_REQUIRES_POSTINGS")
+    return sparse_legacy.encode_query(journal, text)
+
+
+def search(client, journal, text, *, limit=24, **filters):
+    if (read_contract(journal) or {}).get("storage") == STORAGE:
+        return bm25_store.search(journal, text, limit=limit, **filters)
+    terms = encode_query(journal, text)
+    stamp = journal.read_stamp()
+    conditions = []
+    for key, name in (("dataset_ids", "dataset_id"), ("doc_filter", "file_name"),
+                      ("node_roles", "node_role"), ("ancestor_ids", "ancestor_ids")):
+        if filters.get(key):
+            conditions.append(models.FieldCondition(key=name, match=models.MatchAny(any=filters[key])))
+    result = client.query_points(journal.collection, using="bm25_sparse", limit=limit,
+        query_filter=models.Filter(must=conditions) if conditions else None,
+        query=models.SparseVector(indices=list(terms), values=list(terms.values())))
+    journal.assert_unchanged(stamp)
+    return [(point.id, point.score) for point in result.points]
 
 
 @contextmanager
-def external_mutation(journal):
-    """Fence non-ingestion writes, invalidating cached weights even on failure."""
+def external_mutation(journal, *, dataset=None, datasets=None, file=None, ids=None):
+    """Persist precise scope before writes; unknown scopes rebuild safely."""
+    scope = {"ids": list(ids)} if ids is not None else (
+        {"dataset": dataset, **({"file": file} if file is not None else {})} if dataset is not None else None)
+    if datasets is not None:
+        scope = {"datasets": list(datasets)}
     with journal.lease():
         journal.assert_clean()
         contract = read_contract(journal)
-        journal._save(dict(phase="sparse_dirty", mode=(contract or {}).get("mode", "bm25"),
+        journal._save(dict(phase="sparse_dirty", mode=(contract or {}).get("mode", "bm25"), scope=scope,
                            vector_name=(contract or {}).get("vector_name", "bm25_sparse"),
                            revision=uuid.uuid4().hex))
         try:

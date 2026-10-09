@@ -1,0 +1,156 @@
+"""Legacy materialized projection, retained for explicit TF rollback and migration tests.
+
+The replacement journal is the publication fence. Reweighting only touches the
+named sparse vector; point identities, payloads and dense vectors stay intact.
+"""
+from contextlib import closing
+from collections import Counter
+from dataclasses import asdict
+from functools import lru_cache
+import json
+import logging
+import math
+import os
+import sqlite3
+import uuid
+
+from qdrant_client import models
+from backend.inference.bm25_sparse import encode_bm25, _term_id
+from backend.inference.lexical_tokens import CURRENT_TOKENIZER, LEGACY_TOKENIZER, tokenize_current
+from backend.inference.bm25_weighted import BM25Profile
+from backend.interface import EmbeddingContractError
+
+LOG = logging.getLogger(__name__)
+SCHEMA = "les.sparse-index.v1"
+
+
+def _physical_collection(client, name):
+    return next((entry.collection_name for entry in client.get_aliases().aliases
+                 if entry.alias_name == name), name)
+
+
+def read_contract(journal):
+    path = journal.directory / "sparse.json"
+    if not path.exists():
+        return None
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if (value["schema"] not in {SCHEMA, "les.sparse-index.v2"} or value["mode"] not in {"bm25", "tf"}
+                or value["tokenizer"] not in {LEGACY_TOKENIZER, CURRENT_TOKENIZER}
+                or (value["mode"] == "tf" and value["tokenizer"] != LEGACY_TOKENIZER)
+                or value["idf"] != ("exact-corpus" if value["mode"] == "bm25" else "qdrant")):
+            raise ValueError("Unknown sparse contract")
+        if value["schema"] == "les.sparse-index.v2" and (
+                value.get("storage") != "sqlite-postings" or value["mode"] != "bm25"):
+            raise ValueError("Unknown lexical storage")
+        if value["mode"] == "bm25":
+            BM25Profile(**value["profile"])
+        return value
+    except (ValueError, KeyError, TypeError) as error:
+        raise EmbeddingContractError("INDEX_SPARSE_CONTRACT_INVALID") from error
+
+
+def _save_contract(journal, value):
+    path = journal.directory / "sparse.json"
+    temporary = path.with_suffix(".tmp")
+    with temporary.open("w", encoding="utf-8") as stream:
+        json.dump(value, stream, ensure_ascii=False)
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(temporary, path)
+
+
+def rebuild_locked(client, journal, *, mode="bm25", vector_name="bm25_sparse"):
+    """Caller owns journal.lease(); interrupted writes remain unreadable.
+
+    Two bounded passes through a disk spool avoid keeping the corpus in RAM.
+    Mean length is recomputed over every point, including hierarchy navigation,
+    IDF uses the same live population, without Qdrant's delayed deletion stats.
+    Empty text has length zero.
+    """
+    if mode not in {"bm25", "tf"}:
+        raise ValueError("Unknown sparse mode")
+    info = client.get_collection(journal.collection)
+    config = info.config.params.sparse_vectors or {}
+    if vector_name not in config:
+        raise EmbeddingContractError("INDEX_SPARSE_CONTRACT_INVALID")
+    journal.directory.mkdir(parents=True, exist_ok=True)
+    # Mark before any vector write, also when re-entering after a crash.
+    journal._save(dict(phase="sparse_refresh", mode=mode, vector_name=vector_name,
+                       revision=uuid.uuid4().hex))
+    spool = journal.directory / "sparse-spool.sqlite"
+    count = total_length = 0
+    LOG.info("[BM25] Preparing lexical weights for %s", journal.collection)
+    with closing(sqlite3.connect(spool)) as db:
+        db.execute("DROP TABLE IF EXISTS terms")
+        db.execute("CREATE TABLE terms (id TEXT PRIMARY KEY, body TEXT, length INTEGER)")
+        db.execute("DROP TABLE IF EXISTS frequencies")
+        db.execute("CREATE TABLE frequencies (term INTEGER PRIMARY KEY, df INTEGER NOT NULL)")
+        offset = None
+        while True:
+            points, offset = client.scroll(journal.collection, limit=128, offset=offset,
+                                           with_payload=["text"], with_vectors=False)
+            for point in points:
+                text = str((point.payload or {}).get("text") or "")
+                terms = (dict(Counter(_term_id(term) for term in tokenize_current(text)))
+                         if mode == "bm25" else encode_bm25(text))
+                length = int(sum(terms.values()))
+                db.execute("INSERT INTO terms VALUES (?, ?, ?)",
+                           (json.dumps(point.id), json.dumps(terms), length))
+                db.executemany("INSERT INTO frequencies VALUES (?, 1) ON CONFLICT(term) DO UPDATE SET df=df+1",
+                               ((term,) for term in terms))
+                count += 1
+                total_length += length
+            db.commit()
+            LOG.info("[BM25] Read lexical statistics for %s fragments", count)
+            if offset is None:
+                break
+        profile = BM25Profile(total_length / count if total_length and count else 1.0)
+        modifier = models.Modifier.NONE if mode == "bm25" else models.Modifier.IDF
+        if config[vector_name].modifier != modifier:
+            client.update_collection(journal.collection, sparse_vectors_config={
+                vector_name: models.SparseVectorParams(modifier=modifier)})
+
+        @lru_cache(maxsize=8192)
+        def inverse_frequency(term):
+            df = db.execute("SELECT df FROM frequencies WHERE term=?", (term,)).fetchone()[0]
+            return math.log(1 + (count - df + .5) / (df + .5))
+
+        cursor = db.execute("SELECT id, body, length FROM terms ORDER BY id")
+        updated = 0
+        while rows := cursor.fetchmany(128):
+            batch = []
+            for point_id, body, length in rows:
+                terms = {int(key): float(value) for key, value in json.loads(body).items()}
+                if mode == "bm25":
+                    norm = profile.k1 * (1 - profile.b + profile.b * length / profile.average_length)
+                    terms = {term: inverse_frequency(term) * (profile.k1 + 1) * tf / (tf + norm)
+                             for term, tf in terms.items()}
+                batch.append(models.PointVectors(id=json.loads(point_id), vector={
+                    vector_name: models.SparseVector(indices=list(terms), values=list(terms.values()))}))
+            client.update_vectors(journal.collection, points=batch, wait=True)
+            updated += len(batch)
+            LOG.info("[BM25] Lexical weights %s/%s", updated, count)
+    # Publication happens only after Qdrant acknowledged every batch.
+    revision = uuid.uuid4().hex
+    value = dict(schema=SCHEMA, mode=mode, vector_name=vector_name,
+                 physical_collection=_physical_collection(client, journal.collection),
+                 tokenizer=CURRENT_TOKENIZER if mode == "bm25" else LEGACY_TOKENIZER,
+                 idf="exact-corpus" if mode == "bm25" else "qdrant", points=count,
+                 total_length=total_length, profile=asdict(profile), revision=revision)
+    _save_contract(journal, value)
+    journal._save(dict(phase="idle", revision=revision))
+    spool.unlink(missing_ok=True)
+    return value
+
+
+def encode_query(journal, text):
+    contract = read_contract(journal)
+    if not contract or contract["revision"] != journal.read_stamp():
+        raise EmbeddingContractError("INDEX_SPARSE_STALE")
+    if contract["mode"] == "bm25":
+        if contract["tokenizer"] == CURRENT_TOKENIZER:
+            return {_term_id(term): 1.0 for term in tokenize_current(text)}
+        return BM25Profile(**contract["profile"]).query(text)
+    return encode_bm25(text)
+

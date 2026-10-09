@@ -16,7 +16,7 @@ from qdrant_client import QdrantClient, models
 from backend.light_qdrant_runtime import LightQdrantRuntime
 from backend.index_replacement import ReplacementJournal
 from backend.inference.bm25_sparse import encode_bm25
-from backend.sparse_index import ensure_current, encode_query, external_mutation
+from backend.sparse_index import ensure_current, search, external_mutation
 
 
 def make_point(index):
@@ -41,12 +41,11 @@ def measure(client, journal, count):
     for index in range(30):
         start = time.perf_counter()
         assert ensure_current(client, journal)['revision'] == contract['revision']
-        terms = encode_query(journal, f'BB_{index}')
-        hits = client.query_points('benchmark', using='bm25_sparse', limit=10,
-            query=models.SparseVector(indices=list(terms), values=list(terms.values()))).points
-        assert hits and all(f'BB_{index} ' in p.payload['text'] for p in hits)
+        hits = search(client, journal, f'BB_{index}', limit=10)
+        records = client.retrieve('benchmark', ids=[pid for pid, _ in hits], with_payload=True)
+        assert records and all(f'BB_{index} ' in p.payload['text'] for p in records)
         latencies.append((time.perf_counter()-start)*1000)
-    with external_mutation(journal):
+    with external_mutation(journal, ids=[count]):
         client.upsert('benchmark', points=[make_point(count)], wait=True)
     start = time.perf_counter()
     changed = ensure_current(client, journal)

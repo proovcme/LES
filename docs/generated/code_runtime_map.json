@@ -67,6 +67,8 @@
     {
       "inbound": [
         "backend/auth.py",
+        "backend/bm25_hybrid.py",
+        "backend/bm25_store.py",
         "backend/colbert_late_interaction.py",
         "backend/converter.py",
         "backend/document_catalog.py",
@@ -123,6 +125,7 @@
         "backend/runtime_paths.py",
         "backend/smart_index.py",
         "backend/sparse_index.py",
+        "backend/sparse_legacy.py",
         "backend/structure_splitter.py",
         "backend/system_memory.py",
         "backend/text_decoding.py",
@@ -149,6 +152,41 @@
         "sovushka/provider_session.py"
       ],
       "path": "backend/auth.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "backend/qdrant_retrieval.py",
+        "tests/test_light_bm25_incremental.py"
+      ],
+      "lines": 34,
+      "module": "backend.bm25_hybrid",
+      "outbound": [
+        "backend/__init__.py",
+        "backend/bm25_store.py",
+        "backend/interface.py"
+      ],
+      "path": "backend/bm25_hybrid.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "backend/bm25_hybrid.py",
+        "backend/qdrant_collection.py",
+        "backend/sparse_index.py",
+        "tests/test_light_bm25_incremental.py",
+        "tests/test_light_bm25_index.py"
+      ],
+      "lines": 142,
+      "module": "backend.bm25_store",
+      "outbound": [
+        "backend/__init__.py",
+        "backend/inference/lexical_tokens.py",
+        "backend/interface.py"
+      ],
+      "path": "backend/bm25_store.py",
       "status": "PRODUCT_REACHABLE",
       "windows_runtime_explicit": false
     },
@@ -323,6 +361,7 @@
         "proxy/services/chat_section_context_service.py",
         "proxy/services/dataset_deletion_service.py",
         "proxy/services/retrieval_service.py",
+        "tests/test_light_bm25_incremental.py",
         "tests/test_light_bm25_index.py",
         "tests/test_light_chat_sections.py",
         "tests/test_light_index_recovery.py",
@@ -330,7 +369,7 @@
         "tools/benchmark_sparse_index.py",
         "tools/rebuild_sparse_index.py"
       ],
-      "lines": 172,
+      "lines": 199,
       "module": "backend.index_replacement",
       "outbound": [
         "backend/__init__.py",
@@ -369,7 +408,7 @@
         "backend/qdrant_support.py",
         "backend/raptor_qdrant_store.py",
         "backend/retrieval_candidate.py",
-        "backend/sparse_index.py",
+        "backend/sparse_legacy.py",
         "tests/test_light_bm25_index.py",
         "tests/test_light_lexical_v2.py",
         "tools/benchmark_sparse_index.py",
@@ -392,6 +431,7 @@
       "inbound": [
         "backend/retrieval_candidate.py",
         "backend/sparse_index.py",
+        "backend/sparse_legacy.py",
         "tests/test_light_lexical_v2.py",
         "tests/test_light_retrieval_candidate.py",
         "tools/evaluate_retrieval_candidate.py"
@@ -409,9 +449,13 @@
     },
     {
       "inbound": [
+        "backend/bm25_store.py",
         "backend/inference/bm25_sparse.py",
+        "backend/qdrant_retrieval.py",
         "backend/sparse_index.py",
+        "backend/sparse_legacy.py",
         "proxy/services/lexical_index_service.py",
+        "tests/test_light_bm25_index.py",
         "tests/test_light_lexical_v2.py"
       ],
       "lines": 66,
@@ -474,16 +518,20 @@
     },
     {
       "inbound": [
+        "backend/bm25_hybrid.py",
+        "backend/bm25_store.py",
         "backend/document_catalog.py",
         "backend/embedding_client.py",
         "backend/index_replacement.py",
         "backend/qdrant_support.py",
         "backend/sparse_index.py",
+        "backend/sparse_legacy.py",
         "proxy/routers/dataset_cloud.py",
         "proxy/routers/dataset_parse.py",
         "proxy/services/chat_section_context_service.py",
         "proxy/services/lexical_index_service.py",
         "proxy/services/retrieval_service.py",
+        "tests/test_light_bm25_incremental.py",
         "tests/test_light_bm25_index.py",
         "tests/test_light_chat_sections.py",
         "tests/test_light_code_review.py",
@@ -897,10 +945,11 @@
       "inbound": [
         "backend/qdrant_adapter.py"
       ],
-      "lines": 327,
+      "lines": 333,
       "module": "backend.qdrant_collection",
       "outbound": [
         "backend/__init__.py",
+        "backend/bm25_store.py",
         "backend/index_replacement.py",
         "backend/qdrant_support.py",
         "backend/sparse_index.py",
@@ -966,16 +1015,19 @@
     {
       "inbound": [
         "backend/qdrant_adapter.py",
+        "tests/test_light_bm25_incremental.py",
         "tests/test_light_index_recovery.py"
       ],
-      "lines": 439,
+      "lines": 449,
       "module": "backend.qdrant_retrieval",
       "outbound": [
         "backend/__init__.py",
+        "backend/bm25_hybrid.py",
         "backend/colbert_late_interaction.py",
         "backend/embedding_client.py",
         "backend/index_replacement.py",
         "backend/inference/bm25_sparse.py",
+        "backend/inference/lexical_tokens.py",
         "backend/qdrant_support.py",
         "backend/rag_hierarchy.py",
         "backend/sparse_index.py"
@@ -1306,13 +1358,32 @@
         "backend/qdrant_integrity.py",
         "backend/qdrant_retrieval.py",
         "proxy/services/dataset_deletion_service.py",
+        "tests/test_light_bm25_incremental.py",
         "tests/test_light_bm25_index.py",
         "tests/test_light_lexical_v2.py",
         "tools/benchmark_sparse_index.py",
         "tools/rebuild_sparse_index.py"
       ],
-      "lines": 193,
+      "lines": 159,
       "module": "backend.sparse_index",
+      "outbound": [
+        "backend/__init__.py",
+        "backend/bm25_store.py",
+        "backend/inference/bm25_weighted.py",
+        "backend/inference/lexical_tokens.py",
+        "backend/interface.py",
+        "backend/sparse_legacy.py"
+      ],
+      "path": "backend/sparse_index.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "backend/sparse_index.py"
+      ],
+      "lines": 156,
+      "module": "backend.sparse_legacy",
       "outbound": [
         "backend/__init__.py",
         "backend/inference/bm25_sparse.py",
@@ -1320,7 +1391,7 @@
         "backend/inference/lexical_tokens.py",
         "backend/interface.py"
       ],
-      "path": "backend/sparse_index.py",
+      "path": "backend/sparse_legacy.py",
       "status": "PRODUCT_REACHABLE",
       "windows_runtime_explicit": false
     },
@@ -6493,7 +6564,7 @@
         "tests/test_light_rerank_audit.py",
         "tests/test_retrieval_service.py"
       ],
-      "lines": 1393,
+      "lines": 1400,
       "module": "proxy.services.retrieval_service",
       "outbound": [
         "backend/colbert_late_interaction.py",
@@ -8910,7 +8981,7 @@
     },
     {
       "inbound": [],
-      "lines": 88,
+      "lines": 92,
       "module": "tests.test_forest_visualizer",
       "outbound": [
         "backend/rag_config.py",
@@ -8940,11 +9011,29 @@
     },
     {
       "inbound": [],
-      "lines": 209,
+      "lines": 169,
+      "module": "tests.test_light_bm25_incremental",
+      "outbound": [
+        "backend/bm25_hybrid.py",
+        "backend/bm25_store.py",
+        "backend/index_replacement.py",
+        "backend/interface.py",
+        "backend/qdrant_retrieval.py",
+        "backend/sparse_index.py"
+      ],
+      "path": "tests/test_light_bm25_incremental.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
+      "lines": 211,
       "module": "tests.test_light_bm25_index",
       "outbound": [
+        "backend/bm25_store.py",
         "backend/index_replacement.py",
         "backend/inference/bm25_sparse.py",
+        "backend/inference/lexical_tokens.py",
         "backend/interface.py",
         "backend/light_qdrant_runtime.py",
         "backend/sparse_index.py"
@@ -10228,7 +10317,7 @@
     },
     {
       "inbound": [],
-      "lines": 95,
+      "lines": 94,
       "module": "tools.benchmark_sparse_index",
       "outbound": [
         "backend/index_replacement.py",
@@ -10256,7 +10345,7 @@
       "inbound": [
         "tests/test_light_package.py"
       ],
-      "lines": 277,
+      "lines": 278,
       "module": "tools.build_light_package",
       "outbound": [
         "tools/__init__.py",
@@ -12470,12 +12559,12 @@
   "summary": {
     "dormant_candidates": 35,
     "parse_warnings": 0,
-    "product_reachable": 365,
+    "product_reachable": 368,
     "registered_api_routes": 292,
     "runtime_support": 5,
-    "test_or_tool_only": 146,
-    "tracked_python_files": 551,
-    "tracked_python_lines": 155393
+    "test_or_tool_only": 147,
+    "tracked_python_files": 555,
+    "tracked_python_lines": 155916
   },
   "warnings": []
 }

@@ -90,7 +90,7 @@ class QdrantRetrieval:
         ancestor_ids: support.Optional[support.List[str]] = None,
         _query_state=None,
     ) -> support.List[support.Chunk]:
-        """Qdrant-native dense+sparse hybrid over a named-vector collection.
+        """Qdrant dense + exact BM25 postings, with legacy native RRF for TF rollback.
 
         Requires `RAG_QDRANT_SCHEMA=named` and points containing both dense and
         sparse named vectors. Caller should keep a fallback to the legacy hybrid.
@@ -109,9 +109,13 @@ class QdrantRetrieval:
         else:
             dense_vec, journal, stamp = _query_state
         journal.assert_unchanged(stamp)
+        dynamic = False
         if hasattr(self, "_prepare_sparse_index"):
+            from backend.sparse_index import read_contract, STORAGE
+            from backend.inference.lexical_tokens import tokenize_current
+            dynamic = (read_contract(journal) or {}).get("storage") == STORAGE
             from backend.sparse_index import encode_query
-            sparse = encode_query(journal, query)
+            sparse = {term: 1. for term in tokenize_current(query)} if dynamic else encode_query(journal, query)
         else:
             sparse = encode_bm25(query)
         if not sparse:
@@ -136,26 +140,32 @@ class QdrantRetrieval:
             )
         query_filter = support.models.Filter(must=must) if must else None
         prefetch_limit = max(top_k * 2, 24)
-        results = await self.aclient.query_points(
-            collection_name=self.collection_name,
-            prefetch=[
-                support.models.Prefetch(
-                    query=dense_vec,
-                    using=support._dense_vector_name(),
-                    filter=query_filter,
-                    limit=prefetch_limit,
-                ),
-                support.models.Prefetch(
-                    query=support.models.SparseVector(indices=list(sparse.keys()), values=list(sparse.values())),
-                    using=support._sparse_vector_name(),
-                    filter=query_filter,
-                    limit=prefetch_limit,
-                ),
-            ],
-            query=support.models.FusionQuery(fusion=support.models.Fusion.RRF),
-            limit=top_k,
-            with_payload=True,
-        )
+        if dynamic:
+            from backend.bm25_hybrid import query as dynamic_query
+            results = await dynamic_query(self, journal, query, dense_vec, query_filter,
+                dense_name=support._dense_vector_name(), prefetch_limit=prefetch_limit, limit=top_k,
+                dataset_ids=dataset_ids, doc_filter=doc_filter, node_roles=node_roles, ancestor_ids=ancestor_ids)
+        else:
+            results = await self.aclient.query_points(
+                collection_name=self.collection_name,
+                prefetch=[
+                    support.models.Prefetch(
+                        query=dense_vec,
+                        using=support._dense_vector_name(),
+                        filter=query_filter,
+                        limit=prefetch_limit,
+                    ),
+                    support.models.Prefetch(
+                        query=support.models.SparseVector(indices=list(sparse.keys()), values=list(sparse.values())),
+                        using=support._sparse_vector_name(),
+                        filter=query_filter,
+                        limit=prefetch_limit,
+                    ),
+                ],
+                query=support.models.FusionQuery(fusion=support.models.Fusion.RRF),
+                limit=top_k,
+                with_payload=True,
+            )
         journal.assert_unchanged(stamp)
         return [
             support.Chunk(

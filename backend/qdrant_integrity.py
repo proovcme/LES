@@ -383,7 +383,7 @@ class QdrantIntegrity:
             return self._audit_dataset_integrity(dataset_id, repair=False)
         from backend.index_replacement import ReplacementJournal
         from backend.sparse_index import external_mutation
-        with external_mutation(ReplacementJournal.for_adapter(self)):
+        with external_mutation(ReplacementJournal.for_adapter(self), dataset=dataset_id):
             return self._audit_dataset_integrity(dataset_id, repair=True)
 
     def _audit_dataset_integrity(self, dataset_id: str, *, repair: bool = False) -> dict[str, support.Any]:

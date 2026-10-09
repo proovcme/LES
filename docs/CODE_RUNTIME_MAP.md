@@ -19,11 +19,11 @@
 
 | Метрика | Значение |
 | --- | --- |
-| Python-файлов под git | 551 |
-| Строк Python | 155393 |
-| PRODUCT_REACHABLE | 365 |
+| Python-файлов под git | 555 |
+| Строк Python | 155916 |
+| PRODUCT_REACHABLE | 368 |
 | RUNTIME_SUPPORT | 5 |
-| TEST_OR_TOOL_ONLY | 146 |
+| TEST_OR_TOOL_ONLY | 147 |
 | DORMANT_CANDIDATE | 35 |
 | Зарегистрированных API-маршрутов | 292 |
 | Ошибок разбора | 0 |
@@ -42,8 +42,8 @@
 | proxy/services/checklist_review_service.py | 1518 | 1 |
 | proxy/routers/mail.py | 1502 | 4 |
 | proxy/services/cad_bim_graph.py | 1425 | 2 |
+| proxy/services/retrieval_service.py | 1400 | 10 |
 | proxy/services/tool_harness_service.py | 1396 | 14 |
-| proxy/services/retrieval_service.py | 1393 | 10 |
 | proxy/services/context_memory_service.py | 1175 | 8 |
 | sovushka/pages/samovar.py | 1143 | 3 |
 | backend/document_router.py | 1124 | 6 |

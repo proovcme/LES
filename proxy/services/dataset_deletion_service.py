@@ -33,10 +33,10 @@ _DELETE_LOCK = asyncio.Lock()
 
 
 @asynccontextmanager
-async def _mutation_guard(storage_root, collection):
+async def _mutation_guard(storage_root, collection, dataset_ids):
     from backend.index_replacement import ReplacementJournal
     from backend.sparse_index import external_mutation
-    with external_mutation(ReplacementJournal(storage_root, collection)):
+    with external_mutation(ReplacementJournal(storage_root, collection), datasets=dataset_ids):
         yield
 
 
@@ -201,7 +201,7 @@ async def delete_datasets_safely(
             "recovery-free deletion is limited to the exact release acceptance fixture"
         )
 
-    async with _DELETE_LOCK, _mutation_guard(storage_root, collection):
+    async with _DELETE_LOCK, _mutation_guard(storage_root, collection, unique_ids):
         recovery_dir = None if ephemeral else _new_recovery_dir(db_path, "datasets")
         db_backup = None if recovery_dir is None else recovery_dir / db_path.name
         if db_backup is not None:

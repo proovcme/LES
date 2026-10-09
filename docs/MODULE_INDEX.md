@@ -1,6 +1,9 @@
 # Модули LES RAG
 
 Порядок RRF/реранкера, контекст, worker и ошибки: [контракт RAG](modules/rag-ranking.md).
+`backend/bm25_store.py` — postings и точная оценка при запросе;
+`backend/sparse_index.py` — миграция и журнал областей изменений;
+`backend/bm25_hybrid.py` — объединение с dense, `sparse_legacy.py` — TF-откат.
 Рабочий BM25, миграция и обновление без LLM: [контракт](modules/bm25-index.md).
 Версия словаря и короткие обозначения: `backend/inference/lexical_tokens.py`.
 Уведомление об отказе с явным переходом: `sovushka/components/chat_failure_notice.py`.

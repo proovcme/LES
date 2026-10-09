@@ -43,6 +43,10 @@ def test_forest_identity_and_source_contract():
     module = (ROOT / "qdrant_visualizer/forest-model.js").read_text(encoding="utf-8")
     script = "const m=await import('data:text/javascript;base64,'+Buffer.from(" + json.dumps(module) + ").toString('base64'));\n" + r'''
     const assert = (await import('node:assert/strict')).default;
+    for(const [n,w] of [[0,'рощ'],[1,'роща'],[2,'рощи'],[5,'рощ'],[11,'рощ'],[12,'рощ'],[14,'рощ'],[21,'роща'],[22,'рощи'],[101,'роща'],[111,'рощ']])
+      assert.equal(m.counted(n,'роща','рощи','рощ'),`${n} ${w}`);
+    assert.equal(m.counted(2,'документ','документа','документов'),'2 документа');
+
     const a={id:'a:same.pdf',dataset_id:'a',label:'same.pdf'};
     const b={id:'b:same.pdf',dataset_id:'b',label:'same.pdf'};
     const hit={doc_name:'same.pdf',metadata:{dataset_id:'a'}};

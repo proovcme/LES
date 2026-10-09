@@ -121,7 +121,34 @@ class ReplacementJournal:
 
     def finish(self):
         if self.path.exists():
-            self._save(dict(phase="idle", revision=uuid.uuid4().hex))
+            value = self.pending() or {}
+            scope = value.get("scope")
+            if value.get("phase") in {"staging", "committing"}:
+                scope = {"dataset": value["dataset"], "file": value["file_name"]}
+            # The invalidation and idle revision are one durable transaction.
+            # Unknown writers invalidate the whole projection, never silently skip it.
+            with sqlite3.connect(self.path) as conn:
+                conn.execute("PRAGMA synchronous=FULL")
+                conn.execute("CREATE TABLE IF NOT EXISTS sparse_changes (scope TEXT PRIMARY KEY)")
+                conn.execute("INSERT OR IGNORE INTO sparse_changes VALUES (?)", (json.dumps(scope),))
+                conn.execute("UPDATE replacement SET body=? WHERE id=1", (
+                    json.dumps(dict(phase="idle", revision=uuid.uuid4().hex)),))
+
+    def sparse_changes(self):
+        if not self.path.exists():
+            return []
+        with sqlite3.connect(self.path) as conn:
+            if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='sparse_changes'").fetchone():
+                return []
+            return [json.loads(row[0]) for row in conn.execute("SELECT scope FROM sparse_changes")]
+
+    def publish_sparse(self, revision):
+        with sqlite3.connect(self.path) as conn:
+            conn.execute("PRAGMA synchronous=FULL")
+            conn.execute("CREATE TABLE IF NOT EXISTS sparse_changes (scope TEXT PRIMARY KEY)")
+            conn.execute("DELETE FROM sparse_changes")
+            conn.execute("UPDATE replacement SET body=? WHERE id=1", (
+                json.dumps(dict(phase="idle", revision=revision)),))
 
     def recover(self, client, adapter):
         """Caller holds the lease; repeat safely after any interrupted recovery."""

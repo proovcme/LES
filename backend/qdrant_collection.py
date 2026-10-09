@@ -17,7 +17,9 @@ class QdrantCollection:
             )) as client:
                 return ensure_current(client, ReplacementJournal.for_adapter(self),
                                       vector_name=support._sparse_vector_name())
-        return await support.asyncio.to_thread(prepare)
+        contract = await support.asyncio.to_thread(prepare)
+        self._lexical_storage = contract.get("storage", "qdrant_sparse")
+        return contract
 
     async def _ensure_collection(self):
         if self._collection_ready:
@@ -191,8 +193,12 @@ class QdrantCollection:
         try:
             journal = ReplacementJournal.for_adapter(self)
             sparse = read_contract(journal)
+            ready = bool(sparse and sparse["revision"] == journal.read_stamp())
+            if ready and sparse.get("storage") == "sqlite-postings":
+                from backend.bm25_store import metadata
+                ready = metadata(journal) == (sparse["points"], sparse["total_length"], sparse["revision"])
             snapshot["sparse_index"] = {
-                "status": "ready" if sparse and sparse["revision"] == journal.read_stamp() else "pending",
+                "status": "ready" if ready else "pending",
                 "contract": sparse,
             }
         except support.EmbeddingContractError as error:

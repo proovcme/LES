@@ -10,7 +10,8 @@ import pytest
 from qdrant_client import QdrantClient, models
 
 from backend.index_replacement import ReplacementJournal
-from backend.inference.bm25_sparse import tokenize, _term_id, encode_bm25
+from backend.inference.bm25_sparse import _term_id, encode_bm25
+from backend.inference.lexical_tokens import tokenize_current as tokenize
 from backend.interface import EmbeddingContractError
 from backend.sparse_index import ensure_current, encode_query, external_mutation, read_contract
 
@@ -37,9 +38,8 @@ def index(tmp_path):
 
 
 def scores(client, journal, query):
-    terms = encode_query(journal, query)
-    return {point.id: point.score for point in client.query_points("docs", using="bm25_sparse",
-        query=models.SparseVector(indices=list(terms), values=list(terms.values())), limit=200).points}
+    from backend.sparse_index import search
+    return dict(search(client, journal, query, limit=200))
 
 
 def oracle(texts, query):
@@ -102,7 +102,7 @@ def test_add_replace_delete_recalculate_current_corpus_mean(native_index):
     put(client, texts)
     ensure_current(client, journal)
     for operation in ("add", "replace", "delete"):
-        with external_mutation(journal):
+        with external_mutation(journal, ids=[0, 2]):
             if operation == "add":
                 texts.append("кабель " + "сечение " * 30)
                 put(client, texts[-1:], 2)
@@ -121,19 +121,20 @@ def test_add_replace_delete_recalculate_current_corpus_mean(native_index):
 def test_interrupted_partial_reweight_is_blocked_then_recovers(index, monkeypatch):
     client, journal = index
     put(client, ["кабель " * (index % 4 + 1) for index in range(150)])
-    original = client.update_vectors
+    from backend import bm25_store
+    original = bm25_store.put
     calls = []
     def fail(*args, **kwargs):
         original(*args, **kwargs)
         calls.append(True)
         raise OSError("power failure")
-    monkeypatch.setattr(client, "update_vectors", fail)
+    monkeypatch.setattr(bm25_store, "put", fail)
     with pytest.raises(OSError):
         ensure_current(client, journal)
     assert calls and journal.pending()["phase"] == "sparse_refresh"
     with pytest.raises(EmbeddingContractError, match="INDEX_RECOVERY_REQUIRED"):
         journal.read_stamp()
-    monkeypatch.setattr(client, "update_vectors", original)
+    monkeypatch.setattr(bm25_store, "put", original)
     with journal.lease():
         journal.recover(client, SimpleNamespace())
     assert read_contract(journal)["points"] == 150
@@ -149,7 +150,7 @@ def test_rollback_to_legacy_then_bm25_is_explicit_and_repeatable(index):
     assert encode_query(journal, "кабель кабель")[_term_id("кабел")] == 2
     assert ensure_current(client, journal)["mode"] == "tf"
     ensure_current(client, journal, mode="bm25")
-    assert set(encode_query(journal, "кабель кабель").values()) == {1.}
+    assert scores(client, journal, "кабель кабель") == scores(client, journal, "кабель")
 
 
 def test_empty_corpus_and_corrupt_contract_fail_closed(index):
@@ -182,7 +183,8 @@ def test_idf_modifier_cannot_be_applied_twice(index):
     client.update_collection("docs", sparse_vectors_config={
         "bm25_sparse": models.SparseVectorParams(modifier=models.Modifier.IDF)})
     repaired = ensure_current(client, journal)
-    assert repaired["revision"] != original["revision"]
+    # Qdrant modifiers no longer affect dynamic BM25; no rebuild or double IDF.
+    assert repaired["revision"] == original["revision"]
     assert scores(client, journal, "кабель") == pytest.approx(oracle(["кабель", "заземление"], "кабель"), rel=1e-5)
 
 

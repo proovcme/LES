@@ -748,6 +748,9 @@ async def retrieve_chat_chunks(
             detail=f"{type(native_error).__name__}: {native_error}",
         )
     _rt["native"] = round(time.monotonic() - _s, 3)
+    dynamic_bm25 = getattr(rag_backend, "_lexical_storage", None) == "sqlite-postings"
+    lexical_channel = "bm25_postings" if dynamic_bm25 else "qdrant_sparse"
+    fusion_engine = "local_rrf" if dynamic_bm25 else "qdrant_rrf"
     trace = RetrievalTrace(
         status="ok",
         resolved_dataset_ids=list(dataset_ids or []),
@@ -760,14 +763,16 @@ async def retrieve_chat_chunks(
         vector_count=len(native_chunks),
         lexical_count=0,
         merged_count=len(native_chunks),
-        score_kind="qdrant_rrf",
-        retrieval_channels=["dense", "qdrant_sparse"],
+        score_kind=fusion_engine,
+        retrieval_channels=["dense", lexical_channel],
         fusion=(
             "global_rrf+descendant_rrf"
             if hasattr(rag_backend, "retrieve_native_hierarchical")
             else "rrf"
         ),
     )
+    if dynamic_bm25:
+        trace.mode = trace.mode.replace("qdrant_native", "dense_bm25")
     if effective_doc_filter:
         trace.exact_refs.extend([f"file:{name}" for name in effective_doc_filter])
     chunks = native_chunks
@@ -790,10 +795,10 @@ async def retrieve_chat_chunks(
                 trace.status = "ok"
                 trace.resolved_dataset_ids = list(dataset_ids or [])
                 trace.scope_source = scope_source
-                trace.mode = f"qdrant_native_{merged_trace.mode}"
+                trace.mode = f"{'dense_bm25' if dynamic_bm25 else 'qdrant_native'}_{merged_trace.mode}"
                 trace.vector_count = len(native_chunks)
-                trace.retrieval_channels = ["dense", "qdrant_sparse", "lexical"]
-                trace.fusion = "qdrant_rrf+lexical_safety_rrf"
+                trace.retrieval_channels = ["dense", lexical_channel, "lexical"]
+                trace.fusion = f"{fusion_engine}+lexical_safety_rrf"
                 if effective_doc_filter:
                     trace.exact_refs.extend([f"file:{name}" for name in effective_doc_filter])
                 _rt["native_lexical"] = merged_trace.lexical_count
@@ -994,15 +999,17 @@ async def retrieve_chat_chunks(
                     if retry_trace.lexical_count
                     else "qdrant_native_hybrid"
                 )
+                if dynamic_bm25:
+                    retry_trace.mode = retry_trace.mode.replace("qdrant_native", "dense_bm25")
                 retry_trace.vector_count = len(retry_native)
-                retry_trace.score_kind = "rrf" if retry_trace.lexical_count else "qdrant_rrf"
+                retry_trace.score_kind = "rrf" if retry_trace.lexical_count else fusion_engine
                 retry_trace.retrieval_channels = (
-                    ["dense", "qdrant_sparse", "lexical"]
+                    ["dense", lexical_channel, "lexical"]
                     if retry_trace.lexical_count
-                    else ["dense", "qdrant_sparse"]
+                    else ["dense", lexical_channel]
                 )
                 retry_trace.fusion = (
-                    "qdrant_rrf+lexical_safety_rrf"
+                    f"{fusion_engine}+lexical_safety_rrf"
                     if retry_trace.lexical_count
                     else "rrf"
                 )
