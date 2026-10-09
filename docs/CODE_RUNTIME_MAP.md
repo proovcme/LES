@@ -20,7 +20,7 @@
 | Метрика | Значение |
 | --- | --- |
 | Python-файлов под git | 555 |
-| Строк Python | 155916 |
+| Строк Python | 155915 |
 | PRODUCT_REACHABLE | 368 |
 | RUNTIME_SUPPORT | 5 |
 | TEST_OR_TOOL_ONLY | 147 |

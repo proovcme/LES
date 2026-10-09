@@ -1382,7 +1382,7 @@
       "inbound": [
         "backend/sparse_index.py"
       ],
-      "lines": 156,
+      "lines": 155,
       "module": "backend.sparse_legacy",
       "outbound": [
         "backend/__init__.py",
@@ -12564,7 +12564,7 @@
     "runtime_support": 5,
     "test_or_tool_only": 147,
     "tracked_python_files": 555,
-    "tracked_python_lines": 155916
+    "tracked_python_lines": 155915
   },
   "warnings": []
 }

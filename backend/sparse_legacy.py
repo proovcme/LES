@@ -153,4 +153,3 @@ def encode_query(journal, text):
             return {_term_id(term): 1.0 for term in tokenize_current(text)}
         return BM25Profile(**contract["profile"]).query(text)
     return encode_bm25(text)
-
