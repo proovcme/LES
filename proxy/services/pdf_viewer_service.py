@@ -46,6 +46,7 @@ def viewer_html(
     page_count: int,
     initial_page: int = 1,
     highlight_bbox: Iterable[float] | None = None,
+    document_id: str = "",
 ) -> str:
     total = max(1, int(page_count))
     page = max(1, min(int(initial_page or 1), total))
@@ -61,13 +62,14 @@ def viewer_html(
         "pageCount": total,
         "initialPage": page,
         "highlightBbox": bbox,
+        "documentId": document_id,
     })
     return f"""<!doctype html>
 <html lang="ru">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Л.И.С.Т. PDF</title>
+  <title>ЛЕС · PDF</title>
   <style>
     :root {{ color-scheme: light; --bg:#eef3f7; --panel:#fff; --text:#18242e; --dim:#647482;
       --accent:#0f8b68; --line:rgba(0,0,0,.12); --shadow:0 12px 34px rgba(20,36,50,.14); }}
@@ -115,7 +117,7 @@ def viewer_html(
   <header class="toolbar" aria-label="Управление PDF">
     <div class="name" id="name"></div>
     <button id="prev" aria-label="Предыдущая страница" title="Предыдущая страница">&#8592;</button>
-    <div class="page-control"><input id="page" type="number" min="1"><span id="total"></span></div>
+    <div class="page-control"><input id="page" type="number" min="1" aria-label="Номер страницы"><span id="total"></span></div>
     <button id="next" aria-label="Следующая страница" title="Следующая страница">&#8594;</button>
     <button id="zoom-out" aria-label="Уменьшить" title="Уменьшить">&#8722;</button>
     <button class="zoom" id="zoom" title="Вернуть масштаб 100%">100%</button>
@@ -153,12 +155,20 @@ def viewer_html(
       if (cfg.highlightBbox && page === cfg.initialPage) params.set('highlight_bbox', cfg.highlightBbox.join(','));
       image.classList.add('loading');
       image.style.width = `${{zoom}}%`;
-      image.src = `${{api}}/rag/file/pdf-preview?${{params.toString()}}`;
+      status.textContent = 'Загрузка страницы…'; status.classList.add('visible');
+      image.setAttribute('aria-busy', 'true');
+      if (cfg.documentId) {{
+        const preview = new URLSearchParams({{width:params.get('width')}});
+        if (cfg.highlightBbox && page === cfg.initialPage) preview.set('bbox', cfg.highlightBbox.join(','));
+        image.src = `${{api}}/documents/by-id/${{encodeURIComponent(cfg.documentId)}}/pdf-contour/pages/${{page}}/preview?${{preview}}`;
+      }} else image.src = `${{api}}/rag/file/pdf-preview?${{params.toString()}}`;
       const raw = new URLSearchParams({{path:cfg.path}});
-      document.getElementById('open').href = `${{api}}/rag/file/raw?${{raw.toString()}}#page=${{page}}`;
+      document.getElementById('open').href = cfg.documentId
+        ? `${{api}}/documents/by-id/${{encodeURIComponent(cfg.documentId)}}/raw#page=${{page}}`
+        : `${{api}}/rag/file/raw?${{raw.toString()}}#page=${{page}}`;
     }}
-    image.addEventListener('load', () => image.classList.remove('loading'));
-    image.addEventListener('error', () => {{ image.classList.remove('loading'); notify('Страница недоступна'); }});
+    image.addEventListener('load', () => {{ image.classList.remove('loading'); image.setAttribute('aria-busy', 'false'); status.classList.remove('visible'); }});
+    image.addEventListener('error', () => {{ image.classList.remove('loading'); image.setAttribute('aria-busy', 'false'); status.textContent = 'Не удалось показать страницу. Откройте оригинал.'; status.classList.add('visible'); }});
     document.getElementById('prev').addEventListener('click', () => {{ page -= 1; stage.scrollTo(0,0); render(); }});
     document.getElementById('next').addEventListener('click', () => {{ page += 1; stage.scrollTo(0,0); render(); }});
     pageInput.addEventListener('change', () => {{ page = boundedPage(pageInput.value); stage.scrollTo(0,0); render(); }});

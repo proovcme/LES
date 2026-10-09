@@ -438,6 +438,9 @@ def test_sync_parse_updates_legacy_pending_file_name(tmp_path, monkeypatch):
     )
 
     class FakeQdrant:
+        def delete(self, **kwargs):
+            return None
+
         def __init__(self, url, **kwargs):
             self.url = url
 
@@ -487,6 +490,9 @@ def test_sync_parse_prefers_exact_relative_path_over_legacy_basename(tmp_path, m
     )
 
     class FakeQdrant:
+        def delete(self, **kwargs):
+            return None
+
         def __init__(self, url, **kwargs):
             self.url = url
 
@@ -523,6 +529,9 @@ def test_sync_parse_marks_error_when_qdrant_count_mismatches(tmp_path, monkeypat
     )
 
     class FakeQdrant:
+        def delete(self, **kwargs):
+            return None
+
         def __init__(self, url, **kwargs):
             self.url = url
 
@@ -534,7 +543,7 @@ def test_sync_parse_marks_error_when_qdrant_count_mismatches(tmp_path, monkeypat
     result = QdrantLlamaIndexAdapter._sync_parse(adapter, "ds-1", limit=1)
 
     assert result["errors"] == 1
-    assert deleted == ["doc.md", "doc.md"]
+    assert deleted == []  # Neither failure cleanup nor commit may delete the whole file generation.
     assert db.updated[-1][0:4] == ("ds-1", "doc.md", "ERROR", 0)
     assert "qdrant point count mismatch" in db.updated[-1][4]
 
@@ -571,6 +580,9 @@ def test_sync_parse_reuses_existing_vector_by_content_hash(tmp_path, monkeypatch
     )
 
     class FakeQdrant:
+        def delete(self, **kwargs):
+            return None
+
         def __init__(self, url, **kwargs):
             self.url = url
 
@@ -629,6 +641,9 @@ def test_sync_parse_skips_empty_sparse_noise_without_rejecting_pdf(tmp_path, mon
     )
 
     class FakeQdrant:
+        def delete(self, **kwargs):
+            return None
+
         def __init__(self, url, **kwargs):
             self.url = url
 
@@ -682,6 +697,9 @@ def test_sync_parse_ignores_cached_vector_with_different_embedding_fingerprint(t
     )
 
     class FakeQdrant:
+        def delete(self, **kwargs):
+            return None
+
         def __init__(self, url, **kwargs):
             self.url = url
 

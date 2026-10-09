@@ -13,7 +13,7 @@ from backend.interface import EmbeddingContractError
 from backend.qdrant_adapter import EmbedClient
 from proxy.services.model_connection_contracts import CapabilityName, ConnectionRole
 from proxy.services.model_connection_resolver_service import ModelConnectionResolutionError
-from proxy.services.openai_compatible_transport_service import EmbeddingResponse
+from proxy.services.openai_compatible_transport_service import EmbeddingResponse, ModelTransportError
 
 
 class Resolver:
@@ -161,6 +161,59 @@ def test_active_embedding_rejects_observed_model_and_dimension_drift() -> None:
     )
     with pytest.raises(EmbeddingContractError, match="embedding dimension mismatch"):
         mixed_dimensions.encode_sync(["one", "two"])
+
+
+@pytest.mark.parametrize("response_capacity", [16, 3])
+def test_document_embeddings_are_bounded_ordered_and_use_one_binding(response_capacity):
+    resolver = Resolver(SimpleNamespace(revision_id="conn:embed:r1"))
+    calls = []
+
+    class BoundedTransport:
+        async def embed(self, connection, inputs):
+            calls.append((connection.revision_id, tuple(inputs)))
+            if len(inputs) > response_capacity:
+                raise ModelTransportError("UPSTREAM_RESPONSE_TOO_LARGE")
+            return _response([[float(text), 0.0] for text in inputs])
+
+    client = EmbedClient("http://unused", model="embed-model", connection_mode="active",
+                         connection_resolver=resolver, connection_transport=BoundedTransport())
+    assert client.encode_sync([str(i) for i in range(53)]) == [[float(i), 0.0] for i in range(53)]
+    assert len(resolver.calls) == 1
+    assert max(len(inputs) for _, inputs in calls) <= 16
+    assert {revision for revision, _ in calls} == {"conn:embed:r1"}
+
+
+@pytest.mark.parametrize("capacity", [16, 3])
+def test_dimension_drift_between_sub_batches_is_rejected(capacity):
+    class DriftingTransport:
+        async def embed(self, connection, inputs):
+            if len(inputs) > capacity:
+                raise ModelTransportError("UPSTREAM_RESPONSE_TOO_LARGE")
+            dimensions = 2 if inputs[0] == "0" else 3
+            return _response([[1.0] * dimensions for _ in inputs])
+
+    client = EmbedClient("http://unused", model="embed-model", connection_mode="active",
+                         connection_resolver=Resolver(SimpleNamespace()), connection_transport=DriftingTransport())
+    with pytest.raises(EmbeddingContractError, match="dimension mismatch"):
+        client.encode_sync([str(i) for i in range(32)])
+
+
+@pytest.mark.parametrize("error,count", [("UPSTREAM_RESPONSE_TOO_LARGE", 1), ("UPSTREAM_TIMEOUT", 16)])
+def test_failed_embedding_batch_never_returns_partial_vectors_or_retries_other_errors(error, count):
+    calls = []
+
+    class FailingTransport:
+        async def embed(self, connection, inputs):
+            calls.append(tuple(inputs))
+            if inputs[0] == "0":
+                return _response([[1.0] for _ in inputs])
+            raise ModelTransportError(error)
+
+    client = EmbedClient("http://unused", model="embed-model", connection_mode="active",
+                         connection_resolver=Resolver(SimpleNamespace()), connection_transport=FailingTransport())
+    with pytest.raises(ModelTransportError, match=error):
+        client.encode_sync([str(i) for i in range(16 + count)])
+    assert len(calls) == 2
 
 
 @pytest.mark.parametrize("light,expected", [(True,"active"), (False,"legacy")])

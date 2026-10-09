@@ -1,35 +1,12 @@
 from __future__ import annotations
-"""
-С.А.М.О.В.А.Р. // reranker.py
-==============================
-Реранкер на базе Qwen3-4B (cross-encoder режим).
-
-Схема работы:
-    Запрос → bge-m3 → Qdrant top-20 (грубо, по векторам)
-                            ↓
-                    Qwen3-4B оценивает каждую пару (запрос, чанк) → score 0-10
-                            ↓
-                    Сортируем → берём top-K (обычно 5)
-                            ↓
-                    Генерация ответа Qwen3-14B
-
-Подключение:
-    reranker = Reranker(mlx_url="http://127.0.0.1:8080")
-    reranked = await reranker.rerank(query, chunks, top_k=5)
-
-Интеграция в qdrant_adapter.py:
-    chunks = await adapter.retrieve(query, top_k=20)          # грубо
-    chunks = await reranker.rerank(query, chunks, top_k=5)    # точно
-
-Зависимости: только httpx (уже есть в проекте)
-"""
+"""Optional reranking adapters. Local cross-encoder execution is isolated in local_reranker."""
 
 import asyncio
 import json
 import logging
 import os
 import re
-import threading
+import math
 from dataclasses import dataclass
 from typing import Optional
 
@@ -350,8 +327,10 @@ class CrossEncoderReranker:
     async def rerank(self, query: str, chunks: list, top_k: int = 5) -> list:
         import httpx
 
-        if not chunks:
+        if not chunks or top_k <= 0:
             return []
+        if len(chunks) > 64:
+            raise ValueError("RERANK_TOO_MANY_CANDIDATES")
         if len(chunks) == 1:
             return [
                 RankedChunk(
@@ -403,62 +382,25 @@ class SentenceTransformerReranker:
     retrieval decisions while preserving the same async reranker interface.
     """
 
-    _models: dict[tuple[str, str], object] = {}
-    _model_lock = threading.Lock()
-
-    def __init__(
-        self,
-        mlx_url: str = "",
-        model: str = "",
-        mode: str = "batch",
-        timeout: float = 60.0,
-        max_chunk_len: int = 1600,
-    ):
-        del mlx_url, mode, timeout
-        self.model = model or os.getenv("RERANK_MODEL", "BAAI/bge-reranker-v2-m3").strip()
-        self.device = os.getenv("RERANK_DEVICE", "").strip()
-        configured_chunk_len = int(
-            os.getenv("RERANK_MAX_TEXT_CHARS", str(max_chunk_len))
-        )
-        self.max_chunk_len = max(128, configured_chunk_len)
-        self.batch_size = max(1, int(os.getenv("RERANK_BATCH_SIZE", "8")))
-
-    @classmethod
-    def _load_model(cls, model_name: str, device: str):
-        key = (model_name, device)
-        with cls._model_lock:
-            loaded = cls._models.get(key)
-            if loaded is not None:
-                return loaded
-            try:
-                from sentence_transformers import CrossEncoder
-            except ImportError as exc:
-                raise RuntimeError(
-                    "sentence-transformers reranker is not installed; "
-                    "install the windows-reranker extra"
-                ) from exc
-            kwargs = {"device": device} if device else {}
-            loaded = CrossEncoder(model_name, **kwargs)
-            cls._models[key] = loaded
-            return loaded
+    def __init__(self, mlx_url: str = "", model: str = "", mode: str = "batch",
+                 timeout: float = 90.0, max_chunk_len: int = 1600):
+        del mlx_url, mode
+        from backend.local_reranker import configuration
+        self.model = model or configuration()[1]
+        self.timeout = max(1.0, min(float(timeout), 180.0))
+        self.max_chunk_len = max(128, min(int(os.getenv("RERANK_MAX_TEXT_CHARS", str(max_chunk_len))), 8000))
+        self.batch_size = max(1, min(int(os.getenv("RERANK_BATCH_SIZE", "8")), 16))
 
     def _score(self, query: str, chunks: list[dict]) -> list[float]:
-        model = self._load_model(self.model, self.device)
-        pairs = [
-            (query, str(chunk.get("text") or "")[: self.max_chunk_len])
-            for chunk in chunks
-        ]
-        raw_scores = model.predict(
-            pairs,
-            batch_size=self.batch_size,
-            show_progress_bar=False,
-            convert_to_numpy=True,
-        )
-        return [float(value) for value in raw_scores]
+        from backend.local_reranker import score_pairs
+        pairs = [(query[:4000], str(chunk.get("text") or "")[:self.max_chunk_len]) for chunk in chunks]
+        return score_pairs(pairs, timeout=self.timeout, batch_size=self.batch_size, model=self.model)
 
     async def rerank(self, query: str, chunks: list, top_k: int = 5) -> list[RankedChunk]:
-        if not chunks:
+        if not chunks or top_k <= 0:
             return []
+        if len(chunks) > 64:
+            raise ValueError("RERANK_TOO_MANY_CANDIDATES")
         if len(chunks) == 1:
             chunk = chunks[0]
             return [
@@ -471,7 +413,7 @@ class SentenceTransformerReranker:
                 )
             ]
         scores = await asyncio.to_thread(self._score, query, chunks)
-        if len(scores) != len(chunks):
+        if len(scores) != len(chunks) or not all(math.isfinite(value) for value in scores):
             raise RuntimeError("cross-encoder score count does not match candidate count")
         ordered = sorted(zip(scores, chunks), key=lambda item: item[0], reverse=True)
         return [
@@ -506,30 +448,3 @@ def select_reranker_cls():
     if configured == "sentence_transformers":
         return SentenceTransformerReranker
     return CrossEncoderReranker
-
-
-if __name__ == "__main__":
-    import asyncio
-    import logging
-
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-
-    TEST_QUERY = "требования к заземлению электрооборудования"
-    TEST_CHUNKS = [
-        {"text": "Заземление электроустановок должно соответствовать ГОСТ Р 50571. Сопротивление заземляющего устройства не должно превышать 4 Ом.", "score": 0.85},
-        {"text": "Монтаж трубопроводов систем отопления выполняется из стальных электросварных труб по ГОСТ 10704.", "score": 0.72},
-        {"text": "Все металлические части электрооборудования, нормально не находящиеся под напряжением, должны быть заземлены.", "score": 0.81},
-        {"text": "Ведомость рабочих чертежей: лист 1 — план первого этажа, лист 2 — разрез 1-1.", "score": 0.61},
-        {"text": "Молниезащита и заземление здания: категория III, тип Б. Заземлитель — горизонтальный, полоса 40×4 мм.", "score": 0.78},
-    ]
-
-    async def _test():
-        reranker = Reranker(mode="sequential")
-        ranked = await reranker.rerank(TEST_QUERY, TEST_CHUNKS, top_k=3)
-        print(f"\n[РЕЗУЛЬТАТ РЕРАНКИНГА]")
-        print(f"Запрос: {TEST_QUERY}\n")
-        for r in ranked:
-            print(f"  #{r.rank} score={r.score:.1f} (было {r.original_score:.2f})")
-            print(f"     {r.text[:100]}…\n")
-
-    asyncio.run(_test())

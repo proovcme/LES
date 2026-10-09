@@ -250,14 +250,12 @@ def test_chat_redesign_keeps_projects_and_configuration_visible():
     assert '/les/classic' in navigation
     assert 'Студия' not in navigation and 'CAD' not in navigation
 @pytest.mark.parametrize('destination', ['history', 'data'])
-def test_mobile_navigation_closes_before_opening_another_surface(destination):
+def test_project_drawer_closes_before_opening_another_surface(destination):
     from types import SimpleNamespace
     from sovushka.components.chat_project_navigation import ChatProjectNavigation
     events = []
     nav = ChatProjectNavigation(None, on_new=None, on_history=lambda:events.append('history'),
                                 on_data=lambda:events.append('data'))
-    nav.sidebar = SimpleNamespace(classes=lambda **kwargs:events.append('closed'))
-    nav.mobile_open = True
+    nav.drawer = SimpleNamespace(close=lambda:events.append('closed'))
     getattr(nav, 'open_' + destination)()
     assert events == ['closed', destination]
-    assert not nav.mobile_open

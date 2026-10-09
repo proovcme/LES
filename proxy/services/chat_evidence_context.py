@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 from typing import Any, Sequence
 from proxy.services.context_governor_service import ContextCandidate, ContextGovernor, ContextKind, ContextObject, ContextPacket
 from proxy.services.prompt_registry_service import build_mode_system_prompt
@@ -58,6 +59,8 @@ def govern_inference_messages(
     source_map: Sequence[Any] = (),
     tool_exchange: Sequence[Any] = (),
     dialogue: Sequence[Any] = (),
+    required_evidence: Sequence[Any] = (),
+    native_tool_exchange: Sequence[Any] = (),
 ) -> tuple[list[dict[str, str]], ContextPacket]:
     """Build the sole bounded packet used for one provider inference request."""
     candidates = [
@@ -75,9 +78,30 @@ def govern_inference_messages(
         ContextCandidate(ContextKind.CHECKPOINT, tuple(checkpoint)),
         ContextCandidate(ContextKind.WORKING_MEMORY, tuple(working_memory)),
         ContextCandidate(ContextKind.EVIDENCE, _context_objects("evidence", evidence)),
-        ContextCandidate(ContextKind.SOURCE_MAP, _context_objects("source", source_map)),
+        ContextCandidate(ContextKind.EVIDENCE, _context_objects("current-document", required_evidence), required=True),
+        ContextCandidate(ContextKind.NATIVE_TOOL_EXCHANGE, _context_objects("current-tool-turn", native_tool_exchange), required=True),
+        ContextCandidate(ContextKind.SOURCE_MAP, _context_objects("source", [
+            {key: item[key] for key in ("index", "label", "doc_name", "source_page", "page", "url",
+                                      "dataset_id", "qdrant_point_id", "parent_id", "section_fragment_count",
+                                      "context_origin") if key in item}
+            if isinstance(item, dict) else item for item in source_map
+        ])),
         ContextCandidate(ContextKind.TOOL_EXCHANGE, _context_objects("exchange", tool_exchange)),
         ContextCandidate(ContextKind.DIALOGUE, _context_objects("dialogue", dialogue), required=bool(dialogue)),
+    ]
+    packet = ContextGovernor(preset).pack(candidates)
+    # A label without its evidence must not be advertised to the model either.
+    # EVIDENCE precedes optional SOURCE_MAP, so this second pass cannot evict
+    # or reintroduce evidence. It only removes dangling source references.
+    visible = {item.get("index") for item in model_visible_source_map(packet, source_map)
+               if isinstance(item, dict)}
+    candidates = [
+        ContextCandidate(candidate.kind, tuple(
+            obj for obj in candidate.objects
+            if not isinstance(obj.payload, dict) or not obj.payload.get("index")
+            or obj.payload["index"] in visible), required=candidate.required)
+        if candidate.kind == ContextKind.SOURCE_MAP else candidate
+        for candidate in candidates
     ]
     packet = ContextGovernor(preset).pack(candidates)
     return packet.as_messages(request_last=True), packet
@@ -85,7 +109,7 @@ def govern_inference_messages(
 
 def context_packet_trace(packet: ContextPacket, *, purpose: str) -> dict[str, Any]:
     """Expose exact model-visible evidence while keeping private prompt/memory redacted."""
-    visible_kinds = {ContextKind.EVIDENCE, ContextKind.SOURCE_MAP}
+    visible_kinds = {ContextKind.EVIDENCE, ContextKind.SOURCE_MAP, ContextKind.NATIVE_TOOL_EXCHANGE}
 
     def section_trace(section) -> dict[str, Any]:
         item = {
@@ -186,11 +210,24 @@ def selector_evidence_payload(
         payload.extend(_bounded_source_blocks(attachment_context))
     if str(rendered_context or "").strip():
         payload.append("Материалы из найденных документов:")
-    payload.extend(
-        item.payload
-        for item in _text_context_objects("selector-evidence", rendered_context)
-    )
+    payload.extend(source_context_blocks(rendered_context))
     return payload
+
+
+def source_context_blocks(text: str) -> list[str]:
+    """A source header and its paragraphs enter or leave the model together."""
+    return [part.strip() for part in re.split(r"(?m)(?=^\[Источник \d+(?:\s|\]))", text) if part.strip()]
+
+
+def model_visible_source_map(packet: ContextPacket, source_map: Sequence[Any]) -> list[Any]:
+    """Never report a dropped source as evidence that the answerer saw."""
+    indexes = set()
+    for section in packet.sections:
+        if section.kind == ContextKind.EVIDENCE:
+            for obj in section.objects:
+                indexes.update(int(n) for n in re.findall(r"(?m)^\[Источник (\d+)(?:\s|\])", obj.render()))
+    return [source for source in source_map
+            if not isinstance(source, dict) or not source.get("index") or source.get("index") in indexes]
 
 
 def selector_context_shortlist(

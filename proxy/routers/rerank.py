@@ -6,9 +6,10 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 
-from proxy.security import require_admin
+from proxy.security import require_admin, require_user
 from proxy.services.resource_governor import chat_generation_allowed
 
 try:
@@ -32,23 +33,40 @@ class RerankRouterState:
 _state: RerankRouterState | None = None
 
 
+@router.get("/rerank/status")
+async def rerank_status(_user=Depends(require_user)):
+    from backend.local_reranker import readiness
+    return readiness()
+
+
+class RerankChunk(BaseModel):
+    text: str = Field(max_length=8000)
+    score: float = Field(default=0, allow_inf_nan=False)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class RerankRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=4000)
+    chunks: list[RerankChunk] = Field(min_length=1, max_length=64)
+    top_k: int = Field(default=5, ge=1, le=64)
+
+
 def set_rerank_state(state: RerankRouterState) -> None:
     global _state
     _state = state
 
 
 @router.post("/rerank")
-async def rerank_direct(request: Request, _admin=Depends(require_admin)):
+async def rerank_direct(request: RerankRequest, _admin=Depends(require_admin)):
     """
     Direct reranker call.
     Body: {"query": str, "chunks": [{"text": str, "score": float, "metadata": dict}], "top_k": int}
     """
     if not RERANKER_AVAILABLE:
         raise HTTPException(503, "reranker недоступен")
-    body = await request.json()
-    query = body.get("query", "")
-    chunks = body.get("chunks", [])
-    top_k = body.get("top_k", 5)
+    query = request.query.strip()
+    chunks = [chunk.model_dump() for chunk in request.chunks]
+    top_k = request.top_k
 
     if not query or not chunks:
         raise HTTPException(400, "query и chunks обязательны")

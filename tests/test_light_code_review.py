@@ -52,7 +52,9 @@ def test_watch_batch_keeps_last_thousand_events_and_other_datasets(tmp_path):
 
 def test_csv_attachment_preserves_quoted_newline_and_utf16(tmp_path):
     file=tmp_path/'План.csv'
-    file.write_text('name;value\n"две\nстроки";"café"\n',encoding='utf-16')
+    file.write_text('name;value\n"две\nстроки";"café"\n',encoding='utf-16', newline='')
     text,truncated=_format_tabular_attachment_context(file,file.name,max_chars=18000)
-    assert 'CSV!R2: две строки | café' in text
+    assert 'CSV!R2:' in text
+    assert '"coordinate":"A2"' in text and '"value":"две\\nстроки"' in text
+    assert '"coordinate":"B2"' in text and '"value":"café"' in text
     assert not truncated

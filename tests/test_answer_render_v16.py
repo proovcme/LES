@@ -35,7 +35,7 @@ def test_source_chip_xlsx_sheet_row():
 
 def test_source_chip_pdf_page():
     c = ar.source_chip({"source_ref": "Акт.pdf#p3", "source_kind": "extracted_body"})
-    assert c["file"] == "Акт.pdf" and c["locator"] == "стр.3" and c["kind"] == "извлечено"
+    assert c["file"] == "Акт.pdf" and c["locator"] == "стр. 3" and c["kind"] == "извлечено"
 
 def test_source_chip_no_ref_not_fake_link():
     c = ar.source_chip({"file": "doc.pdf"})   # нет source_ref
@@ -193,9 +193,9 @@ def test_citation_drawer_item_uses_stable_document_id_for_raw_link():
     })
 
     assert item["open_url"] == "/lite-api/documents/by-id/doc%2031/raw#page=4"
-    assert item["viewer_url"] == "/lite-api/documents/by-id/doc%2031/raw#page=4"
+    assert item["viewer_url"] == "/lite-api/documents/by-id/doc%2031/viewer?page=4&locator=p4"
     assert item["native_open_url"] == "/lite-api/documents/by-id/doc%2031/open-native"
-    assert item["locator"] == "стр.4"
+    assert item["locator"] == "стр. 4"
 
 
 def test_citation_drawer_item_treats_chunk_document_id_as_auditable_locator():
@@ -239,7 +239,10 @@ def test_citation_drawer_item_carries_exact_source_provenance_in_document_urls()
         "/lite-api/documents/by-id/old-node%3Abudget%3A7e357c6e73593252/raw?"
         f"{expected_query}#page=4"
     )
-    assert item["viewer_url"] == item["open_url"]
+    assert item["viewer_url"] == (
+        "/lite-api/documents/by-id/old-node%3Abudget%3A7e357c6e73593252/viewer?"
+        f"{expected_query}&page=4&locator=p4"
+    )
     assert item["native_open_url"] == (
         "/lite-api/documents/by-id/old-node%3Abudget%3A7e357c6e73593252/open-native?"
         f"{expected_query}"

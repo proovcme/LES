@@ -381,7 +381,7 @@ def test_workspace_navigation_has_no_separate_smeta_project():
 def test_chat_ui_reranker_is_opt_in_per_turn_and_resets_with_new_chat():
     chat = Path("sovushka/pages/chat.py").read_text(encoding="utf-8")
 
-    assert 'checkbox_field("Реранкер", value=False)' in chat
+    assert 'checkbox_field("Уточнять порядок источников · реранкер", value=False)' in chat
     assert '"reranker_enabled": bool(reranker_checkbox.value)' in chat
     clear_chat = chat.split("def _clear_chat():", 1)[1].split("\n    def ", 1)[0]
     assert "reranker_checkbox.set_value(False)" in clear_chat

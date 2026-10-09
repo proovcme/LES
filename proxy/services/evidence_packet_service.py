@@ -284,10 +284,10 @@ def verify_answer_source_labels(answer: str, source_map: Iterable[Mapping[str, A
     }
     cited = citation_indexes(answer)
     invalid = sorted({value for value in cited if value not in available})
-    if not available:
-        status = "not_applicable"
-    elif invalid:
+    if invalid:
         status = "invalid_labels"
+    elif not available:
+        status = "not_applicable"
     elif not cited:
         status = "missing_labels"
     else:
@@ -298,4 +298,5 @@ def verify_answer_source_labels(answer: str, source_map: Iterable[Mapping[str, A
         "available": sorted(available),
         "cited": sorted(set(cited)),
         "invalid": invalid,
+        "claim_verification": "not_performed",
     }

@@ -183,10 +183,6 @@ def render_feedback_state(
     ).props('role="status" aria-live="polite"') as container:
         ui.label(state["title"]).classes("sov-ui-feedback__title")
         ui.label(state["detail"]).classes("sov-ui-feedback__detail")
-        if state["error_code"]:
-            ui.label(state["error_code"]).classes(
-                "sov-ui-feedback__detail sov-ui-source-chip"
-            )
     return container
 
 

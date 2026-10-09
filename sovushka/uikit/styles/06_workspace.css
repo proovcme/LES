@@ -1,9 +1,11 @@
-/* Owner-approved chat workspace: one visible project list and one conversation. */
+/* Conversation first; projects open in an accessible modal drawer. */
 .sov-chat-workspace.sov-chat-shell {
-  grid-template-columns: 256px minmax(0, 1fr) 8px var(--sov-artifacts-w, 420px);
+  grid-template-columns: minmax(0, 1fr) 8px var(--sov-artifacts-w, 420px);
   height: 100dvh; min-height: 0; grid-template-rows:minmax(0,1fr); gap: 0; padding: 0; overflow: hidden;
 }
-.sov-chat-workspace.sov-artifacts-collapsed {grid-template-columns:256px minmax(0,1fr);}
+.sov-chat-workspace.sov-artifacts-collapsed {grid-template-columns:minmax(0,1fr);}
+.sov-project-drawer .q-dialog__inner {padding:0;}
+.sov-project-drawer .sov-project-navigation {width:min(360px,calc(100vw - 32px));height:100%;max-height:100dvh;border-radius:0;box-shadow:var(--sov-ui-shadow-card);color:var(--text);}
 .sov-project-navigation {display:flex;flex-direction:column;gap:var(--sov-ui-space-2);padding:16px;border-right:var(--sov-ui-border);min-width:0;min-height:0;overflow:hidden;}
 .sov-project-navigation > * {flex-shrink:0;}
 .sov-project-navigation-body {width:100%;gap:8px;flex:1;min-height:0;overflow-y:auto;flex-wrap:nowrap;}
@@ -40,7 +42,7 @@
 .sov-chat-workspace .sov-send-btn {margin-left:auto;}
 .sov-chat-workspace .sov-composer-key-hint {display:none;}
 .sov-ui-dialog .sov-mode-select {width:100%;flex:initial;}
-.sov-project-mobile-toggle {display:none!important;}
+.sov-project-toggle {flex-shrink:0;}
 .sov-app-shell--chat.sov-app-shell {display:flex!important;flex-direction:column;overflow:hidden;}
 .sov-app-shell--chat > .sov-ui-header {width:100%!important;height:56px!important;min-height:56px;padding:0 16px!important;flex-direction:row;align-items:center!important;border-right:0;border-bottom:var(--sov-ui-border);box-shadow:none;}
 .sov-app-shell--chat > .sov-app-content {height:calc(100dvh - 56px);min-height:0;margin:0!important;flex:1;}
@@ -51,8 +53,8 @@
 .sov-app-shell--chat .sov-brand-block .sov-acronym-expansion {display:none;}
 .sov-app-shell--chat .sov-ui-header-controls {width:auto;margin:0 0 0 auto!important;padding:0;border:0;flex-direction:row;align-items:center;gap:4px!important;}
 .sov-app-shell--chat .sov-ui-header-controls > * {width:auto;min-height:40px;}
-@media(max-width:1000px){
-  .sov-chat-workspace.sov-chat-shell,.sov-chat-workspace.sov-artifacts-collapsed {grid-template-columns:224px minmax(0,1fr);}
+@media(max-width:1440px){
+  .sov-chat-workspace.sov-chat-shell,.sov-chat-workspace.sov-artifacts-collapsed {grid-template-columns:minmax(0,1fr);}
   .sov-chat-workspace .sov-artifacts-panel {position:absolute;right:0;top:0;bottom:0;width:min(620px,calc(100% - 24px));z-index:1000;}
   .sov-chat-workspace .sov-resize-divider {display:none!important;}
   .sov-project-navigation {padding:20px 8px;}
@@ -60,9 +62,6 @@
 }
 @media(max-width:1000px){
   .sov-chat-workspace.sov-chat-shell,.sov-chat-workspace.sov-artifacts-collapsed {grid-template-columns:minmax(0,1fr);}
-  .sov-project-navigation {display:none;}
-  .sov-project-navigation.sov-project-navigation--open {display:flex;position:absolute;inset:0 40px 0 0;z-index:1200;box-shadow:var(--sov-ui-shadow-card);}
-  .sov-project-mobile-toggle {display:inline-flex!important;}
   .sov-chat-workspace .sov-chat-topbar {padding:8px 12px;gap:8px;}
   .sov-chat-workspace .sov-chat-thread {padding:24px 20px!important;}
   .sov-chat-workspace .sov-chat-empty-title {font-size:24px;}

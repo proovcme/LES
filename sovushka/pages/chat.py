@@ -75,6 +75,13 @@ from sovushka.state import (
 from sovushka.uikit import action_button, checkbox_field, panel, section_heading, select_field, text_field
 
 
+def _restore_failed_question(chat_input, drafts, question: str) -> None:
+    # Do not overwrite a new question typed while the failed request was running.
+    if not str(chat_input.value or "").strip():
+        chat_input.set_value(question)
+        drafts.save(question)
+
+
 def _clear_scope_selection(
     selected_projects: set,
     selected_datasets: set,
@@ -291,17 +298,10 @@ def build_chat(is_admin: bool, tabs=None, tab_mermaid=None, tab_documents=None):
                 _html('<div class="sov-muted" style="font-size:.62rem;">Выбери файл в дереве для просмотра.</div>')
 
         with ui.element("main").classes("sov-chat-main"):
-            with ui.row().classes("sov-conversation-heading"):
-                with ui.column().classes("gap-0"):
-                    ui.label("ПРОСТРАНСТВО ДИАЛОГА").classes("sov-workspace-eyebrow")
-                    ui.label("Разберёмся вместе").classes("sov-conversation-title")
-                if not is_light():
-                    action_button("Лес знаний", icon="o_park", variant="quiet",
-                                  on_click=lambda: ui.navigate.to("/qdrant-visualizer/index.html"))
             with ui.row().classes("sov-chat-topbar"):
                 with ui.row().classes("items-center gap-2"):
-                    action_button("Проекты", icon="menu", variant="quiet",
-                                  classes="sov-project-mobile-toggle", on_click=project_navigation.toggle)
+                    action_button("Проекты и чаты", icon="menu", variant="quiet",
+                                  classes="sov-project-toggle", on_click=project_navigation.toggle).props('aria-haspopup="dialog"')
                     project_navigation.render_heading()
                 with ui.row().classes("sov-workspace-header-actions"):
                     action_button("Память", icon="o_bookmark_border", variant="quiet",
@@ -340,10 +340,20 @@ def build_chat(is_admin: bool, tabs=None, tab_mermaid=None, tab_documents=None):
                                 "selected_sources_only", bool(event.value)
                             )
                         )
-                        reranker_checkbox = checkbox_field("Реранкер", value=False)
+                        reranker_checkbox = checkbox_field("Уточнять порядок источников · реранкер", value=False).props("color=primary")
                         reranker_checkbox.tooltip(
-                            "Дополнительно оценивает найденные источники. Может увеличить время ответа."
+                            "Локальная модель повторно оценивает найденные фрагменты. Медленнее обычного поиска. Можно отключить."
                         )
+                        reranker_status = ui.label("Проверяем доступность реранкера…").classes("text-sm text-secondary")
+                        reranker_status.props('role="status" aria-live="polite"')
+                        reranker_checkbox.disable()
+
+                        async def _refresh_reranker_status():
+                            status = await api_get("/api/rerank/status") or {}
+                            reranker_checkbox.set_enabled(bool(status.get("available")))
+                            reranker_status.set_text(str(status.get("detail") or "Не удалось проверить реранкер. Обычный поиск доступен."))
+
+                        ui.timer(0.1, _refresh_reranker_status, once=True)
                     search_controls.set_visibility(False)
 
                     def _scope_label() -> str:
@@ -632,6 +642,9 @@ def build_chat(is_admin: bool, tabs=None, tab_mermaid=None, tab_documents=None):
                     chat_scroll.scroll_to(percent=1)
 
             chat_scroll = ui.scroll_area(on_scroll=_track_chat_scroll).classes("sov-chat-scroll")
+            # The document list scrolls with the conversation, rather than
+            # reserving another permanent toolbar above a short answer viewport.
+            scope_files_panel.move(chat_scroll)
             with chat_scroll:
                 chat_column = ui.column().classes("sov-chat-thread")
                 with chat_column:
@@ -784,17 +797,22 @@ def build_chat(is_admin: bool, tabs=None, tab_mermaid=None, tab_documents=None):
                 if notify:
                     ui.notify("Вложение снято", type="info")
 
-            with ui.row().classes("sov-workspace-context") as context_row:
-                ui.label("Источники").classes("sov-workspace-owner")
-                scope_btn.move(context_row)
-
             with ui.element("div").classes("sov-composer") as composer_box:
+                composer_box.on('dragenter', js_handler="""event => {
+                    if (Array.from(event.dataTransfer?.types || []).includes('Files'))
+                        event.currentTarget.classList.add('sov-composer--dragging');
+                }""")
+                composer_box.on('dragleave', js_handler="""event => {
+                    if (!event.currentTarget.contains(event.relatedTarget))
+                        event.currentTarget.classList.remove('sov-composer--dragging');
+                }""")
+                composer_box.on('drop', js_handler="event => event.currentTarget.classList.remove('sov-composer--dragging')")
                 indexing_banner = ui.label("").classes("sov-indexing-banner")
                 indexing_banner.set_visibility(False)
                 chat_input = ui.textarea(
                     placeholder="Напишите задачу для ЛЕС…", value=drafts.read(),
                     on_change=lambda event: drafts.save(event.value),
-                ).classes("sov-composer-input").props('rows=2 autogrow borderless maxlength=20000 aria-label="Ваш запрос"')
+                ).classes("sov-composer-input").props('rows=1 autogrow borderless maxlength=20000 aria-label="Ваш запрос"')
                 try:
                     preset_question = (context.client.request.query_params.get("question") or "").strip()
                     if preset_question:
@@ -1888,7 +1906,10 @@ def build_chat(is_admin: bool, tabs=None, tab_mermaid=None, tab_documents=None):
             ui.notify(f"Документ создан: {cmd.get('title', fid)} ({fmt}) — в панели «Файлы»", type="positive")
 
 
+        succeeded = False
+
         def _apply_chat_result(d: dict) -> None:
+            nonlocal succeeded
             """Применяет финальный payload (общий для стрима и нестриминга):
             форматированный ответ, источники, вердикт, артефакт."""
             if sent_attachment and not _preserved_attachment(d, sent_attachment):
@@ -1904,6 +1925,8 @@ def build_chat(is_admin: bool, tabs=None, tab_mermaid=None, tab_documents=None):
                 or retrieval_trace.get("status") == "blocked"
             ):
                 total_status = "blocked"
+            succeeded = total_status != "blocked" and not d.get("partial")
+            activity.finish("Готово" if succeeded else "Запрос не выполнен")
             meta = {
                 "query_route": d.get("query_route") or {},
                 "retrieval_trace": retrieval_trace,
@@ -2097,12 +2120,15 @@ def build_chat(is_admin: bool, tabs=None, tab_mermaid=None, tab_documents=None):
         except Exception as ex:
             activity.finish("Не удалось завершить запрос")
             completed = True
-            _finish_ai_placeholder(ai_placeholder, ai_placeholder_label, f"Ошибка: {ex}", error=True)
-            artifacts._render_artifact_error(str(ex))
+            add_log(f"[CHAT ERROR] {type(ex).__name__}: {ex}")
+            message = "Не удалось завершить запрос. Повторите вопрос или откройте диагностику."
+            _finish_ai_placeholder(ai_placeholder, ai_placeholder_label, message, error=True)
+            artifacts._render_artifact_error(message)
         finally:
             if completed:
                 state["chat_pending"] = None
-            activity.finish("Готово" if completed else "Запрос прерван")
+            if not completed:
+                activity.finish("Запрос прерван")
             _stop_tick["v"] = True
             _tick_task.cancel()
             _sending["v"] = False
@@ -2111,13 +2137,16 @@ def build_chat(is_admin: bool, tabs=None, tab_mermaid=None, tab_documents=None):
             await _refresh_resource_gate()
             _scroll_chat_to_tail()
 
+        return succeeded
+
     async def send_chat():
         q = chat_input.value.strip()
         if not q:
             return
         chat_input.value = ""
         _update_prompt_preview()
-        await _do_send(q)
+        if not await _do_send(q):
+            _restore_failed_question(chat_input, drafts, q)
 
     async def send_with_form():
         q = chat_input.value.strip()
@@ -2127,7 +2156,8 @@ def build_chat(is_admin: bool, tabs=None, tab_mermaid=None, tab_documents=None):
         advanced_dialog.close()
         chat_input.value = ""
         _update_prompt_preview()
-        await _do_send(q)
+        if not await _do_send(q):
+            _restore_failed_question(chat_input, drafts, q)
 
 
     artifacts = ChatArtifacts(

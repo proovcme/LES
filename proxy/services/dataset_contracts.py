@@ -47,6 +47,7 @@ _TRUE_ENV_VALUES = {"1", "true", "yes", "on"}
 
 
 class RetrievalDebugRequest(BaseModel):
+    reranker_enabled: bool = False
     question: str = Field(min_length=1, max_length=4000)
     dataset_ids: list[str] | None = None
     dataset_filter: str | None = None
@@ -54,6 +55,7 @@ class RetrievalDebugRequest(BaseModel):
 
 
 class SearchRequest(BaseModel):
+    reranker_enabled: bool = False
     query: str | None = Field(default=None, min_length=1, max_length=4000)
     question: str | None = Field(default=None, min_length=1, max_length=4000)
     dataset_ids: list[str] | None = None

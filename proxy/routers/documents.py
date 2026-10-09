@@ -19,6 +19,7 @@ from proxy.services.document_explorer_service import explorer
 from proxy.services.file_viewer_service import file_viewer_html, is_viewable_file
 from proxy.services.native_open_service import open_native_file
 from proxy.services.pdf_contour_service import audit_pdf, render_page_preview
+from proxy.services.pdf_viewer_service import pdf_file_info, viewer_html
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
@@ -124,6 +125,7 @@ async def document_viewer_by_id(
     sheet: str = Query(default="", max_length=180),
     dataset_id: SourceDataset = "",
     doc_name: SourceDocument = "",
+    page: int = Query(default=1, ge=1),
     _user=Depends(require_user),
 ):
     """Render office/text evidence through stable document identity."""
@@ -136,9 +138,16 @@ async def document_viewer_by_id(
     source_path = _resolved_document_source(document)
     if source_path is None:
         raise HTTPException(status_code=404, detail="document has no source_path")
-    if not is_viewable_file(source_path) or source_path.suffix.lower() == ".pdf":
+    if not is_viewable_file(source_path):
         raise HTTPException(status_code=415, detail="embedded viewer is unavailable for this format")
     try:
+        if source_path.suffix.lower() == ".pdf":
+            info = await asyncio.to_thread(pdf_file_info, source_path)
+            content = viewer_html(
+                path_id="", document_id=str(document["id"]),
+                file_name=str(info["name"]), page_count=int(info["page_count"]), initial_page=page,
+            )
+            return HTMLResponse(content, headers={"Cache-Control": "private, no-store"})
         content = await asyncio.to_thread(
             file_viewer_html,
             source_path,

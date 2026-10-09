@@ -22,6 +22,7 @@ class ContextKind(str, Enum):
     CHECKPOINT = "checkpoint"
     WORKING_MEMORY = "working_memory"
     DIALOGUE = "dialogue"
+    NATIVE_TOOL_EXCHANGE = "native_tool_exchange"
 
 
 _PACKING_ORDER = tuple(ContextKind)
@@ -85,7 +86,7 @@ class ContextPacket:
     sections: tuple[ContextSection, ...]
     omissions: tuple[ContextOmission, ...]
 
-    def as_messages(self, *, request_last: bool = False) -> list[dict[str, str]]:
+    def as_messages(self, *, request_last: bool = False) -> list[dict[str, Any]]:
         system = "\n\n".join(
             section.render()
             for section in self.sections
@@ -95,9 +96,11 @@ class ContextPacket:
         user_sections = [
             section.render()
             for section in ordered_sections
-            if section.kind != ContextKind.PROFILE_PREFIX
+            if section.kind not in {ContextKind.PROFILE_PREFIX, ContextKind.NATIVE_TOOL_EXCHANGE}
         ]
-        messages: list[dict[str, str]] = []
+        messages: list[dict[str, Any]] = []
+        native = [message for section in self.sections if section.kind == ContextKind.NATIVE_TOOL_EXCHANGE
+                  for item in section.objects for message in item.payload]
         if system:
             messages.append({"role": "system", "content": system})
         if request_last:
@@ -109,16 +112,17 @@ class ContextPacket:
                         else:
                             messages.append({"role": "user", "content": item.render()})
             context = [section.render() for section in self.sections
-                       if section.kind not in {ContextKind.PROFILE_PREFIX, ContextKind.DIALOGUE, ContextKind.REQUEST}]
+                       if section.kind not in {ContextKind.PROFILE_PREFIX, ContextKind.DIALOGUE, ContextKind.REQUEST,
+                                               ContextKind.NATIVE_TOOL_EXCHANGE}]
             if context:
                 messages.append({"role": "user", "content": "\n".join(context)})
             for section in self.sections:
                 if section.kind == ContextKind.REQUEST:
                     messages.append({"role": "user", "content": section.render()})
-            return messages
+            return [*messages, *native]
         if user_sections:
             messages.append({"role": "user", "content": "\n".join(user_sections)})
-        return messages
+        return [*messages, *native]
 
 
 class ContextRequiredSectionOverflow(ValueError):

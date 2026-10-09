@@ -1,9 +1,24 @@
 """Collection lifecycle and health contract."""
 from __future__ import annotations
 from backend import qdrant_support as support
+from backend.index_replacement import recover_adapter
 
 
 class QdrantCollection:
+    async def _prepare_sparse_index(self):
+        from contextlib import closing
+        from backend.index_replacement import ReplacementJournal
+        from backend.sparse_index import ensure_current
+
+        def prepare():
+            with closing(support.qdrant_client.QdrantClient(
+                url=self.qdrant_url, timeout=60, check_compatibility=False,
+                **support.qdrant_client_options(self.qdrant_url),
+            )) as client:
+                return ensure_current(client, ReplacementJournal.for_adapter(self),
+                                      vector_name=support._sparse_vector_name())
+        return await support.asyncio.to_thread(prepare)
+
     async def _ensure_collection(self):
         if self._collection_ready:
             return
@@ -108,6 +123,7 @@ class QdrantCollection:
                 and (self._payload_index_task is None or self._payload_index_task.done())
             ):
                 self._payload_index_task = support.asyncio.create_task(self._ensure_payload_indexes())
+            await support.asyncio.to_thread(recover_adapter, self)
             self._collection_ready = True
 
     async def _ensure_payload_indexes(self) -> None:
@@ -170,6 +186,17 @@ class QdrantCollection:
                 "message": str(error) or type(error).__name__,
             }
         snapshot["qdrant"] = {"ok": ok, "collection": self.collection_name}
+        from backend.index_replacement import ReplacementJournal
+        from backend.sparse_index import read_contract
+        try:
+            journal = ReplacementJournal.for_adapter(self)
+            sparse = read_contract(journal)
+            snapshot["sparse_index"] = {
+                "status": "ready" if sparse and sparse["revision"] == journal.read_stamp() else "pending",
+                "contract": sparse,
+            }
+        except support.EmbeddingContractError as error:
+            snapshot["sparse_index"] = {"status": "blocked", "code": str(error)}
         contract = support.index_contract_status()
         snapshot["index_contract"] = contract
         snapshot["dense_available"] = bool(ok and contract.get("compatible"))

@@ -1,4 +1,4 @@
-"""Visible project/session navigation for the ordinary chat workspace."""
+"""On-demand project/session navigation without a permanent chat column."""
 from __future__ import annotations
 
 import asyncio
@@ -18,18 +18,21 @@ class ChatProjectNavigation:
         self.on_data = on_data
         self.body = None
         self.sidebar = None
+        self.drawer = None
         self.owner_label = None
         self.title_label = None
         self.title_tooltip = None
         self.projects = []
         self.sessions = []
-        self.mobile_open = False
         self.visible_sessions = 20
         self._rendered = None
         self._owner = None
 
     def render(self):
-        with ui.element('aside').classes('sov-project-navigation') as self.sidebar:
+        self.drawer = ui.dialog().props('position=left full-height aria-label="Проекты и чаты"').classes('sov-project-drawer')
+        # QDialog enables pointer events on its direct div child.
+        with self.drawer, ui.element('div').classes('sov-project-navigation').props(
+                'role="navigation" aria-label="Проекты и чаты"') as self.sidebar:
             section_heading('Проекты и чаты')
             action_button('Новый чат', icon='add', variant='secondary',
                           classes='sov-project-nav-row', on_click=self.new_chat)
@@ -49,7 +52,7 @@ class ChatProjectNavigation:
                                       classes='sov-project-nav-row',
                                       on_click=lambda: ui.navigate.to('/les/classic'))
                 action_button('Закрыть список', icon='close', variant='quiet',
-                              classes='sov-project-mobile-toggle', on_click=self.close)
+                              classes='sov-project-nav-row', on_click=self.close)
 
     def render_heading(self):
         with ui.column().classes('sov-workspace-heading'):
@@ -59,13 +62,10 @@ class ChatProjectNavigation:
                 self.title_tooltip = ui.tooltip('Новый чат')
 
     def toggle(self):
-        self.mobile_open = not self.mobile_open
-        self.sidebar.classes(add='sov-project-navigation--open' if self.mobile_open else '',
-                             remove='' if self.mobile_open else 'sov-project-navigation--open')
+        self.drawer.set_value(not self.drawer.value)
 
     def close(self):
-        self.mobile_open = False
-        self.sidebar.classes(remove='sov-project-navigation--open')
+        self.drawer.close()
 
     async def new_chat(self):
         await self.on_new()

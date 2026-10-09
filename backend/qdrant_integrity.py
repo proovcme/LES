@@ -4,6 +4,14 @@ from backend import qdrant_support as support
 
 
 class QdrantIntegrity:
+    def _sync_replace_file_lexical(self, dataset_id, file_key, points):
+        from proxy.services.lexical_index_service import LexicalIndex
+        rows = self._lexical_rows_from_points(points)
+        if len(rows) != len(points):
+            raise RuntimeError("Incomplete lexical replacement")
+        LexicalIndex().replace_file(self.collection_name, dataset_id=dataset_id,
+                                   doc_name=file_key, rows=rows)
+
     def _file_filter(self, dataset_id: str, file_key: str) -> support.models.Filter:
         return support.models.Filter(must=[
             support.models.FieldCondition(
@@ -371,6 +379,14 @@ class QdrantIntegrity:
         return int(result.count)
 
     def audit_dataset_integrity(self, dataset_id: str, *, repair: bool = False) -> dict[str, support.Any]:
+        if not repair:
+            return self._audit_dataset_integrity(dataset_id, repair=False)
+        from backend.index_replacement import ReplacementJournal
+        from backend.sparse_index import external_mutation
+        with external_mutation(ReplacementJournal.for_adapter(self)):
+            return self._audit_dataset_integrity(dataset_id, repair=True)
+
+    def _audit_dataset_integrity(self, dataset_id: str, *, repair: bool = False) -> dict[str, support.Any]:
         """Verify one dataset across source, MetaDB, Qdrant dense/sparse, lexical and FTS.
 
         Repair is conservative: only damaged documents are requeued; missing sources are marked

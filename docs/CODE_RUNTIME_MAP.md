@@ -19,13 +19,13 @@
 
 | Метрика | Значение |
 | --- | --- |
-| Python-файлов под git | 529 |
-| Строк Python | 151710 |
-| PRODUCT_REACHABLE | 357 |
+| Python-файлов под git | 547 |
+| Строк Python | 155118 |
+| PRODUCT_REACHABLE | 363 |
 | RUNTIME_SUPPORT | 5 |
-| TEST_OR_TOOL_ONLY | 134 |
-| DORMANT_CANDIDATE | 33 |
-| Зарегистрированных API-маршрутов | 291 |
+| TEST_OR_TOOL_ONLY | 144 |
+| DORMANT_CANDIDATE | 35 |
+| Зарегистрированных API-маршрутов | 292 |
 | Ошибок разбора | 0 |
 
 ## Крупнейшие продуктовые модули
@@ -33,17 +33,17 @@
 | Файл | Строк | Прямых потребителей |
 | --- | --- | --- |
 | sovushka/styles.py | 3264 | 3 |
-| proxy/services/dataset_memory_service.py | 2288 | 8 |
+| proxy/services/dataset_memory_service.py | 2284 | 9 |
 | mlx_host.py | 2216 | 0 |
-| sovushka/pages/chat.py | 2158 | 1 |
-| proxy/services/chat_evidence_application_service.py | 1912 | 7 |
+| sovushka/pages/chat.py | 2188 | 2 |
+| proxy/services/chat_evidence_application_service.py | 1993 | 7 |
 | proxy/services/project_pdf_table_service.py | 1653 | 2 |
 | sovushka/pages/diag.py | 1606 | 1 |
 | proxy/services/checklist_review_service.py | 1518 | 1 |
 | proxy/routers/mail.py | 1502 | 4 |
 | proxy/services/cad_bim_graph.py | 1425 | 2 |
-| proxy/services/tool_harness_service.py | 1396 | 12 |
-| proxy/services/retrieval_service.py | 1368 | 8 |
+| proxy/services/tool_harness_service.py | 1396 | 14 |
+| proxy/services/retrieval_service.py | 1393 | 10 |
 | proxy/services/context_memory_service.py | 1175 | 8 |
 | sovushka/pages/samovar.py | 1143 | 3 |
 | backend/document_router.py | 1124 | 6 |
@@ -88,6 +88,7 @@
 | Файл | Строк | Почему только кандидат |
 | --- | --- | --- |
 | backend/pdf_layout.py | 254 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
+| backend/rules_extractor.py | 127 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/active_state_service.py | 129 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/agent_router_service.py | 467 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/asbuilt_chat_service.py | 122 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
@@ -107,6 +108,7 @@
 | proxy/services/les_md_chat_service.py | 66 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/nr_sp_service.py | 93 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/office_passport_service.py | 175 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
+| proxy/services/parent_card_hydration_service.py | 172 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/preset_chat_service.py | 64 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/quantity_trace_service.py | 145 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/reconcile_chat_service.py | 150 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |

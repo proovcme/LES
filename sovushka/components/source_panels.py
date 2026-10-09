@@ -33,7 +33,7 @@ def build_source_panels(artifact_panel, open_artifacts, copy_button):
                 ui.label(title).classes("sov-source-detail-title")
                 if item.get("snippet"):
                     with panel(variant="inset", classes="sov-source-excerpt"):
-                        ui.label("Цитата из документа").classes("sov-ui-section-detail")
+                        ui.label("Найденный фрагмент · сверяйте с оригиналом ниже").classes("sov-ui-section-detail")
                         ui.label(str(item["snippet"])).classes("sov-source-excerpt-text")
                 if item.get("viewer_url"):
                     viewer_url = esc(str(item["viewer_url"]))
@@ -42,7 +42,7 @@ def build_source_panels(artifact_panel, open_artifacts, copy_button):
                         f'<iframe src="{viewer_url}" title="Просмотр источника" loading="eager" '
                         'sandbox="allow-scripts allow-same-origin allow-popups"></iframe>'
                         '</div>'
-                    )
+                    ).classes("w-full")
                 if item.get("has_auditable_locator"):
                     source_ref_val = str(item.get("source_ref") or item.get("copy_text") or "")
                     with ui.row().classes("gap-2 items-center flex-wrap").style("margin-top:6px;"):

@@ -543,16 +543,12 @@ def _topic_match_score(probe: str, terms: tuple[str, ...]) -> tuple[int, list[st
         normalized = _norm_text(term)
         if not normalized:
             continue
-        if normalized in probe:
+        # Short section codes must be whole tokens: ОВ is not part of «шкафов».
+        token = re.escape(normalized)
+        pattern = rf"(?<!\w){token}(?!\w)" if len(normalized) <= 3 or term.endswith(" ") else rf"(?<!\w){token}"
+        if re.search(pattern, probe):
             hits.append(term)
             score += 8 if " " in normalized else 5
-            continue
-        if normalized.endswith(" "):
-            continue
-        token = re.escape(normalized)
-        if re.search(rf"(^|[^0-9a-zа-я]){token}", probe):
-            hits.append(term)
-            score += 4
     return score, _dedupe_terms(hits, limit=8)
 
 

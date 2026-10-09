@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import os
 import re
 import time
@@ -703,7 +704,18 @@ async def retrieve_chat_chunks(
         log_error("[RETR] required native RRF backend is unavailable")
         return blocked_result("native_rrf_unavailable")
     _s = time.monotonic()
+    index_journal = None
     try:
+        if hasattr(rag_backend, "content_dir") and hasattr(rag_backend, "_ensure_collection"):
+            from backend.index_replacement import ReplacementJournal
+            await rag_backend._ensure_collection()
+            prepare_sparse = getattr(rag_backend, "_prepare_sparse_index", None)
+            if callable(prepare_sparse):
+                await rag_backend._ensure_collection()
+                rag_backend._assert_dense_index_contract()
+                await prepare_sparse()
+            index_journal = ReplacementJournal.for_adapter(rag_backend)
+            index_stamp = index_journal.read_stamp()
         native_method = getattr(
             rag_backend,
             "retrieve_native_hierarchical",
@@ -717,6 +729,8 @@ async def retrieve_chat_chunks(
         )
     except EmbeddingContractError as native_contract_error:
         embedding_contract_error = str(native_contract_error)
+        if embedding_contract_error.startswith(("INDEX_RECOVERY_", "INDEX_UPDATE_", "INDEX_CHANGED_", "INDEX_SPARSE_")):
+            return blocked_result(embedding_contract_error, detail=embedding_contract_error)
         log_error("[RETR] native RRF blocked by embedding contract: %s", embedding_contract_error)
         return blocked_result(
             "embedding_contract_mismatch",
@@ -725,6 +739,10 @@ async def retrieve_chat_chunks(
         )
     except Exception as native_error:  # noqa: BLE001
         log_error("[RETR] native RRF failed closed: %s", native_error)
+        from proxy.services.public_error_service import public_error_payload
+        public_error = public_error_payload(status_code=502, detail=str(native_error))
+        if public_error["code"] != "MODEL_UPSTREAM_ERROR":
+            return blocked_result(public_error["code"], detail=public_error["detail"])
         return blocked_result(
             "native_rrf_failed",
             detail=f"{type(native_error).__name__}: {native_error}",
@@ -1107,8 +1125,10 @@ async def retrieve_chat_chunks(
 
     # W2.3: cross-encoder реранк гибридного пула — переупорядочивает, не режет
     # (downstream-фокусировка сама сузит). Сопоставление по индексу через
-    # metadata._idx (не по тексту). Сбой → исходный гибридный порядок.
-    if len(chunks) > 1 and (not reranker_enabled or not reranker_available or reranker_cls is None):
+    # metadata._idx (не по тексту). Сбой явно включённого этапа виден пользователю.
+    if reranker_enabled and (not reranker_available or reranker_cls is None):
+        return blocked_result("reranker_unavailable")
+    if len(chunks) > 1 and not reranker_enabled:
         bypass_reason = "disabled" if not reranker_enabled else "unavailable"
         trace.rerank = {
             "status": "bypassed",
@@ -1121,6 +1141,7 @@ async def retrieve_chat_chunks(
         )
     if reranker_available and reranker_enabled and len(chunks) > 1:
         try:
+            rerank_started = time.monotonic()
             reranker = reranker_cls(mlx_url=mlx_url, mode="batch")
             # Native RRF may keep a wide pool for recall (up to 256 technical
             # fragments). A local CPU cross-encoder must receive a bounded
@@ -1154,6 +1175,16 @@ async def retrieve_chat_chunks(
                     rerank_input,
                     top_k=min(max(RERANK_TOP_K, 1), len(rerank_input)),
                 )
+            if not ranked:
+                raise ValueError("RERANK_EMPTY_RESULT")
+            validated_indices = set()
+            for item in ranked:
+                idx = item.metadata.get("_idx")
+                if type(idx) is not int or not 0 <= idx < len(rerank_input) or idx in validated_indices:
+                    raise ValueError("RERANK_INVALID_CANDIDATE")
+                if not math.isfinite(float(getattr(item, "score", 0.0))):
+                    raise ValueError("RERANK_INVALID_SCORE")
+                validated_indices.add(idx)
             reordered = []
             seen = set()
             rerank_items: list[dict[str, Any]] = []
@@ -1201,6 +1232,8 @@ async def retrieve_chat_chunks(
             trace.mode = f"{trace.mode}+rerank"
             trace.rerank = {
                 "status": "applied",
+                "elapsed_ms": round((time.monotonic() - rerank_started) * 1000, 1),
+                "model_id": getattr(reranker, "model", ""),
                 "model": reranker_cls.__name__,
                 "pool_count": len(chunks),
                 "candidate_limit": max(RERANK_CANDIDATE_K, 1),
@@ -1208,7 +1241,7 @@ async def retrieve_chat_chunks(
                 "returned_count": len(ranked),
                 "items": rerank_items,
             }
-            trace.score_kind = "rerank_logit"
+            trace.score_kind = "rerank_score"
             logger.info("[RERANK-CE] гибридный пул %s переупорядочен", len(chunks))
         except Exception as rerank_error:
             log_error("[RERANKER] required rerank failed closed: %s", rerank_error)
@@ -1241,23 +1274,8 @@ async def retrieve_chat_chunks(
     if ordinal_promoted and "first_ordinal_guard" not in trace.mode:
         trace.mode = f"{trace.mode}+first_ordinal_guard"
 
-    # Parent-card hydration: search_chunk → sibling window under the same parent_id.
-    # Does not select a professional answer; only attaches typed meta.parent_card.
-    try:
-        from proxy.services.parent_card_hydration_service import hydrate_parent_cards
-
-        hydration = hydrate_parent_cards(chunks, max_chunks=min(8, max(1, CHAT_TOP_K)))
-        chunks = hydration.chunks
-        trace.parent_hydration = hydration.payload()
-        if hydration.hydrated_count and "parent_card" not in trace.mode:
-            trace.mode = f"{trace.mode}+parent_card"
-    except Exception as hydrate_error:  # noqa: BLE001 — best-effort, never fail retrieval
-        logger.warning("[PARENT_CARD] hydration skipped: %s", hydrate_error)
-        trace.parent_hydration = {
-            "schema": "les.parent_card.v1",
-            "hydrated_count": 0,
-            "error": type(hydrate_error).__name__,
-        }
+    # Real parent reads belong to the bounded chat context stage, after ranking.
+    trace.parent_hydration = {"schema": "les.chat-section-context.v1", "status": "deferred_to_chat"}
 
     # A weak-query retry may replace the trace; record the actual query contract
     # only after every dense pass has completed.
@@ -1282,6 +1300,13 @@ async def retrieve_chat_chunks(
     trace.status = "ok" if quality.status == "good" else "degraded"
     trace.resolved_dataset_ids = list(dataset_ids or [])
     trace.scope_source = scope_source
+    if index_journal is not None:
+        try:
+            index_journal.assert_unchanged(index_stamp)
+        except EmbeddingContractError as error:
+            return blocked_result(str(error), detail=str(error))
+        for chunk in chunks:
+            chunk.meta = {**(getattr(chunk, "meta", {}) or {}), "_index_revision": index_stamp}
     if return_trace:
         return RetrievalResult(chunks, trace, kot, quality)
     return chunks

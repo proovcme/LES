@@ -62,6 +62,12 @@ CODE_FILES = {"sovushka_ng.py", "pyproject.toml", "uv.lock", "tools/__init__.py"
               "tools/light_windows_ocr.ps1", "tools/light_cli.py", "tools/les-light.cmd",
               "tools/backup_suharik.py", "tools/les_doctor.py", "tools/les_runtime_control.py", "tools/lesctl.py",
               "proxy/services/mcp_connection_service.py", "proxy/routers/mcp_connections.py",
+                "backend/local_reranker.py", "backend/index_replacement.py", "backend/sparse_index.py",
+                "backend/inference/bm25_weighted.py",
+                "tools/rebuild_sparse_index.py",
+              "proxy/services/chat_section_context_service.py",
+              "proxy/services/document_task_store.py", "proxy/services/table_document_tool.py",
+              "proxy/services/tabular_document_service.py",
               "sovushka/components/mcp_connections.py", "sovushka/components/light_shell.py"}
 CONFIG_FILES = {"version.json", "light-runtime.json", "windows_python.json", "windows_uv.json"}
 PUBLIC_ASSETS = {

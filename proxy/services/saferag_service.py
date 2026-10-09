@@ -60,8 +60,14 @@ def query_terms(question: str) -> set[str]:
     }
 
 
-def rank_chunks_for_question(question: str, chunks: list[SourceChunk]) -> list[SourceChunk]:
+def rank_chunks_for_question(
+    question: str, chunks: list[SourceChunk], *, preserve_retrieval_order: bool = False,
+) -> list[SourceChunk]:
     """Apply a tiny lexical boost on top of vector score for evidence ordering."""
+    # The hybrid pipeline already owns ranking (RRF, optional cross-encoder,
+    # explicit reference guards). Adding lexical scores here would undo it.
+    if preserve_retrieval_order:
+        return list(chunks)
     terms = query_terms(question)
     if not terms or not chunks:
         return chunks
@@ -166,6 +172,8 @@ def _source_label(index: int, chunk: SourceChunk, include_metadata: bool) -> str
     doc_type = meta.get("doc_type")
     if doc_type:
         details.append(str(doc_type))
+    if meta.get("atomic_evidence") and meta.get("parent_id"):
+        details.append("фрагмент раздела; полнота не гарантируется")
     return "[" + " | ".join(details) + "]"
 
 
@@ -212,6 +220,8 @@ def numeric_provenance_check(answer: str, context: str, *, max_flags: int = 5) -
 def _context_candidates(chunks: Iterable[SourceChunk]) -> list[tuple[int, SourceChunk]]:
     """Put one chunk per source first, then fill with remaining evidence."""
     items = list(enumerate(chunks))
+    if any((getattr(chunk, "meta", {}) or {}).get("atomic_evidence") for _, chunk in items):
+        return items
     first: list[tuple[int, SourceChunk]] = []
     rest: list[tuple[int, SourceChunk]] = []
     seen_docs: set[str] = set()
@@ -234,17 +244,25 @@ def _visible_context_parts(
     """Return exact visible evidence; an oversized chunk cannot block later ones."""
     visible: list[tuple[int, int, SourceChunk, str, str]] = []
     total = 0
+    seen: set[tuple[str, str, str, str]] = set()
     for original_index, chunk in _context_candidates(chunks):
         visible_index = len(visible) + 1
         meta = getattr(chunk, "meta", {}) or {}
-        clean = _clean_chunk_text(chunk.content)
+        clean = chunk.content if meta.get("atomic_evidence") else _clean_chunk_text(chunk.content)
+        identity = (str(meta.get("dataset_id") or ""), str(chunk.doc_name),
+                    str(meta.get("source_page") or meta.get("page") or ""), clean)
+        if identity in seen:
+            continue
+        seen.add(identity)
         table_header = str(meta.get("table_header") or "").strip() if isinstance(meta, dict) else ""
-        if table_header and table_header not in clean[: max(len(table_header) + 40, 200)]:
+        if table_header and not meta.get("atomic_evidence") and table_header not in clean[: max(len(table_header) + 40, 200)]:
             clean = f"[Заголовок таблицы] {table_header}\n{clean}"
         label = _source_label(visible_index, chunk, include_metadata)
         prefix = f"{label}:\n"
-        remaining = max_chars - total
+        remaining = max_chars - total - (2 if visible else 0)
         if len(prefix) + len(clean) > remaining:
+            if meta.get("atomic_evidence"):
+                continue
             # Do not spend a citation slot on an unusably tiny tail. Continue to
             # later (possibly shorter) evidence instead of stopping the pack.
             if remaining <= len(prefix) + 80:
@@ -302,6 +320,11 @@ def source_map_for_context(
             for key in ("dataset_id", "source_page", "page", "page_number", "doc_type", "source_ref"):
                 if meta.get(key):
                     item[key] = meta[key]
+            if meta.get("atomic_evidence"):
+                item["quote"] = clean
+                for key in ("qdrant_point_id", "parent_id", "section_fragment_count", "context_origin"):
+                    if meta.get(key) is not None:
+                        item[key] = meta[key]
         out.append(item)
     return out
 

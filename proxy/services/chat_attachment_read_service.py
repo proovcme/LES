@@ -9,85 +9,17 @@ logger = logging.getLogger(__name__)
 _READ_ATTACH_MAX_CHARS = int(os.getenv("RAG_ATTACH_READ_MAX_CHARS", "18000"))
 
 def _compact_cell(value: Any, *, max_len: int = 240) -> str:
-    text = " ".join(str(value or "").replace("\u00a0", " ").split())
+    text = " ".join(str("" if value is None else value).replace("\u00a0", " ").split())
     if len(text) > max_len:
         return text[: max_len - 1].rstrip() + "…"
     return text
 
 def _format_tabular_attachment_context(path: Path, original_name: str, *, max_chars: int) -> tuple[str, bool] | None:
-    """XLSX/CSV attachment → model-readable row context with sheet/row provenance.
-
-    Preserves sheet and row provenance; does not infer or calculate domain values.
-    """
-    suffix = path.suffix.lower()
-    parts: list[str] = [
-        f"Файл: {original_name}",
-        "Тип данных: таблица/спецификация. Строки ниже сохранены с номерами листов/строк.",
-        "",
-    ]
-    truncated = False
-    used_chars = len('\n'.join(parts))
-
-    def _append(line: str) -> bool:
-        nonlocal truncated, used_chars
-        extra_chars = len(line) + (1 if used_chars else 0)
-        if used_chars + extra_chars > max_chars:
-            truncated = True
-            return False
-        parts.append(line)
-        used_chars += extra_chars
-        return True
-
-    if suffix in {".xlsx", ".xlsm"}:
-        try:
-            import openpyxl
-            wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
-        except Exception as err:  # noqa: BLE001
-            logger.warning("[ATTACH] xlsx structured read failed for %s: %s", original_name, err)
-            return None
-        try:
-            for sheet in wb.sheetnames:
-                ws = wb[sheet]
-                if not _append(f"## Лист: {sheet}"):
-                    break
-                nonempty = 0
-                for ri, row in enumerate(ws.iter_rows(values_only=True), 1):
-                    vals = [_compact_cell(v) for v in row if v not in (None, "")]
-                    if not vals:
-                        continue
-                    nonempty += 1
-                    if not _append(f"{sheet}!R{ri}: " + " | ".join(vals)):
-                        break
-                _append(f"Итого непустых строк на листе «{sheet}»: {nonempty}")
-                if truncated:
-                    break
-        finally:
-            wb.close()
-    elif suffix == ".csv":
-        import csv
-        import io
-        from backend.text_decoding import read_document_text
-        text = read_document_text(path)
-        sample = text.partition('\n')[0]
-        delimiter = ";" if sample.count(";") >= sample.count(",") else ","
-        reader = csv.reader(io.StringIO(text), delimiter=delimiter)
-        nonempty = 0
-        _append("## CSV")
-        for ri, row in enumerate(reader, 1):
-            vals = [_compact_cell(v) for v in row if str(v or "").strip()]
-            if not vals:
-                continue
-            nonempty += 1
-            if not _append(f"CSV!R{ri}: " + " | ".join(vals)):
-                break
-        _append(f"Итого непустых строк CSV: {nonempty}")
-    else:
+    """Literal coordinates and whole-row preview; no lossy cell compaction."""
+    from proxy.services.tabular_document_service import TABLE_SUFFIXES, read_table, preview
+    if path.suffix.lower() not in TABLE_SUFFIXES:
         return None
-
-    if truncated and parts[-1] != "[Табличный контекст усечён по лимиту; для полного документа нужен датасет или более узкий лист.]":
-        parts.append("[Табличный контекст усечён по лимиту; для полного документа нужен датасет или более узкий лист.]")
-    text = "\n".join(parts).strip()
-    return (text, truncated) if text else None
+    return preview(read_table(path, original_name), max_chars)
 
 async def _prepare_read_attachment(
     temp_path: Path,
@@ -116,7 +48,7 @@ async def _prepare_read_attachment(
             original_name,
             max_chars=_READ_ATTACH_MAX_CHARS,
         )
-    except (OSError, ValueError) as error:
+    except Exception as error:  # Malformed ZIP/XML/CSV must remain a visible upload error.
         raise HTTPException(422, f'Не удалось прочитать таблицу «{original_name}»: {error}') from error
     if structured:
         text, truncated = structured

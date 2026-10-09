@@ -414,3 +414,41 @@ async def test_document_viewer_by_id_uses_metadata_identity(monkeypatch, tmp_pat
     response = await documents_router.document_viewer_by_id("doc-31", locator="para4", _user=object())
 
     assert "Титул.docx:para4" in response.body.decode("utf-8")
+
+
+@pytest.mark.asyncio
+async def test_pdf_citation_viewer_resolves_chunk_identity_and_renders_exact_page(monkeypatch, tmp_path):
+    import json
+    import re
+    import pypdfium2 as pdfium
+
+    source = tmp_path / "Проект с пробелами.pdf"
+    with pdfium.PdfDocument.new() as pdf:
+        for _ in range(4):
+            pdf.new_page(300, 400).close()
+        pdf.save(source)
+    original = source.read_bytes()
+    document = {"id": "stable-document", "dataset_id": "project-7",
+                "file_name": source.name, "source_path": str(source)}
+
+    class StubExplorer:
+        def get_document(self, doc_id):
+            return document if doc_id == "stable-document" else None
+
+        def get_document_by_source(self, dataset_id, doc_name):
+            assert (dataset_id, doc_name) == ("project-7", source.name)
+            return document
+
+    monkeypatch.setattr(documents_router, "explorer", lambda: StubExplorer())
+    response = await documents_router.document_viewer_by_id(
+        "chunk:budget:unknown", dataset_id="project-7", doc_name=source.name, page=3, _user=object())
+    html = response.body.decode("utf-8")
+    config = json.loads(re.search(r'<script id="viewer-config" type="application/json">(.*?)</script>', html).group(1))
+    assert config["documentId"] == "stable-document"
+    assert config["initialPage"] == 3
+    assert config["pageCount"] == 4
+    assert str(source) not in html
+    preview = await documents_router.document_pdf_contour_preview(
+        "stable-document", 3, width=320, bbox="", _user=object())
+    assert preview.body.startswith(b"\x89PNG\r\n\x1a\n")
+    assert source.read_bytes() == original

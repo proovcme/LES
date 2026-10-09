@@ -69,6 +69,8 @@ def _probe_request(
     if capability is CapabilityName.TOOLS:
         return "POST", join_openai_path(endpoint, "/chat/completions"), {
             **chat_body,
+            "messages": [{"role": "user", "content": "Call les_capability_probe to verify tool calling."}],
+            "max_tokens": 128,
             "tools": [
                 {
                     "type": "function",

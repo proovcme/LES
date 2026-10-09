@@ -10,7 +10,7 @@ The sole recovery-free path is a strictly identified release-acceptance fixture.
 from __future__ import annotations
 
 import asyncio
-from contextlib import closing
+from contextlib import closing, asynccontextmanager
 import re
 import shutil
 import sqlite3
@@ -30,6 +30,16 @@ class DatasetDeletionError(RuntimeError):
 
 
 _DELETE_LOCK = asyncio.Lock()
+
+
+@asynccontextmanager
+async def _mutation_guard(storage_root, collection):
+    from backend.index_replacement import ReplacementJournal
+    from backend.sparse_index import external_mutation
+    with external_mutation(ReplacementJournal(storage_root, collection)):
+        yield
+
+
 _RELEASE_ACCEPTANCE_NAME = re.compile(r"LES acceptance [0-9a-f]{32}")
 
 
@@ -191,7 +201,7 @@ async def delete_datasets_safely(
             "recovery-free deletion is limited to the exact release acceptance fixture"
         )
 
-    async with _DELETE_LOCK:
+    async with _DELETE_LOCK, _mutation_guard(storage_root, collection):
         recovery_dir = None if ephemeral else _new_recovery_dir(db_path, "datasets")
         db_backup = None if recovery_dir is None else recovery_dir / db_path.name
         if db_backup is not None:

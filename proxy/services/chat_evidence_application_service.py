@@ -42,7 +42,7 @@ from proxy.services.context_governor_service import (
     ContextPacket,
     ContextRequiredSectionOverflow,
 )
-from proxy.services.context_expander_service import expand_context_windows
+from proxy.services.chat_section_context_service import ChatSectionReader, SectionReadError, visible_chunks
 from proxy.services.evidence_packet_service import (
     build_retrieval_evidence_packet,
     render_retrieval_evidence_for_model,
@@ -97,7 +97,7 @@ from proxy.services.chat_evidence_tools import safe_selected_call_trace
 from proxy.services.chat_evidence_context import _context_objects
 from proxy.services.chat_evidence_context import _text_context_objects
 from proxy.services.chat_evidence_context import workspace_memory_objects
-from proxy.services.chat_evidence_context import govern_inference_messages
+from proxy.services.chat_evidence_context import govern_inference_messages, source_context_blocks, model_visible_source_map
 from proxy.services.chat_evidence_context import context_packet_trace
 from proxy.services.chat_evidence_tools import execute_canonical_shadow_decision
 from proxy.services.chat_evidence_tools import safe_execute_canonical_shadow_decision
@@ -173,7 +173,6 @@ async def _execute_chat_evidence_application(
     _env_bool = runtime.env_bool
     _env_float = runtime.env_float
     _env_int = runtime.env_int
-    expand_context_windows = runtime.expand_context_windows
     _format_tool_results_for_model = runtime.format_tool_results_for_model
     _generation_token_budget = runtime.generation_token_budget
     _local_context_budget = runtime.local_context_budget
@@ -282,18 +281,29 @@ async def _execute_chat_evidence_application(
                 "поиск по другим документам автоматически не выполнялся."
             )
             action = "Выбрать доступный датасет или загрузить источники."
+        elif error_code in {"embedding_contract_mismatch", "INDEX_RECOVERY_REQUIRED",
+                            "INDEX_RECOVERY_INCOMPLETE", "INDEX_UPDATE_BUSY", "INDEX_CHANGED_DURING_SEARCH",
+                            "ROLE_BINDING_MISSING", "CONNECTION_DISABLED", "CONNECTION_SECRET_MISSING",
+                            "CAPABILITY_SNAPSHOT_MISSING", "CAPABILITY_SNAPSHOT_STALE", "CAPABILITY_REQUIRED",
+                            "UPSTREAM_TIMEOUT", "UPSTREAM_UNREACHABLE", "UPSTREAM_AUTH_FAILED",
+                            "UPSTREAM_MODEL_NOT_FOUND", "UPSTREAM_RATE_LIMITED",
+                            "UPSTREAM_RESPONSE_INVALID", "UPSTREAM_RESPONSE_TOO_LARGE"}:
+            from proxy.services.public_error_service import public_error_payload
+            blocked_answer = public_error_payload(status_code=503, detail=error_code)["detail"]
+            action = blocked_answer
         elif error_code in {"reranker_disabled", "reranker_unavailable", "reranker_failed"}:
             blocked_answer = (
-                "Поиск остановлен: обязательный реранкер недоступен. "
-                "Я не формирую ответ по непроверенному порядку фрагментов."
+                "Реранкер не смог обработать найденные источники. "
+                "Отключите «Уточнять порядок источников» и повторите вопрос "
+                "или проверьте реранкер в диагностике."
             )
-            action = "Восстановить реранкер и повторить запрос."
+            action = "Отключить реранкер или восстановить его, затем повторить вопрос."
         else:
             blocked_answer = (
-                "Поиск остановлен: обязательный native RRF-контур недоступен. "
-                "Старый или широкий поиск вместо него не запускался."
+                "Не удалось выполнить поиск по выбранным документам. "
+                "Проверьте готовность набора в разделе «Данные» и повторите вопрос."
             )
-            action = "Проверить индекс-контракт и native RRF, затем повторить запрос."
+            action = "Открыть «Данные» и проверить готовность набора к поиску."
         retrieval_trace["blocker"] = {
             "schema": "retrieval_blocker_v1",
             "code": error_code,
@@ -476,7 +486,20 @@ async def _execute_chat_evidence_application(
     try:
         connection_resolver, connection_secret_store, resolved_connection = resolve_required_answer(model_connection_resolver)
     except Exception as error:
-        raise HTTPException(503, f"MODEL_CONNECTION_RESOLUTION_FAILED: {error}") from error
+        raise HTTPException(503, str(error)) from error
+    from proxy.services.table_document_tool import (
+        bind_table_tool, manifest as table_manifest, TOOL_NAME as TABLE_TOOL,
+        without_table_replays,
+    )
+    table_tool = await asyncio.to_thread(
+        bind_table_tool, req, dataset_ids=_dataset_ids,
+        profile_revision=str((profile_snapshot or {}).get("revision_id") or ""),
+        model_revision=resolved_connection.revision_id,
+        input_budget=resolved_connection.effective_preset.input_token_limit,
+    )
+    if table_tool is not None:
+        use_semantic_cache = False
+        retrieval_trace["document_task"] = table_tool.state()
     canonical_route = resolve_canonical_route(receipt=None)
     canonical_execution_mode = CanonicalRouteMode.ACTIVE
     candidate_acceptance = bool(getattr(req, "candidate_acceptance", False))
@@ -501,7 +524,7 @@ async def _execute_chat_evidence_application(
     context_window_chars = context_budget["context_window_chars"]
     context_radius = 0 if is_structured else None
 
-    chunks = rank_chunks_for_question(req.question, chunks)
+    chunks = rank_chunks_for_question(req.question, chunks, preserve_retrieval_order=True)
     protected_doc_names: list[str] = list(target_doc_filter or [])
     protected_doc_names.extend(topic_doc_filter)
     if notebook_study_pack is not None:
@@ -525,7 +548,7 @@ async def _execute_chat_evidence_application(
         focused_names = {str(getattr(chunk, "doc_name", "") or "") for chunk in chunks}
         fallback_floor = _env_float("RAG_CHAT_FOCUS_MIN_SCORE", 0.35)
         promoted_fallback = None
-        for candidate in rank_chunks_for_question(req.question, list(retrieval.chunks)):
+        for candidate in rank_chunks_for_question(req.question, list(retrieval.chunks), preserve_retrieval_order=True):
             candidate_name = str(getattr(candidate, "doc_name", "") or "")
             if (
                 not candidate_name
@@ -612,7 +635,17 @@ async def _execute_chat_evidence_application(
         }
 
     t_ctx_start = time.time()
-    context_windows = expand_context_windows(
+    section_reader = ChatSectionReader(rag_backend, _dataset_ids)
+
+    async def expand_chat_context(values, **kwargs):
+        if values:
+            await chat_progress(token_sink, "context", "Дочитываю найденные разделы")
+        expanded = await section_reader.expand(values, **kwargs)
+        if values:
+            await chat_progress(token_sink, "context", "Собираю контекст с отдельной ссылкой на каждый фрагмент")
+        return expanded
+
+    context_windows = await expand_chat_context(
         chunks,
         collection=getattr(rag_backend, "collection_name", ""),
         logger=logger,
@@ -634,7 +667,7 @@ async def _execute_chat_evidence_application(
     # Переиспользуем контекст ответа: те же чанки, валидатор проверяет ответ по ним.
     # Отдельный проход вернуть: RAG_VALIDATION_SEPARATE_CONTEXT=true.
     if _env_bool("RAG_VALIDATION_SEPARATE_CONTEXT", False):
-        validation_context_windows = expand_context_windows(
+        validation_context_windows = await expand_chat_context(
             chunks,
             collection=getattr(rag_backend, "collection_name", ""),
             logger=logger,
@@ -802,7 +835,10 @@ async def _execute_chat_evidence_application(
         include_metadata=True,
     )
     attachment_context = str(getattr(req, "attachment_context", "") or "").strip()
+    if table_tool is not None:
+        attachment_context = table_manifest(table_tool)
     terminal_model_answer = None
+    terminal_context_packet = None
     active_model_streamed = False
     terminal_answer_streamed = False
     dialogue_context = [session_block] if session_block else []
@@ -839,6 +875,7 @@ async def _execute_chat_evidence_application(
                 Возвращает (answer_text, usage_dict)."""
                 nonlocal active_model_result, active_pending_tool_calls, active_model_streamed
                 from proxy.services.chat_attachment_service import with_image_attachment
+                section_reader.assert_for_inference()
                 provider_messages = tuple(body.get("messages") or ())
                 provider_messages = with_image_attachment(provider_messages, getattr(req, "attachment_id", None))
                 inference_request = InferenceRequest(
@@ -959,6 +996,8 @@ async def _execute_chat_evidence_application(
                 profile_tools,
                 enabled=document_grounding_enabled,
             )
+            if table_tool is not None:
+                profile_tools = [TABLE_TOOL, *profile_tools]
             route_trace = canonical_route_trace_payload(
                 canonical_route,
                 execution_mode=canonical_execution_mode,
@@ -990,6 +1029,7 @@ async def _execute_chat_evidence_application(
                     from proxy.services.tool_harness_service import harness
 
                     tool_harness = harness(web_config=web_research_config)
+                    table_contract = table_tool.register(tool_harness) if table_tool is not None else None
 
                     async def _fallback_model_tool(tool_name: str, args: dict[str, Any]):
                         return await asyncio.to_thread(tool_harness.call, tool_name, args)
@@ -1054,6 +1094,12 @@ async def _execute_chat_evidence_application(
                         for tool in shortlist.get("tools", [])
                         if isinstance(tool, dict) and tool.get("name")
                     }
+                    if table_contract is not None:
+                        # The explicit attachment grants only this bound document tool.
+                        shortlist["tools"] = [table_contract, *[
+                            item for item in shortlist.get("tools", []) if item.get("name") != TABLE_TOOL
+                        ]][:shortlist_limit]
+                        allowed_tools = {item["name"] for item in shortlist["tools"]}
                     native_tools = native_model_tool_schemas(
                         shortlist.get("tools") or []
                     )
@@ -1062,6 +1108,12 @@ async def _execute_chat_evidence_application(
                     research_rounds: list[dict[str, Any]] = []
                     failed_calls: set[str] = set()
                     completed_reads: set[str] = set()
+                    def iteration_call_identity(call):
+                        identity = tool_call_identity(call)
+                        if table_tool is not None and call.get('tool') == TABLE_TOOL:
+                            state = table_tool.state()
+                            return f"{state['task_id']}:{state['revision']}:{identity}"
+                        return identity
                     research_deadline_seconds = max(
                         1.0,
                         _env_float("LES_CHAT_RESEARCH_DEADLINE_SECONDS", 120.0),
@@ -1074,7 +1126,7 @@ async def _execute_chat_evidence_application(
                         research_round += 1
                         prior_results = [
                             _compact_tool_result_for_prompt(item, max_chars=2400)
-                            for item in tool_results_for_model[-max_calls:]
+                            for item in without_table_replays(tool_results_for_model[-max_calls:])
                         ]
                         tool_call_instruction = (
                             "Вызывай предоставленные инструменты напрямую. "
@@ -1133,9 +1185,10 @@ async def _execute_chat_evidence_application(
                             source_map=selector_source_map,
                             tool_exchange=prior_results,
                             dialogue=dialogue_context,
+                            **table_tool.model_context() if table_tool is not None else {},
                         )
                         retrieval_trace["context_governor"]["calls"].append(
-                            context_packet_trace(selector_packet, purpose="tool_decision")
+                            {**context_packet_trace(selector_packet, purpose="tool_decision"), "sent_to_model": True}
                         )
                         selector_body = {
                             "messages": selector_messages,
@@ -1167,8 +1220,8 @@ async def _execute_chat_evidence_application(
                             )
                         ]
                         calls = [call for call in proposed_calls[:calls_remaining]
-                                 if tool_call_identity(call) not in failed_calls
-                                 and tool_call_identity(call) not in completed_reads]
+                                 if iteration_call_identity(call) not in failed_calls
+                                 and iteration_call_identity(call) not in completed_reads]
                         research_rounds.append(
                             {"round": research_round, "proposed": len(proposed_calls), "executed": len(calls)}
                         )
@@ -1176,20 +1229,24 @@ async def _execute_chat_evidence_application(
                             stop_reason = "model_stop"
                             if proposed_calls:
                                 stop_reason = "repeated_tool_failure"
-                                if any(tool_call_identity(call) in completed_reads for call in proposed_calls):
+                                if any(iteration_call_identity(call) in completed_reads for call in proposed_calls):
                                     stop_reason = "repeated_read"
                             else:
                                 response = active_model_result.response
                                 if response.text.strip() and not response.tool_calls:
                                     terminal_model_answer = (response.text, dict(response.usage))
                                     terminal_answer_streamed = active_model_streamed
+                                    terminal_context_packet = selector_packet
                             break
                         for call in calls:
+                            call_identity = iteration_call_identity(call)
                             tool_loop_stage = "tool_execution"
                             tool_name = str(call.get("tool") or "")
                             await chat_progress(token_sink, "tool", "Читаю и проверяю найденные материалы")
                             research_result = await model_research_tools.execute(call)
                             payload = research_result.payload
+                            if table_tool is not None and tool_name == TABLE_TOOL and payload.get('status') == 'error':
+                                table_tool.remember_validation_failure(call.get('args') or {}, payload)
                             if research_result.chunks:
                                 known_chunk_ids = {
                                     str((getattr(item, "meta", {}) or {}).get("chunk_id") or "")
@@ -1215,7 +1272,7 @@ async def _execute_chat_evidence_application(
                                     if found_id not in known_chunk_ids:
                                         chunks.append(found_chunk)
                                         known_chunk_ids.add(found_id)
-                                research_windows = expand_context_windows(
+                                research_windows = await expand_chat_context(
                                     chunks,
                                     collection=getattr(rag_backend, "collection_name", ""),
                                     logger=logger,
@@ -1243,10 +1300,15 @@ async def _execute_chat_evidence_application(
                                 selector_source_map = answer_source_map
                             selected_calls.append(call)
                             if payload.get("status") == "error" or payload.get("ok") is False:
-                                failed_calls.add(tool_call_identity(call))
-                            completed_reads.add(tool_call_identity(call))
+                                failed_calls.add(call_identity)
+                            completed_reads.add(call_identity)
                             calls_remaining -= 1
                             tool_results_for_model.append(payload)
+                            if table_tool is not None and tool_name == TABLE_TOOL:
+                                task_status = table_tool.state()
+                                retrieval_trace["document_task"] = task_status
+                                done = task_status['total'] - task_status['pending']
+                                await chat_progress(token_sink, "document", f"Проверено строк: {done} из {task_status['total']}")
                             answer_source_map = _merge_web_source_map(
                                 answer_source_map,
                                 tool_results_for_model,
@@ -1256,7 +1318,7 @@ async def _execute_chat_evidence_application(
                         if calls_remaining <= 0:
                             stop_reason = "calls_budget"
                             break
-                    tool_context = _format_tool_results_for_model(tool_results_for_model)
+                    tool_context = _format_tool_results_for_model(without_table_replays(tool_results_for_model))
                     web_research_trace = public_web_research_config(
                         web_research_config
                     )
@@ -1318,7 +1380,9 @@ async def _execute_chat_evidence_application(
                             "message": "Обязательная часть выбора инструмента не помещается в безопасный контекст модели.",
                         },
                     ) from context_error
-                except Exception as tool_err:  # noqa: BLE001 - tool loop must degrade into trace, not block chat
+                except SectionReadError:
+                    raise
+                except Exception as tool_err:  # noqa: BLE001 - optional tool errors remain observable in trace
                     logger.exception(
                         "[TOOLS] model tool loop skipped: %s",
                         type(tool_err).__name__,
@@ -1333,6 +1397,9 @@ async def _execute_chat_evidence_application(
                     }
                     if isinstance(tool_err, ModelTransportError) and str(tool_err) == "CAPABILITY_REQUIRED: tools":
                         retrieval_trace["tool_loop"]["unavailable_capability"] = "tools"
+                    elif isinstance(tool_err, ModelTransportError):
+                        # Preserve outage/timeout instead of repeating the same failed inference.
+                        raise
             else:
                 retrieval_trace["tool_loop"] = {
                     "schema": "les_model_research_loop_v1",
@@ -1351,7 +1418,7 @@ async def _execute_chat_evidence_application(
                     # Ретрай не выбрасывает найденные источники: повторная генерация получает
                     # весь уже собранный evidence packet, а не новый кодовый shortlist.
                     strict_chunks = list(chunks)
-                    strict_windows = expand_context_windows(
+                    strict_windows = await expand_chat_context(
                         strict_chunks if strict_chunks else chunks[:2],
                         collection=getattr(rag_backend, "collection_name", ""),
                         logger=logger,
@@ -1398,15 +1465,6 @@ async def _execute_chat_evidence_application(
                         answer_source_map,
                         tool_results_for_model,
                     )
-                    if token_sink is not None and attempt == 1:
-                        await token_sink({
-                            "event": "sources",
-                            "data": {
-                                "sources": source_names(ctx_chunks),
-                                "source_excerpts": source_excerpts(ctx_chunks, max_n=len(ctx_chunks), max_chars=280),
-                                "source_map": answer_source_map,
-                            },
-                        })
                     # ADR-12 §2: каркас формы под интент добавляем к нормальному промпту.
                     sys_msg = sys_normal + (f" {answer_form.instruction}" if answer_form.instruction else "")
                     # Формат/стиль из GUI (глубина/язык) — ТОЛЬКО в системный промпт генерации,
@@ -1462,16 +1520,13 @@ async def _execute_chat_evidence_application(
                 answer_tool_exchange = (
                     [
                         _compact_tool_result_for_prompt(item, max_chars=2400)
-                        for item in tool_results_for_model
+                        for item in without_table_replays(tool_results_for_model)
                     ]
                 )
                 answer_evidence = (
                     [
                         "Материалы из найденных документов:",
-                        *[
-                            item.payload
-                            for item in _text_context_objects("answer-evidence", context)
-                        ],
+                        *source_context_blocks(context),
                     ] if context.strip() else []
                 )
                 try:
@@ -1485,6 +1540,7 @@ async def _execute_chat_evidence_application(
                         source_map=(answer_source_map),
                         tool_exchange=answer_tool_exchange,
                         dialogue=dialogue_context,
+                        required_evidence=[table_tool.context()] if table_tool is not None else (),
                     )
                 except ContextRequiredSectionOverflow as context_error:
                     retrieval_trace["context_governor"]["error"] = {
@@ -1501,7 +1557,7 @@ async def _execute_chat_evidence_application(
                         },
                     ) from context_error
                 retrieval_trace["context_governor"]["calls"].append(
-                    context_packet_trace(answer_packet, purpose="answer")
+                    {**context_packet_trace(answer_packet, purpose="answer"), "sent_to_model": terminal_model_answer is None}
                 )
                 user_prompt = next(
                     (message["content"] for message in messages if message["role"] == "user"),
@@ -1582,6 +1638,24 @@ async def _execute_chat_evidence_application(
                         logger.warning("[CHAT] empty LLM answer on attempt=%s — retrying strict", attempt)
                         continue
                     raise ValueError(f"Пустой ответ LLM (stream={token_sink is not None})")
+                actual_packet = terminal_context_packet if terminal_model_answer is not None else answer_packet
+                if actual_packet is not None:
+                    answer_source_map = model_visible_source_map(actual_packet, answer_source_map)
+                    retrieval_trace["section_coverage"] = section_reader.coverage(answer_source_map)
+                    visible_labels = {item.get("label") for item in answer_source_map}
+                    if "evidence" in final_evidence_packet:
+                        final_evidence_packet["evidence"]["sources"] = [
+                            item for item in final_evidence_packet["evidence"].get("sources", [])
+                            if item.get("context_label") in visible_labels
+                        ]
+                        final_evidence_packet["retrieval"]["visible_source_count"] = len(final_evidence_packet["evidence"]["sources"])
+                if token_sink is not None:
+                    shown = visible_chunks(ctx_chunks, answer_source_map)
+                    await token_sink({"event": "sources", "data": {
+                        "sources": source_names(shown),
+                        "source_excerpts": source_excerpts(shown, max_n=len(shown), max_chars=280),
+                        "source_map": answer_source_map,
+                    }})
                 tokens = usage.get("completion_tokens", 0)
                 # W3.3: учёт расходов облака (токены → $). Локальные вызовы не считаем.
                 if active_model_result is not None and active_model_result.connection.locality is ConnectionLocality.REMOTE:
@@ -1598,6 +1672,13 @@ async def _execute_chat_evidence_application(
                 logger.info("[CHAT] model answer accepted unchanged; citation check is trace-only")
                 break
 
+
+            if table_tool is not None and (getattr(req, 'attachment_id', None) or any(
+                    item.get('tool') == TABLE_TOOL for item in tool_results_for_model)):
+                notice = table_tool.coverage_notice()
+                if notice:
+                    answer = notice + '\n\n' + answer
+                    await chat_progress(token_sink, 'document', notice.replace('**', ''))
 
             try:
                 from proxy.services.evidence_packet_service import verify_answer_source_labels
@@ -1701,7 +1782,7 @@ async def _execute_chat_evidence_application(
             for key in ("latency_search", "latency_gen", "tokens", "latency_phases"):
                 state.chat_metrics[key] = state.chat_metrics[key][-100:]
 
-            history_chunks = model_evidence_chunks if model_evidence_chunks else chunks
+            history_chunks = visible_chunks(ctx_chunks, answer_source_map)
             sources_list = source_names(history_chunks)
             if project_inventory_prompt:
                 sources_list = [*sources_list, "Опись файлов датасета (MetaDB documents)"]
@@ -1897,7 +1978,7 @@ async def _execute_chat_evidence_application(
         raise HTTPException(504, "Истёк таймаут назначенной модели — проверь подключение или повтори запрос.")
     except ModelTransportError as e:
         logger.error("[CHAT] ASSIGNED MODEL ERROR: %s", e)
-        raise HTTPException(502, f"Назначенная модель не ответила: {e}")
+        raise HTTPException(502, str(e)) from e
     except httpx.HTTPStatusError as e:
         detail = f"LLM HTTP {e.response.status_code}: {e.response.text[:200]}"
         logger.error("[CHAT] LLM HTTP ERROR: %s", detail)

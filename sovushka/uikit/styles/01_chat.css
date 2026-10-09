@@ -200,9 +200,18 @@
 }
 
 .sov-composer-drop {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  visibility: hidden;
+  pointer-events: none;
+  height: 100%;
+  max-height: none !important;
+  background: var(--bg-panel);
   border-style: dashed;
-  border-color: var(--muted);
+  border-color: var(--accent);
 }
+.sov-composer--dragging .sov-composer-drop {visibility:visible;pointer-events:auto;}
 
 .sov-composer-drop .q-uploader__header {
   background: transparent;

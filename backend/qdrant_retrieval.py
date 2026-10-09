@@ -1,6 +1,16 @@
 """Dense/sparse retrieval, reranking and hierarchy."""
 from __future__ import annotations
 from backend import qdrant_support as support
+from backend.embedding_client import EmbedClient
+from backend.index_replacement import ReplacementJournal
+
+
+def _query_embedder(adapter):
+    journal = ReplacementJournal.for_adapter(adapter)
+    stamp = journal.read_stamp()
+    client = adapter.embed
+    frozen = client.for_index(support._embedding_cache_descriptor()) if isinstance(client, EmbedClient) else client
+    return frozen, journal, stamp
 
 
 class QdrantRetrieval:
@@ -15,7 +25,8 @@ class QdrantRetrieval:
         self._assert_dense_index_contract()
 
         # Async эмбеддинг запроса
-        vecs = await self.embed.encode_async([query], query=True)
+        embedder, journal, stamp = _query_embedder(self)
+        vecs = await embedder.encode_async([query], query=True)
         query_vec = vecs[0]
 
         # ADR-12 стадия-2: doc_filter сужает поиск до выбранных документов-узлов
@@ -56,6 +67,7 @@ class QdrantRetrieval:
                     return True
             return False
 
+        journal.assert_unchanged(stamp)
         return [
             support.Chunk(
                 content=p.payload.get("text", ""),
@@ -76,6 +88,7 @@ class QdrantRetrieval:
         doc_filter: support.Optional[support.List[str]] = None,
         node_roles: support.Optional[support.List[str]] = None,
         ancestor_ids: support.Optional[support.List[str]] = None,
+        _query_state=None,
     ) -> support.List[support.Chunk]:
         """Qdrant-native dense+sparse hybrid over a named-vector collection.
 
@@ -88,9 +101,19 @@ class QdrantRetrieval:
 
         await self._ensure_collection()
         self._assert_dense_index_contract()
-        vecs = await self.embed.encode_async([query], query=True)
-        dense_vec = vecs[0]
-        sparse = encode_bm25(query)
+        if _query_state is None:
+            if hasattr(self, "_prepare_sparse_index"):
+                await self._prepare_sparse_index()
+            embedder, journal, stamp = _query_embedder(self)
+            dense_vec = (await embedder.encode_async([query], query=True))[0]
+        else:
+            dense_vec, journal, stamp = _query_state
+        journal.assert_unchanged(stamp)
+        if hasattr(self, "_prepare_sparse_index"):
+            from backend.sparse_index import encode_query
+            sparse = encode_query(journal, query)
+        else:
+            sparse = encode_bm25(query)
         if not sparse:
             # Do not let the caller label a dense-only query as native RRF.
             # The retrieval service will use its explicit dense+FTS fallback
@@ -133,6 +156,7 @@ class QdrantRetrieval:
             limit=top_k,
             with_payload=True,
         )
+        journal.assert_unchanged(stamp)
         return [
             support.Chunk(
                 content=p.payload.get("text", ""),
@@ -159,12 +183,21 @@ class QdrantRetrieval:
         """
         from backend.rag_hierarchy import reciprocal_rank_fuse
 
+        await self._ensure_collection()
+        self._assert_dense_index_contract()
+        if hasattr(self, "_prepare_sparse_index"):
+            await self._prepare_sparse_index()
+        embedder, journal, stamp = _query_embedder(self)
+        dense_vec = (await embedder.encode_async([query], query=True))[0]
+        query_state = dense_vec, journal, stamp
+
         global_evidence = await self.retrieve_native_hybrid(
             query,
             dataset_ids=dataset_ids,
             top_k=top_k,
             doc_filter=doc_filter,
             node_roles=["evidence"],
+            _query_state=query_state,
         )
         navigation = await self.retrieve_native_hybrid(
             query,
@@ -172,6 +205,7 @@ class QdrantRetrieval:
             top_k=min(max(4, top_k // 2), 16),
             doc_filter=doc_filter,
             node_roles=["navigation"],
+            _query_state=query_state,
         )
         route_ids = [
             str((item.meta or {}).get("node_id") or "")
@@ -187,6 +221,7 @@ class QdrantRetrieval:
             doc_filter=doc_filter,
             node_roles=["evidence"],
             ancestor_ids=route_ids,
+            _query_state=query_state,
         )
         return reciprocal_rank_fuse(
             [global_evidence, descendant_evidence],

@@ -1,10 +1,10 @@
 """Dataset search endpoints."""
 from __future__ import annotations
 import logging
-import os
 from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from backend.rag_config import rag_runtime_config
+from backend.reranker import select_reranker_cls
 from proxy.config import mlx_url
 from proxy.security import require_user
 from proxy.services.context_expander_service import expand_context_windows
@@ -67,9 +67,9 @@ async def search(req: SearchRequest, _user=Depends(require_user)):
         question=query,
         dataset_ids=dataset_ids,
         rag_backend=state.backend,
-        reranker_enabled=False,
-        reranker_available=False,
-        reranker_cls=None,
+        reranker_enabled=req.reranker_enabled,
+        reranker_available=True,
+        reranker_cls=select_reranker_cls(),
         mlx_url=mlx_url(),
         logger=logger,
         return_trace=True,
@@ -138,7 +138,7 @@ async def retrieve_debug(req: RetrievalDebugRequest, _user=Depends(require_user)
         _rr_available = True
     except ImportError:
         _rr_cls, _rr_available = None, False
-    _rr_enabled = os.getenv("RERANKER_ENABLED", "false").lower() == "true"
+    _rr_enabled = req.reranker_enabled
     retrieval = await retrieve_chat_chunks(
         question=req.question,
         dataset_ids=dataset_ids,

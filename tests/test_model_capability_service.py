@@ -67,6 +67,21 @@ def _peer_ok(_response, _endpoint) -> None:
 
 
 @pytest.mark.asyncio
+async def test_tool_probe_has_budget_for_complete_native_call():
+    def handler(request):
+        body = json.loads(request.content)
+        assert 32 <= body['max_tokens'] <= 256
+        assert 'Call les_capability_probe' in body['messages'][0]['content']
+        return httpx.Response(200, json={'choices': [{'message': {'role': 'assistant', 'tool_calls': [
+            {'id': 'probe1', 'type': 'function', 'function': {'name': 'les_capability_probe', 'arguments': '{}'}}]},
+            'finish_reason': 'tool_calls'}]})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        snapshot = await CapabilityProbe(client=client, peer_verifier=_peer_ok).probe(
+            _connection(), requested=[CapabilityName.TOOLS])
+    require_capabilities(snapshot, [CapabilityName.TOOLS])
+
+
+@pytest.mark.asyncio
 async def test_probe_records_supported_unsupported_unknown_without_model_text() -> None:
     async with _client(
         {

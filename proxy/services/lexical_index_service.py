@@ -380,62 +380,80 @@ class LexicalIndex:
             )
             return int(cur.rowcount or 0)
 
+    def replace_file(self, collection: str, *, dataset_id: str, doc_name: str,
+                     rows: Iterable[dict[str, Any]]) -> int:
+        rows = list(rows)
+        if not collection or not dataset_id or not doc_name or not rows:
+            raise ValueError("Empty lexical replacement")
+        if any(str(row.get("dataset_id")) != dataset_id or
+               str(row.get("doc_name")) != doc_name or not row.get("point_id") or
+               not str(row.get("text") or "").strip() for row in rows):
+            raise ValueError("Lexical replacement scope/content mismatch")
+        with self.connect() as conn:
+            conn.execute("DELETE FROM lexical_chunks WHERE collection=? AND dataset_id=? AND doc_name=?",
+                         (collection, dataset_id, doc_name))
+            return self._upsert_chunks(conn, collection, rows)
+
     def upsert_chunks(self, collection: str, rows: Iterable[dict[str, Any]]) -> int:
+        with self.connect() as conn:
+            return self._upsert_chunks(conn, collection, rows)
+
+    @staticmethod
+    def _upsert_chunks(conn, collection, rows):
         now = time.time()
         count = 0
-        with self.connect() as conn:
-            for row in rows:
-                text = str(row.get("text") or "")
-                point_id = str(row.get("point_id") or "")
-                if not text or not point_id:
-                    continue
-                conn.execute(
-                    """
-                    INSERT INTO lexical_chunks
-                    (
-                        collection, point_id, dataset_id, doc_id, doc_name, text, content_hash,
-                        chunk_ord, section_heading, parent_id, parent_ord, child_ord,
-                        parent_heading, context_before, context_after, context_kind, updated_at
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(collection, point_id) DO UPDATE SET
-                        dataset_id=excluded.dataset_id,
-                        doc_id=excluded.doc_id,
-                        doc_name=excluded.doc_name,
-                        text=excluded.text,
-                        content_hash=excluded.content_hash,
-                        chunk_ord=excluded.chunk_ord,
-                        section_heading=excluded.section_heading,
-                        parent_id=excluded.parent_id,
-                        parent_ord=excluded.parent_ord,
-                        child_ord=excluded.child_ord,
-                        parent_heading=excluded.parent_heading,
-                        context_before=excluded.context_before,
-                        context_after=excluded.context_after,
-                        context_kind=excluded.context_kind,
-                        updated_at=excluded.updated_at
-                    """,
-                    (
-                        collection,
-                        point_id,
-                        str(row.get("dataset_id") or ""),
-                        str(row.get("doc_id") or ""),
-                        str(row.get("doc_name") or row.get("file_name") or ""),
-                        text,
-                        str(row.get("content_hash") or content_hash(text)),
-                        row.get("chunk_ord"),
-                        str(row.get("section_heading") or ""),
-                        str(row.get("parent_id") or ""),
-                        row.get("parent_ord"),
-                        row.get("child_ord"),
-                        str(row.get("parent_heading") or ""),
-                        str(row.get("context_before") or ""),
-                        str(row.get("context_after") or ""),
-                        str(row.get("context_kind") or ""),
-                        now,
-                    ),
+        for row in rows:
+            text = str(row.get("text") or "")
+            point_id = str(row.get("point_id") or "")
+            if not text or not point_id:
+                continue
+            conn.execute(
+                """
+                INSERT INTO lexical_chunks
+                (
+                    collection, point_id, dataset_id, doc_id, doc_name, text, content_hash,
+                    chunk_ord, section_heading, parent_id, parent_ord, child_ord,
+                    parent_heading, context_before, context_after, context_kind, updated_at
                 )
-                count += 1
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(collection, point_id) DO UPDATE SET
+                    dataset_id=excluded.dataset_id,
+                    doc_id=excluded.doc_id,
+                    doc_name=excluded.doc_name,
+                    text=excluded.text,
+                    content_hash=excluded.content_hash,
+                    chunk_ord=excluded.chunk_ord,
+                    section_heading=excluded.section_heading,
+                    parent_id=excluded.parent_id,
+                    parent_ord=excluded.parent_ord,
+                    child_ord=excluded.child_ord,
+                    parent_heading=excluded.parent_heading,
+                    context_before=excluded.context_before,
+                    context_after=excluded.context_after,
+                    context_kind=excluded.context_kind,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    collection,
+                    point_id,
+                    str(row.get("dataset_id") or ""),
+                    str(row.get("doc_id") or ""),
+                    str(row.get("doc_name") or row.get("file_name") or ""),
+                    text,
+                    str(row.get("content_hash") or content_hash(text)),
+                    row.get("chunk_ord"),
+                    str(row.get("section_heading") or ""),
+                    str(row.get("parent_id") or ""),
+                    row.get("parent_ord"),
+                    row.get("child_ord"),
+                    str(row.get("parent_heading") or ""),
+                    str(row.get("context_before") or ""),
+                    str(row.get("context_after") or ""),
+                    str(row.get("context_kind") or ""),
+                    now,
+                ),
+            )
+            count += 1
         return count
 
     def mark_collection(self, collection: str, *, point_count: int, indexed_count: int, cursor_json: str = "") -> None:

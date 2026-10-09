@@ -22,6 +22,9 @@ def test_light_shell_has_real_destinations_and_remembers_panel(monkeypatch):
         assert any(item._props.get("href") == "/qdrant-visualizer/index.html" for item in links)
         assert any(item._props.get("href") == "/les/classic?tab=models" for item in links)
         assert not any("Сметы" in str(getattr(item, "text", "")) for item in client.elements.values())
+        assert not any("Найти в лесу" in str(getattr(item, "text", "")) for item in client.elements.values())
+        assert any(item._props.get("aria-label") == "Ещё разделы" for item in client.elements.values())
+        assert any(item._props.get("data-les-back") is True for item in client.elements.values())
         tabs.set_value(refs["data"])
         assert stored["last_chat_tab"] == "Данные"
 
@@ -49,3 +52,25 @@ def test_light_project_sidebar_does_not_repeat_global_navigation(monkeypatch):
     assert "Новый чат" in labels
     assert "Создать проект" in labels
     assert not {"Данные", "История чатов", "Настройки"} & set(labels)
+
+
+def test_projects_open_on_demand_and_reopen_after_native_dismissal(monkeypatch):
+    from sovushka.components import chat_project_navigation as navigation
+
+    monkeypatch.setattr(navigation, "is_light", lambda: True)
+    with Client(page("/__project_drawer")):
+        nav = navigation.ChatProjectNavigation(
+            SimpleNamespace(is_admin=True), on_new=None, on_history=None,
+        )
+        nav.render()
+        assert not nav.drawer.value
+        assert nav.drawer._props["position"] == "left"
+        assert nav.sidebar._props["aria-label"] == "Проекты и чаты"
+        nav.toggle()
+        assert nav.drawer.value
+        # Escape/backdrop update the dialog value, without calling our close().
+        nav.drawer.set_value(False)
+        nav.toggle()
+        assert nav.drawer.value
+        nav.close()
+        assert not nav.drawer.value

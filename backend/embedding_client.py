@@ -1,5 +1,6 @@
 """Embedding transport and response validation for explicit model connections."""
 import asyncio
+import copy
 import hashlib
 import logging
 import math
@@ -16,9 +17,11 @@ from proxy.services.model_connection_contracts import CapabilityName, Connection
 from proxy.services.model_connection_registry_service import ModelConnectionRegistry
 from proxy.services.model_connection_resolver_service import ModelConnectionResolver
 from proxy.services.model_secret_service import EnvironmentSecretStore
-from proxy.services.openai_compatible_transport_service import OpenAICompatibleTransport
+from proxy.services.openai_compatible_transport_service import ModelTransportError, OpenAICompatibleTransport
 logger = logging.getLogger(__name__)
 EMBED_TIMEOUT = float(os.getenv("RAG_EMBED_TIMEOUT_SEC", "300"))
+EMBED_BATCH_SIZE = 16
+EMBED_RESPONSE_LIMIT = 1024 * 1024
 
 class EmbedClient:
     """
@@ -59,12 +62,33 @@ class EmbedClient:
             self.backend = os.getenv("EMBED_BACKEND", "sentence_transformers").strip().lower()
 
     def _resolve_embedding_connection(self):
+        frozen = getattr(self, "_frozen_connection", None)
+        if frozen is not None:
+            return frozen
         if self.connection_resolver is None:
             raise RuntimeError("MODEL_CONNECTION_RESOLVER_REQUIRED")
         return self.connection_resolver.resolve(
             ConnectionRole.EMBEDDINGS,
             required_capabilities=frozenset({CapabilityName.EMBEDDINGS}),
         )
+
+    def for_index(self, descriptor: dict[str, str]):
+        """Freeze one binding for a whole document/query, including cache hits.
+
+        An existing collection never silently changes vector space when a role
+        is reassigned. A different model requires an explicit new index.
+        """
+        frozen = copy.copy(self)
+        expected = descriptor["model_id"]
+        if self._normalise_model_id(self.model) != self._normalise_model_id(expected):
+            raise EmbeddingContractError("EMBEDDING_INDEX_MODEL_MISMATCH")
+        if self.connection_mode == "active":
+            connection = self._resolve_embedding_connection()
+            if self._normalise_model_id(connection.model_id) != self._normalise_model_id(expected):
+                raise EmbeddingContractError("EMBEDDING_INDEX_MODEL_MISMATCH")
+            frozen._frozen_connection = connection
+        frozen._index_vector_size = int(descriptor["vector_size"])
+        return frozen
 
     def _shadow_compare(self) -> None:
         try:
@@ -88,14 +112,19 @@ class EmbedClient:
         dimensions = {len(row) for row in vectors}
         if not dimensions or 0 in dimensions or len(dimensions) != 1:
             raise EmbeddingContractError("embedding dimension mismatch")
+        index_size = getattr(self, "_index_vector_size", None)
+        if index_size is not None and dimensions != {index_size}:
+            raise EmbeddingContractError("EMBEDDING_INDEX_DIMENSION_MISMATCH")
         if any(not math.isfinite(value) for row in vectors for value in row):
             raise EmbeddingContractError('embedding response contains non-finite values')
         return vectors
 
     async def _encode_connection_async(self, texts: List[str]) -> List[List[float]]:
+        if not texts:
+            return []
         connection = self._resolve_embedding_connection()
         if self.connection_transport is not None:
-            response = await self.connection_transport.embed(connection, texts)
+            return await self._encode_connection_batches(self.connection_transport, connection, texts)
         else:
             secret_store = self._connection_secret_store or EnvironmentSecretStore(ENV_PATH)
             async with httpx.AsyncClient(timeout=EMBED_TIMEOUT) as client:
@@ -103,9 +132,37 @@ class EmbedClient:
                     client=client,
                     secret_store=secret_store,
                     timeout=EMBED_TIMEOUT,
+                    # Vectors need more space than a short chat/probe response.
+                    # This cap applies only to this embedding transport.
+                    response_body_limit=EMBED_RESPONSE_LIMIT,
                 )
-                response = await transport.embed(connection, texts)
-        return self._vectors_from_connection_response(response, len(texts))
+                return await self._encode_connection_batches(transport, connection, texts)
+
+    async def _encode_connection_batches(self, transport, connection, texts: List[str]) -> List[List[float]]:
+        """Keep responses bounded without changing the frozen model binding.
+
+        High-dimensional providers may need smaller batches. Only the explicit
+        response-size error permits subdivision; all other failures propagate.
+        No partial result is returned when any batch violates the contract.
+        """
+        async def encode_batch(batch):
+            try:
+                response = await transport.embed(connection, batch)
+            except ModelTransportError as error:
+                if str(error) != "UPSTREAM_RESPONSE_TOO_LARGE" or len(batch) == 1:
+                    raise
+                middle = len(batch) // 2
+                return await encode_batch(batch[:middle]) + await encode_batch(batch[middle:])
+            return self._vectors_from_connection_response(response, len(batch))
+
+        vectors = []
+        for offset in range(0, len(texts), EMBED_BATCH_SIZE):
+            batch_vectors = await encode_batch(texts[offset:offset + EMBED_BATCH_SIZE])
+            expected_dimension = len(vectors[0]) if vectors else len(batch_vectors[0])
+            if any(len(row) != expected_dimension for row in batch_vectors):
+                raise EmbeddingContractError("embedding dimension mismatch across batches")
+            vectors.extend(batch_vectors)
+        return vectors
 
     def _encode_connection_sync(self, texts: List[str]) -> List[List[float]]:
         def run() -> List[List[float]]:

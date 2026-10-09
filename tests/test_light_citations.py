@@ -9,12 +9,20 @@ from sovushka.answer_render import citation_drawer_item, link_source_markers, so
 from sovushka.components.source_links import SOURCE_LINK_CLICK
 
 
+def test_drawer_exposes_whole_model_fragment_beyond_list_preview():
+    quote = "Вводная часть. " * 50 + "Исключение: работы прекращают при -20 °C."
+    source = {"doc_name": "Условия.pdf", "dataset_id": "ds", "page": 4,
+              "snippet": quote[:360], "quote": quote,
+              "locator": {"excerpt": quote[:360], "page": 4}}
+    assert citation_drawer_item(source, 1)["snippet"] == quote
+
+
 def test_model_named_marker_links_to_verified_document_name_and_page():
     source = {"doc_id": "document", "doc_name": "Архив/План открытия.pdf", "page": 3,
               "source_ref": "internal/document.pdf#p3", "snippet": "Открытие 17 мая."}
     text = "Открытие 17 мая [Источник 1 | выдуманное имя 2031.pdf]."
     result = link_source_markers(text, source_count=1, sources=[source], anchor_prefix="source-42")
-    assert result == "Открытие 17 мая [План открытия.pdf · стр.3](#source-42-1)."
+    assert result == "Открытие 17 мая [План открытия.pdf · стр. 3](#source-42-1)."
     assert source_usage(source, 1, text)["code"] == "used"
     assert source_marker_numbers(text) == [1]
 

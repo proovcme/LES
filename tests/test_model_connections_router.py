@@ -297,7 +297,7 @@ def test_admin_can_bind_http_model_on_explicit_private_network(api) -> None:
         headers=_headers(ADMIN_ROLE),
         json=_valid_connection(
             display_name="Qwen 35B · Mac mini",
-            base_url="http://10.195.146.98:8080/v1",
+            base_url="http://10.20.30.40:8080/v1",
             locality="private_network",
             extension_type="mlx",
         ),

@@ -199,7 +199,7 @@ def source_chip(source: Any, index: int | None = None) -> dict:
         file_name = source_card_title(source, file_name)
     # локатор человекочитаемо: para85→абз.85, p3→стр.3, row5→стр.5, Лист!R12→Лист R12, chunk2→чанк2
     loc_h = loc
-    for pat, rep in ((r"^para(\d+)", r"абз.\1"), (r"^p(\d+)$", r"стр.\1"), (r"^row(\d+)", r"стр.\1"),
+    for pat, rep in ((r"^para(\d+)", r"абз.\1"), (r"^(?:p|page=?)(\d+)$", r"стр. \1"), (r"^row(\d+)", r"стр.\1"),
                      (r"^L(\d+)", r"стр.\1"), (r"^chunk(\d+)?", r"чанк\1")):
         loc_h = re.sub(pat, rep, loc_h)
     typed_openable = kind in {"file_excerpt", "norm_card", "web_result"}
@@ -418,7 +418,9 @@ def citation_drawer_item(source: Any, index: int | None = None) -> dict:
         item["source_ref"] = str(typed_locator["source_ref"])
     if typed_locator.get("doc_id"):
         item["doc_id"] = str(typed_locator["doc_id"])
-    if typed_locator.get("excerpt"):
+    if isinstance(source, dict) and source.get("quote"):
+        item["snippet"] = str(source["quote"])
+    elif typed_locator.get("excerpt"):
         item["snippet"] = str(typed_locator["excerpt"])
     elif isinstance(source, dict):
         # The compact list preview must not truncate the proof in its drawer.
@@ -474,10 +476,12 @@ def citation_drawer_item(source: Any, index: int | None = None) -> dict:
         page_match = re.search(r"(?:^|[#;&])(?:p|page=?)\s*(\d+)(?:$|[#;&])", location, re.I)
         if suffix == ".pdf" and page_match:
             open_url += f"#page={int(page_match.group(1))}"
-        if suffix == ".pdf" or suffix in {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}:
+        if suffix in {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}:
             viewer_url = open_url
         elif suffix in _EMBEDDED_VIEW_EXTENSIONS:
             params: dict[str, object] = dict(document_params)
+            if suffix == ".pdf":
+                params["page"] = int(page_match.group(1)) if page_match else 1
             if location:
                 params["locator"] = location
             if isinstance(source, dict) and source.get("sheet"):

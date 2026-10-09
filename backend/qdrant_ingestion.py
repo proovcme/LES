@@ -2,6 +2,8 @@
 from __future__ import annotations
 from backend import qdrant_support as support
 from backend.qdrant_nodes import QdrantNodes
+from backend.index_replacement import retire_previous, discard_staged, ReplacementJournal, recover_adapter
+from backend.embedding_client import EmbedClient
 
 
 class QdrantIngestion:
@@ -27,6 +29,13 @@ class QdrantIngestion:
         return res
 
     def _sync_parse(self, dataset_id: str, limit: int | None = None) -> support.Dict[str, support.Any]:
+        recover_adapter(self)
+        journal = ReplacementJournal.for_adapter(self)
+        with journal.lease():
+            journal.assert_clean()
+            return QdrantIngestion._sync_parse_locked(self, dataset_id, limit, journal)
+
+    def _sync_parse_locked(self, dataset_id, limit, journal):
         """
         Синхронный парсинг в threadpool.
         Батч-эмбеддинги: 32 чанка за запрос вместо по одному.
@@ -182,7 +191,13 @@ class QdrantIngestion:
                     support.logger.info(f"[PARSE] {i}/{total} ({_t.time()-t0:.0f}с)")
                 begin_attempt = getattr(self.db, "begin_document_attempt", None)
                 attempts = int(begin_attempt(dataset_id, db_file_key) or 1) if begin_attempt else 1
+                staged_ids: list[str] = []
+                replacement_committed = False
+                journal_started = False
                 try:
+                    _parse_embed = getattr(self, "embed_parse", None) or self.embed
+                    if isinstance(_parse_embed, EmbedClient):
+                        _parse_embed = _parse_embed.for_index(embedding_descriptor)
                     _stage(db_file_key, "CONVERT")
                     if next_convert is not None:
                         future, local_timings = next_convert
@@ -246,43 +261,8 @@ class QdrantIngestion:
                     )
                     _add_timing("cache_sec", phase_start)
 
-                    # W1.4: старые точки удаляем ПОСЛЕ успешной конвертации — сбой
-                    # конвертации больше не оставляет файл без старого индекса.
-                    phase_start = _t.time()
-                    self._sync_delete_file_points(sync_qdrant, dataset_id, file_key)
-                    _delete_file_lexical(file_key)
-                    _add_timing("delete_sec", phase_start)
-
                     if not file_nodes:
-                        phase_start = _t.time()
-                        self.db.update_document_status(dataset_id, db_file_key, "INDEXED", 0, route=route)
-                        _add_timing("db_sec", phase_start)
-                        continue
-
-                    # Стираем старые правила для этого файла перед переиндексацией
-                    self.db.clear_structured_rules(file_key)
-
-                    # Извлекаем структурированные правила для нормативных и сложных документов
-                    if route and route.doc_type in ("NORMATIVE", "SPEC"):
-                        try:
-                            from .rules_extractor import StructuredRulesExtractor
-                            extractor = StructuredRulesExtractor()
-                            extracted_rules = []
-                            for node in file_nodes:
-                                chunk_rules = extractor.extract_rules(
-                                    text=node["text"],
-                                    document_id=dataset_id,
-                                    file_key=file_key,
-                                    chunk_id=node["doc_id"]
-                                )
-                                if chunk_rules:
-                                    extracted_rules.extend(chunk_rules)
-
-                            if extracted_rules:
-                                self.db.insert_structured_rules(extracted_rules)
-                                support.logger.info(f"[OCR_RULES] Извлечено структурированных правил из {file_key}: {len(extracted_rules)}")
-                        except Exception as rule_err:
-                            support.logger.error(f"[OCR_RULES] Ошибка извлечения структурированных правил для {file_key}: {rule_err}", exc_info=True)
+                        raise RuntimeError("Document produced no searchable fragments; previous index preserved")
 
                     _stage(db_file_key, "EMBED")
                     # Батч-эмбеддинги по EMBED_BATCH чанков. Upsert начинаем только
@@ -308,7 +288,6 @@ class QdrantIngestion:
                         if miss_texts:
                             phase_start = _t.time()
                             # Парс-эмбеддер (EMBED_URL_PARSE); дефолт/тесты-моки → основной self.embed.
-                            _parse_embed = getattr(self, "embed_parse", None) or self.embed
                             vectors = _parse_embed.encode_sync(miss_texts)
                             _add_timing("embed_sec", phase_start)
                             if len(vectors) != len(miss_texts):
@@ -356,16 +335,30 @@ class QdrantIngestion:
                             ))
 
                     _stage(db_file_key, "UPSERT")
+                    journal.begin(dataset_id, file_key, db_file_key, [str(point.id) for point in points])
+                    journal_started = True
                     # Upsert батчами после успешного embedding всего файла.
                     for point_start in range(0, len(points), support.UPSERT_BATCH):
                         phase_start = _t.time()
+                        batch_points = points[point_start:point_start + support.UPSERT_BATCH]
+                        # Include a possibly partially accepted batch in rollback.
+                        staged_ids.extend(str(point.id) for point in batch_points)
                         sync_qdrant.upsert(
                             collection_name=self.collection_name,
-                            points=points[point_start:point_start + support.UPSERT_BATCH],
+                            points=batch_points,
                             wait=True,
                         )
                         _add_timing("upsert_sec", phase_start)
-                    _upsert_file_lexical(points)
+                    journal.commit()
+                    replacement_committed = True
+                    retire_previous(sync_qdrant, self.collection_name, dataset_id, file_key, staged_ids)
+                    replace_lexical = getattr(self, "_sync_replace_file_lexical", None)
+                    if replace_lexical is not None:
+                        replace_lexical(dataset_id, file_key, points)
+                    else:
+                        _delete_file_lexical(file_key)
+                        _upsert_file_lexical(points)
+                    self.db.clear_structured_rules(file_key)
 
                     file_chunk_count = len(file_nodes)
                     # W1.2: exact-count в Qdrant — дорогая проверка; выборочно (каждый N-й файл
@@ -401,6 +394,8 @@ class QdrantIngestion:
                             fingerprint_error,
                         )
                     _add_timing("db_sec", phase_start)
+                    self.db.update_dataset_chunk_count(dataset_id)
+                    journal.finish()
 
                 except support.UnsupportedIndexingSourceError as file_err:
                     support.logger.info("[PARSE] SKIPPED %s: %s", file_key, file_err)
@@ -422,8 +417,11 @@ class QdrantIngestion:
                 except Exception as file_err:
                     support.logger.error(f"[PARSE] ERROR {file_key}: {file_err}", exc_info=True)
                     try:
-                        self._sync_delete_file_points(sync_qdrant, dataset_id, file_key)
-                        _delete_file_lexical(file_key)
+                        decision = journal.pending() if journal_started else None
+                        if not replacement_committed and (not decision or decision["phase"] == "staging"):
+                            discard_staged(sync_qdrant, self.collection_name, staged_ids)
+                            if journal_started:
+                                journal.finish()
                     except Exception as cleanup_err:
                         support.logger.error("[PARSE] cleanup failed %s: %s", file_key, cleanup_err)
                     phase_start = _t.time()
@@ -454,6 +452,10 @@ class QdrantIngestion:
                         )
                     _add_timing("db_sec", phase_start)
                     errors += 1
+                    if journal.pending() is not None:
+                        # Do not overwrite an unresolved transaction with the
+                        # next file. Recovery must complete before more writes.
+                        break
 
             if convert_pool is not None:
                 convert_pool.shutdown(wait=False, cancel_futures=True)

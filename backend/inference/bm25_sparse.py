@@ -1,4 +1,7 @@
-"""BM25/IDF sparse-вектора для Qdrant-native гибрида (W2.4).
+"""Legacy TF+IDF sparse vectors; the historical name is NOT full BM25.
+
+Kept unchanged for existing indexes. The isolated BM25 candidate is implemented
+in bm25_weighted.py and requires rebuilding document weights before use.
 
 Вместо нейросетевого BGE-M3 (на этом железе ~9 ч на 169k) — лёгкий лексический
 sparse: токены → стем → TF. IDF Qdrant считает САМ по статистике коллекции
