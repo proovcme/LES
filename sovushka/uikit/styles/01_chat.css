@@ -4,6 +4,16 @@
   min-height: var(--sov-ui-hit);
 }
 
+.sov-chat-failure-notice {
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+  color: var(--text);
+  border-bottom: var(--sov-ui-border);
+  padding-bottom: 4px;
+}
+
 .sov-composer-actions {
   width: 100%;
   min-width: 0;

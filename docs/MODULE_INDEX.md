@@ -2,6 +2,9 @@
 
 Порядок RRF/реранкера, контекст, worker и ошибки: [контракт RAG](modules/rag-ranking.md).
 Рабочий BM25, миграция и обновление без LLM: [контракт](modules/bm25-index.md).
+Версия словаря и короткие обозначения: `backend/inference/lexical_tokens.py`.
+Уведомление об отказе с явным переходом: `sovushka/components/chat_failure_notice.py`.
+Нагрузочный стенд без моделей: `tools/benchmark_sparse_index.py`.
 Отдельный кандидат BM25 и чтения разделов: [контракт испытаний](modules/retrieval-candidate.md).
 Чтение родителей в основном чате и бюджет доказательств: [контракт](modules/chat-section-context.md).
 

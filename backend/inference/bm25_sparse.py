@@ -18,7 +18,7 @@ import re
 import zlib
 from collections import Counter
 
-from proxy.services.lexical_index_service import NO_STEM_WORDS, TOKEN_RE, stem_russian_word
+from backend.inference.lexical_tokens import NO_STEM_WORDS, TOKEN_RE, stem_russian_word
 
 # Имя named sparse-вектора в Qdrant (общий контракт reindex ↔ retrieve).
 SPARSE_VECTOR_NAME = "bm25_sparse"

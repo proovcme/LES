@@ -79,6 +79,7 @@
         "backend/inference/__init__.py",
         "backend/inference/bm25_sparse.py",
         "backend/inference/bm25_weighted.py",
+        "backend/inference/lexical_tokens.py",
         "backend/inference/providers.py",
         "backend/inference/routing.py",
         "backend/inference/validator.py",
@@ -326,6 +327,7 @@
         "tests/test_light_chat_sections.py",
         "tests/test_light_index_recovery.py",
         "tests/test_light_rerank_audit.py",
+        "tools/benchmark_sparse_index.py",
         "tools/rebuild_sparse_index.py"
       ],
       "lines": 172,
@@ -344,6 +346,7 @@
       "inbound": [
         "backend/inference/bm25_sparse.py",
         "backend/inference/bm25_weighted.py",
+        "backend/inference/lexical_tokens.py",
         "backend/inference/providers.py",
         "backend/inference/routing.py",
         "backend/inference/validator.py"
@@ -368,6 +371,8 @@
         "backend/retrieval_candidate.py",
         "backend/sparse_index.py",
         "tests/test_light_bm25_index.py",
+        "tests/test_light_lexical_v2.py",
+        "tools/benchmark_sparse_index.py",
         "tools/build_rag_contract_sibling.py",
         "tools/evaluate_retrieval_candidate.py",
         "tools/rag_rrf_readiness.py"
@@ -377,7 +382,7 @@
       "outbound": [
         "backend/__init__.py",
         "backend/inference/__init__.py",
-        "proxy/services/lexical_index_service.py"
+        "backend/inference/lexical_tokens.py"
       ],
       "path": "backend/inference/bm25_sparse.py",
       "status": "PRODUCT_REACHABLE",
@@ -387,6 +392,7 @@
       "inbound": [
         "backend/retrieval_candidate.py",
         "backend/sparse_index.py",
+        "tests/test_light_lexical_v2.py",
         "tests/test_light_retrieval_candidate.py",
         "tools/evaluate_retrieval_candidate.py"
       ],
@@ -398,6 +404,23 @@
         "backend/inference/bm25_sparse.py"
       ],
       "path": "backend/inference/bm25_weighted.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "backend/inference/bm25_sparse.py",
+        "backend/sparse_index.py",
+        "proxy/services/lexical_index_service.py",
+        "tests/test_light_lexical_v2.py"
+      ],
+      "lines": 66,
+      "module": "backend.inference.lexical_tokens",
+      "outbound": [
+        "backend/__init__.py",
+        "backend/inference/__init__.py"
+      ],
+      "path": "backend/inference/lexical_tokens.py",
       "status": "PRODUCT_REACHABLE",
       "windows_runtime_explicit": false
     },
@@ -535,6 +558,7 @@
       "inbound": [
         "tests/test_light_bm25_index.py",
         "tests/test_light_qdrant_runtime.py",
+        "tools/benchmark_sparse_index.py",
         "tools/evaluate_retrieval_candidate.py",
         "tools/light_launcher.py"
       ],
@@ -1283,14 +1307,17 @@
         "backend/qdrant_retrieval.py",
         "proxy/services/dataset_deletion_service.py",
         "tests/test_light_bm25_index.py",
+        "tests/test_light_lexical_v2.py",
+        "tools/benchmark_sparse_index.py",
         "tools/rebuild_sparse_index.py"
       ],
-      "lines": 183,
+      "lines": 193,
       "module": "backend.sparse_index",
       "outbound": [
         "backend/__init__.py",
         "backend/inference/bm25_sparse.py",
         "backend/inference/bm25_weighted.py",
+        "backend/inference/lexical_tokens.py",
         "backend/interface.py"
       ],
       "path": "backend/sparse_index.py",
@@ -5056,7 +5083,6 @@
     {
       "inbound": [
         "backend/document_catalog.py",
-        "backend/inference/bm25_sparse.py",
         "backend/qdrant_integrity.py",
         "proxy/routers/chat.py",
         "proxy/routers/dataset_catalog.py",
@@ -5078,12 +5104,14 @@
         "tests/test_datasets_router.py",
         "tests/test_document_explorer_service.py",
         "tests/test_light_index_recovery.py",
+        "tests/test_light_lexical_v2.py",
         "tests/test_retrieval_service.py",
         "tools/rag_rrf_readiness.py"
       ],
-      "lines": 680,
+      "lines": 655,
       "module": "proxy.services.lexical_index_service",
       "outbound": [
+        "backend/inference/lexical_tokens.py",
         "backend/interface.py",
         "backend/rag_config.py",
         "proxy/__init__.py",
@@ -7359,6 +7387,7 @@
         "sovushka/components/chat_answer_body.py",
         "sovushka/components/chat_artifacts.py",
         "sovushka/components/chat_drafts.py",
+        "sovushka/components/chat_failure_notice.py",
         "sovushka/components/chat_folder.py",
         "sovushka/components/chat_messages.py",
         "sovushka/components/chat_presentation.py",
@@ -7490,6 +7519,7 @@
         "sovushka/components/chat_answer_body.py",
         "sovushka/components/chat_artifacts.py",
         "sovushka/components/chat_drafts.py",
+        "sovushka/components/chat_failure_notice.py",
         "sovushka/components/chat_folder.py",
         "sovushka/components/chat_messages.py",
         "sovushka/components/chat_presentation.py",
@@ -7612,6 +7642,21 @@
         "sovushka/components/__init__.py"
       ],
       "path": "sovushka/components/chat_drafts.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "sovushka/pages/chat.py",
+        "tests/test_light_lexical_v2.py"
+      ],
+      "lines": 28,
+      "module": "sovushka.components.chat_failure_notice",
+      "outbound": [
+        "sovushka/__init__.py",
+        "sovushka/components/__init__.py"
+      ],
+      "path": "sovushka/components/chat_failure_notice.py",
       "status": "PRODUCT_REACHABLE",
       "windows_runtime_explicit": false
     },
@@ -8116,7 +8161,7 @@
         "sovushka_ng.py",
         "tests/test_light_rerank_audit.py"
       ],
-      "lines": 2188,
+      "lines": 2200,
       "module": "sovushka.pages.chat",
       "outbound": [
         "backend/product_edition.py",
@@ -8128,6 +8173,7 @@
         "sovushka/components/chat_answer_body.py",
         "sovushka/components/chat_artifacts.py",
         "sovushka/components/chat_drafts.py",
+        "sovushka/components/chat_failure_notice.py",
         "sovushka/components/chat_folder.py",
         "sovushka/components/chat_messages.py",
         "sovushka/components/chat_presentation.py",
@@ -9187,6 +9233,22 @@
     },
     {
       "inbound": [],
+      "lines": 89,
+      "module": "tests.test_light_lexical_v2",
+      "outbound": [
+        "backend/inference/bm25_sparse.py",
+        "backend/inference/bm25_weighted.py",
+        "backend/inference/lexical_tokens.py",
+        "backend/sparse_index.py",
+        "proxy/services/lexical_index_service.py",
+        "sovushka/components/chat_failure_notice.py"
+      ],
+      "path": "tests/test_light_lexical_v2.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
       "lines": 46,
       "module": "tests.test_light_mail_isolation",
       "outbound": [
@@ -10108,6 +10170,7 @@
     {
       "inbound": [
         "tools/backup_suharik.py",
+        "tools/benchmark_sparse_index.py",
         "tools/build_light_installers.py",
         "tools/build_light_package.py",
         "tools/build_macos_app.py",
@@ -10162,6 +10225,21 @@
       "path": "tools/backup_suharik.py",
       "status": "PRODUCT_REACHABLE",
       "windows_runtime_explicit": true
+    },
+    {
+      "inbound": [],
+      "lines": 95,
+      "module": "tools.benchmark_sparse_index",
+      "outbound": [
+        "backend/index_replacement.py",
+        "backend/inference/bm25_sparse.py",
+        "backend/light_qdrant_runtime.py",
+        "backend/sparse_index.py",
+        "tools/__init__.py"
+      ],
+      "path": "tools/benchmark_sparse_index.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
     },
     {
       "inbound": [],
@@ -12392,12 +12470,12 @@
   "summary": {
     "dormant_candidates": 35,
     "parse_warnings": 0,
-    "product_reachable": 363,
+    "product_reachable": 365,
     "registered_api_routes": 292,
     "runtime_support": 5,
-    "test_or_tool_only": 144,
-    "tracked_python_files": 547,
-    "tracked_python_lines": 155118
+    "test_or_tool_only": 146,
+    "tracked_python_files": 551,
+    "tracked_python_lines": 155393
   },
   "warnings": []
 }

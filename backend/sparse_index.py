@@ -4,6 +4,7 @@ The replacement journal is the publication fence. Reweighting only touches the
 named sparse vector; point identities, payloads and dense vectors stay intact.
 """
 from contextlib import closing, contextmanager
+from collections import Counter
 from dataclasses import asdict
 from functools import lru_cache
 import json
@@ -14,7 +15,8 @@ import sqlite3
 import uuid
 
 from qdrant_client import models
-from backend.inference.bm25_sparse import encode_bm25
+from backend.inference.bm25_sparse import encode_bm25, _term_id
+from backend.inference.lexical_tokens import CURRENT_TOKENIZER, LEGACY_TOKENIZER, tokenize_current
 from backend.inference.bm25_weighted import BM25Profile
 from backend.interface import EmbeddingContractError
 
@@ -34,7 +36,8 @@ def read_contract(journal):
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
         if (value["schema"] != SCHEMA or value["mode"] not in {"bm25", "tf"}
-                or value["tokenizer"] != "les.lexical.v1"
+                or value["tokenizer"] not in {LEGACY_TOKENIZER, CURRENT_TOKENIZER}
+                or (value["mode"] == "tf" and value["tokenizer"] != LEGACY_TOKENIZER)
                 or value["idf"] != ("exact-corpus" if value["mode"] == "bm25" else "qdrant")):
             raise ValueError("Unknown sparse contract")
         if value["mode"] == "bm25":
@@ -85,7 +88,9 @@ def rebuild_locked(client, journal, *, mode="bm25", vector_name="bm25_sparse"):
             points, offset = client.scroll(journal.collection, limit=128, offset=offset,
                                            with_payload=["text"], with_vectors=False)
             for point in points:
-                terms = encode_bm25(str((point.payload or {}).get("text") or ""))
+                text = str((point.payload or {}).get("text") or "")
+                terms = (dict(Counter(_term_id(term) for term in tokenize_current(text)))
+                         if mode == "bm25" else encode_bm25(text))
                 length = int(sum(terms.values()))
                 db.execute("INSERT INTO terms VALUES (?, ?, ?)",
                            (json.dumps(point.id), json.dumps(terms), length))
@@ -94,6 +99,7 @@ def rebuild_locked(client, journal, *, mode="bm25", vector_name="bm25_sparse"):
                 count += 1
                 total_length += length
             db.commit()
+            LOG.info("[BM25] Read lexical statistics for %s fragments", count)
             if offset is None:
                 break
         profile = BM25Profile(total_length / count if total_length and count else 1.0)
@@ -126,7 +132,8 @@ def rebuild_locked(client, journal, *, mode="bm25", vector_name="bm25_sparse"):
     revision = uuid.uuid4().hex
     value = dict(schema=SCHEMA, mode=mode, vector_name=vector_name,
                  physical_collection=_physical_collection(client, journal.collection),
-                 tokenizer="les.lexical.v1", idf="exact-corpus" if mode == "bm25" else "qdrant", points=count,
+                 tokenizer=CURRENT_TOKENIZER if mode == "bm25" else LEGACY_TOKENIZER,
+                 idf="exact-corpus" if mode == "bm25" else "qdrant", points=count,
                  total_length=total_length, profile=asdict(profile), revision=revision)
     _save_contract(journal, value)
     journal._save(dict(phase="idle", revision=revision))
@@ -152,6 +159,7 @@ def ensure_current(client, journal, *, vector_name="bm25_sparse", mode=None):
         config = client.get_collection(journal.collection).config.params.sparse_vectors or {}
         expected_modifier = models.Modifier.NONE if target == "bm25" else models.Modifier.IDF
         if (contract and contract["revision"] == stamp and contract["mode"] == target
+                and contract["tokenizer"] == (CURRENT_TOKENIZER if target == "bm25" else LEGACY_TOKENIZER)
                 and contract["vector_name"] == vector_name and contract["points"] == count
                 and contract.get("physical_collection") == _physical_collection(client, journal.collection)
                 and vector_name in config and config[vector_name].modifier == expected_modifier):
@@ -164,6 +172,8 @@ def encode_query(journal, text):
     if not contract or contract["revision"] != journal.read_stamp():
         raise EmbeddingContractError("INDEX_SPARSE_STALE")
     if contract["mode"] == "bm25":
+        if contract["tokenizer"] == CURRENT_TOKENIZER:
+            return {_term_id(term): 1.0 for term in tokenize_current(text)}
         return BM25Profile(**contract["profile"]).query(text)
     return encode_bm25(text)
 

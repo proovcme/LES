@@ -19,11 +19,11 @@
 
 | Метрика | Значение |
 | --- | --- |
-| Python-файлов под git | 547 |
-| Строк Python | 155118 |
-| PRODUCT_REACHABLE | 363 |
+| Python-файлов под git | 551 |
+| Строк Python | 155393 |
+| PRODUCT_REACHABLE | 365 |
 | RUNTIME_SUPPORT | 5 |
-| TEST_OR_TOOL_ONLY | 144 |
+| TEST_OR_TOOL_ONLY | 146 |
 | DORMANT_CANDIDATE | 35 |
 | Зарегистрированных API-маршрутов | 292 |
 | Ошибок разбора | 0 |
@@ -35,7 +35,7 @@
 | sovushka/styles.py | 3264 | 3 |
 | proxy/services/dataset_memory_service.py | 2284 | 9 |
 | mlx_host.py | 2216 | 0 |
-| sovushka/pages/chat.py | 2188 | 2 |
+| sovushka/pages/chat.py | 2200 | 2 |
 | proxy/services/chat_evidence_application_service.py | 1993 | 7 |
 | proxy/services/project_pdf_table_service.py | 1653 | 2 |
 | sovushka/pages/diag.py | 1606 | 1 |

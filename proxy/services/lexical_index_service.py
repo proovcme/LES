@@ -16,7 +16,9 @@ from backend.rag_config import rag_meta_db_path
 from proxy.services.kot_service import extract_norm_refs
 
 
-TOKEN_RE = re.compile(r"[0-9a-zа-яё.-]{2,}", re.IGNORECASE)
+from backend.inference.lexical_tokens import (
+    NO_STEM_WORDS, TOKEN_RE, stem_russian_word, compact_query_terms,
+)
 
 CONTEXT_COLUMNS = {
     "parent_id": "parent_id TEXT DEFAULT ''",
@@ -147,34 +149,6 @@ def _row_to_chunk(row: sqlite3.Row, *, score: float = 0.0, extra_meta: dict[str,
     )
 
 
-NO_STEM_WORDS = {
-    "какие", "какой", "какая", "какое", "каких", "каким", "какими",
-    "где", "смотреть", "требования", "нормы", "норма", "требование",
-    "найти", "пункт", "раздел", "свод", "правил", "гост", "сп",
-    "случаях", "случае", "случай", "выполнять", "выполнение", "делать",
-    "допускается", "допускать", "почему", "зачем", "что", "кто", "как",
-    "когда", "куда", "откуда",
-    "нужно", "должно", "следует", "необходимо", "быть", "может", "можно", "ли",
-    "или", "для", "при", "под", "над", "все", "всех", "всеми", "чем", "тем", "только"
-}
-
-
-def stem_russian_word(word: str) -> str:
-    """A simple, robust Russian stemmer to handle common inflections."""
-    if not re.match(r"^[а-яё]+$", word):
-        return word
-    endings = (
-        "иями", "ям", "ыми", "ейший", "ейшая", "ейшее", "ейшие", "ейших",
-        "ого", "его", "ому", "ему", "ыми", "ими", "ых", "их", "ою", "ею",
-        "ая", "яя", "ое", "ее", "ые", "ие", "ым", "им", "ом", "ем", "ах", "ях",
-        "ов", "ев", "ей", "ам", "ям", "ит", "ет", "ут", "ют", "ат", "ят", "ти",
-        "а", "ев", "ов", "е", "и", "й", "о", "у", "ы", "ь", "я", "ю", "ию"
-    )
-    for ending in endings:
-        if word.endswith(ending) and len(word) - len(ending) >= 4:
-            return word[:-len(ending)]
-    return word
-
 
 def _fts_quote(term: str) -> str:
     return '"' + term.replace('"', '""') + '"'
@@ -192,10 +166,11 @@ def build_fts_query(question: str) -> str:
         normalized = re.sub(r"\s+", " ", item.strip().casefold().replace("ё", "е"))
         if normalized and normalized not in terms:
             terms.append(normalized)
-    if not terms:
+    if not terms and not compact_query_terms(question):
         return ""
     
-    body_terms = []
+    compact = compact_query_terms(question)
+    body_terms = [_fts_quote(term) for term in dict.fromkeys(compact)]
     ref_terms = []
     for term in terms:
         is_ref = term in refs or any(c.isdigit() or c in " ." for c in term)

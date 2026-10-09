@@ -798,6 +798,8 @@ def build_chat(is_admin: bool, tabs=None, tab_mermaid=None, tab_documents=None):
                     ui.notify("Вложение снято", type="info")
 
             with ui.element("div").classes("sov-composer") as composer_box:
+                from sovushka.components.chat_failure_notice import ChatFailureNotice
+                failure_notice = ChatFailureNotice()
                 composer_box.on('dragenter', js_handler="""event => {
                     if (Array.from(event.dataTransfer?.types || []).includes('Files'))
                         event.currentTarget.classList.add('sov-composer--dragging');
@@ -1390,6 +1392,7 @@ def build_chat(is_admin: bool, tabs=None, tab_mermaid=None, tab_documents=None):
         if msgs is None:
             add_log("[ИСТОРИЯ] Ошибка загрузки сессии")
             return False
+        failure_notice.clear()
         _clear_attachment(notify=False)
         artifacts._clear_file_artifacts()
         artifact_panel.clear()
@@ -1444,7 +1447,10 @@ def build_chat(is_admin: bool, tabs=None, tab_mermaid=None, tab_documents=None):
         send_chat=lambda *args, **kwargs: send_chat(*args, **kwargs),
         get_artifacts=lambda: artifacts,
     )
-    _finish_ai_placeholder = messages._finish_ai_placeholder
+    def _finish_ai_placeholder(bubble, label, text, srcs=None, crag="", error=False, meta=None):
+        messages._finish_ai_placeholder(bubble, label, text, srcs, crag, error, meta)
+        if error or crag == "BLOCKED":
+            failure_notice.show(bubble)
     _render_chat_bubble = messages._render_chat_bubble
     _render_chat_history = messages._render_chat_history
     _render_msg = messages._render_msg
@@ -1719,6 +1725,7 @@ def build_chat(is_admin: bool, tabs=None, tab_mermaid=None, tab_documents=None):
     async def _do_send(question: str):
         if _sending["v"]:
             return
+        failure_notice.clear()
         _sending["v"] = True
         try:
             await workspace.persist(
@@ -2067,7 +2074,8 @@ def build_chat(is_admin: bool, tabs=None, tab_mermaid=None, tab_documents=None):
                 activity.finish("Ответ оборвался — получен не полностью")
                 _finish_ai_placeholder(ai_placeholder, ai_placeholder_label,
                                        stream_state["text"] + "\n\n" + message, error=True)
-                artifacts._render_artifact_error(message)
+                if artifact_shell.visible:
+                    artifacts._render_artifact_error(message)
             else:
                 serr = stream_state["error"] or {}
                 if serr:
@@ -2079,7 +2087,8 @@ def build_chat(is_admin: bool, tabs=None, tab_mermaid=None, tab_documents=None):
                     if serr.get("status") == 409:
                         await _refresh_resource_gate()
                     _finish_ai_placeholder(ai_placeholder, ai_placeholder_label, message, error=True)
-                    artifacts._render_artifact_error(message)
+                    if artifact_shell.visible:
+                        artifacts._render_artifact_error(message)
                 elif should_retry_unstreamed_chat(
                     got_token=bool(stream_state["got_token"]),
                     got_progress=bool(stream_state["got_progress"]),
@@ -2098,13 +2107,15 @@ def build_chat(is_admin: bool, tabs=None, tab_mermaid=None, tab_documents=None):
                         if err.get("status_code") == 409:
                             await _refresh_resource_gate()
                         _finish_ai_placeholder(ai_placeholder, ai_placeholder_label, message, error=True)
-                        artifacts._render_artifact_error(message)
+                        if artifact_shell.visible:
+                            artifacts._render_artifact_error(message)
                 else:
                     completed = True
                     activity.finish("Соединение прервано")
                     message = "Соединение прервано. Повторите запрос для полного ответа."
                     _finish_ai_placeholder(ai_placeholder, ai_placeholder_label, message, error=True)
-                    artifacts._render_artifact_error(message)
+                    if artifact_shell.visible:
+                        artifacts._render_artifact_error(message)
         except asyncio.CancelledError:
             activity.finish("Остановлено")
             completed = True
@@ -2123,7 +2134,8 @@ def build_chat(is_admin: bool, tabs=None, tab_mermaid=None, tab_documents=None):
             add_log(f"[CHAT ERROR] {type(ex).__name__}: {ex}")
             message = "Не удалось завершить запрос. Повторите вопрос или откройте диагностику."
             _finish_ai_placeholder(ai_placeholder, ai_placeholder_label, message, error=True)
-            artifacts._render_artifact_error(message)
+            if artifact_shell.visible:
+                artifacts._render_artifact_error(message)
         finally:
             if completed:
                 state["chat_pending"] = None
