@@ -1,0 +1,127 @@
+{
+  "schema": "les.reasoning-acceptance.v1",
+  "build": 761,
+  "profile_api": {
+    "build": 761,
+    "reasoning_policy_persisted": {
+      "reasoning_budget_tokens": 2048,
+      "reasoning_enabled": true,
+      "temperature": 0.1
+    },
+    "invalid_budget_status": 409,
+    "invalid_budget_rejected": true
+  },
+  "installed_protocol_journey": {
+    "backend": "authored protocol fixture, not a generative model",
+    "ordinary_chat": true,
+    "retrieval_on_synthetic_dataset": true,
+    "progress_stages": [
+      "prepare",
+      "connection",
+      "retrieval",
+      "context",
+      "context",
+      "queue",
+      "queue",
+      "generation",
+      "thinking",
+      "answer"
+    ],
+    "request": {
+      "max_tokens": 2048,
+      "thinking": true,
+      "stream": true,
+      "message_count": 3
+    },
+    "stream_equals_final": true,
+    "internal_text_absent": true,
+    "source_count": 10,
+    "answer": "Synthetic transport acceptance."
+  },
+  "real_35b_full_chat": {
+    "model": "Qwen3.6-35B-A3B-oQ3 (local text variant)",
+    "cases": [
+      {
+        "id": "e9",
+        "event": "error",
+        "seconds": 5.22,
+        "code": "CHAT_MEMORY_PRESSURE"
+      },
+      {
+        "id": "e9",
+        "event": "error",
+        "seconds": 0.59,
+        "code": "CHAT_MEMORY_PRESSURE"
+      },
+      {
+        "id": "e9",
+        "event": "error",
+        "seconds": 1.57,
+        "code": "CHAT_MEMORY_PRESSURE"
+      },
+      {
+        "id": "e9",
+        "event": "error",
+        "seconds": 1.01,
+        "code": "CHAT_MEMORY_PRESSURE"
+      }
+    ],
+    "completed_answers": 0,
+    "memory_guard_unchanged": true
+  },
+  "real_35b_installed_transport": {
+    "completed_answers": 0,
+    "error": "UPSTREAM_STREAM_INTERRUPTED",
+    "cause": "ReadTimeout",
+    "standalone_short_request": "ReadTimeout after 15s",
+    "scope": "synthetic quotes, not ordinary RAG chat; failure is not a semantic result"
+  },
+  "installed_source_receipts": [
+    {
+      "file": "config/version.json",
+      "sha256": "28b63d9243d1a69364676dc19c150a54f58abdfa69eff1066a6a01069388ef0e"
+    },
+    {
+      "file": "proxy/services/chat_evidence_application_service.py",
+      "sha256": "acd898e59b204fe70ff19e82b364f2593d0140f2c9b7f77c11d5072ce170f006"
+    },
+    {
+      "file": "proxy/services/chat_profile_service.py",
+      "sha256": "f112d8181b67ab4c30b86b39e6070a851b15a525a1ae02f77fd3475d7b763e04"
+    },
+    {
+      "file": "proxy/services/llm_transport_profile_service.py",
+      "sha256": "a0e924e8e3c6322c53b0b536a53e0d6bb89e2d448ff0fe84b8d2032a75638afa"
+    },
+    {
+      "file": "proxy/services/model_execution_preset_service.py",
+      "sha256": "a6556dcb719c00404c27c188bb42ccd88a9444f3a7a13ee4a424b723fb7267ce"
+    },
+    {
+      "file": "proxy/services/model_streaming_service.py",
+      "sha256": "3962891389093f90e45f1ff9b47d6e04e678247540dd425e52697b832bada953"
+    },
+    {
+      "file": "proxy/services/openai_compatible_transport_service.py",
+      "sha256": "7a4bcabb44514e44caaa56be60f4ddc178cd93d62fa2496ca8fb04055f550d28"
+    },
+    {
+      "file": "proxy/services/public_error_service.py",
+      "sha256": "31c613097b66ebd8105f3853c55c4514127f27f9dce466517e3af2eadbc53d33"
+    },
+    {
+      "file": "sovushka/pages/profiles.py",
+      "sha256": "297756d6aa124fc767d50971455f439c7f743cd5ccdc25c78d26a4e32cbdbb20"
+    },
+    {
+      "file": "proxy/services/model_reasoning_service.py",
+      "sha256": "545c336ce924e12b980831eb87859a572b911431903e1d20890cc3c1c23f98f0"
+    }
+  ],
+  "limitations": [
+    "No 35B ordinary-chat quality score for build761",
+    "No private history, prompts, documents, gallery or persistent logs inspected",
+    "UI geometry and clicks not tested; Computer Use restriction preserved",
+    "Working app and its role assignments unchanged"
+  ]
+}

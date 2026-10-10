@@ -288,6 +288,7 @@ async def test_chat_refreshes_stale_bound_capabilities_without_a_restart(monkeyp
                             job_service=None, job_tracker={}, llm_semaphore=asyncio.Semaphore(1))
     monkeypatch.setattr('proxy.services.chat_runtime.get_chat_state', lambda: state)
     monkeypatch.setattr('proxy.services.chat_runtime._active_dispatcher_reindex_jobs', lambda _: 0)
+    monkeypatch.setattr('proxy.services.generation_guard_service.live_memory_metrics', lambda metrics:dict(metrics))
     await chat_inference_service._refresh_stale_bound_model_capabilities(object())
 
     assert len(probes) == 1

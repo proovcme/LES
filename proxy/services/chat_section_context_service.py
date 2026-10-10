@@ -89,10 +89,10 @@ class ChatSectionReader:
                            "model_section_complete": len(included) == len(points)})
         return result
 
-    async def expand(self, chunks, *, max_chunks=None, **_unused):
+    async def expand(self, chunks, *, max_chunks=None, hit_limit=10, **_unused):
         try:
             async with asyncio.timeout(15):
-                return await self._expand(chunks, max_chunks=max_chunks)
+                return await self._expand(chunks, max_chunks=max_chunks, hit_limit=hit_limit)
         except EmbeddingContractError as error:
             raise SectionReadError(409, detail={"code": str(error)}) from error
         except HTTPException:
@@ -100,8 +100,8 @@ class ChatSectionReader:
         except Exception as error:
             raise SectionReadError(503, detail={"code": "SECTION_READ_UNAVAILABLE"}) from error
 
-    async def _expand(self, chunks, *, max_chunks):
-        seeds = list(chunks[:min(10, max_chunks or 10)])
+    async def _expand(self, chunks, *, max_chunks, hit_limit):
+        seeds = list(chunks[:min(hit_limit, max_chunks or hit_limit)])
         if not seeds:
             return SectionContext([], [], 0)
         if not self.started:

@@ -11,6 +11,7 @@ from proxy.services.model_connection_resolver_service import ModelConnectionReso
 @pytest.fixture
 def runtime(monkeypatch):
     monkeypatch.setattr('proxy.services.chat_runtime._active_dispatcher_reindex_jobs', lambda _: 0)
+    monkeypatch.setattr('proxy.services.generation_guard_service.live_memory_metrics', lambda metrics:dict(metrics))
     for key in ('LES_CHAT_MEMORY_GUARD', 'LES_CHAT_MIN_FREE_GB'):
         monkeypatch.delenv(key, raising=False)
     return SimpleNamespace(current_mode={'mode': 'chat'}, metrics_cache={'ram_free_gb': 12},

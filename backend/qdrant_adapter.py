@@ -231,6 +231,9 @@ class QdrantLlamaIndexAdapter(QdrantCollection, QdrantIngestion, QdrantIntegrity
     async def mark_document_error(self, dataset_id: str, document_id: str, error: str) -> None:
         await support.asyncio.to_thread(self.db.mark_document_error, dataset_id, document_id, error)
 
+    async def mark_document_deferred(self, dataset_id: str, document_id: str, reason: str) -> None:
+        await support.asyncio.to_thread(self.db.mark_document_deferred, dataset_id, document_id, reason)
+
     async def register_external_file(self, dataset_id: str, source_path: support.Path, file_name: str, *, force_reindex: bool = False) -> str:
         """Регистрирует внешний файл как источник БЕЗ копии в storage.
 

@@ -12,6 +12,7 @@ from urllib.parse import urlsplit, urlunsplit
 import httpx
 
 from proxy.services.llm_transport_profile_service import assistant_delta_text
+from proxy.services.model_reasoning_service import ReasoningOutput
 from proxy.services.model_connection_contracts import CapabilityName, CapabilityState
 from proxy.services.model_connection_resolver_service import ResolvedModelConnection
 from proxy.services.model_connection_security_service import (
@@ -70,8 +71,11 @@ class InferenceRequest:
     temperature: float | None = None
     tools: Sequence[Mapping[str, Any]] = ()
     response_format: Mapping[str, Any] | None = None
+    reasoning_enabled: bool = False
 
     def __post_init__(self) -> None:
+        if not isinstance(self.reasoning_enabled, bool):
+            raise ValueError("reasoning_enabled must be boolean")
         if self.max_output_tokens < 1:
             raise ValueError("max_output_tokens must be positive")
         object.__setattr__(self, "messages", tuple(dict(item) for item in self.messages))
@@ -195,6 +199,11 @@ class OpenAICompatibleTransport:
             "messages": system_messages + conversation,
             self._output_field(connection): request.max_output_tokens,
         }
+        supports_local_options = connection.locality.value != "remote"
+        if request.reasoning_enabled and not supports_local_options:
+            raise ModelTransportError("REASONING_MODE_UNSUPPORTED")
+        if supports_local_options:
+            body["chat_template_kwargs"] = {"enable_thinking": request.reasoning_enabled}
         if request.temperature is not None:
             body["temperature"] = request.temperature
         if request.tools:
@@ -245,7 +254,7 @@ class OpenAICompatibleTransport:
         body: dict[str, Any] = {
             "model": connection.model_id,
             "messages": messages,
-            "think": False,
+            "think": request.reasoning_enabled,
             # Native chat sends one NDJSON event per generated fragment.
             # Consuming it keeps a long local generation alive while complete()
             # still returns the exact concatenated model answer as one value.
@@ -289,12 +298,17 @@ class OpenAICompatibleTransport:
             event_wire_limit = max(1024, self.response_body_limit * 8)
             saw_event = False
             finished = False
+            reasoning_output = ReasoningOutput(request.reasoning_enabled)
+            thinking_reported = False
             text_parts: list[str] = []
             tool_calls: list[Mapping[str, Any]] = []
             prompt_tokens = 0
             completion_tokens = 0
             finish_reason = ""
             model_id = connection.model_id
+            if request.reasoning_enabled and token_sink is not None:
+                await token_sink({"event": "progress", "data": {"stage": "thinking", "label": "Модель думает"}})
+                thinking_reported = True
             async for line in response.aiter_lines():
                 event_count += 1
                 if event_count > event_count_limit or len(line.encode("utf-8")) > event_wire_limit:
@@ -312,13 +326,23 @@ class OpenAICompatibleTransport:
                     raise ModelTransportError("UPSTREAM_RESPONSE_INVALID") from exc
                 saw_event = True
                 model_id = str(payload.get("model") or model_id)
+                thought = message.get("thinking") or message.get("reasoning_content") or ""
+                if thought:
+                    reasoning_output.separate()
+                    semantic_size += len(str(thought).encode("utf-8"))
+                    if semantic_size > self.response_body_limit:
+                        raise ModelTransportError("UPSTREAM_RESPONSE_TOO_LARGE")
+                    if token_sink is not None and not thinking_reported:
+                        await token_sink({"event": "progress", "data": {"stage": "thinking", "label": "Модель думает"}})
+                        thinking_reported = True
                 content = message.get("content")
                 if isinstance(content, str) and content:
                     semantic_size += len(content.encode("utf-8"))
                     if semantic_size > self.response_body_limit:
                         raise ModelTransportError("UPSTREAM_RESPONSE_TOO_LARGE")
+                    content = reasoning_output.feed(content)
                     text_parts.append(content)
-                    if token_sink is not None:
+                    if token_sink is not None and content:
                         await token_sink({"event": "token", "data": content})
                 tool_calls_raw = message.get("tool_calls") or ()
                 if not isinstance(tool_calls_raw, Sequence) or isinstance(tool_calls_raw, str):
@@ -341,6 +365,13 @@ class OpenAICompatibleTransport:
                 raise ModelTransportError("UPSTREAM_STREAM_INTERRUPTED")
             if not saw_event:
                 raise ModelTransportError("UPSTREAM_RESPONSE_INVALID")
+            try:
+                tail = reasoning_output.finish(finish_reason)
+            except ValueError as error:
+                raise ModelTransportError(str(error)) from error
+            text_parts.append(tail)
+            if tail and token_sink is not None:
+                await token_sink({"event": "token", "data": tail})
             return InferenceResponse(
                 text="".join(text_parts),
                 tool_calls=tuple(tool_calls),
@@ -467,8 +498,16 @@ class OpenAICompatibleTransport:
             tool_calls = tuple(
                 MappingProxyType(dict(item)) for item in tool_calls_raw if isinstance(item, Mapping)
             )
+            reasoning_output = ReasoningOutput(request.reasoning_enabled)
+            if message.get("reasoning_content") or message.get("reasoning"):
+                reasoning_output.separate()
+            text = reasoning_output.feed(_message_text(message))
+            try:
+                text += reasoning_output.finish(str(choice.get("finish_reason") or ""))
+            except ValueError as error:
+                raise ModelTransportError(str(error)) from error
             return InferenceResponse(
-                text=_message_text(message),
+                text=text,
                 tool_calls=tool_calls,
                 finish_reason=str(choice.get("finish_reason") or ""),
                 usage=_usage(payload.get("usage")),
@@ -489,6 +528,8 @@ class OpenAICompatibleTransport:
             url=join_openai_path(connection.endpoint, "/chat/completions"),
             body=self._chat_body(connection, request, stream=True),
         )
+        reasoning_output = ReasoningOutput(request.reasoning_enabled)
+        thinking_reported = False
         consumed = 0
         events = 0
         finished = False
@@ -497,6 +538,9 @@ class OpenAICompatibleTransport:
             if not 200 <= response.status_code < 300:
                 await self._read_bounded(response)
                 raise ModelTransportError(f"UPSTREAM_HTTP_ERROR: {response.status_code}")
+            if request.reasoning_enabled:
+                yield InferenceEvent(kind="reasoning", model_id=observed_model_id)
+                thinking_reported = True
             async for line in response.aiter_lines():
                 events += 1
                 if events > max(256, request.max_output_tokens * 8) or len(line.encode("utf-8")) > self.response_body_limit * 8:
@@ -505,6 +549,13 @@ class OpenAICompatibleTransport:
                     continue
                 raw = line.removeprefix("data:").strip()
                 if raw == "[DONE]":
+                    if not finished:
+                        try:
+                            tail = reasoning_output.finish("")
+                        except ValueError as error:
+                            raise ModelTransportError(str(error)) from error
+                        if tail:
+                            yield InferenceEvent(kind="text_delta", text=tail, model_id=observed_model_id)
                     if not finished:
                         yield InferenceEvent(kind="finish", model_id=observed_model_id)
                     finished = True
@@ -520,8 +571,15 @@ class OpenAICompatibleTransport:
                 except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
                     raise ModelTransportError("UPSTREAM_STREAM_EVENT_INVALID") from exc
                 observed_model_id = str(payload.get("model") or observed_model_id)
-                text = assistant_delta_text(delta)
-                consumed += len(text.encode("utf-8")) + len(json.dumps(delta.get("tool_calls") or [], ensure_ascii=False).encode("utf-8"))
+                thought = delta.get("reasoning") or delta.get("reasoning_content") or ""
+                if thought:
+                    reasoning_output.separate()
+                    if not thinking_reported:
+                        yield InferenceEvent(kind="reasoning", model_id=observed_model_id)
+                        thinking_reported = True
+                raw_text = assistant_delta_text(delta)
+                text = reasoning_output.feed(raw_text)
+                consumed += len(str(thought).encode("utf-8")) + len(raw_text.encode("utf-8")) + len(json.dumps(delta.get("tool_calls") or [], ensure_ascii=False).encode("utf-8"))
                 if consumed > self.response_body_limit:
                     raise ModelTransportError("UPSTREAM_RESPONSE_TOO_LARGE")
                 if text:
@@ -545,6 +603,12 @@ class OpenAICompatibleTransport:
                     )
                 finish_reason = str(choice.get("finish_reason") or "")
                 if finish_reason:
+                    try:
+                        tail = reasoning_output.finish(finish_reason)
+                    except ValueError as error:
+                        raise ModelTransportError(str(error)) from error
+                    if tail:
+                        yield InferenceEvent(kind="text_delta", text=tail, model_id=observed_model_id)
                     finished = True
                     yield InferenceEvent(
                         kind="finish",

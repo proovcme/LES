@@ -8,3 +8,6 @@ Ollama или сторонним Qdrant. Сметный интерфейс и е
 Запуск: tools/light_launcher.py. Сборка: tools/build_light_package.py.
 Некоторые общие модули ещё содержат унаследованные ветви; их удаление требует
 проверки зависимостей. Это отражено в [бэклоге](BACKLOG.md).
+
+macOS browser preview использует тот же Light launcher с отдельным состоянием
+и собственным нативным Qdrant. [Граница установки](MACOS_PREVIEW.md).

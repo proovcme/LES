@@ -58,6 +58,17 @@ async def _record_background_parse_error(
     error: Exception,
 ) -> None:
     """Make an asynchronous intake failure visible to API/UI operators."""
+    if isinstance(error, HTTPException) and error.status_code == 429:
+        deferred = getattr(state.backend, "mark_document_deferred", None)
+        if callable(deferred):
+            try:
+                await deferred(dataset_id, document_id, str(error.detail))
+                logger.info("[UPLOAD PARSE] dataset=%s document=%s awaiting resources", dataset_id, document_id)
+                return
+            except NotImplementedError:
+                pass  # Other backends still get the explicit persisted error below.
+            except Exception:
+                logger.exception("[UPLOAD PARSE] failed to persist resource deferral")
     diagnostic = (
         f"BACKGROUND_PARSE_FAILED [{type(error).__name__}]: "
         f"{str(error) or 'exception without message'}"

@@ -686,6 +686,8 @@ def create_app():
     from proxy.services.version_service import PRODUCT_VERSION
     fastapi_app = FastAPI(title="LES RAG" if is_light() else "LES Proxy v2.0", version=PRODUCT_VERSION if is_light() else "2.0.0")
     if is_light():
+        from proxy.light_boundary import LightBrowserBoundary
+        fastapi_app.add_middleware(LightBrowserBoundary)
         @fastapi_app.get("/api/light/instance", include_in_schema=False)
         async def light_instance():
             return {"instance_id": os.getenv("LES_LIGHT_INSTANCE_ID", "")}

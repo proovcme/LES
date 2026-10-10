@@ -48,3 +48,60 @@ def test_visible_statuses_are_human_labels():
     badges = evidence_badges({"RETRIEVED": 1, "BLOCKED": 2})
     assert [item["label"] for item in badges] == ["Найдено", "Недоступно"]
     assert answer_status("private_internal_failure")["label"] == "Статус не определён"
+
+
+@pytest.mark.parametrize('legacy',[False,True])
+def test_factory_upgrade_preserves_existing_revision_and_binding(tmp_path,monkeypatch,legacy):
+    import json
+    import sqlite3
+    db=tmp_path/'factory.db'
+    contracts=profiles._factory_contracts()
+    old_contracts=json.loads(json.dumps(contracts))
+    old_contracts['agent']['prompt']='Factory policy before upgrade.'
+    monkeypatch.setattr(profiles,'_factory_contracts',lambda:old_contracts)
+    old=profiles.resolve_chat_profile(session_id='old-chat',requested_mode='agent',db_path=db)
+    if legacy:
+        # A pre-760 factory used one stable Base ID. Preserve it as a historical revision.
+        old_id=old['revision_id'];old['revision_id']='factory:profile:agent:base'
+        with sqlite3.connect(db) as conn:
+            conn.execute('UPDATE les_profile_revisions SET revision_id=?,snapshot_json=? WHERE revision_id=?',
+                (old['revision_id'],json.dumps(old,ensure_ascii=False),old_id))
+            conn.execute('UPDATE les_active_profiles SET profile_revision_id=? WHERE mode=?',(old['revision_id'],'agent'))
+            conn.execute('UPDATE les_chat_profile_bindings SET profile_revision_id=?,snapshot_json=? WHERE session_id=?',
+                (old['revision_id'],json.dumps(old,ensure_ascii=False),'old-chat'))
+    with sqlite3.connect(db) as conn:
+        before=conn.execute('SELECT snapshot_json FROM les_chat_profile_bindings WHERE session_id=?',('old-chat',)).fetchone()[0]
+        prompt_before=conn.execute('SELECT text_value,sha256 FROM les_prompt_revisions WHERE revision_id=?',
+            (old['prompt_revision_id'],)).fetchone()
+    monkeypatch.setattr(profiles,'_factory_contracts',lambda:contracts)
+    catalog=profiles.registry_snapshot(db_path=db)
+    agent=next(row for row in catalog['profiles'] if row['mode']=='agent')
+    assert agent['active_revision_id']==old['revision_id']
+    latest=max(agent['revisions'],key=lambda row:row['revision_no'])
+    assert latest['revision_id']!=old['revision_id'] and latest['prompt_text']==contracts['agent']['prompt'].strip()
+    assert len(agent['revisions'])==2
+    # Seeding twice is idempotent and never mutates the embedded chat snapshot.
+    assert len(next(row for row in profiles.registry_snapshot(db_path=db)['profiles'] if row['mode']=='agent')['revisions'])==2
+    assert profiles.resolve_chat_profile(session_id='old-chat',requested_mode='agent',db_path=db)==old
+    with sqlite3.connect(db) as conn:
+        assert conn.execute('SELECT snapshot_json FROM les_chat_profile_bindings WHERE session_id=?',('old-chat',)).fetchone()[0]==before
+        assert conn.execute('SELECT text_value,sha256 FROM les_prompt_revisions WHERE revision_id=?',
+            (old['prompt_revision_id'],)).fetchone()==prompt_before
+    profiles.activate_profile_revision('agent',latest['revision_id'],db_path=db)
+    assert profiles.resolve_chat_profile(session_id='new-chat',requested_mode='agent',db_path=db)['revision_id']==latest['revision_id']
+    assert profiles.resolve_chat_profile(session_id='old-chat',requested_mode='agent',db_path=db)==old
+
+
+def test_factory_upgrade_does_not_replace_custom_active_selection(tmp_path,monkeypatch):
+    import json
+    db=tmp_path/'custom.db'
+    initial=profiles.resolve_chat_profile(session_id=None,requested_mode='agent',db_path=db)
+    custom=profiles.publish_profile_revision(mode='agent',name='Selected by user',
+        prompt_revision_id=initial['prompt_revision_id'],skill_revision_id=initial['skill_revision_id'],
+        tools=[],model_policy={},rag_policy={},db_path=db)
+    profiles.activate_profile_revision('agent',custom['revision_id'],db_path=db)
+    changed=json.loads(json.dumps(profiles._factory_contracts()))
+    changed['agent']['prompt']='New factory policy.'
+    monkeypatch.setattr(profiles,'_factory_contracts',lambda:changed)
+    result=profiles.resolve_chat_profile(session_id='fresh',requested_mode='agent',db_path=db)
+    assert result['revision_id']==custom['revision_id']

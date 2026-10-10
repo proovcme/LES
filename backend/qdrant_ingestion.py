@@ -19,7 +19,11 @@ class QdrantIngestion:
         await self._ensure_collection()
         self._assert_dense_index_contract()
         self.db.update_dataset_status(dataset_id, "PARSING")
-        res = await support.asyncio.to_thread(self._sync_parse, dataset_id, limit)
+        try:
+            res = await support.asyncio.to_thread(self._sync_parse, dataset_id, limit)
+        except BaseException:
+            self.db.update_dataset_status(dataset_id, "ERROR")
+            raise
         status = "COMPLETED" if res.get("status") == "completed" else "ERROR"
         if res.get("errors", 0) > 0:
             status = "ERROR"
@@ -28,12 +32,20 @@ class QdrantIngestion:
         self.db.update_dataset_status(dataset_id, status)
         return res
 
+    @staticmethod
+    def _source_fingerprint(path):
+        before = path.stat()
+        digest = support._sha256_file(path)
+        after = path.stat()
+        if (before.st_size, before.st_mtime_ns, before.st_ino) != (after.st_size, after.st_mtime_ns, after.st_ino):
+            raise RuntimeError("SOURCE_CHANGED_DURING_INDEXING")
+        return dict(file_hash=digest, file_mtime=after.st_mtime, file_size=after.st_size)
+
     def _sync_parse(self, dataset_id: str, limit: int | None = None) -> support.Dict[str, support.Any]:
         recover_adapter(self)
         journal = ReplacementJournal.for_adapter(self)
-        with journal.lease():
-            journal.assert_clean()
-            return QdrantIngestion._sync_parse_locked(self, dataset_id, limit, journal)
+        journal.assert_clean()
+        return QdrantIngestion._sync_parse_locked(self, dataset_id, limit, journal)
 
     def _sync_parse_locked(self, dataset_id, limit, journal):
         """
@@ -178,11 +190,12 @@ class QdrantIngestion:
             def _submit_convert(index: int):
                 f, fk, _dbk = files_to_parse[index]
                 local_timings: dict = {}
+                fingerprint = QdrantIngestion._source_fingerprint(f)
                 future = convert_pool.submit(
                     QdrantIngestion._convert_file, self, f, data_dir, fk, dataset_id,
                     md_parser, splitter, local_timings, False,
                 )
-                return future, local_timings
+                return future, local_timings, fingerprint
 
             next_convert = _submit_convert(0) if convert_pool else None
 
@@ -200,7 +213,7 @@ class QdrantIngestion:
                         _parse_embed = _parse_embed.for_index(embedding_descriptor)
                     _stage(db_file_key, "CONVERT")
                     if next_convert is not None:
-                        future, local_timings = next_convert
+                        future, local_timings, source_fingerprint = next_convert
                         try:
                             route, file_nodes = future.result(timeout=support.PARSE_FILE_TIMEOUT)
                         except support.FuturesTimeoutError:
@@ -221,6 +234,7 @@ class QdrantIngestion:
                                 md_parser, splitter, timings, True,
                             )
                     else:
+                        source_fingerprint = QdrantIngestion._source_fingerprint(file_path)
                         route, file_nodes = QdrantIngestion._convert_file(
                             self, file_path, data_dir, file_key, dataset_id,
                             md_parser, splitter, timings, True,
@@ -334,68 +348,60 @@ class QdrantIngestion:
                                 payload=payload,
                             ))
 
-                    _stage(db_file_key, "UPSERT")
-                    journal.begin(dataset_id, file_key, db_file_key, [str(point.id) for point in points])
-                    journal_started = True
-                    # Upsert батчами после успешного embedding всего файла.
-                    for point_start in range(0, len(points), support.UPSERT_BATCH):
-                        phase_start = _t.time()
-                        batch_points = points[point_start:point_start + support.UPSERT_BATCH]
-                        # Include a possibly partially accepted batch in rollback.
-                        staged_ids.extend(str(point.id) for point in batch_points)
-                        sync_qdrant.upsert(
-                            collection_name=self.collection_name,
-                            points=batch_points,
-                            wait=True,
-                        )
-                        _add_timing("upsert_sec", phase_start)
-                    journal.commit()
-                    replacement_committed = True
-                    retire_previous(sync_qdrant, self.collection_name, dataset_id, file_key, staged_ids)
-                    replace_lexical = getattr(self, "_sync_replace_file_lexical", None)
-                    if replace_lexical is not None:
-                        replace_lexical(dataset_id, file_key, points)
-                    else:
-                        _delete_file_lexical(file_key)
-                        _upsert_file_lexical(points)
-                    self.db.clear_structured_rules(file_key)
-
-                    file_chunk_count = len(file_nodes)
-                    # W1.2: exact-count в Qdrant — дорогая проверка; выборочно (каждый N-й файл
-                    # и последний), а не после каждого. Upsert-ошибки и так поднимают исключение.
-                    if i % support.VERIFY_POINTS_EVERY == 0 or i == total:
-                        phase_start = _t.time()
-                        indexed_points = self._sync_count_file_points(sync_qdrant, dataset_id, file_key)
-                        _add_timing("count_sec", phase_start)
-                        if indexed_points != file_chunk_count:
-                            raise RuntimeError(
-                                f"qdrant point count mismatch: got {indexed_points}, expected {file_chunk_count}"
+                    # Conversion and embeddings do not own the collection writer lease.
+                    # Verify the source generation before publishing any replacement.
+                    if QdrantIngestion._source_fingerprint(file_path) != source_fingerprint:
+                        raise RuntimeError("SOURCE_CHANGED_DURING_INDEXING: original changed; previous index preserved")
+                    with journal.lease():
+                        journal.assert_clean()
+                        _stage(db_file_key, "UPSERT")
+                        journal.begin(dataset_id, file_key, db_file_key, [str(point.id) for point in points])
+                        journal_started = True
+                        # Upsert батчами после успешного embedding всего файла.
+                        for point_start in range(0, len(points), support.UPSERT_BATCH):
+                            phase_start = _t.time()
+                            batch_points = points[point_start:point_start + support.UPSERT_BATCH]
+                            # Include a possibly partially accepted batch in rollback.
+                            staged_ids.extend(str(point.id) for point in batch_points)
+                            sync_qdrant.upsert(
+                                collection_name=self.collection_name,
+                                points=batch_points,
+                                wait=True,
                             )
-                    total_chunks    += file_chunk_count
-                    phase_start = _t.time()
-                    self.db.update_document_status(
-                        dataset_id, db_file_key, "INDEXED", file_chunk_count, route=route
-                    )
-                    try:
+                            _add_timing("upsert_sec", phase_start)
+                        journal.commit()
+                        replacement_committed = True
+                        retire_previous(sync_qdrant, self.collection_name, dataset_id, file_key, staged_ids)
+                        replace_lexical = getattr(self, "_sync_replace_file_lexical", None)
+                        if replace_lexical is not None:
+                            replace_lexical(dataset_id, file_key, points)
+                        else:
+                            _delete_file_lexical(file_key)
+                            _upsert_file_lexical(points)
+                        self.db.clear_structured_rules(file_key)
+
+                        file_chunk_count = len(file_nodes)
+                        # W1.2: exact-count в Qdrant — дорогая проверка; выборочно (каждый N-й файл
+                        # и последний), а не после каждого. Upsert-ошибки и так поднимают исключение.
+                        if i % support.VERIFY_POINTS_EVERY == 0 or i == total:
+                            phase_start = _t.time()
+                            indexed_points = self._sync_count_file_points(sync_qdrant, dataset_id, file_key)
+                            _add_timing("count_sec", phase_start)
+                            if indexed_points != file_chunk_count:
+                                raise RuntimeError(
+                                    f"qdrant point count mismatch: got {indexed_points}, expected {file_chunk_count}"
+                                )
+                        total_chunks    += file_chunk_count
+                        phase_start = _t.time()
+                        self.db.update_document_status(
+                            dataset_id, db_file_key, "INDEXED", file_chunk_count, route=route
+                        )
                         set_fingerprint = getattr(self.db, "set_document_source_fingerprint", None)
                         if callable(set_fingerprint):
-                            stat = file_path.stat()
-                            set_fingerprint(
-                                dataset_id,
-                                db_file_key,
-                                file_hash=support._sha256_file(file_path),
-                                file_mtime=stat.st_mtime,
-                                file_size=stat.st_size,
-                            )
-                    except OSError as fingerprint_error:
-                        support.logger.warning(
-                            "[INTEGRITY] source fingerprint skipped %s: %s",
-                            db_file_key,
-                            fingerprint_error,
-                        )
-                    _add_timing("db_sec", phase_start)
-                    self.db.update_dataset_chunk_count(dataset_id)
-                    journal.finish()
+                            set_fingerprint(dataset_id, db_file_key, **source_fingerprint)
+                        _add_timing("db_sec", phase_start)
+                        self.db.update_dataset_chunk_count(dataset_id)
+                        journal.finish()
 
                 except support.UnsupportedIndexingSourceError as file_err:
                     support.logger.info("[PARSE] SKIPPED %s: %s", file_key, file_err)
@@ -417,11 +423,12 @@ class QdrantIngestion:
                 except Exception as file_err:
                     support.logger.error(f"[PARSE] ERROR {file_key}: {file_err}", exc_info=True)
                     try:
-                        decision = journal.pending() if journal_started else None
-                        if not replacement_committed and (not decision or decision["phase"] == "staging"):
-                            discard_staged(sync_qdrant, self.collection_name, staged_ids)
-                            if journal_started:
-                                journal.finish()
+                        with journal.lease():
+                            decision = journal.pending() if journal_started else None
+                            if not replacement_committed and (not decision or decision["phase"] == "staging"):
+                                discard_staged(sync_qdrant, self.collection_name, staged_ids)
+                                if journal_started:
+                                    journal.finish()
                     except Exception as cleanup_err:
                         support.logger.error("[PARSE] cleanup failed %s: %s", file_key, cleanup_err)
                     phase_start = _t.time()
@@ -536,6 +543,9 @@ class QdrantIngestion:
         elif route.pipeline == "parquet":
             try:
                 file_nodes = self._sync_table_nodes(file_path, data_dir, file_key, dataset_id, route, timings)
+                if not file_nodes and file_path.suffix.lower() in {'.csv', '.xlsx', '.xlsm', '.xls'}:
+                    # Unknown column names must not erase readable source rows.
+                    raise RuntimeError("No structured table nodes; read original sheet as markdown")
             except Exception as table_err:
                 support.logger.warning(
                     "[PARQUET] fallback to markdown for %s: %s",

@@ -62,9 +62,9 @@ class ModelExecutionPreset:
                 "restart_required": False,
             },
             "reasoning": {
-                "requested": False,
+                "requested": self.reasoning_enabled,
                 "effective": self.reasoning_enabled,
-                "source": "workflow_invariants",
+                "source": source,
                 "restart_required": False,
             },
         }
@@ -208,4 +208,4 @@ def resolve_execution_preset(
         resolved = _narrow(resolved, restrictions)
         source_chain.append("workflow_profile_restrictions")
 
-    return replace(resolved, source_chain=tuple(source_chain), reasoning_enabled=False)
+    return replace(resolved, source_chain=tuple(source_chain))

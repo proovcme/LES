@@ -4,6 +4,14 @@ from __future__ import annotations
 import ctypes
 import os
 from pathlib import Path
+import sys
+
+
+def owned_command(command):
+    if sys.platform == 'darwin':
+        guard = Path(__file__).resolve().parents[1] / 'tools/light_child.py'
+        return [sys.executable, str(guard), str(os.getpid()), *command]
+    return command
 
 
 class InstanceLock:

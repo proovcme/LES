@@ -192,7 +192,7 @@ async def test_complete_preserves_tool_calls_auth_and_output_field(tmp_path):
     assert captured["request"].headers["Authorization"] == "Bearer secret-value"
     assert captured["body"]["max_completion_tokens"] == 21
     assert "max_tokens" not in captured["body"]
-    assert result.text == "checked"
+    assert result.text == ""  # Provider reasoning is not the user-facing answer.
     assert result.tool_calls[0]["function"]["name"] == "read_file"
     assert result.finish_reason == "tool_calls"
 
@@ -386,7 +386,8 @@ async def test_stream_normalizes_text_deltas_and_finish(tmp_path):
     finally:
         await client.aclose()
 
-    assert [event.text for event in events if event.kind == "text_delta"] == ["one", " two"]
+    assert [event.text for event in events if event.kind == "text_delta"] == [" two"]
+    assert [event.kind for event in events].count("reasoning") == 1
     assert events[-1].kind == "finish"
     assert events[-1].finish_reason == "stop"
     assert {event.model_id for event in events} == {"observed-stream-model"}

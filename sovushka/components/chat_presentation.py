@@ -159,7 +159,11 @@ def _operator_status_chips(crag: str, meta: dict | None, srcs: list | None = Non
     chips: list[dict[str, str]] = []
     src_count = len(srcs or [])
     if src_count:
-        chips.append({"label": f"{src_count} источн.", "tone": "ok"})
+        chips.append({"label": f"{src_count} источн.", "tone": "muted"})
+    trace = (meta or {}).get("retrieval_trace") or {}
+    quality = trace.get("quality_status") if isinstance(trace, dict) else None
+    if quality in {"weak", "degraded", "needs_clarification"}:
+        chips.append({"label": "Поиск дал слабые совпадения", "tone": "warn"})
     latency = (meta or {}).get("latency_phases")
     raw_total = latency.get("total") if isinstance(latency, dict) else None
     try:

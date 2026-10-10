@@ -164,6 +164,7 @@ class DatasetKindRequest(BaseModel):
 
 
 _PARSE_STAGE_LABELS = {
+    "WAITING_RESOURCES": "ожидание свободной памяти",
     "CONVERT": "чтение страниц",
     "EMBED": "создание поискового индекса",
     "UPSERT": "сохранение индекса",

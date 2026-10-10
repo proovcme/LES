@@ -14,6 +14,8 @@ async def collect_stream(events, token_sink):
             if event.kind == "text_delta":
                 parts.append(event.text)
                 await token_sink({"event": "token", "data": event.text})
+            elif event.kind == "reasoning":
+                await token_sink({"event": "progress", "data": {"stage": "thinking", "label": "Модель думает"}})
             elif event.kind == "tool_delta":
                 for delta in event.tool_calls:
                     index = delta.get("index", 0)

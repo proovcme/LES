@@ -7,6 +7,9 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import time
+
+import psutil
 from uuid import uuid4
 
 from backend.runtime_paths import mutable_path
@@ -50,11 +53,26 @@ def calculate(skill, path, items):
                    if key.upper() in {'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP'}}
     interrupted = False
     try:
-        completed = subprocess.run([sys.executable, '-I', '-S', '-X', 'utf8', str(worker)],
-            cwd=work, env=environment, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL, timeout=20,
-            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-        interrupted = completed.returncode != 0
+        command=[sys.executable, '-I', '-S', '-X', 'utf8', str(worker)]
+        if sys.platform == 'darwin':
+            with subprocess.Popen(command, cwd=work, env=environment, stdin=subprocess.DEVNULL,
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) as child:
+                deadline=time.monotonic()+20
+                while child.poll() is None:
+                    try:
+                        over_memory=psutil.Process(child.pid).memory_info().rss > 512*1024*1024
+                    except psutil.NoSuchProcess:
+                        break
+                    if over_memory or time.monotonic() >= deadline:
+                        child.kill();child.wait();interrupted=True;break
+                    time.sleep(.02)
+                interrupted=interrupted or child.wait() != 0
+        else:
+            completed = subprocess.run([sys.executable, '-I', '-S', '-X', 'utf8', str(worker)],
+                cwd=work, env=environment, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL, timeout=20,
+                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            interrupted = completed.returncode != 0
     except subprocess.TimeoutExpired:
         interrupted = True
     results = [json.loads(file.read_text(encoding='utf-8')) for file in sorted(work.glob('[0-9][0-9][0-9][0-9].json'))]

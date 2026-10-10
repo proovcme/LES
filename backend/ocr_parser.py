@@ -4,6 +4,7 @@ Explicit legacy backends remain available through RAG_OCR_BACKEND. Failures
 raise exceptions and must never become searchable document content.
 """
 import os
+import sys
 import gc
 import base64
 import logging
@@ -259,7 +260,10 @@ class TesseractOCRParser:
 
 def make_ocr_parser(model_id: Optional[str] = None):
     """Windows OCR by default; other backends require explicit configuration."""
-    backend = os.getenv("RAG_OCR_BACKEND", "windows").strip().lower()
+    backend = os.getenv("RAG_OCR_BACKEND", "macos" if sys.platform == "darwin" else "windows").strip().lower()
+    if backend in {"macos", "vision"}:
+        from backend.macos_ocr import MacOSOCRParser
+        return MacOSOCRParser()
     if backend == 'windows':
         from backend.windows_ocr import WindowsOCRParser
         return WindowsOCRParser()
