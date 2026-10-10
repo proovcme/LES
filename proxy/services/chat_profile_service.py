@@ -565,6 +565,8 @@ def publish_profile_revision(
     db_path: str | Path | None = None,
     additional_skill_revision_ids: list[str] | None = None,
 ) -> dict[str, Any]:
+    from proxy.services.model_reasoning_service import validate_reasoning_policy
+    validate_reasoning_policy(model_policy or {})
     canonical = canonical_profile_mode(mode)
     title = str(name or "").strip()
     if not title:

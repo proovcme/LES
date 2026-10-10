@@ -19,11 +19,11 @@
 
 | Метрика | Значение |
 | --- | --- |
-| Python-файлов под git | 565 |
-| Строк Python | 157149 |
-| PRODUCT_REACHABLE | 370 |
+| Python-файлов под git | 567 |
+| Строк Python | 157477 |
+| PRODUCT_REACHABLE | 371 |
 | RUNTIME_SUPPORT | 5 |
-| TEST_OR_TOOL_ONLY | 155 |
+| TEST_OR_TOOL_ONLY | 156 |
 | DORMANT_CANDIDATE | 35 |
 | Зарегистрированных API-маршрутов | 292 |
 | Ошибок разбора | 0 |
@@ -36,7 +36,7 @@
 | proxy/services/dataset_memory_service.py | 2284 | 9 |
 | mlx_host.py | 2216 | 0 |
 | sovushka/pages/chat.py | 2200 | 2 |
-| proxy/services/chat_evidence_application_service.py | 1993 | 7 |
+| proxy/services/chat_evidence_application_service.py | 2003 | 7 |
 | proxy/services/project_pdf_table_service.py | 1653 | 2 |
 | sovushka/pages/diag.py | 1606 | 1 |
 | proxy/services/checklist_review_service.py | 1518 | 1 |
@@ -55,8 +55,8 @@
 | backend/parquet_writer.py | 965 | 3 |
 | proxy/routers/runtime.py | 920 | 3 |
 | proxy/services/project_pdf_extract_service.py | 915 | 4 |
+| proxy/services/chat_profile_service.py | 914 | 8 |
 | tools/les_runtime_control.py | 913 | 4 |
-| proxy/services/chat_profile_service.py | 912 | 7 |
 | proxy/services/mail_registry_service.py | 903 | 6 |
 | proxy/services/document_explorer_service.py | 866 | 4 |
 | proxy/services/project_document_registry_service.py | 853 | 3 |

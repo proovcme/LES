@@ -1712,6 +1712,7 @@
         "proxy/services/model_connection_security_service.py",
         "proxy/services/model_engine_extension_service.py",
         "proxy/services/model_execution_preset_service.py",
+        "proxy/services/model_reasoning_service.py",
         "proxy/services/model_research_tool_service.py",
         "proxy/services/model_resource_service.py",
         "proxy/services/model_secret_service.py",
@@ -3192,6 +3193,7 @@
         "proxy/services/model_connection_security_service.py",
         "proxy/services/model_engine_extension_service.py",
         "proxy/services/model_execution_preset_service.py",
+        "proxy/services/model_reasoning_service.py",
         "proxy/services/model_research_tool_service.py",
         "proxy/services/model_resource_service.py",
         "proxy/services/model_secret_service.py",
@@ -3679,7 +3681,7 @@
         "tests/test_light_prompt_boundary.py",
         "tests/test_workspace_context.py"
       ],
-      "lines": 1993,
+      "lines": 2003,
       "module": "proxy.services.chat_evidence_application_service",
       "outbound": [
         "backend/inference/routing.py",
@@ -3706,6 +3708,7 @@
         "proxy/services/memory_service.py",
         "proxy/services/model_connection_contracts.py",
         "proxy/services/model_execution_preset_service.py",
+        "proxy/services/model_reasoning_service.py",
         "proxy/services/model_research_tool_service.py",
         "proxy/services/notebook_service.py",
         "proxy/services/notebook_study_service.py",
@@ -3875,15 +3878,17 @@
         "tests/test_light_mcp_connections.py",
         "tests/test_light_profile_integrity.py",
         "tests/test_light_prompt_boundary.py",
+        "tests/test_light_reasoning_761.py",
         "tests/test_product_edition.py"
       ],
-      "lines": 912,
+      "lines": 914,
       "module": "proxy.services.chat_profile_service",
       "outbound": [
         "backend/product_edition.py",
         "backend/rag_config.py",
         "proxy/__init__.py",
         "proxy/services/__init__.py",
+        "proxy/services/model_reasoning_service.py",
         "proxy/services/prompt_registry_service.py",
         "proxy/services/system_dataset_service.py",
         "proxy/services/tool_harness_service.py"
@@ -5322,7 +5327,7 @@
         "proxy/services/version_service.py",
         "sovushka/components/header.py"
       ],
-      "lines": 302,
+      "lines": 300,
       "module": "proxy.services.llm_transport_profile_service",
       "outbound": [
         "proxy/__init__.py",
@@ -5597,6 +5602,7 @@
         "tests/test_chat_mail_query.py",
         "tests/test_light_admission.py",
         "tests/test_light_capability_refresh.py",
+        "tests/test_light_reasoning_761.py",
         "tests/test_light_runtime_identity.py",
         "tests/test_model_capability_service.py",
         "tests/test_model_connection_chat_integration.py",
@@ -5724,9 +5730,11 @@
         "proxy/services/context_governor_service.py",
         "proxy/services/llm_transport_profile_service.py",
         "proxy/services/model_connection_resolver_service.py",
+        "proxy/services/model_reasoning_service.py",
         "tests/test_chat_mail_query.py",
         "tests/test_context_governor_service.py",
         "tests/test_light_document_tasks.py",
+        "tests/test_light_reasoning_761.py",
         "tests/test_openai_compatible_transport_service.py",
         "tests/test_workspace_context.py"
       ],
@@ -5737,6 +5745,24 @@
         "proxy/services/__init__.py"
       ],
       "path": "proxy/services/model_execution_preset_service.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "proxy/services/chat_evidence_application_service.py",
+        "proxy/services/chat_profile_service.py",
+        "proxy/services/openai_compatible_transport_service.py",
+        "tests/test_light_reasoning_761.py"
+      ],
+      "lines": 75,
+      "module": "proxy.services.model_reasoning_service",
+      "outbound": [
+        "proxy/__init__.py",
+        "proxy/services/__init__.py",
+        "proxy/services/model_execution_preset_service.py"
+      ],
+      "path": "proxy/services/model_reasoning_service.py",
       "status": "PRODUCT_REACHABLE",
       "windows_runtime_explicit": false
     },
@@ -5801,7 +5827,7 @@
       "inbound": [
         "proxy/services/openai_compatible_transport_service.py"
       ],
-      "lines": 45,
+      "lines": 47,
       "module": "proxy.services.model_streaming_service",
       "outbound": [
         "proxy/__init__.py",
@@ -5956,11 +5982,12 @@
         "proxy/services/model_streaming_service.py",
         "tests/test_chat_mail_query.py",
         "tests/test_light_admission.py",
+        "tests/test_light_reasoning_761.py",
         "tests/test_model_connection_chat_integration.py",
         "tests/test_model_connection_embeddings_integration.py",
         "tests/test_openai_compatible_transport_service.py"
       ],
-      "lines": 595,
+      "lines": 659,
       "module": "proxy.services.openai_compatible_transport_service",
       "outbound": [
         "proxy/__init__.py",
@@ -5969,6 +5996,7 @@
         "proxy/services/model_connection_contracts.py",
         "proxy/services/model_connection_resolver_service.py",
         "proxy/services/model_connection_security_service.py",
+        "proxy/services/model_reasoning_service.py",
         "proxy/services/model_secret_service.py",
         "proxy/services/model_streaming_service.py"
       ],
@@ -6319,7 +6347,7 @@
         "tests/test_light_rerank_audit.py",
         "tests/test_public_error_service.py"
       ],
-      "lines": 88,
+      "lines": 90,
       "module": "proxy.services.public_error_service",
       "outbound": [
         "proxy/__init__.py",
@@ -8463,7 +8491,7 @@
         "sovushka_ng.py",
         "tests/test_light_mcp_ui.py"
       ],
-      "lines": 594,
+      "lines": 619,
       "module": "sovushka.pages.profiles",
       "outbound": [
         "backend/product_edition.py",
@@ -9670,6 +9698,21 @@
     },
     {
       "inbound": [],
+      "lines": 149,
+      "module": "tests.test_light_reasoning_761",
+      "outbound": [
+        "proxy/services/chat_profile_service.py",
+        "proxy/services/model_connection_contracts.py",
+        "proxy/services/model_execution_preset_service.py",
+        "proxy/services/model_reasoning_service.py",
+        "proxy/services/openai_compatible_transport_service.py"
+      ],
+      "path": "tests/test_light_reasoning_761.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
       "lines": 168,
       "module": "tests.test_light_rerank_audit",
       "outbound": [
@@ -10128,7 +10171,7 @@
     },
     {
       "inbound": [],
-      "lines": 588,
+      "lines": 589,
       "module": "tests.test_openai_compatible_transport_service",
       "outbound": [
         "proxy/services/model_connection_contracts.py",
@@ -12770,12 +12813,12 @@
   "summary": {
     "dormant_candidates": 35,
     "parse_warnings": 0,
-    "product_reachable": 370,
+    "product_reachable": 371,
     "registered_api_routes": 292,
     "runtime_support": 5,
-    "test_or_tool_only": 155,
-    "tracked_python_files": 565,
-    "tracked_python_lines": 157149
+    "test_or_tool_only": 156,
+    "tracked_python_files": 567,
+    "tracked_python_lines": 157477
   },
   "warnings": []
 }
