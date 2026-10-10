@@ -170,7 +170,6 @@ from proxy.services.chat_prompt_support import _parse_model_tool_calls
 from proxy.services.chat_prompt_support import _compact_tool_result_for_prompt
 from proxy.services.chat_prompt_support import _format_tool_results_for_model
 from proxy.services.chat_prompt_support import _names_for_dataset_ids
-from proxy.services.chat_prompt_support import _CJK_RE
 from proxy.services.chat_prompt_support import _local_context_budget
 from proxy.services.chat_prompt_support import _generation_token_budget
 from proxy.services.chat_prompt_support import _dataset_sensitivities

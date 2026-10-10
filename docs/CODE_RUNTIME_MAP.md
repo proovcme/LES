@@ -19,11 +19,11 @@
 
 | Метрика | Значение |
 | --- | --- |
-| Python-файлов под git | 563 |
-| Строк Python | 156721 |
+| Python-файлов под git | 565 |
+| Строк Python | 157138 |
 | PRODUCT_REACHABLE | 370 |
 | RUNTIME_SUPPORT | 5 |
-| TEST_OR_TOOL_ONLY | 153 |
+| TEST_OR_TOOL_ONLY | 155 |
 | DORMANT_CANDIDATE | 35 |
 | Зарегистрированных API-маршрутов | 292 |
 | Ошибок разбора | 0 |
@@ -50,7 +50,7 @@
 | tools/build_rag_contract_sibling.py | 1114 | 2 |
 | tools/reindex_datasets_guarded.py | 1016 | 1 |
 | proxy/services/drawing_manifest_service.py | 1012 | 3 |
-| backend/document_catalog.py | 977 | 2 |
+| backend/document_catalog.py | 989 | 3 |
 | sovushka/components/header.py | 968 | 2 |
 | backend/parquet_writer.py | 965 | 3 |
 | proxy/services/chat_profile_service.py | 958 | 7 |
@@ -67,7 +67,7 @@
 
 ### `proxy/routers/chat.py`
 
-Статус: `PRODUCT_REACHABLE`; строк: 466.
+Статус: `PRODUCT_REACHABLE`; строк: 465.
 
 | Импортируемый символ | Потребители |
 | --- | --- |

@@ -543,6 +543,9 @@ class QdrantIngestion:
         elif route.pipeline == "parquet":
             try:
                 file_nodes = self._sync_table_nodes(file_path, data_dir, file_key, dataset_id, route, timings)
+                if not file_nodes and file_path.suffix.lower() in {'.csv', '.xlsx', '.xlsm', '.xls'}:
+                    # Unknown column names must not erase readable source rows.
+                    raise RuntimeError("No structured table nodes; read original sheet as markdown")
             except Exception as table_err:
                 support.logger.warning(
                     "[PARQUET] fallback to markdown for %s: %s",

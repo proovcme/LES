@@ -3,14 +3,14 @@ from contextlib import asynccontextmanager
 
 from fastapi import HTTPException
 from proxy.services.runtime_admission import (
-    acquire_generation_slot, count_active_jobs, evaluate_chat_admission, generation_semaphore,
+    acquire_generation_slot, count_active_jobs, evaluate_chat_admission, generation_semaphore, live_memory_metrics,
 )
 
 
 def ensure_generation_allowed(state, connection):
     from proxy.services.chat_runtime import _active_dispatcher_reindex_jobs
     admission = evaluate_chat_admission(
-        current_mode=state.current_mode, metrics_cache=state.metrics_cache,
+        current_mode=state.current_mode, metrics_cache=live_memory_metrics(state.metrics_cache),
         active_jobs=count_active_jobs(state.job_service, state.job_tracker) + _active_dispatcher_reindex_jobs(state),
         connection=connection,
     )

@@ -492,6 +492,18 @@ class MetaDB:
                     f"for dataset_id={dataset_id}, document_id={document_id}"
                 )
 
+    def mark_document_deferred(self, dataset_id: str, document_id: str, reason: str) -> None:
+        """A resource gate did not attempt conversion; preserve previous counts."""
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "UPDATE documents SET status='PENDING', stage='WAITING_RESOURCES', "
+                "last_error=?, error_code='PARSE_ADMISSION_DEFERRED', retryable=1, retry_after=0 "
+                "WHERE dataset_id=? AND id=?",
+                (str(reason)[:2000], dataset_id, document_id),
+            )
+            if cur.rowcount != 1:
+                raise RuntimeError("Deferred document identity not found")
+
     def requeue_error_documents(self, dataset_id: str) -> int:
         """«Ремонт» датасета: ERROR-документы → PENDING (очистка last_error/stage/chunk_count),
         чтобы перепарсить их БЕЗ удаления датасета/индекса. Возвращает число сброшенных."""

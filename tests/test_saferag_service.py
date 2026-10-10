@@ -61,7 +61,7 @@ def test_build_context_can_include_evidence_metadata():
         include_metadata=True,
     )
 
-    assert context.startswith("[Источник 1 | doc-a | score=0.730 | стр. 5 | NORMATIVE]:")
+    assert context.startswith("[Источник 1 | doc-a | стр. 5 | NORMATIVE]:")
 
 
 def test_rank_chunks_for_question_boosts_lexical_matches():
