@@ -9417,7 +9417,7 @@
     },
     {
       "inbound": [],
-      "lines": 73,
+      "lines": 76,
       "module": "tests.test_light_macos",
       "outbound": [
         "backend/macos_ocr.py",
@@ -12718,7 +12718,7 @@
     "runtime_support": 5,
     "test_or_tool_only": 153,
     "tracked_python_files": 563,
-    "tracked_python_lines": 156718
+    "tracked_python_lines": 156721
   },
   "warnings": []
 }

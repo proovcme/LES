@@ -1,5 +1,6 @@
 import hashlib
 import io
+import os
 import tarfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,6 +13,7 @@ from tools import light_launcher, light_runtime_assets
 def test_macos_state_and_home_are_isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(light_launcher.sys, 'platform', 'darwin')
     monkeypatch.setenv('HOME', str(tmp_path))
+    monkeypatch.setattr(Path, 'home', classmethod(lambda cls: tmp_path))
     monkeypatch.setenv('OPENAI_API_KEY', 'foreign-secret')
     monkeypatch.setenv('LES_STATE_ROOT', 'foreign-state')
     state = light_launcher.default_state()
@@ -36,7 +38,8 @@ def test_native_tar_extracts_only_verified_binary(tmp_path):
     result = light_runtime_assets.verified_executable(archive, hashlib.sha256(archive.read_bytes()).hexdigest(), dest, executable_name='qdrant')
     assert result == dest / 'qdrant'
     assert result.read_bytes() == b'binary'
-    assert result.stat().st_mode & 0o111
+    if os.name != 'nt':
+        assert result.stat().st_mode & 0o111  # Windows has no POSIX executable mode.
     assert not (tmp_path / 'unrelated').exists()
 
 
