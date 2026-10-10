@@ -20,7 +20,7 @@
 | Метрика | Значение |
 | --- | --- |
 | Python-файлов под git | 565 |
-| Строк Python | 157138 |
+| Строк Python | 157149 |
 | PRODUCT_REACHABLE | 370 |
 | RUNTIME_SUPPORT | 5 |
 | TEST_OR_TOOL_ONLY | 155 |
@@ -53,10 +53,10 @@
 | backend/document_catalog.py | 989 | 3 |
 | sovushka/components/header.py | 968 | 2 |
 | backend/parquet_writer.py | 965 | 3 |
-| proxy/services/chat_profile_service.py | 958 | 7 |
 | proxy/routers/runtime.py | 920 | 3 |
 | proxy/services/project_pdf_extract_service.py | 915 | 4 |
 | tools/les_runtime_control.py | 913 | 4 |
+| proxy/services/chat_profile_service.py | 912 | 7 |
 | proxy/services/mail_registry_service.py | 903 | 6 |
 | proxy/services/document_explorer_service.py | 866 | 4 |
 | proxy/services/project_document_registry_service.py | 853 | 3 |

@@ -3877,7 +3877,7 @@
         "tests/test_light_prompt_boundary.py",
         "tests/test_product_edition.py"
       ],
-      "lines": 958,
+      "lines": 912,
       "module": "proxy.services.chat_profile_service",
       "outbound": [
         "backend/product_edition.py",
@@ -9621,7 +9621,7 @@
     },
     {
       "inbound": [],
-      "lines": 50,
+      "lines": 107,
       "module": "tests.test_light_profile_integrity",
       "outbound": [
         "proxy/services/chat_evidence_application_service.py",
@@ -12775,7 +12775,7 @@
     "runtime_support": 5,
     "test_or_tool_only": 155,
     "tracked_python_files": 565,
-    "tracked_python_lines": 157138
+    "tracked_python_lines": 157149
   },
   "warnings": []
 }
