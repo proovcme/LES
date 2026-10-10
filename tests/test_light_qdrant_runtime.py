@@ -49,7 +49,7 @@ def test_spawn_failure_releases_lock_and_removes_credentials(tmp_path, monkeypat
         raise OSError("spawn failed")
 
     monkeypatch.setattr("backend.light_qdrant_runtime.subprocess.Popen", fail)
-    with pytest.raises(RuntimeError, match="Windows") as failure:
+    with pytest.raises(RuntimeError, match="Не удалось запустить Qdrant") as failure:
         runtime.start()
     assert isinstance(failure.value.__cause__, OSError)
     assert not (runtime.root / "runtime.yaml").exists()

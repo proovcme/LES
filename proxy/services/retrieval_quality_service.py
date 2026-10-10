@@ -69,6 +69,8 @@ def evaluate_retrieval_quality(
     # as a good retrieval result.
     if term_coverage < 0.25 and source_diversity > 3:
         return RetrievalQuality("weak", "broad_low_coverage", term_coverage, source_diversity, top_score, trace.score_kind)
+    if term_coverage == 0.0:
+        return RetrievalQuality("weak", "no_lexical_support", term_coverage, source_diversity, top_score, trace.score_kind)
     if "hybrid" in trace.mode:
         detail = "hybrid_evidence" if term_coverage >= 0.25 or trace.exact_refs else "hybrid_partial_support"
         status = "good" if detail == "hybrid_evidence" else "weak"

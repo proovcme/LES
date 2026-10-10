@@ -750,7 +750,10 @@ async def retrieve_chat_chunks(
     _rt["native"] = round(time.monotonic() - _s, 3)
     dynamic_bm25 = getattr(rag_backend, "_lexical_storage", None) == "sqlite-postings"
     lexical_channel = "bm25_postings" if dynamic_bm25 else "qdrant_sparse"
-    fusion_engine = "local_rrf" if dynamic_bm25 else "qdrant_rrf"
+    dense_only = bool(native_chunks) and all(
+        (getattr(chunk, "meta", {}) or {}).get("_retrieval_channels") == ["dense"]
+        for chunk in native_chunks)
+    fusion_engine = "dense_only" if dense_only else ("local_rrf" if dynamic_bm25 else "qdrant_rrf")
     trace = RetrievalTrace(
         status="ok",
         resolved_dataset_ids=list(dataset_ids or []),
@@ -764,7 +767,7 @@ async def retrieve_chat_chunks(
         lexical_count=0,
         merged_count=len(native_chunks),
         score_kind=fusion_engine,
-        retrieval_channels=["dense", lexical_channel],
+        retrieval_channels=["dense"] if dense_only else ["dense", lexical_channel],
         fusion=(
             "global_rrf+descendant_rrf"
             if hasattr(rag_backend, "retrieve_native_hierarchical")
@@ -773,6 +776,11 @@ async def retrieve_chat_chunks(
     )
     if dynamic_bm25:
         trace.mode = trace.mode.replace("qdrant_native", "dense_bm25")
+    if dense_only:
+        hierarchical = hasattr(rag_backend, "retrieve_native_hierarchical")
+        trace.mode = "dense_hierarchical" if hierarchical else "dense_only"
+        trace.score_kind = "rrf" if hierarchical else "dense_similarity"
+        trace.fusion = "global_dense+descendant_rrf" if hierarchical else "none"
     if effective_doc_filter:
         trace.exact_refs.extend([f"file:{name}" for name in effective_doc_filter])
     chunks = native_chunks

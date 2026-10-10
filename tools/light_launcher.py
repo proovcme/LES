@@ -12,10 +12,11 @@ import sys
 import threading
 import time
 import webbrowser
+from urllib.parse import urlsplit
 
 import httpx
 
-from backend.light_processes import InstanceLock, attach_lifetime_job
+from backend.light_processes import InstanceLock, attach_lifetime_job, owned_command
 from backend.light_health_monitor import HealthMonitor
 from backend.light_qdrant_runtime import LightQdrantRuntime, free_port, port_is_free
 
@@ -32,10 +33,10 @@ def write_status(state, phase, message, **details):
 
 def child_environment(root, state, qdrant, api_port, ui_port, instance_id):
     # Installed Light never inherits another LES edition's paths or keys.
-    system_keys = {"SYSTEMROOT", "WINDIR", "COMSPEC", "PATH", "PATHEXT", "TEMP", "TMP", "USERPROFILE", "LOCALAPPDATA", "APPDATA", "PROGRAMDATA", "PROGRAMFILES", "PROGRAMFILES(X86)", "COMMONPROGRAMFILES", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE", "HOMEDRIVE", "HOMEPATH"}
+    system_keys = {"SYSTEMROOT", "WINDIR", "COMSPEC", "PATH", "PATHEXT", "TEMP", "TMP", "USERPROFILE", "LOCALAPPDATA", "APPDATA", "PROGRAMDATA", "PROGRAMFILES", "PROGRAMFILES(X86)", "COMMONPROGRAMFILES", "HOME", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE", "SHELL", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE", "HOMEDRIVE", "HOMEPATH"}
     env = {key: value for key, value in os.environ.items() if key.upper() in system_keys}
     env.update({"PYTHONPATH": str(root), "PYTHONUTF8": "1", "PYTHONNOUSERSITE": "1", "LES_PRODUCT_EDITION": "light",
-        "LES_WINDOWS_STATE_ROOT": str(state), "LES_ENV_PATH": str(state / ".env"),
+        "LES_STATE_ROOT": str(state), "LES_WINDOWS_STATE_ROOT": str(state), "LES_ENV_PATH": str(state / ".env"),
         "LES_RUNTIME_HOME": str(root), "LES_REPO_ROOT": str(root), "RAG_META_DB_PATH": str(state / "data/meta.db"),
         "QDRANT_URL": qdrant.url, "LES_LIGHT_QDRANT_URL": qdrant.url, "LES_LIGHT_QDRANT_API_KEY": qdrant.api_key,
         "LES_LIGHT_INSTANCE_ID": instance_id, "PROXY_URL": f"http://127.0.0.1:{api_port}", "LES_PROXY_URL": f"http://127.0.0.1:{api_port}",
@@ -58,7 +59,7 @@ class LightStack:
     def spawn(self, command, environment, log_name):
         log = (self.state / "logs" / log_name).open("ab")
         self.logs.append(log)
-        process = subprocess.Popen(command, cwd=self.state, env=environment, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+        process = subprocess.Popen(owned_command(command), cwd=self.state, env=environment, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         self.children.append(process)
         return process
@@ -85,7 +86,8 @@ class LightStack:
         for attempt in range(3):
             self.qdrant.start()
             self.instance_id = secrets.token_urlsafe(24)
-            self.api_port, self.ui_port = free_port(), free_port()
+            self.api_port = self.api_port if self.api_port and port_is_free(self.api_port) else free_port()
+            self.ui_port = self.ui_port if self.ui_port and port_is_free(self.ui_port) else free_port()
             while self.ui_port == self.api_port:
                 self.ui_port = free_port()
             environment = child_environment(self.root, self.state, self.qdrant, self.api_port, self.ui_port, self.instance_id)
@@ -131,12 +133,35 @@ class LightStack:
         self.qdrant.stop()
 
 
+def reopen_owned_browser(state):
+    try:
+        status=json.loads((state/'launcher-status.json').read_text(encoding='utf-8'))
+        if status.get('phase') != 'ready' or not status.get('instance_id'):
+            return False
+        api=urlsplit(status['api_url']);ui=urlsplit(status['ui_url'])
+        for url in (api,ui):
+            if url.scheme != 'http' or url.hostname != '127.0.0.1' or not url.port or url.username or url.password or url.query or url.fragment:
+                return False
+        if api.path not in {'','/'} or ui.path != '/classic':
+            return False
+        with httpx.Client(timeout=3,trust_env=False) as client:
+            probe=client.get(status['api_url']+'/api/light/instance')
+            if probe.status_code != 200 or probe.json().get('instance_id') != status['instance_id']:
+                return False
+        webbrowser.open(status['ui_url'])
+        return True
+    except (OSError, ValueError, KeyError, httpx.HTTPError):
+        return False
+
+
 def run(args):
     root = Path(args.root).resolve()
     state = Path(args.state).resolve()
     state.mkdir(parents=True, exist_ok=True)
     lock = InstanceLock(state / "launcher.lock")
     if not lock.acquire():
+        if args.browser and reopen_owned_browser(state):
+            return 0
         return 10  # Existing owner; never overwrite its status or stop its children.
     job = None
     stop = threading.Event()
@@ -153,7 +178,7 @@ def run(args):
                 stop.set()
             threading.Thread(target=parent_input, daemon=True).start()
         stack = LightStack(root, state, Path(args.qdrant).resolve(), read_only=args.read_only)
-        opened = False
+        opened_url = ""
         restart_times = []
         while not stop.is_set():
             write_status(state, "starting", "Запускаю LES RAG…", launcher_pid=os.getpid())
@@ -168,9 +193,9 @@ def run(args):
             write_status(state, "ready", "LES RAG готов", launcher_pid=os.getpid(), instance_id=stack.instance_id,
                 ui_url=ui_url, api_url=f"http://127.0.0.1:{stack.api_port}", qdrant_pid=stack.qdrant._process.pid,
                 api_pid=stack.children[-2].pid, ui_pid=stack.children[-1].pid)
-            if args.browser and not opened:
+            if args.browser and opened_url != ui_url:
                 webbrowser.open(ui_url)
-                opened = True
+                opened_url = ui_url
             while not stop.wait(1) and not stack.failed():
                 pass
             if stop.is_set():
@@ -198,12 +223,23 @@ def run(args):
         # job intentionally stays open until process exit, including abrupt termination.
 
 
-if __name__ == "__main__":
+def default_state() -> Path:
+    if sys.platform == "darwin":
+        return Path.home() / "Library/Application Support/LES Light"
+    return Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "LES Light"
+
+
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default=str(ROOT))
-    parser.add_argument("--state", default=str(Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "LES Light"))
-    parser.add_argument("--qdrant", default=str(ROOT / "native/qdrant/qdrant.exe"))
+    parser.add_argument("--state", default=str(default_state()))
+    native = "qdrant.exe" if os.name == "nt" else "qdrant"
+    parser.add_argument("--qdrant", default=str(ROOT / "native/qdrant" / native))
     parser.add_argument("--parent-pipe", action="store_true")
     parser.add_argument("--browser", action="store_true")
     parser.add_argument("--read-only", action="store_true", help="Disable background mutations for isolated acceptance")
-    raise SystemExit(run(parser.parse_args()))
+    return run(parser.parse_args(argv))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
