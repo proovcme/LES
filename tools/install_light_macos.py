@@ -8,7 +8,9 @@ import plistlib
 import shutil
 import subprocess
 import sys
+from tempfile import TemporaryDirectory
 
+from backend.light_processes import InstanceLock
 from tools.build_light_package import stage_code
 from tools.light_runtime_assets import stage, host_target
 
@@ -23,6 +25,26 @@ def install(app: Path, state: Path) -> Path:
     uv = shutil.which('uv')
     if not uv:
         raise RuntimeError('Install uv before running this developer installer')
+    lock = InstanceLock(app.parent / f'.{app.name}.install.lock')
+    if not lock.acquire():
+        raise RuntimeError('Another installation is using this application path')
+    try:
+        if app.exists():
+            raise FileExistsError('Application already exists; use another --app path to preserve rollback')
+        # Same filesystem: only a complete bundle becomes the visible .app.
+        # TemporaryDirectory removes our candidate on failure, never an old app.
+        with TemporaryDirectory(prefix=f'.{app.name}.install-', dir=app.parent) as temporary:
+            candidate = Path(temporary) / app.name
+            _build_app(candidate, state, uv)
+            if app.exists():
+                raise FileExistsError('Application appeared during installation; it was preserved')
+            candidate.rename(app)
+        return app
+    finally:
+        lock.release()
+
+
+def _build_app(app: Path, state: Path, uv: str) -> None:
     resources = app / 'Contents/Resources'
     resources.mkdir(parents=True)
     stage_code(resources)
@@ -42,7 +64,10 @@ def install(app: Path, state: Path) -> Path:
     vision=runtime/'native/vision';vision.mkdir(parents=True)
     subprocess.run(['/usr/bin/xcrun','swiftc',str(Path(__file__).with_name('light_macos_ocr.swift')),
                     '-o',str(vision/'les-ocr')],check=True)
-    subprocess.run([uv, 'sync', '--locked', '--no-dev', '--extra', 'mcp'], cwd=runtime, check=True)
+    # The bundle is renamed after installation. Avoid absolute entrypoint and
+    # editable-package links back to the temporary build directory.
+    subprocess.run([uv, 'venv', '--relocatable'], cwd=runtime, check=True)
+    subprocess.run([uv, 'sync', '--locked', '--no-dev', '--no-editable', '--extra', 'mcp'], cwd=runtime, check=True)
     # Installer writes paths into a local-only plist; no machine paths in source.
     version = json.loads((runtime/'config/version.json').read_text())
     contents = app / 'Contents'
@@ -65,7 +90,6 @@ cd "$resources/runtime"
 exec .venv/bin/python -B -m tools.light_launcher --state "$state" --browser >>"$state/logs/launcher-console.txt" 2>&1
 ''')
     executable.chmod(0o755)
-    return app
 
 
 def main(argv=None):

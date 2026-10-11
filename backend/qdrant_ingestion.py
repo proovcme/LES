@@ -6,6 +6,10 @@ from backend.index_replacement import retire_previous, discard_staged, Replaceme
 from backend.embedding_client import EmbedClient
 
 
+class SourceRegistrationChanged(RuntimeError):
+    """Discard work whose document was removed or registered differently."""
+
+
 class QdrantIngestion:
     async def parse_dataset(self, dataset_id: str, limit: int | None = None) -> support.Dict[str, support.Any]:
         if limit is None and support.os.getenv(support.ALLOW_UNBOUNDED_PARSE, "").lower() not in ("1", "true", "yes"):
@@ -187,15 +191,23 @@ class QdrantIngestion:
                 if upsert_lexical is not None:
                     upsert_lexical(points)
 
-            def _submit_convert(index: int):
-                f, fk, _dbk = files_to_parse[index]
-                local_timings: dict = {}
+            def _convert_source(index: int, local_timings: dict, allow_ocr: bool):
+                f, fk, dbk = files_to_parse[index]
+                registration = self.db.document_registration(dataset_id, dbk)
+                if registration is None or registration[1] != external_sources.get(dbk, ""):
+                    raise SourceRegistrationChanged("Источник удалён или изменён; нужна повторная проверка каталога.")
                 fingerprint = QdrantIngestion._source_fingerprint(f)
-                future = convert_pool.submit(
-                    QdrantIngestion._convert_file, self, f, data_dir, fk, dataset_id,
-                    md_parser, splitter, local_timings, False,
+                route, nodes = QdrantIngestion._convert_file(
+                    self, f, data_dir, fk, dataset_id, md_parser, splitter, local_timings, allow_ocr,
                 )
-                return future, local_timings, fingerprint
+                return route, nodes, fingerprint, registration
+
+            def _submit_convert(index: int):
+                local_timings: dict = {}
+                future = convert_pool.submit(
+                    _convert_source, index, local_timings, False,
+                )
+                return future, local_timings
 
             next_convert = _submit_convert(0) if convert_pool else None
 
@@ -213,9 +225,9 @@ class QdrantIngestion:
                         _parse_embed = _parse_embed.for_index(embedding_descriptor)
                     _stage(db_file_key, "CONVERT")
                     if next_convert is not None:
-                        future, local_timings, source_fingerprint = next_convert
+                        future, local_timings = next_convert
                         try:
-                            route, file_nodes = future.result(timeout=support.PARSE_FILE_TIMEOUT)
+                            route, file_nodes, source_fingerprint, registration = future.result(timeout=support.PARSE_FILE_TIMEOUT)
                         except support.FuturesTimeoutError:
                             # Зависший конвертер бросаем вместе с пулом; индексация продолжается.
                             convert_pool.shutdown(wait=False, cancel_futures=True)
@@ -234,11 +246,7 @@ class QdrantIngestion:
                                 md_parser, splitter, timings, True,
                             )
                     else:
-                        source_fingerprint = QdrantIngestion._source_fingerprint(file_path)
-                        route, file_nodes = QdrantIngestion._convert_file(
-                            self, file_path, data_dir, file_key, dataset_id,
-                            md_parser, splitter, timings, True,
-                        )
+                        route, file_nodes, source_fingerprint, registration = _convert_source(i - 1, timings, True)
 
                     # One final invariant for every parser and node type. Parser-
                     # specific chunkers may improve boundaries, but none may bypass
@@ -354,6 +362,8 @@ class QdrantIngestion:
                         raise RuntimeError("SOURCE_CHANGED_DURING_INDEXING: original changed; previous index preserved")
                     with journal.lease():
                         journal.assert_clean()
+                        if self.db.document_registration(dataset_id, db_file_key) != registration:
+                            raise SourceRegistrationChanged("Источник удалён или изменён; результат индексации отменён.")
                         _stage(db_file_key, "UPSERT")
                         journal.begin(dataset_id, file_key, db_file_key, [str(point.id) for point in points])
                         journal_started = True
@@ -402,6 +412,12 @@ class QdrantIngestion:
                         _add_timing("db_sec", phase_start)
                         self.db.update_dataset_chunk_count(dataset_id)
                         journal.finish()
+
+                except SourceRegistrationChanged as file_err:
+                    # Do not recreate a deleted row or mark a replacement row as
+                    # failed. Nothing has been published for this stale ticket.
+                    support.logger.warning("[PARSE] CANCELLED %s: %s", file_key, file_err)
+                    errors += 1
 
                 except support.UnsupportedIndexingSourceError as file_err:
                     support.logger.info("[PARSE] SKIPPED %s: %s", file_key, file_err)

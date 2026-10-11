@@ -239,9 +239,10 @@
       "inbound": [
         "backend/qdrant_support.py",
         "tests/test_light_code_review.py",
-        "tests/test_light_grounding_760.py"
+        "tests/test_light_grounding_760.py",
+        "tests/test_light_ingestion_races.py"
       ],
-      "lines": 989,
+      "lines": 1004,
       "module": "backend.document_catalog",
       "outbound": [
         "backend/__init__.py",
@@ -264,6 +265,7 @@
         "backend/qdrant_support.py",
         "backend/smart_index.py",
         "proxy/routers/dataset_uploads.py",
+        "tests/test_light_ingestion_races.py",
         "tests/test_mail_registry_service.py",
         "tests/test_qdrant_adapter_parse.py"
       ],
@@ -370,6 +372,7 @@
         "tests/test_light_bm25_index.py",
         "tests/test_light_chat_sections.py",
         "tests/test_light_index_recovery.py",
+        "tests/test_light_ingestion_races.py",
         "tests/test_light_rerank_audit.py",
         "tools/benchmark_sparse_index.py",
         "tools/evaluate_light_semantics.py",
@@ -578,6 +581,8 @@
         "proxy/services/dataset_watch_service.py",
         "proxy/services/light_update_service.py",
         "tests/test_light_launcher.py",
+        "tests/test_light_macos_install.py",
+        "tools/install_light_macos.py",
         "tools/light_launcher.py",
         "tools/skill_compute_worker.py"
       ],
@@ -995,9 +1000,10 @@
       "inbound": [
         "backend/qdrant_adapter.py",
         "tests/test_light_audit_regressions.py",
-        "tests/test_light_grounding_760.py"
+        "tests/test_light_grounding_760.py",
+        "tests/test_light_ingestion_races.py"
       ],
-      "lines": 588,
+      "lines": 604,
       "module": "backend.qdrant_ingestion",
       "outbound": [
         "backend/__init__.py",
@@ -1084,6 +1090,7 @@
         "tests/test_light_audit_regressions.py",
         "tests/test_light_grounding_760.py",
         "tests/test_light_index_recovery.py",
+        "tests/test_light_ingestion_races.py",
         "tests/test_light_rerank_audit.py",
         "tests/test_qdrant_adapter_parse.py"
       ],
@@ -1399,6 +1406,7 @@
         "proxy/services/dataset_deletion_service.py",
         "tests/test_light_bm25_incremental.py",
         "tests/test_light_bm25_index.py",
+        "tests/test_light_ingestion_races.py",
         "tests/test_light_lexical_v2.py",
         "tools/benchmark_sparse_index.py",
         "tools/evaluate_light_semantics.py",
@@ -4380,7 +4388,8 @@
     {
       "inbound": [
         "proxy/routers/dataset_catalog.py",
-        "tests/test_dataset_deletion_service.py"
+        "tests/test_dataset_deletion_service.py",
+        "tests/test_light_ingestion_races.py"
       ],
       "lines": 300,
       "module": "proxy.services.dataset_deletion_service",
@@ -9115,7 +9124,7 @@
     },
     {
       "inbound": [],
-      "lines": 193,
+      "lines": 194,
       "module": "tests.test_light_audit_regressions",
       "outbound": [
         "backend/index_replacement.py",
@@ -9457,6 +9466,23 @@
     },
     {
       "inbound": [],
+      "lines": 110,
+      "module": "tests.test_light_ingestion_races",
+      "outbound": [
+        "backend/document_catalog.py",
+        "backend/document_router.py",
+        "backend/index_replacement.py",
+        "backend/qdrant_ingestion.py",
+        "backend/qdrant_support.py",
+        "backend/sparse_index.py",
+        "proxy/services/dataset_deletion_service.py"
+      ],
+      "path": "tests/test_light_ingestion_races.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
       "lines": 74,
       "module": "tests.test_light_installed_skills",
       "outbound": [
@@ -9517,6 +9543,18 @@
         "tools/light_runtime_assets.py"
       ],
       "path": "tests/test_light_macos.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
+      "lines": 77,
+      "module": "tests.test_light_macos_install",
+      "outbound": [
+        "backend/light_processes.py",
+        "tools/install_light_macos.py"
+      ],
+      "path": "tests/test_light_macos_install.py",
       "status": "TEST_OR_TOOL_ONLY",
       "windows_runtime_explicit": false
     },
@@ -10259,7 +10297,7 @@
       "inbound": [
         "tests/test_light_rerank_audit.py"
       ],
-      "lines": 951,
+      "lines": 954,
       "module": "tests.test_qdrant_adapter_parse",
       "outbound": [
         "backend/document_router.py",
@@ -10760,10 +10798,13 @@
       "windows_runtime_explicit": true
     },
     {
-      "inbound": [],
-      "lines": 80,
+      "inbound": [
+        "tests/test_light_macos_install.py"
+      ],
+      "lines": 104,
       "module": "tools.install_light_macos",
       "outbound": [
+        "backend/light_processes.py",
         "tools/__init__.py",
         "tools/build_light_package.py",
         "tools/light_runtime_assets.py"
@@ -12840,9 +12881,9 @@
     "product_reachable": 371,
     "registered_api_routes": 292,
     "runtime_support": 5,
-    "test_or_tool_only": 157,
-    "tracked_python_files": 568,
-    "tracked_python_lines": 157760
+    "test_or_tool_only": 159,
+    "tracked_python_files": 570,
+    "tracked_python_lines": 158006
   },
   "warnings": []
 }

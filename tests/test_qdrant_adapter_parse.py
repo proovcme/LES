@@ -36,6 +36,9 @@ class LegacyNamePendingDB:
     def get_pending_files(self, dataset_id, limit=None):
         return ["doc.md"] if not self.updated else []
 
+    def document_registration(self, dataset_id, file_name):
+        return (file_name, "", 0, 0)
+
     def update_document_status(self, dataset_id, file_name, status, chunk_count, route=None, last_error=""):
         self.updated.append((dataset_id, file_name, status, chunk_count))
 

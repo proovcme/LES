@@ -24,6 +24,9 @@
 контекст и управление резидентностью; [измерения](acceptance/embedding-762.md).
 Журнал замены индекса: `backend/index_replacement.py` — решение commit, OS lease,
 восстановление Qdrant/FTS и ревизия чтения; интеграция в collection/ingestion/retrieval.
+`document_catalog.document_registration` — снимок идентичности и пути источника;
+ingestion повторно проверяет его под writer lease перед публикацией. Удаление или
+перерегистрация во время конвертации отменяет устаревшую работу без записи в индекс.
 PDF из цитаты: `proxy/routers/documents.py` и `proxy/services/pdf_viewer_service.py` —
 разрешение исходника по происхождению, собственный просмотр страницы без PDF-плагина.
 

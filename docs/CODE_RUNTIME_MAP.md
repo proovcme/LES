@@ -19,11 +19,11 @@
 
 | Метрика | Значение |
 | --- | --- |
-| Python-файлов под git | 568 |
-| Строк Python | 157760 |
+| Python-файлов под git | 570 |
+| Строк Python | 158006 |
 | PRODUCT_REACHABLE | 371 |
 | RUNTIME_SUPPORT | 5 |
-| TEST_OR_TOOL_ONLY | 157 |
+| TEST_OR_TOOL_ONLY | 159 |
 | DORMANT_CANDIDATE | 35 |
 | Зарегистрированных API-маршрутов | 292 |
 | Ошибок разбора | 0 |
@@ -46,11 +46,11 @@
 | proxy/services/tool_harness_service.py | 1396 | 14 |
 | proxy/services/context_memory_service.py | 1175 | 8 |
 | sovushka/pages/samovar.py | 1143 | 3 |
-| backend/document_router.py | 1124 | 6 |
+| backend/document_router.py | 1124 | 7 |
 | tools/build_rag_contract_sibling.py | 1114 | 2 |
 | tools/reindex_datasets_guarded.py | 1016 | 1 |
 | proxy/services/drawing_manifest_service.py | 1012 | 3 |
-| backend/document_catalog.py | 989 | 3 |
+| backend/document_catalog.py | 1004 | 4 |
 | sovushka/components/header.py | 968 | 2 |
 | backend/parquet_writer.py | 965 | 3 |
 | proxy/routers/runtime.py | 920 | 3 |

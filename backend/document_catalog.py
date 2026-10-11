@@ -435,6 +435,21 @@ class MetaDB:
             )
             return doc_id, True, True
 
+    def document_registration(self, dataset_id: str, file_name: str) -> tuple | None:
+        """Identity/source ticket for publication after unlocked conversion.
+
+        Joining datasets also rejects orphan catalog rows. Status/stage are not
+        identity: parser progress must not invalidate its own ticket.
+        """
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT doc.id, COALESCE(doc.source_path, ''), doc.file_mtime, doc.file_size "
+                "FROM documents doc JOIN datasets ds ON ds.id=doc.dataset_id "
+                "WHERE doc.dataset_id=? AND doc.file_name=?",
+                (dataset_id, file_name),
+            ).fetchone()
+            return tuple(row) if row else None
+
     def update_document_status(
         self,
         dataset_id: str,

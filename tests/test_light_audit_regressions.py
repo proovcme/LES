@@ -42,6 +42,7 @@ def test_source_generation_and_conversion_do_not_lock_other_readers(tmp_path, mo
     writes, statuses, fingerprints = [], [], []
     class DB:
         def get_pending_files(self, *args, **kwargs): return [] if statuses else ['doc.md']
+        def document_registration(self, *args): return ('document', '', 0, 0)
         def update_document_status(self, *args, **kwargs): statuses.append(args)
         def update_dataset_chunk_count(self, *args): pass
         def clear_structured_rules(self, *args): pass
