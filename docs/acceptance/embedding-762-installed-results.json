@@ -1,0 +1,316 @@
+{
+  "build": 762,
+  "scope": "installed local patch and separate synthetic runtime trials",
+  "installed_patch": {
+    "changed_product_files": 41,
+    "role_bindings_preserved": true,
+    "rollback_rehearsal_passed": true,
+    "startup_background_mutations": false,
+    "files": [
+      {
+        "path": "tools/light_mcp_server.py",
+        "sha256": "a4fe886104d4773f5bcf7b5e4583804fb7d53663de30f1d6ed13e5e65656e317"
+      },
+      {
+        "path": "tools/light_launcher.py",
+        "sha256": "543eae097cd405c2da57ac07ead9dcd411a3c0639e99320fc7db4c84207d4ac2"
+      },
+      {
+        "path": "tools/light_child.py",
+        "sha256": "b9bbae8a8a2339896687bcbbf7f24d685257a8d826a1d9364bcd5fa783100290"
+      },
+      {
+        "path": "proxy/light_boundary.py",
+        "sha256": "6b24afbfeffe4f0e20d23233e0bc974dd51f74d1805510b0ae7f904fbbb2f817"
+      },
+      {
+        "path": "proxy/app.py",
+        "sha256": "960a85a3638a9a01bf0cfd211967ce996bdd20c1d5c686f37b9301080efe9cc3"
+      },
+      {
+        "path": "config/version.json",
+        "sha256": "fa41ae54f7b159f6d09cbb0e92fb0e508e13f4464da15b0d81285929c70247e4"
+      },
+      {
+        "path": "backend/light_processes.py",
+        "sha256": "3d5cd13f5775b19eee87bf590d31a1f464d8b403fb2fdb4cb7d4510d9f1831e8"
+      },
+      {
+        "path": "backend/embedding_client.py",
+        "sha256": "39c0b60811d0dfd4f395de250244ede4d2104a25ab661da60da77b98c162edcc"
+      },
+      {
+        "path": "backend/qdrant_retrieval.py",
+        "sha256": "c88bf8f766c1f1e6ef87d66f315437fe52338a74c7b192e09d56d2fa82ae348c"
+      },
+      {
+        "path": "backend/document_catalog.py",
+        "sha256": "a005dfb8247edd0a12bc7a63e5ad37851a5eeaa5e436249aa6654d45093fe6b4"
+      },
+      {
+        "path": "backend/qdrant_adapter.py",
+        "sha256": "0f32fbdece7109b721a18898e1737a1af5800043cab5b6bbfa34fa8e8b43e9f3"
+      },
+      {
+        "path": "backend/interface.py",
+        "sha256": "9f0620db426bffb9c577c1d0dcec737ecb3539c65bc50224478faf37b40c13be"
+      },
+      {
+        "path": "backend/converter.py",
+        "sha256": "f1ec14116ccf2a0b3f77e2dedac581385bef7bf54f272012f244ae7ff81060ac"
+      },
+      {
+        "path": "backend/light_qdrant_runtime.py",
+        "sha256": "dda5144eec06275c8a4a64d03e74050e11476ae8998583db172f50a5bac67c99"
+      },
+      {
+        "path": "backend/qdrant_ingestion.py",
+        "sha256": "203191e9c4f62b5283ebfddebeb972ad8a560fc045678095f900997b5fd7c3cc"
+      },
+      {
+        "path": "schema/artel_family_learning_case.schema.json",
+        "sha256": "5723f81f18b3949c828fe6bb58dd54220df9cafe187424b4c4b25e9eaecf652e"
+      },
+      {
+        "path": "proxy/routers/dataset_uploads.py",
+        "sha256": "c3fa854516bce475414efb4327471cd99880e1c945caa6faded05b942ba014bd"
+      },
+      {
+        "path": "proxy/routers/dataset_search.py",
+        "sha256": "defeab29cc4ea35babbe66af6b320331f542a933593c65fdf83ac777d48636f3"
+      },
+      {
+        "path": "proxy/routers/chat.py",
+        "sha256": "c58245bd3ebf97f398dc90e7346b3faa2317c6ceaf06764469edc53238ff9890"
+      },
+      {
+        "path": "proxy/services/model_streaming_service.py",
+        "sha256": "3962891389093f90e45f1ff9b47d6e04e678247540dd425e52697b832bada953"
+      },
+      {
+        "path": "proxy/services/prompt_registry_service.py",
+        "sha256": "4585a1e9470584dfe12b97c633392867ddb86025b15145e741482e9ec4b1b049"
+      },
+      {
+        "path": "proxy/services/model_reasoning_service.py",
+        "sha256": "545c336ce924e12b980831eb87859a572b911431903e1d20890cc3c1c23f98f0"
+      },
+      {
+        "path": "proxy/services/runtime_admission.py",
+        "sha256": "4db5ba9cec649a7473a4005cae528f53c58cba7ebf8eaec47e037434c142d724"
+      },
+      {
+        "path": "proxy/services/saferag_service.py",
+        "sha256": "dab2c8885f842c947f8a2e80cf0327290374f29513ba899260ec04908c04e7a9"
+      },
+      {
+        "path": "proxy/services/public_error_service.py",
+        "sha256": "31c613097b66ebd8105f3853c55c4514127f27f9dce466517e3af2eadbc53d33"
+      },
+      {
+        "path": "proxy/services/model_capability_service.py",
+        "sha256": "226bbeae1d887b3c9cf9d99049e11eeb430a884365d7f464d26f04079798442d"
+      },
+      {
+        "path": "proxy/services/dataset_contracts.py",
+        "sha256": "9bcabb163e80120b5ac8238ef0e5f0a965a0cc4a070a296e73b63189a0ffdb7b"
+      },
+      {
+        "path": "proxy/services/openai_compatible_transport_service.py",
+        "sha256": "aebd67f7003d5f2cc716dd8796f6eefd4e299d588392af796f07b20fa922277c"
+      },
+      {
+        "path": "proxy/services/model_execution_preset_service.py",
+        "sha256": "a6556dcb719c00404c27c188bb42ccd88a9444f3a7a13ee4a424b723fb7267ce"
+      },
+      {
+        "path": "proxy/services/chat_prompt_support.py",
+        "sha256": "f54d63681979a45199bdda744591e02c09f4591871c556dbd58f7877ebd3a4d5"
+      },
+      {
+        "path": "proxy/services/chat_profile_service.py",
+        "sha256": "f112d8181b67ab4c30b86b39e6070a851b15a525a1ae02f77fd3475d7b763e04"
+      },
+      {
+        "path": "proxy/services/chat_request_service.py",
+        "sha256": "a7f0d3d840ddf5bfce5cf228f1ad3b320f168337d0c00b990661444f5d905376"
+      },
+      {
+        "path": "proxy/services/chat_evidence_application_service.py",
+        "sha256": "acd898e59b204fe70ff19e82b364f2593d0140f2c9b7f77c11d5072ce170f006"
+      },
+      {
+        "path": "proxy/services/retrieval_quality_service.py",
+        "sha256": "ecac570ec1a8b9d9657a7f2fdfe50a95b6963864f9735c6c906de8c461536f1e"
+      },
+      {
+        "path": "proxy/services/chat_section_context_service.py",
+        "sha256": "486cc7944b1482a8bff39b8ea569cb6563dbab08a78876b4016de0786d41fcbc"
+      },
+      {
+        "path": "proxy/services/retrieval_service.py",
+        "sha256": "4817fdf4e61baef91944c44c3896deb31ad09a77911d7b4f53be8939cb7c64cb"
+      },
+      {
+        "path": "proxy/services/llm_transport_profile_service.py",
+        "sha256": "a0e924e8e3c6322c53b0b536a53e0d6bb89e2d448ff0fe84b8d2032a75638afa"
+      },
+      {
+        "path": "proxy/services/generation_guard_service.py",
+        "sha256": "bc5adeb716ea1d1e0180fb1e7f84276c5c39626b6c3362ddde8d86638211cad0"
+      },
+      {
+        "path": "sovushka/components/model_setup.py",
+        "sha256": "4b274dd9eb64dca0dca34c3024373d710de3ab685a1fc4e27c009bb941aa9391"
+      },
+      {
+        "path": "sovushka/components/chat_presentation.py",
+        "sha256": "fb3dd5afe74c9a591922818413ca92d7cb90709e2b9df112b342383cc3b434b6"
+      },
+      {
+        "path": "sovushka/pages/profiles.py",
+        "sha256": "297756d6aa124fc767d50971455f439c7f743cd5ccdc25c78d26a4e32cbdbb20"
+      }
+    ],
+    "settings_endpoint_status": {
+      "/api/model-connections": 200,
+      "/api/model-connections/templates": 200,
+      "/api/model-connections/effective": 200,
+      "/api/settings/runtime-registry": 200,
+      "/api/settings/presets": 200,
+      "/api/update/check": 200
+    },
+    "embedding_transport_options": {
+      "embedding_protocol": "native_embedding_v1",
+      "max_output_field": "max_tokens"
+    }
+  },
+  "trials": [
+    {
+      "label": "baseline",
+      "settings": {
+        "prefill_step_size": 2048,
+        "allocator_cache_limit_mb": null,
+        "wired_limit_mb": "server_default"
+      },
+      "cases": [
+        {
+          "id": "e9",
+          "event": "final",
+          "seconds": 57.78,
+          "answer": "\n\nНет, именной билет обмену не подлежит. Согласно [Источник 1], обменять можно только обычный купленный билет до начала представления.",
+          "error_code": null,
+          "os_memory": {
+            "available_gb": 2.291007488,
+            "swap_pct": 83.8
+          },
+          "mlx_memory": {
+            "active": 16251868813,
+            "cache": 152974684,
+            "peak": 17742905850
+          }
+        },
+        {
+          "id": "e11",
+          "event": "error",
+          "seconds": 0.02,
+          "answer": null,
+          "error_code": "CHAT_MEMORY_PRESSURE",
+          "os_memory": {
+            "available_gb": 2.291007488,
+            "swap_pct": 83.8
+          },
+          "mlx_memory": {
+            "active": 16251868813,
+            "cache": 152974684,
+            "peak": 17742905850
+          }
+        }
+      ]
+    },
+    {
+      "label": "limited",
+      "settings": {
+        "prefill_step_size": 2048,
+        "allocator_cache_limit_mb": 256,
+        "wired_limit_mb": "server_default"
+      },
+      "cases": [
+        {
+          "id": "e9",
+          "event": "final",
+          "seconds": 53.9,
+          "answer": "\n\nНет, именной билет обмену не подлежит. [Источник 1]",
+          "error_code": null,
+          "os_memory": {
+            "available_gb": 3.18119936,
+            "swap_pct": 73.6
+          },
+          "mlx_memory": {
+            "active": 16239043851,
+            "cache": 65780916,
+            "peak": 17742905850
+          }
+        },
+        {
+          "id": "e11",
+          "event": "error",
+          "seconds": 0.02,
+          "answer": null,
+          "error_code": "CHAT_MEMORY_PRESSURE",
+          "os_memory": {
+            "available_gb": 3.178184704,
+            "swap_pct": 73.6
+          },
+          "mlx_memory": {
+            "active": 16239043851,
+            "cache": 65780916,
+            "peak": 17742905850
+          }
+        }
+      ]
+    },
+    {
+      "label": "bounded",
+      "settings": {
+        "prefill_step_size": 512,
+        "allocator_cache_limit_mb": 256,
+        "wired_limit_mb": 12288
+      },
+      "cases": [
+        {
+          "id": "e9",
+          "event": "final",
+          "seconds": 72.74,
+          "answer": "\n\nНет, именной билет обмену не подлежит. Согласно [Источник 1], хотя купленный билет можно обменять до начала представления, именной билет является исключением.",
+          "error_code": null,
+          "os_memory": {
+            "available_gb": 2.822455296,
+            "swap_pct": 83.3
+          },
+          "mlx_memory": {
+            "active": 16245311512,
+            "cache": 159504737,
+            "peak": 16707231332
+          }
+        },
+        {
+          "id": "e11",
+          "event": "error",
+          "seconds": 0.02,
+          "answer": null,
+          "error_code": "CHAT_MEMORY_PRESSURE",
+          "os_memory": {
+            "available_gb": 2.82959872,
+            "swap_pct": 83.3
+          },
+          "mlx_memory": {
+            "active": 16245311512,
+            "cache": 159504737,
+            "peak": 16707231332
+          }
+        }
+      ]
+    }
+  ]
+}
