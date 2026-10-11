@@ -190,6 +190,18 @@ class ChatAdmission:
         }
 
 
+def live_memory_metrics(metrics_cache: dict[str, Any] | None) -> dict[str, Any]:
+    """Sample at the admission boundary; dashboard telemetry can lag unloads."""
+    from backend.system_memory import system_memory_snapshot
+    metrics = dict(metrics_cache or {})
+    try:
+        metrics.update(system_memory_snapshot())
+    except (OSError, RuntimeError):
+        # Preserve the last measured protection if the OS sampler is unavailable.
+        pass
+    return metrics
+
+
 def memory_snapshot(metrics_cache: dict[str, Any] | None) -> dict[str, Any]:
     metrics = metrics_cache or {}
     ram_total = _coerce_float(metrics.get("ram_total_gb", metrics.get("ram_total")))

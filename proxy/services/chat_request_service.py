@@ -621,9 +621,11 @@ async def _run_chat(req: chat_request_contracts.ChatRequest, token_sink=None):
 
     table_result = None
 
+    from proxy.services.runtime_admission import live_memory_metrics
+    fresh_metrics = await asyncio.to_thread(live_memory_metrics, state.metrics_cache)
     admission = evaluate_chat_admission(
         current_mode=state.current_mode,
-        metrics_cache=state.metrics_cache,
+        metrics_cache=fresh_metrics,
         active_jobs=count_active_jobs(state.job_service, state.job_tracker) + chat_runtime._active_dispatcher_reindex_jobs(state),
     )
     if not admission.allowed:

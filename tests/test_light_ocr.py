@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -9,10 +10,12 @@ from backend.windows_ocr import WindowsOCRParser
 
 
 def test_default_ocr_uses_windows_without_hidden_model(monkeypatch):
+    monkeypatch.setattr(ocr_parser.sys, 'platform', 'win32')
     monkeypatch.delenv('RAG_OCR_BACKEND', raising=False)
     assert isinstance(ocr_parser.make_ocr_parser(), WindowsOCRParser)
 
 
+@pytest.mark.skipif(os.name != 'nt', reason='Windows OCR native process contract')
 @pytest.mark.parametrize('failure', [False, True])
 def test_windows_ocr_temporary_files_are_owned_and_failures_are_not_text(tmp_path, monkeypatch, failure):
     import backend.windows_ocr as windows

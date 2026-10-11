@@ -105,6 +105,7 @@ async def test_summary_waits_for_shared_model_slot_and_releases_it(conversation,
                               job_service=None, job_tracker={}, llm_semaphore=semaphore)
     monkeypatch.setattr('proxy.services.chat_runtime.get_chat_state', lambda: runtime)
     monkeypatch.setattr('proxy.services.chat_runtime._active_dispatcher_reindex_jobs', lambda _: 0)
+    monkeypatch.setattr('proxy.services.generation_guard_service.live_memory_metrics', lambda metrics:dict(metrics))
     monkeypatch.setattr('proxy.services.model_connection_resolver_service.ModelConnectionResolver.resolve',
                         lambda *args, **kwargs: connection)
     async def complete(self, actual, request):

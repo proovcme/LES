@@ -10,6 +10,7 @@ import subprocess
 import time
 
 import httpx
+from backend.light_processes import owned_command
 
 
 class PortCollisionError(RuntimeError):
@@ -24,6 +25,9 @@ def free_port():
 
 def port_is_free(port):
     with socket.socket() as reservation:
+        if os.name != 'nt':
+            # Match the server's reusable TCP bind: TIME_WAIT is not a live owner.
+            reservation.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             reservation.bind(("127.0.0.1", port))
             return True
@@ -104,13 +108,13 @@ class LightQdrantRuntime:
             self._log = (self.root / "runtime.log").open("ab")
             try:
                 self._process = subprocess.Popen(
-                    [str(self.executable), "--config-path", str(self._config)], cwd=self.root,
+                    owned_command([str(self.executable), "--config-path", str(self._config)]), cwd=self.root,
                     stdin=subprocess.DEVNULL, stdout=self._log, stderr=subprocess.STDOUT,
                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                     env={key: value for key, value in os.environ.items() if not key.upper().startswith("QDRANT__")},
                 )
             except OSError as exc:
-                raise RuntimeError("Windows не смог запустить Qdrant LES RAG. Восстановите приложение установщиком; документы сохранятся.") from exc
+                raise RuntimeError("Не удалось запустить Qdrant LES RAG. Восстановите приложение установщиком; документы сохранятся.") from exc
             deadline = time.monotonic() + self.timeout
             with httpx.Client(headers={"api-key": self.api_key}, timeout=1, trust_env=False) as probe:
                 while time.monotonic() < deadline:

@@ -123,8 +123,6 @@ def assistant_delta_text(delta: Mapping[str, Any] | None) -> str:
         return ""
     return str(
         delta.get("content")
-        or delta.get("reasoning")
-        or delta.get("reasoning_content")
         or ""
     )
 
@@ -141,7 +139,7 @@ def apply_transport_options(
     if not provider_is_local(provider):
         return normalized
     template_options = dict(normalized.get("chat_template_kwargs") or {})
-    template_options["enable_thinking"] = False
+    template_options.setdefault("enable_thinking", False)
     normalized["chat_template_kwargs"] = template_options
     return normalized
 

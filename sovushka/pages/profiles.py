@@ -506,6 +506,31 @@ def build_profiles():
                         "temperature", float(event.value or 0.0)
                     )
                 )
+                model_policy = draft.get("model_policy") or {}
+                reasoning = ui.switch(
+                    "Размышление модели",
+                    value=bool(model_policy.get("reasoning_enabled", False)),
+                )
+                reasoning.on_value_change(
+                    lambda event: draft.setdefault("model_policy", {}).__setitem__(
+                        "reasoning_enabled", bool(event.value)
+                    )
+                )
+                reasoning_budget = ui.number(
+                    "Бюджет размышления и ответа, токены",
+                    value=int(model_policy.get("reasoning_budget_tokens", 2048)),
+                    min=512, max=8192, step=512,
+                ).props("outlined dense").classes("w-full")
+                reasoning_budget.on_value_change(
+                    lambda event: draft.setdefault("model_policy", {}).__setitem__(
+                        "reasoning_budget_tokens", int(event.value or 2048)
+                    )
+                )
+                ui.label(
+                    "Для поддерживающих размышление моделей в локальных MLX LM, "
+                    "oMLX и Ollama. Может увеличить время ответа; бюджет включает "
+                    "размышление и итоговый текст."
+                ).classes("sov-ui-section-detail")
                 with ui.row().classes("w-full gap-4 flex-wrap"):
                     grounded = ui.switch(
                         "Только по источникам",

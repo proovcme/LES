@@ -58,7 +58,7 @@ FULL_LES_ONLY_SERVICES = frozenset({
 def _full_les_only(relative: str) -> bool:
     return (relative in FULL_LES_ONLY_CODE or relative in FULL_LES_ONLY_SERVICES
             or relative.startswith(FULL_LES_ONLY_PREFIXES))
-CODE_FILES = {"sovushka_ng.py", "pyproject.toml", "uv.lock", "tools/__init__.py", "tools/light_launcher.py", "tools/light_mcp_server.py",
+CODE_FILES = {"sovushka_ng.py", "pyproject.toml", "uv.lock", "tools/__init__.py", "tools/light_launcher.py", "tools/light_mcp_server.py", "tools/light_child.py",
               "tools/light_windows_ocr.ps1", "tools/light_cli.py", "tools/les-light.cmd",
               "tools/backup_suharik.py", "tools/les_doctor.py", "tools/les_runtime_control.py", "tools/lesctl.py",
               "proxy/services/mcp_connection_service.py", "proxy/routers/mcp_connections.py",
@@ -71,7 +71,7 @@ CODE_FILES = {"sovushka_ng.py", "pyproject.toml", "uv.lock", "tools/__init__.py"
               "proxy/services/tabular_document_service.py",
               "sovushka/components/mcp_connections.py", "sovushka/components/light_shell.py"}
 CONFIG_FILES = {"version.json", "light-runtime.json", "windows_python.json", "windows_uv.json"}
-PUBLIC_ASSETS = {
+PUBLIC_ASSETS = {"tools/light_macos_ocr.swift",
     "qdrant_visualizer/index.html", "qdrant_visualizer/forest.js",
     "qdrant_visualizer/forest-model.js", "qdrant_visualizer/forest.css",
     "qdrant_visualizer/navigation.js",
@@ -131,8 +131,7 @@ def hash_file(path):
 def stage_code(payload):
     runtime = payload / "runtime"
     tracked = set(iter_files())
-    if not tracked:
-        tracked.update(_local_untracked_candidate_files())
+    tracked.update(_local_untracked_candidate_files())
     # Explicit source list supports a local candidate before owner-authorized git publication.
     tracked.update(ROOT / name for name in CODE_FILES if (ROOT / name).is_file())
     sources = set()

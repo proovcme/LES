@@ -435,6 +435,21 @@ class MetaDB:
             )
             return doc_id, True, True
 
+    def document_registration(self, dataset_id: str, file_name: str) -> tuple | None:
+        """Identity/source ticket for publication after unlocked conversion.
+
+        Joining datasets also rejects orphan catalog rows. Status/stage are not
+        identity: parser progress must not invalidate its own ticket.
+        """
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT doc.id, COALESCE(doc.source_path, ''), doc.file_mtime, doc.file_size "
+                "FROM documents doc JOIN datasets ds ON ds.id=doc.dataset_id "
+                "WHERE doc.dataset_id=? AND doc.file_name=?",
+                (dataset_id, file_name),
+            ).fetchone()
+            return tuple(row) if row else None
+
     def update_document_status(
         self,
         dataset_id: str,
@@ -491,6 +506,18 @@ class MetaDB:
                     f"document error update affected {cur.rowcount} rows "
                     f"for dataset_id={dataset_id}, document_id={document_id}"
                 )
+
+    def mark_document_deferred(self, dataset_id: str, document_id: str, reason: str) -> None:
+        """A resource gate did not attempt conversion; preserve previous counts."""
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "UPDATE documents SET status='PENDING', stage='WAITING_RESOURCES', "
+                "last_error=?, error_code='PARSE_ADMISSION_DEFERRED', retryable=1, retry_after=0 "
+                "WHERE dataset_id=? AND id=?",
+                (str(reason)[:2000], dataset_id, document_id),
+            )
+            if cur.rowcount != 1:
+                raise RuntimeError("Deferred document identity not found")
 
     def requeue_error_documents(self, dataset_id: str) -> int:
         """«Ремонт» датасета: ERROR-документы → PENDING (очистка last_error/stage/chunk_count),

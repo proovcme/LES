@@ -11,12 +11,10 @@ from proxy.services import chat_inference_service
 
 logger = logging.getLogger(__name__)
 
-_CJK_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af]+")
-
 
 def clean_visible_text(text: str) -> str:
-    """Remove CJK garbage from visible Russian/Latin operator output."""
-    cleaned = _CJK_RE.sub("", str(text or ""))
+    """Normalize presentation whitespace without deleting valid source scripts."""
+    cleaned = str(text or "")
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned.strip()

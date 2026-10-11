@@ -35,8 +35,8 @@ def test_short_text_not_truncated():
     assert ex[0]["text"] == "короткий пункт"  # без многоточия
 
 
-def test_clean_visible_text_strips_cjk_garbage():
-    assert clean_visible_text("Документы 其它 系统 связи") == "Документы связи"
+def test_clean_visible_text_preserves_original_script():
+    assert clean_visible_text("Документы 其它 系统 связи") == "Документы 其它 系统 связи"
 
 
 def test_source_map_matches_context_numbering_and_limit():
@@ -60,7 +60,10 @@ def test_source_map_matches_context_numbering_and_limit():
     assert full[0]["dataset_id"] == "ds1"
     assert full[0]["source_ref"] == "СП 1.docx#p7"
 
-    limited = source_map_for_context(chunks, max_chars=180, include_metadata=True)
+    # Header no longer contains numeric ranking; reserve only the first source.
+    from proxy.services.saferag_service import build_context
+    first_size = len(build_context(chunks[:1], max_chars=2000, include_metadata=True))
+    limited = source_map_for_context(chunks, max_chars=first_size + 8, include_metadata=True)
     assert len(limited) == 1
     assert limited[0]["label"] == "Источник 1"
 

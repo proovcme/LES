@@ -15,7 +15,9 @@ def main():
     job = attach_lifetime_job(memory_bytes=512 * 1024 * 1024, process_limit=1, cpu_seconds=15)
     if os.name != 'nt':
         import resource
-        resource.setrlimit(resource.RLIMIT_AS, (512 * 1024 * 1024,) * 2)
+        if sys.platform != "darwin":
+            resource.setrlimit(resource.RLIMIT_AS, (512 * 1024 * 1024,) * 2)
+        # macOS does not implement RLIMIT_AS; the parent enforces RSS.
         resource.setrlimit(resource.RLIMIT_CPU, (15, 15))
     request = json.loads(Path('input.json').read_text(encoding='utf-8'))
     source = Path('script.py').read_bytes()

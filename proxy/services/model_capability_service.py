@@ -6,6 +6,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Callable, Iterable, Mapping
 from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
+import json
+import math
 
 import httpx
 
@@ -355,6 +357,44 @@ class CapabilityProbe:
                             )
                 except (httpx.HTTPError, OSError, TypeError, ValueError):
                     pass
+
+        embedding_observation = next(
+            (item for item in observations if item.capability is CapabilityName.EMBEDDINGS), None,
+        )
+        if (
+            connection.extension_type == "ollama"
+            and connection.locality.value != "remote"
+            and embedding_observation is not None
+            and embedding_observation.state is CapabilityState.SUPPORTED
+        ):
+            # Select a native protocol only after verifying its response shape.
+            # The role's context limit and request residency must reach the backend.
+            try:
+                async with self.client.stream(
+                    "POST", _native_api_url(endpoint, "embed"), headers=headers,
+                    json={"model": connection.model_id, "input": ["capability probe"],
+                          "truncate": False, "keep_alive": 0,
+                          "options": {"num_ctx": connection.requested_context_tokens or 8192}},
+                    follow_redirects=False,
+                ) as response:
+                    self.peer_verifier(response, endpoint)
+                    native_bytes = bytearray()
+                    async for block in response.aiter_bytes():
+                        native_bytes.extend(block)
+                        if len(native_bytes) > self.response_body_limit:
+                            raise ValueError("native embedding probe too large")
+                    if 200 <= response.status_code < 300:
+                        payload = json.loads(native_bytes)
+                        if not isinstance(payload, dict):
+                            raise ValueError("native embedding probe invalid")
+                        vectors = payload.get("embeddings")
+                        if (payload.get("model") == connection.model_id
+                                and isinstance(vectors, list) and len(vectors) == 1
+                                and isinstance(vectors[0], list) and vectors[0]
+                                and all(not isinstance(v, bool) and math.isfinite(float(v)) for v in vectors[0])):
+                            transport_options["embedding_protocol"] = "native_embedding_v1"
+            except (httpx.HTTPError, OSError, TypeError, ValueError):
+                pass
 
         return CapabilitySnapshot(
             snapshot_id=f"cap:{uuid4().hex}",

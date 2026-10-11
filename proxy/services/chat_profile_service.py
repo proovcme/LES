@@ -388,110 +388,64 @@ def _factory_contracts() -> dict[str, dict[str, Any]]:
 
 
 def _seed_factory(conn: sqlite3.Connection) -> None:
+    """Publish content-addressed defaults; never rewrite bound revisions."""
     contracts = _factory_contracts()
-    seeded_at = _now()
     for mode in profile_modes():
         contract = contracts[mode]
-        prompt_id = f"factory:prompt:{mode}:base"
-        skill_id = f"factory:skill:{mode}:base"
-        profile_id = f"factory:profile:{mode}:base"
         prompt_text = str(contract["prompt"]).strip()
         skill_text = str(contract["skill"]).strip()
-        existing_profile = conn.execute(
-            "SELECT created_at,is_factory FROM les_profile_revisions WHERE revision_id=?",
+        identity = _sha(_json({**contract, "prompt": prompt_text, "skill": skill_text}))
+        profile_id = f"factory:profile:{mode}:{identity}"
+        prompt_id = f"factory:prompt:{mode}:{_sha(prompt_text)}"
+        skill_id = f"factory:skill:{mode}:{_sha(skill_text)}"
+        for table, revision_id in (("les_profile_revisions", profile_id),
+                                   ("les_prompt_revisions", prompt_id),
+                                   ("les_skill_revisions", skill_id)):
+            reserved = conn.execute(
+                f"SELECT is_factory FROM {table} WHERE revision_id=?", (revision_id,)
+            ).fetchone()
+            if reserved is not None and not bool(reserved["is_factory"]):
+                raise ValueError(f"Зарезервированный factory ID занят: {revision_id}")
+        existing = conn.execute(
+            "SELECT revision_no,created_at FROM les_profile_revisions WHERE revision_id=?",
             (profile_id,),
         ).fetchone()
-        if existing_profile is not None and not bool(existing_profile["is_factory"]):
-            raise ValueError(f"Зарезервированный factory profile ID занят: {profile_id}")
-        created = (
-            str(existing_profile["created_at"])
-            if existing_profile is not None
-            else seeded_at
-        )
+        if existing is None:
+            revision_no = int(conn.execute(
+                "SELECT COALESCE(MAX(revision_no),0)+1 FROM les_profile_revisions "
+                "WHERE mode=? AND is_factory=1", (mode,)
+            ).fetchone()[0])
+            created = _now()
+            for table, revision_id, text in (("les_prompt_revisions", prompt_id, prompt_text),
+                                             ("les_skill_revisions", skill_id, skill_text)):
+                conn.execute(
+                    f"INSERT OR IGNORE INTO {table} "
+                    "(revision_id,name,revision_no,text_value,sha256,is_factory,created_at) "
+                    "VALUES(?,?,?,?,?,1,?)",
+                    (revision_id, f"{MODE_LABELS[mode]} · Base", revision_no, text, _sha(text), created),
+                )
+            snapshot = _make_snapshot(
+                revision_id=profile_id, mode=mode, name=f"{MODE_LABELS[mode]} · Base",
+                revision_no=revision_no, prompt_revision_id=prompt_id, prompt_text=prompt_text,
+                skill_revision_id=skill_id, skill_text=skill_text, tools=list(contract["tools"]),
+                model_policy=dict(contract["model_policy"]), rag_policy=dict(contract["rag_policy"]),
+                is_factory=True, created_at=created,
+            )
+            conn.execute(
+                "INSERT OR IGNORE INTO les_profile_revisions "
+                "(revision_id,mode,name,revision_no,prompt_revision_id,skill_revision_id,"
+                "tools_json,model_policy_json,rag_policy_json,snapshot_json,is_factory,created_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,1,?)",
+                (profile_id, mode, snapshot["name"], revision_no, prompt_id, skill_id,
+                 _json(snapshot["tools"]), _json(snapshot["model_policy"]), _json(snapshot["rag_policy"]),
+                 _json(snapshot), created),
+            )
+        else:
+            created = str(existing["created_at"])
+        # Only a fresh installation gets this default automatically. Existing
+        # bindings and every explicit active selection keep their exact snapshot.
         conn.execute(
-            """INSERT OR IGNORE INTO les_prompt_revisions
-               (revision_id,name,revision_no,text_value,sha256,is_factory,created_at)
-               VALUES(?,?,?,?,?,1,?)""",
-            (prompt_id, f"{MODE_LABELS[mode]} · Base", 1, prompt_text, _sha(prompt_text), created),
-        )
-        conn.execute(
-            """UPDATE les_prompt_revisions SET name=?,revision_no=1,text_value=?,sha256=?,
-                      deleted_at=NULL
-               WHERE revision_id=? AND is_factory=1""",
-            (f"{MODE_LABELS[mode]} · Base", prompt_text, _sha(prompt_text), prompt_id),
-        )
-        conn.execute(
-            """INSERT OR IGNORE INTO les_skill_revisions
-               (revision_id,name,revision_no,text_value,sha256,is_factory,created_at)
-               VALUES(?,?,?,?,?,1,?)""",
-            (skill_id, f"{MODE_LABELS[mode]} · Base", 1, skill_text, _sha(skill_text), created),
-        )
-        conn.execute(
-            """UPDATE les_skill_revisions SET name=?,revision_no=1,text_value=?,sha256=?,
-                      deleted_at=NULL
-               WHERE revision_id=? AND is_factory=1""",
-            (f"{MODE_LABELS[mode]} · Base", skill_text, _sha(skill_text), skill_id),
-        )
-        snapshot = _make_snapshot(
-            revision_id=profile_id,
-            mode=mode,
-            name=f"{MODE_LABELS[mode]} · Base",
-            revision_no=1,
-            prompt_revision_id=prompt_id,
-            prompt_text=prompt_text,
-            skill_revision_id=skill_id,
-            skill_text=skill_text,
-            tools=list(contract["tools"]),
-            model_policy=dict(contract["model_policy"]),
-            rag_policy=dict(contract["rag_policy"]),
-            is_factory=True,
-            created_at=created,
-        )
-        conn.execute(
-            """INSERT OR IGNORE INTO les_profile_revisions
-               (revision_id,mode,name,revision_no,prompt_revision_id,skill_revision_id,
-                tools_json,model_policy_json,rag_policy_json,snapshot_json,is_factory,created_at)
-               VALUES(?,?,?,?,?,?,?,?,?,?,1,?)""",
-            (
-                profile_id,
-                mode,
-                snapshot["name"],
-                1,
-                prompt_id,
-                skill_id,
-                _json(snapshot["tools"]),
-                _json(snapshot["model_policy"]),
-                _json(snapshot["rag_policy"]),
-                _json(snapshot),
-                created,
-            ),
-        )
-        snapshot_json = _json(snapshot)
-        conn.execute(
-            """UPDATE les_profile_revisions SET mode=?,name=?,revision_no=1,
-                      prompt_revision_id=?,skill_revision_id=?,tools_json=?,
-                      model_policy_json=?,rag_policy_json=?,snapshot_json=?,deleted_at=NULL
-               WHERE revision_id=? AND is_factory=1""",
-            (
-                mode,
-                snapshot["name"],
-                prompt_id,
-                skill_id,
-                _json(snapshot["tools"]),
-                _json(snapshot["model_policy"]),
-                _json(snapshot["rag_policy"]),
-                snapshot_json,
-                profile_id,
-            ),
-        )
-        conn.execute(
-            """UPDATE les_chat_profile_bindings SET snapshot_json=?,updated_at=?
-               WHERE profile_revision_id=? AND snapshot_json<>?""",
-            (snapshot_json, seeded_at, profile_id, snapshot_json),
-        )
-        conn.execute(
-            """INSERT OR IGNORE INTO les_active_profiles(mode,profile_revision_id,updated_at)
-               VALUES(?,?,?)""",
+            "INSERT OR IGNORE INTO les_active_profiles(mode,profile_revision_id,updated_at) VALUES(?,?,?)",
             (mode, profile_id, created),
         )
     conn.commit()
@@ -611,6 +565,8 @@ def publish_profile_revision(
     db_path: str | Path | None = None,
     additional_skill_revision_ids: list[str] | None = None,
 ) -> dict[str, Any]:
+    from proxy.services.model_reasoning_service import validate_reasoning_policy
+    validate_reasoning_policy(model_policy or {})
     canonical = canonical_profile_mode(mode)
     title = str(name or "").strip()
     if not title:

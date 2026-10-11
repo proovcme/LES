@@ -7,7 +7,8 @@ from backend.rag_config import rag_runtime_config
 from backend.reranker import select_reranker_cls
 from proxy.config import mlx_url
 from proxy.security import require_user
-from proxy.services.context_expander_service import expand_context_windows
+from proxy.services.chat_section_context_service import ChatSectionReader
+from types import SimpleNamespace
 from proxy.services.retrieval_service import classify_query, resolve_dataset_ids, retrieve_chat_chunks
 
 from proxy.services.dataset_contracts import (RetrievalDebugRequest, SearchRequest)
@@ -48,6 +49,36 @@ def _chunk_payload(chunk: Any, *, rank: int, max_chars: int, expanded_chunk: Any
     }
 
 
+async def _read_context(backend, chunks, dataset_ids, top_k, max_chars=2200):
+    allowed = dataset_ids or list(dict.fromkeys(
+        str((getattr(c, "meta", {}) or {}).get("dataset_id") or "") for c in chunks))
+    reader = ChatSectionReader(backend, allowed)
+    result = await reader.expand(chunks, max_chunks=top_k, hit_limit=top_k)
+    expanded = []
+    for seed in chunks:
+        meta = seed.meta or {}
+        neighbours = [c for c in result.chunks
+            if (c.meta.get("dataset_id"), c.doc_name, c.meta.get("parent_id")) ==
+               (meta.get("dataset_id"), seed.doc_name, meta.get("parent_id"))
+            and (meta.get("parent_id") or c.meta.get("qdrant_point_id") == meta.get("qdrant_point_id"))]
+        fragments, rendered, used = [], [], 0
+        for neighbour in neighbours:
+            header = f"[Page {neighbour.meta.get('page') or neighbour.meta.get('source_page') or '?'}]\n"
+            if used + len(header) + len(neighbour.content) > max_chars:
+                continue  # Whole fragments with their own provenance; no hidden clipping.
+            fields = ('dataset_id', 'file_name', 'parent_id', 'page', 'source_page',
+                      'source_ref', 'qdrant_point_id', '_index_revision')
+            fragments.append({"content": neighbour.content,
+                "metadata": {key: neighbour.meta.get(key) for key in fields}})
+            rendered.append(header + neighbour.content)
+            used += len(header) + len(neighbour.content) + 2
+        text = "\n\n".join(rendered)
+        expanded.append(SimpleNamespace(content=text, meta={**meta, "context_expanded": len(neighbours)>1,
+            "context_fragments": fragments, "context_omitted_fragments": len(neighbours)-len(fragments)}))
+    reader.assert_for_inference()
+    return expanded, result.payload()
+
+
 @search_router.post("/search")
 async def search(req: SearchRequest, _user=Depends(require_user)):
     state = dataset_runtime.get_dataset_state()
@@ -78,14 +109,9 @@ async def search(req: SearchRequest, _user=Depends(require_user)):
     expanded_chunks: list[Any] = []
     context_payload: dict[str, Any] | None = None
     if req.include_context:
-        context_windows = expand_context_windows(
-            chunks,
-            collection=getattr(state.backend, "collection_name", ""),
-            logger=logger,
-            max_chunks=req.top_k,
-        )
-        expanded_chunks = list(context_windows.chunks)
-        context_payload = context_windows.payload()
+        expanded_chunks, context_payload = await _read_context(
+            state.backend, chunks, dataset_ids, req.top_k, req.max_chars)
+
 
     result: dict[str, Any] = {
         "query": query,
@@ -151,15 +177,10 @@ async def retrieve_debug(req: RetrievalDebugRequest, _user=Depends(require_user)
         return_trace=True,
     )
     chunks = retrieval.chunks[: req.top_k]
-    context_windows = expand_context_windows(
-        chunks,
-        collection=getattr(state.backend, "collection_name", ""),
-        logger=logger,
-        max_chunks=req.top_k,
-    )
+    expanded_chunks, context_payload = await _read_context(
+        state.backend, chunks, dataset_ids, req.top_k)
     retrieval_trace = retrieval.payload()
-    retrieval_trace["context_window"] = context_windows.payload()
-    expanded_chunks = list(context_windows.chunks)
+    retrieval_trace["context_window"] = context_payload
     return {
         "question": req.question,
         "query_route": {

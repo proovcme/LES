@@ -680,7 +680,12 @@ async def _execute_chat_evidence_application(
     retrieval_trace["validation_context_window"] = validation_context_windows.payload()
     t_ctx = time.time() - t_ctx_start
 
-    execution_preset = resolved_connection.effective_preset
+    from proxy.services.model_reasoning_service import profile_execution_preset
+    try:
+        execution_preset = profile_execution_preset(
+            resolved_connection.effective_preset, (profile_snapshot or {}).get("model_policy") or {})
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
     preset_diagnostics = execution_preset.diagnostics()
     preset_diagnostics["model_preset"]["requested"] = resolved_connection.model_id
     retrieval_trace["model_execution_profile"] = preset_diagnostics
@@ -880,6 +885,7 @@ async def _execute_chat_evidence_application(
                 provider_messages = with_image_attachment(provider_messages, getattr(req, "attachment_id", None))
                 inference_request = InferenceRequest(
                     messages=provider_messages,
+                    reasoning_enabled=execution_preset.reasoning_enabled,
                     max_output_tokens=max(
                         1,
                         int(
@@ -894,10 +900,11 @@ async def _execute_chat_evidence_application(
                 )
 
                 active_model_streamed = False
-
                 async def forward_stream(event):
                     nonlocal active_model_streamed
                     if event.get("event") == "token":
+                        if execution_preset.reasoning_enabled and not active_model_streamed:
+                            await chat_progress(token_sink, "answer", "Модель пишет ответ")
                         active_model_streamed = True
                     elif event.get("event") == "reset":
                         active_model_streamed = False
@@ -1608,6 +1615,9 @@ async def _execute_chat_evidence_application(
                     generation_budget,
                     answer_execution_preset.generation_reserve_tokens,
                 )
+
+                if answer_execution_preset.reasoning_enabled:
+                    generation_budget = answer_execution_preset.generation_reserve_tokens
 
                 chat_body = {
                     "messages": messages,

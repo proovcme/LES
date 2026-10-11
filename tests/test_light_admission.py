@@ -27,6 +27,7 @@ def policy(monkeypatch):
     for key in ('LES_CHAT_MEMORY_GUARD','LES_CHAT_MIN_FREE_GB','LES_CHAT_RESIDENT_MIN_FREE_GB'):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setattr('proxy.services.chat_runtime._active_dispatcher_reindex_jobs', lambda _:0)
+    monkeypatch.setattr('proxy.services.generation_guard_service.live_memory_metrics', lambda metrics:dict(metrics))
 
 
 @pytest.mark.parametrize('locality,allowed', [('loopback',False),('private_network',False),('unknown',False),('remote',True)])

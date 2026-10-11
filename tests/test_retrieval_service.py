@@ -485,8 +485,12 @@ async def test_retrieve_chat_chunks_can_use_qdrant_native_hybrid(monkeypatch):
     assert result.trace.retrieval_channels == ["dense", "qdrant_sparse"]
     assert result.trace.fusion == "rrf"
     assert result.chunks[0].doc_name == "native.docx"
+    # The literal identifier q has no support in the fixture's source text.
+    # The normalized quality check widens candidates without changing the query.
+    assert result.trace.quality_status == "weak" and result.trace.retry_count == 1
     assert backend.native_calls == [
-        {"question": "q", "dataset_ids": ["ds-1"], "top_k": 64, "doc_filter": ["doc.md"]}
+        {"question": "q", "dataset_ids": ["ds-1"], "top_k": 64, "doc_filter": ["doc.md"]},
+        {"question": "q", "dataset_ids": ["ds-1"], "top_k": 128, "doc_filter": ["doc.md"]},
     ]
     assert backend.calls == []
 

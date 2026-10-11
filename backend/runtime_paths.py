@@ -14,14 +14,14 @@ class MutablePathError(ValueError):
 
 
 def mutable_path(relative: str | Path) -> Path:
-    """Return a mutable path owned by persistent Windows state when configured."""
+    """Return a mutable path owned by persistent application state when configured."""
 
     candidate = Path(relative)
     if candidate.is_absolute():
         raise MutablePathError("mutable path must be relative")
     if not candidate.parts or candidate.parts[0] not in MUTABLE_ROOTS:
         raise MutablePathError("mutable path must use a registered mutable root")
-    state = os.getenv("LES_WINDOWS_STATE_ROOT", "").strip()
+    state = os.getenv("LES_STATE_ROOT", "").strip() or os.getenv("LES_WINDOWS_STATE_ROOT", "").strip()
     return Path(state).joinpath(*candidate.parts) if state else candidate
 
 

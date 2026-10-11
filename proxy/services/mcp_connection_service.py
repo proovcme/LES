@@ -54,7 +54,7 @@ def save(name: str, url: str = "", *, transport: str = "http", command: str = ""
             raise ValueError("Укажите полный путь к существующей программе MCP (.exe). Командная строка оболочки не поддерживается")
         if len(arguments) > 32 or any(not isinstance(arg, str) or len(arg) > 4096 or '\x00' in arg for arg in arguments):
             raise ValueError("Допустимо до 32 аргументов, каждый до 4096 символов")
-        config.update(command=str(program.resolve()), args=arguments)
+        config.update(command=str(program.absolute()), args=arguments)
         url = "stdio:" + hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()
     elif transport == "http":
         try:

@@ -7,7 +7,7 @@ from typing import Any
 
 from proxy.services.kot_service import KotDecision
 from proxy.services.lexical_index_service import RetrievalTrace
-from proxy.services.saferag_service import query_terms
+from backend.inference.lexical_tokens import tokenize_current
 
 
 @dataclass(frozen=True)
@@ -40,9 +40,12 @@ def evaluate_retrieval_quality(
     if not chunks:
         return RetrievalQuality("weak", "no_chunks", 0.0, 0, 0.0, trace.score_kind)
 
-    terms = query_terms(question)
-    haystack = "\n".join(f"{getattr(chunk, 'doc_name', '')}\n{getattr(chunk, 'content', '')}" for chunk in chunks).casefold()
-    matched = {term for term in terms if term in haystack}
+    # Use the same normalized token boundary as BM25. Raw substring checks
+    # lose Russian inflections and let short codes match unrelated longer codes.
+    terms = set(tokenize_current(question))
+    haystack = set(tokenize_current("\n".join(
+        f"{getattr(chunk, 'doc_name', '')}\n{getattr(chunk, 'content', '')}" for chunk in chunks)))
+    matched = terms & haystack
     term_coverage = len(matched) / len(terms) if terms else 1.0
     source_diversity = len({getattr(chunk, "doc_name", "") for chunk in chunks})
     top_score = float(getattr(chunks[0], "score", 0.0) or 0.0)
@@ -69,6 +72,8 @@ def evaluate_retrieval_quality(
     # as a good retrieval result.
     if term_coverage < 0.25 and source_diversity > 3:
         return RetrievalQuality("weak", "broad_low_coverage", term_coverage, source_diversity, top_score, trace.score_kind)
+    if term_coverage == 0.0:
+        return RetrievalQuality("weak", "no_lexical_support", term_coverage, source_diversity, top_score, trace.score_kind)
     if "hybrid" in trace.mode:
         detail = "hybrid_evidence" if term_coverage >= 0.25 or trace.exact_refs else "hybrid_partial_support"
         status = "good" if detail == "hybrid_evidence" else "weak"

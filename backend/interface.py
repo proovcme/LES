@@ -53,6 +53,10 @@ class RAGBackend(ABC):
         """Persist a background intake failure instead of leaving the document PENDING."""
         raise NotImplementedError
 
+    async def mark_document_deferred(self, dataset_id: str, document_id: str, reason: str) -> None:
+        """Keep an admitted upload pending when parsing awaits resources."""
+        raise NotImplementedError
+
     @abstractmethod
     async def register_external_file(self, dataset_id: str, source_path: Path, file_name: str) -> str:
         """Регистрирует внешний файл как источник БЕЗ копирования в storage.

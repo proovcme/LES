@@ -511,9 +511,9 @@ def _parse_spreadsheet(path: Path) -> str:
                 md_parts.append(_render_spreadsheet_sheet(sheet, df))
     except Exception as e:
         logger.error(f"[CONVERT] spreadsheet error {path.name}: {e}")
-        return f"[ERROR] Не удалось прочитать таблицу: {e}"
+        raise RuntimeError("Не удалось прочитать таблицу") from e
 
-    return "\n\n".join(md_parts) if md_parts else f"[WARN] {path.name}: таблица пуста"
+    return "\n\n".join(md_parts) if md_parts else ""
 
 
 def _render_spreadsheet_sheet(sheet_name: str, df: Any) -> str:
@@ -526,7 +526,7 @@ def _render_spreadsheet_sheet(sheet_name: str, df: Any) -> str:
     """
     cleaned = df.dropna(how="all").dropna(axis=1, how="all")
     if cleaned.empty:
-        return f"## Лист: {sheet_name}\n[WARN] лист пуст"
+        return ""
 
     rows, cols = cleaned.shape
     if rows * cols <= SPREADSHEET_FULL_TABLE_MAX_CELLS:

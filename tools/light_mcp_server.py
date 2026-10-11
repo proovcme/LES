@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 from urllib.parse import quote, urlencode, urlsplit
 
@@ -18,6 +19,8 @@ def _state_root() -> Path:
     configured = os.environ.get("LES_LIGHT_STATE", "").strip()
     if configured:
         return Path(configured)
+    if sys.platform == "darwin":
+        return Path.home() / "Library/Application Support/LES Light"
     local = os.environ.get("LOCALAPPDATA", "").strip()
     if not local:
         raise RuntimeError("Укажите LES_LIGHT_STATE — папку данных запущенного LES RAG")
@@ -120,6 +123,10 @@ def search_sources(query: str, dataset_ids: list[str] | None = None, limit: int 
             "page": meta.get("page"), "section": meta.get("section_heading") or meta.get("parent_heading"),
             "excerpt": str(chunk.get("content") or ""),
             "context": str((chunk.get("context") or {}).get("content") or ""),
+            "context_fragments": [{"excerpt": item.get("content", ""),
+                "page": (item.get("metadata") or {}).get("page"),
+                "point_id": (item.get("metadata") or {}).get("qdrant_point_id")}
+                for item in ((chunk.get("context") or {}).get("metadata") or {}).get("context_fragments", [])],
             "original_url": link,
         })
     trace = result.get("retrieval_trace") or {}

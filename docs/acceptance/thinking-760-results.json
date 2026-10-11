@@ -1,0 +1,88 @@
+{
+  "schema": "les.thinking-diagnostic.v1",
+  "scope": "post-hoc three exception cases, identical quoted context, local 35B, max_tokens2048 vs512; not controlled solely for thinking",
+  "system_sha256": "4777e921fe1cf59b79ac0c4d8005b2e40e03c620011bedfefb728a0ea198c8ef",
+  "cases": [
+    {
+      "id": "e9",
+      "model": "Qwen3.6-35B-A3B-oQ3 (local text variant)",
+      "question": "Можно ли обменять именной билет до начала представления?",
+      "context_sha256": "8282c97ab58ef55a4c3594256c972d0ffc8983e82c356258169bd2b24139ec93",
+      "enable_thinking_requested": true,
+      "max_tokens": 2048,
+      "thinking_observed": true,
+      "thinking_chars": 4291,
+      "answer": "Нет, именной билет обмену не подлежит. [Источник 1 | ticket.md]",
+      "done_reason": "stop",
+      "usage": {
+        "prompt_tokens": 720,
+        "completion_tokens": 1116,
+        "total_tokens": 1836,
+        "prompt_tokens_details": {
+          "cached_tokens": 206
+        }
+      },
+      "elapsed_s": 31.19,
+      "manual_review": {
+        "verdict": "pass",
+        "note": "Явное исключение учтено, ответ нет подтверждён приведённым источником; противоречивого да нет."
+      }
+    },
+    {
+      "id": "e11",
+      "model": "Qwen3.6-35B-A3B-oQ3 (local text variant)",
+      "question": "Можно ли бесплатно везти 18 кг багажа на маршруте Север?",
+      "context_sha256": "41d492693a920af24bd3e3d3ae155b3fcb051097f1cb3c7286f839b6015d6b5a",
+      "enable_thinking_requested": true,
+      "max_tokens": 2048,
+      "thinking_observed": true,
+      "thinking_chars": 2137,
+      "answer": "Нет, бесплатно везти 18 кг багажа на маршруте Север нельзя. Согласно источнику [Источник 2 | luggage.md], для маршрута Север бесплатный лимит составляет 12 кг, поэтому вес свыше этого лимита будет оплачиваться отдельно.",
+      "done_reason": "stop",
+      "usage": {
+        "prompt_tokens": 697,
+        "completion_tokens": 654,
+        "total_tokens": 1351,
+        "prompt_tokens_details": {
+          "cached_tokens": 206
+        }
+      },
+      "elapsed_s": 19.17,
+      "manual_review": {
+        "verdict": "pass",
+        "note": "Явное исключение учтено, ответ нет подтверждён приведённым источником; противоречивого да нет."
+      }
+    },
+    {
+      "id": "e16",
+      "model": "Qwen3.6-35B-A3B-oQ3 (local text variant)",
+      "question": "Принимает ли сервис аккумулятор марки T в ремонт?",
+      "context_sha256": "10918a1f1fe83820e914ffdbd8f0c8a74cb512cb30afd64d62f963a1b362eb23",
+      "enable_thinking_requested": true,
+      "max_tokens": 2048,
+      "thinking_observed": true,
+      "thinking_chars": 3297,
+      "answer": "Нет, сервис не принимает аккумуляторы марки T в ремонт. Согласно [Источник 2 | repair.md], аккумуляторы этой марки не ремонтируются.",
+      "done_reason": "stop",
+      "usage": {
+        "prompt_tokens": 1179,
+        "completion_tokens": 861,
+        "total_tokens": 2040,
+        "prompt_tokens_details": {
+          "cached_tokens": 206
+        }
+      },
+      "elapsed_s": 25.88,
+      "manual_review": {
+        "verdict": "pass",
+        "note": "Явное исключение учтено, ответ нет подтверждён приведённым источником; противоречивого да нет."
+      }
+    }
+  ],
+  "limitations": [
+    "three post-hoc exception cases only; not overall accuracy or ordinary app chat",
+    "reasoning enabled and output budget increased together, cannot isolate the causal contribution of each",
+    "thinking trace omitted; only presence and character count recorded; same system/context text hashes",
+    "public factory prompt only; no user private prompt read; working model assignments unchanged"
+  ]
+}

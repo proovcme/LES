@@ -161,11 +161,9 @@ def concentrate_sources(
 def _source_label(index: int, chunk: SourceChunk, include_metadata: bool) -> str:
     if not include_metadata:
         return f"[{chunk.doc_name}]"
-    score = getattr(chunk, "score", None)
     meta = getattr(chunk, "meta", {}) or {}
     details = [f"Источник {index}", chunk.doc_name]
-    if isinstance(score, (int, float)):
-        details.append(f"score={score:.3f}")
+    # Ranking scores remain in diagnostics, not in model-facing evidence labels.
     page = meta.get("source_page") or meta.get("page") or meta.get("page_number")
     if page:
         details.append(f"стр. {page}")

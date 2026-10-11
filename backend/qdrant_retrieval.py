@@ -118,11 +118,6 @@ class QdrantRetrieval:
             sparse = {term: 1. for term in tokenize_current(query)} if dynamic else encode_query(journal, query)
         else:
             sparse = encode_bm25(query)
-        if not sparse:
-            # Do not let the caller label a dense-only query as native RRF.
-            # The retrieval service will use its explicit dense+FTS fallback
-            # and expose the actual channels in trace.
-            raise RuntimeError("native RRF requires a non-empty sparse query")
 
         must = []
         if dataset_ids:
@@ -140,7 +135,12 @@ class QdrantRetrieval:
             )
         query_filter = support.models.Filter(must=must) if must else None
         prefetch_limit = max(top_k * 2, 24)
-        if dynamic:
+        if not sparse:
+            results = await self.aclient.query_points(
+                collection_name=self.collection_name, query=dense_vec,
+                using=support._dense_vector_name(), query_filter=query_filter,
+                limit=top_k, with_payload=True)
+        elif dynamic:
             from backend.bm25_hybrid import query as dynamic_query
             results = await dynamic_query(self, journal, query, dense_vec, query_filter,
                 dense_name=support._dense_vector_name(), prefetch_limit=prefetch_limit, limit=top_k,
@@ -173,7 +173,8 @@ class QdrantRetrieval:
                 doc_id=p.payload.get("doc_id", ""),
                 doc_name=p.payload.get("file_name", "unknown"),
                 score=p.score,
-                meta={**p.payload, "qdrant_point_id": str(p.id)},
+                meta={**p.payload, "qdrant_point_id": str(p.id),
+                      "_retrieval_channels": ["dense", "bm25_postings" if dynamic else "qdrant_sparse"] if sparse else ["dense"]},
             )
             for p in results.points
             if len(p.payload.get("text", "")) >= 1

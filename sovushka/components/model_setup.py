@@ -28,7 +28,7 @@ def open_model_setup(on_done, *, local=True):
     engines, saved = {}, {}
     with ui.dialog() as dialog, ui.card().classes("sov-model-dialog"):
         section_heading("Модель на компьютере" if local else "Подключить API",
-                        "Выберите модель и её задачу. Остальное ЛЕС настроит сам.")
+                        "Выберите модель и её задачу. ЛЕС проверит подключение перед назначением.")
         note = ui.label("Ищем работающие локальные серверы…" if local else
                         "Укажите адрес API вашего сервиса. Ключ нужен только если сервис его требует.")
         note.classes("sov-ui-section-detail").props('role="status" aria-live="polite"')
@@ -43,7 +43,7 @@ def open_model_setup(on_done, *, local=True):
         manual = text_field(label="Имя модели", classes="w-full")
         manual.set_visibility(False)
         role = select_field(ROLES, value="answer", label="Для чего использовать", classes="w-full")
-        ui.label("Для чата и поиска можно выбрать разные модели. Смена модели поиска может потребовать обновления индекса.").classes("sov-ui-section-detail")
+        ui.label("Для чата нужна текстовая модель, для поиска — embedding-модель. Назначение поиска не создаёт и не переносит индекс: модель и размерность должны совпадать с его настройками.").classes("sov-ui-section-detail")
         privacy = ui.label("При использовании внешнего API ваши запросы и выбранные фрагменты документов передаются этому сервису.").classes("sov-ui-section-detail")
         privacy.set_visibility(not local)
 

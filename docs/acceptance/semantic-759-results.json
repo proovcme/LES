@@ -1,0 +1,1020 @@
+{
+  "schema": "les.semantic-review.v1",
+  "fixture_sha256": "672e696e6b1b854d9f09914340227eececcf53f1337ea0a9d14fe638d59e5046",
+  "models": {
+    "embedding": "qwen3-embedding:0.6b",
+    "chat": "qwen3:8b"
+  },
+  "scope": "production native hybrid + parent reader + evidence packet; standalone answer prompt, not full chat agent",
+  "review_method": "Human inspection against fixed authored expectations and exact visible quotes; no model judge. Ranking metrics computed from saved retrieved IDs.",
+  "summary": {
+    "cases": 20,
+    "answerable": 16,
+    "unanswerable": 4,
+    "recall5": 1.0,
+    "ndcg5": 0.96875,
+    "semantic_pass": 18,
+    "semantic_fail": 2,
+    "irrelevant_abstention_citation_cases": [
+      "n1"
+    ]
+  },
+  "cases": [
+    {
+      "id": "v1",
+      "category": "versions",
+      "question": "Каков действующий срок доставки заказа?",
+      "gold_documents": [
+        "delivery-new"
+      ],
+      "expected": "7 рабочих дней, не 12",
+      "retrieved_documents": [
+        "delivery-old",
+        "shipping",
+        "delivery-new",
+        "distractor",
+        "warranty-new"
+      ],
+      "answer": "Действующий срок доставки заказа — 7 рабочих дней [3].",
+      "recall5": 1.0,
+      "ndcg5": 0.5,
+      "review": {
+        "semantic_pass": true,
+        "note": "Answer meets the authored expectation on this synthetic case."
+      },
+      "visible_sources": [
+        {
+          "index": 1,
+          "document": "delivery-old",
+          "quote": "Доставка. Редакция от 2030-01-01, утратила силу 2031-01-01. Заказ доставляют за 12 рабочих дней."
+        },
+        {
+          "index": 2,
+          "document": "shipping",
+          "quote": "Доставка бесплатная при заказе от 5000 рублей. Исключение: на острова доставка стоит 900 рублей при любой сумме заказа."
+        },
+        {
+          "index": 3,
+          "document": "delivery-new",
+          "quote": "Доставка. Редакция от 2031-01-01 заменяет редакцию 2030 года. Заказ доставляют за 7 рабочих дней."
+        },
+        {
+          "index": 4,
+          "document": "distractor",
+          "quote": "Меню кафе: чай стоит 120 рублей, суп 250 рублей. Проект озеленения предусматривает посадку 7 деревьев. Доставка мебели производится по пятницам."
+        },
+        {
+          "index": 5,
+          "document": "warranty-new",
+          "quote": "Гарантия по действующим правилам 2031 года составляет 24 месяца. Правила 2028 года не действуют."
+        }
+      ]
+    },
+    {
+      "id": "v2",
+      "category": "versions",
+      "question": "Сколько времени сейчас даётся на возврат?",
+      "gold_documents": [
+        "refund-new"
+      ],
+      "expected": "30 календарных дней, не 14",
+      "retrieved_documents": [
+        "refund-new",
+        "refund-old",
+        "access",
+        "delivery-old",
+        "delivery-new"
+      ],
+      "answer": "Возвращение допускается в течение 30 календарных дней [1].",
+      "recall5": 1.0,
+      "ndcg5": 1.0,
+      "review": {
+        "semantic_pass": true,
+        "note": "Answer meets the authored expectation on this synthetic case."
+      },
+      "visible_sources": [
+        {
+          "index": 1,
+          "document": "refund-new",
+          "quote": "Возврат. Действующая редакция 2031 года. Возврат допускается в течение 30 календарных дней. Заменяет редакцию 2029 года."
+        },
+        {
+          "index": 2,
+          "document": "refund-old",
+          "quote": "Возврат. Редакция 2029 года отменена редакцией 2031 года. Возврат допускается в течение 14 календарных дней."
+        },
+        {
+          "index": 3,
+          "document": "access",
+          "quote": "Посещение сада разрешено до 20:00. Исключение: при объявленной грозе сад закрыт независимо от времени."
+        },
+        {
+          "index": 4,
+          "document": "delivery-old",
+          "quote": "Доставка. Редакция от 2030-01-01, утратила силу 2031-01-01. Заказ доставляют за 12 рабочих дней."
+        },
+        {
+          "index": 5,
+          "document": "delivery-new",
+          "quote": "Доставка. Редакция от 2031-01-01 заменяет редакцию 2030 года. Заказ доставляют за 7 рабочих дней."
+        }
+      ]
+    },
+    {
+      "id": "v3",
+      "category": "versions",
+      "question": "До какого часа работает библиотека в апреле 2031 года?",
+      "gold_documents": [
+        "hours-new"
+      ],
+      "expected": "до 19:00",
+      "retrieved_documents": [
+        "hours-new",
+        "warranty-new",
+        "hours-old",
+        "refund-old",
+        "refund-new"
+      ],
+      "answer": "Библиотека работает до 19:00 в апреле 2031 года [1].",
+      "recall5": 1.0,
+      "ndcg5": 1.0,
+      "review": {
+        "semantic_pass": true,
+        "note": "Answer meets the authored expectation on this synthetic case."
+      },
+      "visible_sources": [
+        {
+          "index": 1,
+          "document": "hours-new",
+          "quote": "График библиотеки с 2031-03-01: открыта с 10:00 до 19:00. Предыдущий график отменён."
+        },
+        {
+          "index": 2,
+          "document": "warranty-new",
+          "quote": "Гарантия по действующим правилам 2031 года составляет 24 месяца. Правила 2028 года не действуют."
+        },
+        {
+          "index": 3,
+          "document": "hours-old",
+          "quote": "Архивный график библиотеки, до 2031-03-01: открыта с 9:00 до 17:00."
+        },
+        {
+          "index": 4,
+          "document": "refund-old",
+          "quote": "Возврат. Редакция 2029 года отменена редакцией 2031 года. Возврат допускается в течение 14 календарных дней."
+        },
+        {
+          "index": 5,
+          "document": "refund-new",
+          "quote": "Возврат. Действующая редакция 2031 года. Возврат допускается в течение 30 календарных дней. Заменяет редакцию 2029 года."
+        }
+      ]
+    },
+    {
+      "id": "v4",
+      "category": "versions",
+      "question": "Какова гарантия согласно действующим правилам?",
+      "gold_documents": [
+        "warranty-new"
+      ],
+      "expected": "24 месяца, не 6",
+      "retrieved_documents": [
+        "warranty-new",
+        "warranty-old",
+        "refund-new",
+        "capacity-b",
+        "budget-b"
+      ],
+      "answer": "Гарантия согласно действующим правилам составляет 24 месяца [1].",
+      "recall5": 1.0,
+      "ndcg5": 1.0,
+      "review": {
+        "semantic_pass": true,
+        "note": "Answer meets the authored expectation on this synthetic case."
+      },
+      "visible_sources": [
+        {
+          "index": 1,
+          "document": "warranty-new",
+          "quote": "Гарантия по действующим правилам 2031 года составляет 24 месяца. Правила 2028 года не действуют."
+        },
+        {
+          "index": 2,
+          "document": "warranty-old",
+          "quote": "Гарантия по правилам 2028 года составляла 6 месяцев. Эти правила отменены."
+        },
+        {
+          "index": 3,
+          "document": "refund-new",
+          "quote": "Возврат. Действующая редакция 2031 года. Возврат допускается в течение 30 календарных дней. Заменяет редакцию 2029 года."
+        },
+        {
+          "index": 4,
+          "document": "capacity-b",
+          "quote": "Акт эксплуатации того же зала: максимальная вместимость 90 человек. Связь документов и приоритет не определены."
+        },
+        {
+          "index": 5,
+          "document": "budget-b",
+          "quote": "Сводка отдела Б: бюджет того же фестиваля 450000 рублей. Дата 2031-04-01, подписано. Порядок разрешения расхождений не установлен."
+        }
+      ]
+    },
+    {
+      "id": "e1",
+      "category": "exceptions",
+      "question": "Можно ли взять справочник домой на 21 день?",
+      "gold_documents": [
+        "loan"
+      ],
+      "expected": "Нет, только читальный зал",
+      "retrieved_documents": [
+        "loan",
+        "refund-old",
+        "delivery-old",
+        "refund-new",
+        "delivery-new"
+      ],
+      "answer": "Нет, справочники не выдаются домой, только в читальный зал [1].",
+      "recall5": 1.0,
+      "ndcg5": 1.0,
+      "review": {
+        "semantic_pass": true,
+        "note": "Answer meets the authored expectation on this synthetic case."
+      },
+      "visible_sources": [
+        {
+          "index": 1,
+          "document": "loan",
+          "quote": "Книги выдаются на 21 день. Исключение: справочники выдаются только в читальный зал, домой их не выдают."
+        },
+        {
+          "index": 2,
+          "document": "refund-old",
+          "quote": "Возврат. Редакция 2029 года отменена редакцией 2031 года. Возврат допускается в течение 14 календарных дней."
+        },
+        {
+          "index": 3,
+          "document": "delivery-old",
+          "quote": "Доставка. Редакция от 2030-01-01, утратила силу 2031-01-01. Заказ доставляют за 12 рабочих дней."
+        },
+        {
+          "index": 4,
+          "document": "refund-new",
+          "quote": "Возврат. Действующая редакция 2031 года. Возврат допускается в течение 30 календарных дней. Заменяет редакцию 2029 года."
+        },
+        {
+          "index": 5,
+          "document": "delivery-new",
+          "quote": "Доставка. Редакция от 2031-01-01 заменяет редакцию 2030 года. Заказ доставляют за 7 рабочих дней."
+        }
+      ]
+    },
+    {
+      "id": "e2",
+      "category": "exceptions",
+      "question": "Можно ли посетить сад в 15:00 при объявленной грозе?",
+      "gold_documents": [
+        "access"
+      ],
+      "expected": "Нет, сад закрыт при грозе",
+      "retrieved_documents": [
+        "access",
+        "hours-new",
+        "hours-old",
+        "distractor",
+        "facts"
+      ],
+      "answer": "Нет, посетить сад в 15:00 при объявленной грозе нельзя, так как сад закрыт независимо от времени при грозе [1].",
+      "recall5": 1.0,
+      "ndcg5": 1.0,
+      "review": {
+        "semantic_pass": true,
+        "note": "Answer meets the authored expectation on this synthetic case."
+      },
+      "visible_sources": [
+        {
+          "index": 1,
+          "document": "access",
+          "quote": "Посещение сада разрешено до 20:00. Исключение: при объявленной грозе сад закрыт независимо от времени."
+        },
+        {
+          "index": 2,
+          "document": "hours-new",
+          "quote": "График библиотеки с 2031-03-01: открыта с 10:00 до 19:00. Предыдущий график отменён."
+        },
+        {
+          "index": 3,
+          "document": "hours-old",
+          "quote": "Архивный график библиотеки, до 2031-03-01: открыта с 9:00 до 17:00."
+        },
+        {
+          "index": 4,
+          "document": "distractor",
+          "quote": "Меню кафе: чай стоит 120 рублей, суп 250 рублей. Проект озеленения предусматривает посадку 7 деревьев. Доставка мебели производится по пятницам."
+        },
+        {
+          "index": 5,
+          "document": "facts",
+          "quote": "Лаборатория открывается в 8:30. Код камеры K-42. Архив закрыт по понедельникам. Партия содержит 16 упаковок."
+        }
+      ]
+    },
+    {
+      "id": "e3",
+      "category": "exceptions",
+      "question": "Сколько стоит доставка на остров при заказе на 6000 рублей?",
+      "gold_documents": [
+        "shipping"
+      ],
+      "expected": "900 рублей, исключение",
+      "retrieved_documents": [
+        "shipping",
+        "distractor",
+        "delivery-old",
+        "delivery-new",
+        "budget-b"
+      ],
+      "answer": "Доставка на остров стоит 900 рублей при любой сумме заказа [1].",
+      "recall5": 1.0,
+      "ndcg5": 1.0,
+      "review": {
+        "semantic_pass": true,
+        "note": "Answer meets the authored expectation on this synthetic case."
+      },
+      "visible_sources": [
+        {
+          "index": 1,
+          "document": "shipping",
+          "quote": "Доставка бесплатная при заказе от 5000 рублей. Исключение: на острова доставка стоит 900 рублей при любой сумме заказа."
+        },
+        {
+          "index": 2,
+          "document": "distractor",
+          "quote": "Меню кафе: чай стоит 120 рублей, суп 250 рублей. Проект озеленения предусматривает посадку 7 деревьев. Доставка мебели производится по пятницам."
+        },
+        {
+          "index": 3,
+          "document": "delivery-old",
+          "quote": "Доставка. Редакция от 2030-01-01, утратила силу 2031-01-01. Заказ доставляют за 12 рабочих дней."
+        },
+        {
+          "index": 4,
+          "document": "delivery-new",
+          "quote": "Доставка. Редакция от 2031-01-01 заменяет редакцию 2030 года. Заказ доставляют за 7 рабочих дней."
+        },
+        {
+          "index": 5,
+          "document": "budget-b",
+          "quote": "Сводка отдела Б: бюджет того же фестиваля 450000 рублей. Дата 2031-04-01, подписано. Порядок разрешения расхождений не установлен."
+        }
+      ]
+    },
+    {
+      "id": "e4",
+      "category": "exceptions",
+      "question": "При какой температуре хранить образец Z?",
+      "gold_documents": [
+        "storage"
+      ],
+      "expected": "минус 18 градусов",
+      "retrieved_documents": [
+        "storage",
+        "facts",
+        "capacity-a",
+        "capacity-b",
+        "contact-b"
+      ],
+      "answer": "Образец Z хранится при температуре минус 18 градусов Цельсия [1].",
+      "recall5": 1.0,
+      "ndcg5": 1.0,
+      "review": {
+        "semantic_pass": true,
+        "note": "Answer meets the authored expectation on this synthetic case."
+      },
+      "visible_sources": [
+        {
+          "index": 1,
+          "document": "storage",
+          "quote": "Образцы хранят при температуре от 2 до 8 градусов Цельсия. Исключение: образец типа Z хранится при минус 18 градусах."
+        },
+        {
+          "index": 2,
+          "document": "facts",
+          "quote": "Лаборатория открывается в 8:30. Код камеры K-42. Архив закрыт по понедельникам. Партия содержит 16 упаковок."
+        },
+        {
+          "index": 3,
+          "document": "capacity-a",
+          "quote": "Паспорт зала от изготовителя: максимальная вместимость 120 человек."
+        },
+        {
+          "index": 4,
+          "document": "capacity-b",
+          "quote": "Акт эксплуатации того же зала: максимальная вместимость 90 человек. Связь документов и приоритет не определены."
+        },
+        {
+          "index": 5,
+          "document": "contact-b",
+          "quote": "Памятка поддержки того же филиала: телефон 555-0102. Обновлено 2031-06-01. Приоритет не определён."
+        }
+      ]
+    },
+    {
+      "id": "c1",
+      "category": "conflicts",
+      "question": "Назови точную утверждённую дату запуска проекта.",
+      "gold_documents": [
+        "launch-a",
+        "launch-b"
+      ],
+      "expected": "Противоречие: 10 и 17 июня; нельзя выбрать без основания",
+      "retrieved_documents": [
+        "launch-a",
+        "launch-b",
+        "distractor",
+        "budget-a",
+        "budget-b"
+      ],
+      "answer": "10 июня 2031 года [1].",
+      "recall5": 1.0,
+      "ndcg5": 1.0,
+      "review": {
+        "semantic_pass": false,
+        "note": "Ignores conflicting launch date despite both sources in evidence."
+      },
+      "visible_sources": [
+        {
+          "index": 1,
+          "document": "launch-a",
+          "quote": "Протокол совета А от 2031-05-02: запуск проекта намечен на 10 июня 2031 года. Статус: утверждено."
+        },
+        {
+          "index": 2,
+          "document": "launch-b",
+          "quote": "Протокол совета Б от 2031-05-02: запуск того же проекта намечен на 17 июня 2031 года. Статус: утверждено. Приоритет протоколов не указан."
+        },
+        {
+          "index": 3,
+          "document": "distractor",
+          "quote": "Меню кафе: чай стоит 120 рублей, суп 250 рублей. Проект озеленения предусматривает посадку 7 деревьев. Доставка мебели производится по пятницам."
+        },
+        {
+          "index": 4,
+          "document": "budget-a",
+          "quote": "Сводка отдела А: бюджет фестиваля 400000 рублей. Дата 2031-04-01, подписано."
+        },
+        {
+          "index": 5,
+          "document": "budget-b",
+          "quote": "Сводка отдела Б: бюджет того же фестиваля 450000 рублей. Дата 2031-04-01, подписано. Порядок разрешения расхождений не установлен."
+        }
+      ]
+    },
+    {
+      "id": "c2",
+      "category": "conflicts",
+      "question": "Каков окончательный бюджет фестиваля?",
+      "gold_documents": [
+        "budget-a",
+        "budget-b"
+      ],
+      "expected": "Противоречие: 400000 и 450000; окончательный не установлен",
+      "retrieved_documents": [
+        "budget-b",
+        "budget-a",
+        "distractor",
+        "capacity-b",
+        "capacity-a"
+      ],
+      "answer": "Окончательный бюджет фестиваля не определён из-за противоречия между источниками:  \n- Сводка отдела А указывает бюджет 400000 рублей [2].  \n- Сводка отдела Б указывает бюджет 450000 рублей [1].  \n\nПорядок разрешения расхождений не установлен [1].",
+      "recall5": 1.0,
+      "ndcg5": 1.0,
+      "review": {
+        "semantic_pass": true,
+        "note": "Answer meets the authored expectation on this synthetic case."
+      },
+      "visible_sources": [
+        {
+          "index": 1,
+          "document": "budget-b",
+          "quote": "Сводка отдела Б: бюджет того же фестиваля 450000 рублей. Дата 2031-04-01, подписано. Порядок разрешения расхождений не установлен."
+        },
+        {
+          "index": 2,
+          "document": "budget-a",
+          "quote": "Сводка отдела А: бюджет фестиваля 400000 рублей. Дата 2031-04-01, подписано."
+        },
+        {
+          "index": 3,
+          "document": "distractor",
+          "quote": "Меню кафе: чай стоит 120 рублей, суп 250 рублей. Проект озеленения предусматривает посадку 7 деревьев. Доставка мебели производится по пятницам."
+        },
+        {
+          "index": 4,
+          "document": "capacity-b",
+          "quote": "Акт эксплуатации того же зала: максимальная вместимость 90 человек. Связь документов и приоритет не определены."
+        },
+        {
+          "index": 5,
+          "document": "capacity-a",
+          "quote": "Паспорт зала от изготовителя: максимальная вместимость 120 человек."
+        }
+      ]
+    },
+    {
+      "id": "c3",
+      "category": "conflicts",
+      "question": "Сколько человек точно можно разместить в зале?",
+      "gold_documents": [
+        "capacity-a",
+        "capacity-b"
+      ],
+      "expected": "Противоречие: 120 и 90; приоритет неизвестен",
+      "retrieved_documents": [
+        "capacity-a",
+        "capacity-b",
+        "facts",
+        "storage",
+        "budget-a"
+      ],
+      "answer": "Максимальная вместимость зала указана в двух источниках: 120 человек по паспорту зала [1], и 90 человек по акту эксплуатации [2]. Приоритет между документами не определён.",
+      "recall5": 1.0,
+      "ndcg5": 1.0,
+      "review": {
+        "semantic_pass": true,
+        "note": "Answer meets the authored expectation on this synthetic case."
+      },
+      "visible_sources": [
+        {
+          "index": 1,
+          "document": "capacity-a",
+          "quote": "Паспорт зала от изготовителя: максимальная вместимость 120 человек."
+        },
+        {
+          "index": 2,
+          "document": "capacity-b",
+          "quote": "Акт эксплуатации того же зала: максимальная вместимость 90 человек. Связь документов и приоритет не определены."
+        },
+        {
+          "index": 3,
+          "document": "facts",
+          "quote": "Лаборатория открывается в 8:30. Код камеры K-42. Архив закрыт по понедельникам. Партия содержит 16 упаковок."
+        },
+        {
+          "index": 4,
+          "document": "storage",
+          "quote": "Образцы хранят при температуре от 2 до 8 градусов Цельсия. Исключение: образец типа Z хранится при минус 18 градусах."
+        },
+        {
+          "index": 5,
+          "document": "budget-a",
+          "quote": "Сводка отдела А: бюджет фестиваля 400000 рублей. Дата 2031-04-01, подписано."
+        }
+      ]
+    },
+    {
+      "id": "c4",
+      "category": "conflicts",
+      "question": "Какой актуальный телефон поддержки филиала?",
+      "gold_documents": [
+        "contact-a",
+        "contact-b"
+      ],
+      "expected": "Противоречие: 555-0101 и 555-0102; приоритет неизвестен",
+      "retrieved_documents": [
+        "contact-a",
+        "contact-b",
+        "warranty-new",
+        "budget-a",
+        "budget-b"
+      ],
+      "answer": "Актуальный телефон поддержки филиала: 555-0101 [1].",
+      "recall5": 1.0,
+      "ndcg5": 1.0,
+      "review": {
+        "semantic_pass": false,
+        "note": "Selects one phone despite conflicting equal-date records."
+      },
+      "visible_sources": [
+        {
+          "index": 1,
+          "document": "contact-a",
+          "quote": "Карточка поддержки филиала: телефон 555-0101. Обновлено 2031-06-01."
+        },
+        {
+          "index": 2,
+          "document": "contact-b",
+          "quote": "Памятка поддержки того же филиала: телефон 555-0102. Обновлено 2031-06-01. Приоритет не определён."
+        },
+        {
+          "index": 3,
+          "document": "warranty-new",
+          "quote": "Гарантия по действующим правилам 2031 года составляет 24 месяца. Правила 2028 года не действуют."
+        },
+        {
+          "index": 4,
+          "document": "budget-a",
+          "quote": "Сводка отдела А: бюджет фестиваля 400000 рублей. Дата 2031-04-01, подписано."
+        },
+        {
+          "index": 5,
+          "document": "budget-b",
+          "quote": "Сводка отдела Б: бюджет того же фестиваля 450000 рублей. Дата 2031-04-01, подписано. Порядок разрешения расхождений не установлен."
+        }
+      ]
+    },
+    {
+      "id": "n1",
+      "category": "unanswerable",
+      "question": "Как называется директор лаборатории?",
+      "gold_documents": [],
+      "expected": "В источниках нет ответа; не выдумывать",
+      "retrieved_documents": [
+        "facts",
+        "capacity-b",
+        "capacity-a",
+        "budget-a",
+        "hours-old"
+      ],
+      "answer": "Ответа нет [1].",
+      "recall5": null,
+      "ndcg5": null,
+      "review": {
+        "semantic_pass": true,
+        "note": "Correct abstention, but adds an irrelevant citation that does not establish absence."
+      },
+      "visible_sources": [
+        {
+          "index": 1,
+          "document": "facts",
+          "quote": "Лаборатория открывается в 8:30. Код камеры K-42. Архив закрыт по понедельникам. Партия содержит 16 упаковок."
+        },
+        {
+          "index": 2,
+          "document": "capacity-b",
+          "quote": "Акт эксплуатации того же зала: максимальная вместимость 90 человек. Связь документов и приоритет не определены."
+        },
+        {
+          "index": 3,
+          "document": "capacity-a",
+          "quote": "Паспорт зала от изготовителя: максимальная вместимость 120 человек."
+        },
+        {
+          "index": 4,
+          "document": "budget-a",
+          "quote": "Сводка отдела А: бюджет фестиваля 400000 рублей. Дата 2031-04-01, подписано."
+        },
+        {
+          "index": 5,
+          "document": "hours-old",
+          "quote": "Архивный график библиотеки, до 2031-03-01: открыта с 9:00 до 17:00."
+        }
+      ]
+    },
+    {
+      "id": "n2",
+      "category": "unanswerable",
+      "question": "Какова масса упаковки в партии?",
+      "gold_documents": [],
+      "expected": "В источниках нет ответа; не выдумывать",
+      "retrieved_documents": [
+        "facts",
+        "capacity-a",
+        "capacity-b",
+        "delivery-old",
+        "budget-b"
+      ],
+      "answer": "Ответа нет.",
+      "recall5": null,
+      "ndcg5": null,
+      "review": {
+        "semantic_pass": true,
+        "note": "Answer meets the authored expectation on this synthetic case."
+      },
+      "visible_sources": [
+        {
+          "index": 1,
+          "document": "facts",
+          "quote": "Лаборатория открывается в 8:30. Код камеры K-42. Архив закрыт по понедельникам. Партия содержит 16 упаковок."
+        },
+        {
+          "index": 2,
+          "document": "capacity-a",
+          "quote": "Паспорт зала от изготовителя: максимальная вместимость 120 человек."
+        },
+        {
+          "index": 3,
+          "document": "capacity-b",
+          "quote": "Акт эксплуатации того же зала: максимальная вместимость 90 человек. Связь документов и приоритет не определены."
+        },
+        {
+          "index": 4,
+          "document": "delivery-old",
+          "quote": "Доставка. Редакция от 2030-01-01, утратила силу 2031-01-01. Заказ доставляют за 12 рабочих дней."
+        },
+        {
+          "index": 5,
+          "document": "budget-b",
+          "quote": "Сводка отдела Б: бюджет того же фестиваля 450000 рублей. Дата 2031-04-01, подписано. Порядок разрешения расхождений не установлен."
+        }
+      ]
+    },
+    {
+      "id": "n3",
+      "category": "unanswerable",
+      "question": "Какой пароль от камеры K-42?",
+      "gold_documents": [],
+      "expected": "В источниках нет ответа; не выдумывать",
+      "retrieved_documents": [
+        "facts",
+        "budget-a",
+        "storage",
+        "contact-b",
+        "budget-b"
+      ],
+      "answer": "Ответа нет.",
+      "recall5": null,
+      "ndcg5": null,
+      "review": {
+        "semantic_pass": true,
+        "note": "Answer meets the authored expectation on this synthetic case."
+      },
+      "visible_sources": [
+        {
+          "index": 1,
+          "document": "facts",
+          "quote": "Лаборатория открывается в 8:30. Код камеры K-42. Архив закрыт по понедельникам. Партия содержит 16 упаковок."
+        },
+        {
+          "index": 2,
+          "document": "budget-a",
+          "quote": "Сводка отдела А: бюджет фестиваля 400000 рублей. Дата 2031-04-01, подписано."
+        },
+        {
+          "index": 3,
+          "document": "storage",
+          "quote": "Образцы хранят при температуре от 2 до 8 градусов Цельсия. Исключение: образец типа Z хранится при минус 18 градусах."
+        },
+        {
+          "index": 4,
+          "document": "contact-b",
+          "quote": "Памятка поддержки того же филиала: телефон 555-0102. Обновлено 2031-06-01. Приоритет не определён."
+        },
+        {
+          "index": 5,
+          "document": "budget-b",
+          "quote": "Сводка отдела Б: бюджет того же фестиваля 450000 рублей. Дата 2031-04-01, подписано. Порядок разрешения расхождений не установлен."
+        }
+      ]
+    },
+    {
+      "id": "n4",
+      "category": "unanswerable",
+      "question": "На какой улице расположена библиотека?",
+      "gold_documents": [],
+      "expected": "В источниках нет ответа; не выдумывать",
+      "retrieved_documents": [
+        "hours-new",
+        "hours-old",
+        "loan",
+        "contact-a",
+        "facts"
+      ],
+      "answer": "Ответа нет.",
+      "recall5": null,
+      "ndcg5": null,
+      "review": {
+        "semantic_pass": true,
+        "note": "Answer meets the authored expectation on this synthetic case."
+      },
+      "visible_sources": [
+        {
+          "index": 1,
+          "document": "hours-new",
+          "quote": "График библиотеки с 2031-03-01: открыта с 10:00 до 19:00. Предыдущий график отменён."
+        },
+        {
+          "index": 2,
+          "document": "hours-old",
+          "quote": "Архивный график библиотеки, до 2031-03-01: открыта с 9:00 до 17:00."
+        },
+        {
+          "index": 3,
+          "document": "loan",
+          "quote": "Книги выдаются на 21 день. Исключение: справочники выдаются только в читальный зал, домой их не выдают."
+        },
+        {
+          "index": 4,
+          "document": "contact-a",
+          "quote": "Карточка поддержки филиала: телефон 555-0101. Обновлено 2031-06-01."
+        },
+        {
+          "index": 5,
+          "document": "facts",
+          "quote": "Лаборатория открывается в 8:30. Код камеры K-42. Архив закрыт по понедельникам. Партия содержит 16 упаковок."
+        }
+      ]
+    },
+    {
+      "id": "d1",
+      "category": "direct",
+      "question": "Во сколько открывается лаборатория?",
+      "gold_documents": [
+        "facts"
+      ],
+      "expected": "8:30",
+      "retrieved_documents": [
+        "facts",
+        "hours-old",
+        "hours-new",
+        "capacity-a",
+        "capacity-b"
+      ],
+      "answer": "Лаборатория открывается в 8:30 [1].",
+      "recall5": 1.0,
+      "ndcg5": 1.0,
+      "review": {
+        "semantic_pass": true,
+        "note": "Answer meets the authored expectation on this synthetic case."
+      },
+      "visible_sources": [
+        {
+          "index": 1,
+          "document": "facts",
+          "quote": "Лаборатория открывается в 8:30. Код камеры K-42. Архив закрыт по понедельникам. Партия содержит 16 упаковок."
+        },
+        {
+          "index": 2,
+          "document": "hours-old",
+          "quote": "Архивный график библиотеки, до 2031-03-01: открыта с 9:00 до 17:00."
+        },
+        {
+          "index": 3,
+          "document": "hours-new",
+          "quote": "График библиотеки с 2031-03-01: открыта с 10:00 до 19:00. Предыдущий график отменён."
+        },
+        {
+          "index": 4,
+          "document": "capacity-a",
+          "quote": "Паспорт зала от изготовителя: максимальная вместимость 120 человек."
+        },
+        {
+          "index": 5,
+          "document": "capacity-b",
+          "quote": "Акт эксплуатации того же зала: максимальная вместимость 90 человек. Связь документов и приоритет не определены."
+        }
+      ]
+    },
+    {
+      "id": "d2",
+      "category": "direct",
+      "question": "Какой код камеры?",
+      "gold_documents": [
+        "facts"
+      ],
+      "expected": "K-42",
+      "retrieved_documents": [
+        "facts",
+        "contact-a",
+        "contact-b",
+        "budget-b",
+        "budget-a"
+      ],
+      "answer": "Код камеры K-42 [1].",
+      "recall5": 1.0,
+      "ndcg5": 1.0,
+      "review": {
+        "semantic_pass": true,
+        "note": "Answer meets the authored expectation on this synthetic case."
+      },
+      "visible_sources": [
+        {
+          "index": 1,
+          "document": "facts",
+          "quote": "Лаборатория открывается в 8:30. Код камеры K-42. Архив закрыт по понедельникам. Партия содержит 16 упаковок."
+        },
+        {
+          "index": 2,
+          "document": "contact-a",
+          "quote": "Карточка поддержки филиала: телефон 555-0101. Обновлено 2031-06-01."
+        },
+        {
+          "index": 3,
+          "document": "contact-b",
+          "quote": "Памятка поддержки того же филиала: телефон 555-0102. Обновлено 2031-06-01. Приоритет не определён."
+        },
+        {
+          "index": 4,
+          "document": "budget-b",
+          "quote": "Сводка отдела Б: бюджет того же фестиваля 450000 рублей. Дата 2031-04-01, подписано. Порядок разрешения расхождений не установлен."
+        },
+        {
+          "index": 5,
+          "document": "budget-a",
+          "quote": "Сводка отдела А: бюджет фестиваля 400000 рублей. Дата 2031-04-01, подписано."
+        }
+      ]
+    },
+    {
+      "id": "d3",
+      "category": "direct",
+      "question": "В какой день архив закрыт?",
+      "gold_documents": [
+        "facts"
+      ],
+      "expected": "по понедельникам",
+      "retrieved_documents": [
+        "facts",
+        "hours-old",
+        "loan",
+        "access",
+        "hours-new"
+      ],
+      "answer": "Архив закрыт по понедельникам [1].",
+      "recall5": 1.0,
+      "ndcg5": 1.0,
+      "review": {
+        "semantic_pass": true,
+        "note": "Answer meets the authored expectation on this synthetic case."
+      },
+      "visible_sources": [
+        {
+          "index": 1,
+          "document": "facts",
+          "quote": "Лаборатория открывается в 8:30. Код камеры K-42. Архив закрыт по понедельникам. Партия содержит 16 упаковок."
+        },
+        {
+          "index": 2,
+          "document": "hours-old",
+          "quote": "Архивный график библиотеки, до 2031-03-01: открыта с 9:00 до 17:00."
+        },
+        {
+          "index": 3,
+          "document": "loan",
+          "quote": "Книги выдаются на 21 день. Исключение: справочники выдаются только в читальный зал, домой их не выдают."
+        },
+        {
+          "index": 4,
+          "document": "access",
+          "quote": "Посещение сада разрешено до 20:00. Исключение: при объявленной грозе сад закрыт независимо от времени."
+        },
+        {
+          "index": 5,
+          "document": "hours-new",
+          "quote": "График библиотеки с 2031-03-01: открыта с 10:00 до 19:00. Предыдущий график отменён."
+        }
+      ]
+    },
+    {
+      "id": "d4",
+      "category": "direct",
+      "question": "Сколько упаковок содержит партия?",
+      "gold_documents": [
+        "facts"
+      ],
+      "expected": "16",
+      "retrieved_documents": [
+        "facts",
+        "capacity-a",
+        "capacity-b",
+        "contact-a",
+        "delivery-old"
+      ],
+      "answer": "Партия содержит 16 упаковок [1].",
+      "recall5": 1.0,
+      "ndcg5": 1.0,
+      "review": {
+        "semantic_pass": true,
+        "note": "Answer meets the authored expectation on this synthetic case."
+      },
+      "visible_sources": [
+        {
+          "index": 1,
+          "document": "facts",
+          "quote": "Лаборатория открывается в 8:30. Код камеры K-42. Архив закрыт по понедельникам. Партия содержит 16 упаковок."
+        },
+        {
+          "index": 2,
+          "document": "capacity-a",
+          "quote": "Паспорт зала от изготовителя: максимальная вместимость 120 человек."
+        },
+        {
+          "index": 3,
+          "document": "capacity-b",
+          "quote": "Акт эксплуатации того же зала: максимальная вместимость 90 человек. Связь документов и приоритет не определены."
+        },
+        {
+          "index": 4,
+          "document": "contact-a",
+          "quote": "Карточка поддержки филиала: телефон 555-0101. Обновлено 2031-06-01."
+        },
+        {
+          "index": 5,
+          "document": "delivery-old",
+          "quote": "Доставка. Редакция от 2030-01-01, утратила силу 2031-01-01. Заказ доставляют за 12 рабочих дней."
+        }
+      ]
+    }
+  ]
+}
