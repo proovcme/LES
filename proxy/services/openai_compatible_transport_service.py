@@ -217,14 +217,14 @@ class OpenAICompatibleTransport:
         return body
 
     @staticmethod
-    def _native_chat_url(connection: ResolvedModelConnection) -> str:
+    def _native_chat_url(connection: ResolvedModelConnection, operation: str = "chat") -> str:
         parsed = urlsplit(connection.endpoint.canonical_base_url)
         path = parsed.path.rstrip("/")
         for suffix in ("/api/v1", "/v1"):
             if path.endswith(suffix):
                 path = path[: -len(suffix)]
                 break
-        return urlunsplit((parsed.scheme, parsed.netloc, f"{path}/api/chat", "", ""))
+        return urlunsplit((parsed.scheme, parsed.netloc, f"{path}/api/{operation}", "", ""))
 
     @staticmethod
     def _native_chat_body(
@@ -626,15 +626,22 @@ class OpenAICompatibleTransport:
         self,
         connection: ResolvedModelConnection,
         inputs: Sequence[str],
+        *,
+        release_after: bool = False,
     ) -> EmbeddingResponse:
         self._require(connection, CapabilityName.EMBEDDINGS)
         normalized_inputs = tuple(str(item) for item in inputs)
         if not normalized_inputs:
             raise ValueError("inputs must not be empty")
+        native = connection.capability_snapshot.transport_options.get("embedding_protocol") == "native_embedding_v1"
+        body = {"model": connection.model_id, "input": list(normalized_inputs)}
+        if native:
+            body.update({"truncate": False, "keep_alive": 0 if release_after else "60s",
+                         "options": {"num_ctx": int(connection.effective_preset.input_token_limit)}})
         response = await self._open(
             connection,
-            url=join_openai_path(connection.endpoint, "/embeddings"),
-            body={"model": connection.model_id, "input": list(normalized_inputs)},
+            url=self._native_chat_url(connection, "embed") if native else join_openai_path(connection.endpoint, "/embeddings"),
+            body=body,
         )
         try:
             raw = await self._read_bounded(response)
@@ -642,10 +649,15 @@ class OpenAICompatibleTransport:
                 raise ModelTransportError(f"UPSTREAM_HTTP_ERROR: {response.status_code}")
             try:
                 payload = json.loads(raw)
-                rows = sorted(payload["data"], key=lambda item: int(item["index"]))
-                vectors = tuple(
-                    tuple(float(value) for value in item["embedding"]) for item in rows
-                )
+                if native:
+                    if not isinstance(payload, dict):
+                        raise ValueError("native embedding response invalid")
+                    if not isinstance(payload.get("model"), str) or not payload["model"].strip():
+                        raise ValueError("native embedding model missing")
+                    vectors = tuple(tuple(float(value) for value in row) for row in payload["embeddings"])
+                else:
+                    rows = sorted(payload["data"], key=lambda item: int(item["index"]))
+                    vectors = tuple(tuple(float(value) for value in item["embedding"]) for item in rows)
             except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
                 raise ModelTransportError("UPSTREAM_EMBEDDING_RESPONSE_INVALID") from exc
             if len(vectors) != len(normalized_inputs):

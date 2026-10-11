@@ -282,11 +282,12 @@
         "backend/qdrant_retrieval.py",
         "backend/qdrant_support.py",
         "tests/test_light_code_review.py",
+        "tests/test_light_embedding_762.py",
         "tests/test_light_index_recovery.py",
         "tests/test_model_connection_embeddings_integration.py",
         "tests/test_qdrant_adapter_parse.py"
       ],
-      "lines": 320,
+      "lines": 356,
       "module": "backend.embedding_client",
       "outbound": [
         "backend/__init__.py",
@@ -5565,9 +5566,10 @@
         "proxy/routers/model_connections.py",
         "proxy/services/chat_inference_service.py",
         "proxy/services/model_connection_resolver_service.py",
+        "tests/test_light_embedding_762.py",
         "tests/test_model_capability_service.py"
       ],
-      "lines": 397,
+      "lines": 437,
       "module": "proxy.services.model_capability_service",
       "outbound": [
         "proxy/__init__.py",
@@ -5602,6 +5604,7 @@
         "tests/test_chat_mail_query.py",
         "tests/test_light_admission.py",
         "tests/test_light_capability_refresh.py",
+        "tests/test_light_embedding_762.py",
         "tests/test_light_reasoning_761.py",
         "tests/test_light_runtime_identity.py",
         "tests/test_model_capability_service.py",
@@ -5982,12 +5985,13 @@
         "proxy/services/model_streaming_service.py",
         "tests/test_chat_mail_query.py",
         "tests/test_light_admission.py",
+        "tests/test_light_embedding_762.py",
         "tests/test_light_reasoning_761.py",
         "tests/test_model_connection_chat_integration.py",
         "tests/test_model_connection_embeddings_integration.py",
         "tests/test_openai_compatible_transport_service.py"
       ],
-      "lines": 659,
+      "lines": 671,
       "module": "proxy.services.openai_compatible_transport_service",
       "outbound": [
         "proxy/__init__.py",
@@ -9348,6 +9352,22 @@
     },
     {
       "inbound": [],
+      "lines": 195,
+      "module": "tests.test_light_embedding_762",
+      "outbound": [
+        "backend/embedding_client.py",
+        "proxy/services/model_capability_service.py",
+        "proxy/services/model_connection_contracts.py",
+        "proxy/services/openai_compatible_transport_service.py",
+        "tests/test_model_capability_service.py",
+        "tests/test_openai_compatible_transport_service.py"
+      ],
+      "path": "tests/test_light_embedding_762.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
       "lines": 43,
       "module": "tests.test_light_extracted_bindings",
       "outbound": [],
@@ -10065,7 +10085,9 @@
       "windows_runtime_explicit": false
     },
     {
-      "inbound": [],
+      "inbound": [
+        "tests/test_light_embedding_762.py"
+      ],
       "lines": 341,
       "module": "tests.test_model_capability_service",
       "outbound": [
@@ -10170,7 +10192,9 @@
       "windows_runtime_explicit": false
     },
     {
-      "inbound": [],
+      "inbound": [
+        "tests/test_light_embedding_762.py"
+      ],
       "lines": 589,
       "module": "tests.test_openai_compatible_transport_service",
       "outbound": [
@@ -12816,9 +12840,9 @@
     "product_reachable": 371,
     "registered_api_routes": 292,
     "runtime_support": 5,
-    "test_or_tool_only": 156,
-    "tracked_python_files": 567,
-    "tracked_python_lines": 157477
+    "test_or_tool_only": 157,
+    "tracked_python_files": 568,
+    "tracked_python_lines": 157760
   },
   "warnings": []
 }

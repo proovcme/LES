@@ -20,6 +20,8 @@
 
 Пакетирование embeddings: `backend/embedding_client.py` — явная роль, ограниченный
 размер ответа, сохранение порядка и проверка контракта между пакетами.
+Кандидат 762: короткий кэш векторов запросов, нативный протокол после live probe,
+контекст и управление резидентностью; [измерения](acceptance/embedding-762.md).
 Журнал замены индекса: `backend/index_replacement.py` — решение commit, OS lease,
 восстановление Qdrant/FTS и ревизия чтения; интеграция в collection/ingestion/retrieval.
 PDF из цитаты: `proxy/routers/documents.py` и `proxy/services/pdf_viewer_service.py` —

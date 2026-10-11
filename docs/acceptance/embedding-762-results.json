@@ -1,0 +1,142 @@
+{
+  "build": 762,
+  "hardware": "Apple M4, 24 GB",
+  "embedding": {
+    "model": "qwen3-embedding:0.6b",
+    "input_count": 20,
+    "compatible": {
+      "seconds": 1.5241,
+      "residency": [
+        {
+          "bytes": 5776426925,
+          "vram_bytes": 5776426925,
+          "context": 32768
+        }
+      ]
+    },
+    "native": {
+      "seconds": 1.0193,
+      "residency": [
+        {
+          "bytes": 2857191341,
+          "vram_bytes": 2857191341,
+          "context": 8192
+        }
+      ]
+    },
+    "dimension": 1024,
+    "max_abs_diff": 0.00013829799999999937,
+    "min_cosine": 0.9999992412051398,
+    "warm_release": {
+      "seconds": 0.0248,
+      "resident_immediately": []
+    },
+    "released": {
+      "seconds": 0.001,
+      "residency": []
+    }
+  },
+  "installed_embedding": {
+    "build": 762,
+    "protocol": {
+      "embedding_protocol": "native_embedding_v1",
+      "max_output_field": "max_tokens"
+    },
+    "context": 8192,
+    "runs": [
+      {
+        "seconds": 0.610998,
+        "dimension": 1024,
+        "sha256": "794389b7ff5c2cfc906eb4db11a9bc33275d1b1708cfbf3540a87024e3b051b9"
+      },
+      {
+        "seconds": 8.1e-05,
+        "dimension": 1024,
+        "sha256": "794389b7ff5c2cfc906eb4db11a9bc33275d1b1708cfbf3540a87024e3b051b9"
+      },
+      {
+        "seconds": 2.5e-05,
+        "dimension": 1024,
+        "sha256": "794389b7ff5c2cfc906eb4db11a9bc33275d1b1708cfbf3540a87024e3b051b9"
+      }
+    ],
+    "model_still_resident": false,
+    "cache_entries": 1
+  },
+  "retrieval_parity": {
+    "build": 762,
+    "queries": 20,
+    "same_ordered_hits": 20,
+    "same_source_texts": 20,
+    "changed_case_ids": []
+  },
+  "repeat_search": [
+    {
+      "id": "e9",
+      "repeat": 0,
+      "seconds": 1.6351
+    },
+    {
+      "id": "e11",
+      "repeat": 0,
+      "seconds": 1.1029
+    },
+    {
+      "id": "e16",
+      "repeat": 0,
+      "seconds": 0.7068
+    },
+    {
+      "id": "e9",
+      "repeat": 1,
+      "seconds": 0.1115
+    },
+    {
+      "id": "e11",
+      "repeat": 1,
+      "seconds": 0.1121
+    },
+    {
+      "id": "e16",
+      "repeat": 1,
+      "seconds": 0.1129
+    }
+  ],
+  "real_35b_chat": [
+    {
+      "id": "e9",
+      "event": "final",
+      "seconds": 36.48,
+      "answer": "\n\nНет. Согласно [Источник 1], именной билет обмену не подлежит.",
+      "error_code": null
+    },
+    {
+      "id": "e11",
+      "event": "error",
+      "seconds": 0.01,
+      "answer": null,
+      "error_code": "CHAT_MEMORY_PRESSURE"
+    }
+  ],
+  "runtime_files": {
+    "backend/embedding_client.py": "39c0b60811d0dfd4f395de250244ede4d2104a25ab661da60da77b98c162edcc",
+    "proxy/services/model_capability_service.py": "226bbeae1d887b3c9cf9d99049e11eeb430a884365d7f464d26f04079798442d",
+    "proxy/services/openai_compatible_transport_service.py": "aebd67f7003d5f2cc716dd8796f6eefd4e299d588392af796f07b20fa922277c",
+    "config/version.json": "fa41ae54f7b159f6d09cbb0e92fb0e508e13f4464da15b0d81285929c70247e4"
+  },
+  "settings_endpoint_status": {
+    "/api/model-connections": 200,
+    "/api/model-connections/templates": 200,
+    "/api/model-connections/effective": 200,
+    "/api/settings/runtime-registry": 200,
+    "/api/settings/presets": 200,
+    "/api/update/check": 200
+  },
+  "tests": {
+    "targeted_passed": 75,
+    "verify_collected": 1261,
+    "suite_passed": 1205,
+    "suite_skipped": 56,
+    "subtests_passed": 18
+  }
+}

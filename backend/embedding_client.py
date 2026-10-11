@@ -8,6 +8,8 @@ import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
+from collections import OrderedDict
+from threading import Lock
 from typing import Any, List
 import httpx
 from backend.interface import EmbeddingContractError
@@ -22,6 +24,9 @@ logger = logging.getLogger(__name__)
 EMBED_TIMEOUT = float(os.getenv("RAG_EMBED_TIMEOUT_SEC", "300"))
 EMBED_BATCH_SIZE = 16
 EMBED_RESPONSE_LIMIT = 1024 * 1024
+QUERY_CACHE_SIZE = 128
+QUERY_CACHE_TTL = 60.0
+QUERY_CACHE_MAX_VALUES = 8192
 
 class EmbedClient:
     """
@@ -46,6 +51,10 @@ class EmbedClient:
         self.connection_mode = normalized_mode
         self.connection_resolver = connection_resolver
         self.connection_transport = connection_transport
+        # Shared by for_index copies, bounded and never persisted. No source text
+        # is retained; a changed connection/probe/context cannot hit an old key.
+        self._query_cache = OrderedDict()
+        self._query_cache_lock = Lock()
         self._connection_secret_store: EnvironmentSecretStore | None = None
         if self.connection_mode != "legacy" and self.connection_resolver is None:
             self._connection_secret_store = EnvironmentSecretStore(ENV_PATH)
@@ -119,12 +128,12 @@ class EmbedClient:
             raise EmbeddingContractError('embedding response contains non-finite values')
         return vectors
 
-    async def _encode_connection_async(self, texts: List[str]) -> List[List[float]]:
+    async def _encode_connection_async(self, texts: List[str], *, connection=None, release_after=False) -> List[List[float]]:
         if not texts:
             return []
-        connection = self._resolve_embedding_connection()
+        connection = connection or self._resolve_embedding_connection()
         if self.connection_transport is not None:
-            return await self._encode_connection_batches(self.connection_transport, connection, texts)
+            return await self._encode_connection_batches(self.connection_transport, connection, texts, release_after=release_after)
         else:
             secret_store = self._connection_secret_store or EnvironmentSecretStore(ENV_PATH)
             async with httpx.AsyncClient(timeout=EMBED_TIMEOUT) as client:
@@ -136,28 +145,31 @@ class EmbedClient:
                     # This cap applies only to this embedding transport.
                     response_body_limit=EMBED_RESPONSE_LIMIT,
                 )
-                return await self._encode_connection_batches(transport, connection, texts)
+                return await self._encode_connection_batches(transport, connection, texts, release_after=release_after)
 
-    async def _encode_connection_batches(self, transport, connection, texts: List[str]) -> List[List[float]]:
+    async def _encode_connection_batches(self, transport, connection, texts: List[str], *, release_after=False) -> List[List[float]]:
         """Keep responses bounded without changing the frozen model binding.
 
         High-dimensional providers may need smaller batches. Only the explicit
         response-size error permits subdivision; all other failures propagate.
         No partial result is returned when any batch violates the contract.
         """
-        async def encode_batch(batch):
+        native = getattr(getattr(connection, 'capability_snapshot', None), 'transport_options', {}).get('embedding_protocol') == 'native_embedding_v1'
+
+        async def encode_batch(batch, last):
             try:
-                response = await transport.embed(connection, batch)
+                options = {'release_after': release_after and last} if native else {}
+                response = await transport.embed(connection, batch, **options)
             except ModelTransportError as error:
                 if str(error) != "UPSTREAM_RESPONSE_TOO_LARGE" or len(batch) == 1:
                     raise
                 middle = len(batch) // 2
-                return await encode_batch(batch[:middle]) + await encode_batch(batch[middle:])
+                return await encode_batch(batch[:middle], False) + await encode_batch(batch[middle:], last)
             return self._vectors_from_connection_response(response, len(batch))
 
         vectors = []
         for offset in range(0, len(texts), EMBED_BATCH_SIZE):
-            batch_vectors = await encode_batch(texts[offset:offset + EMBED_BATCH_SIZE])
+            batch_vectors = await encode_batch(texts[offset:offset + EMBED_BATCH_SIZE], offset + EMBED_BATCH_SIZE >= len(texts))
             expected_dimension = len(vectors[0]) if vectors else len(batch_vectors[0])
             if any(len(row) != expected_dimension for row in batch_vectors):
                 raise EmbeddingContractError("embedding dimension mismatch across batches")
@@ -308,7 +320,31 @@ class EmbedClient:
         """Асинхронный вариант для retrieve; query contract never touches documents."""
         payload_texts = [prepare_query_for_embedding(text) for text in texts] if query else texts
         if self.connection_mode == "active":
-            return await self._encode_connection_async(payload_texts)
+            # Resolve before lookup so disabled/expired bindings still fail.
+            connection = self._resolve_embedding_connection()
+            key = None
+            if query and payload_texts and len(payload_texts) <= EMBED_BATCH_SIZE:
+                snapshot = getattr(connection, 'capability_snapshot', None)
+                key = (connection.revision_id, getattr(connection, 'base_url', ''),
+                       getattr(connection, 'model_id', self.model),
+                       getattr(snapshot, 'snapshot_id', ''),
+                       repr(getattr(connection, 'effective_preset', None)),
+                       getattr(self, '_index_vector_size', None),
+                       tuple(hashlib.sha256(text.encode('utf-8')).digest() for text in payload_texts))
+                with self._query_cache_lock:
+                    cached = self._query_cache.get(key)
+                    if cached and time.monotonic() - cached[0] < QUERY_CACHE_TTL:
+                        self._query_cache.move_to_end(key)
+                        return [list(row) for row in cached[1]]
+                    self._query_cache.pop(key, None)
+            vectors = await self._encode_connection_async(payload_texts, connection=connection, release_after=query)
+            if key is not None and sum(len(row) for row in vectors) <= QUERY_CACHE_MAX_VALUES:
+                with self._query_cache_lock:
+                    self._query_cache[key] = (time.monotonic(), tuple(tuple(row) for row in vectors))
+                    self._query_cache.move_to_end(key)
+                    while len(self._query_cache) > QUERY_CACHE_SIZE:
+                        self._query_cache.popitem(last=False)
+            return vectors
         if self.connection_mode == "shadow":
             self._shadow_compare()
         async with httpx.AsyncClient(timeout=30.0) as c:
