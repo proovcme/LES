@@ -45,5 +45,10 @@ PDF из цитаты: `proxy/routers/documents.py` и `proxy/services/pdf_viewe
 снимок источника). Задания по строкам: `document_task_store.py` (атомарные пакеты,
 область, возобновление), `table_document_tool.py` (инструмент текущего диалога).
 Контракт: [Работа с таблицами](modules/document-tasks.md).
+Общая очередь выбранных документов/разделов: `document_review_tool.py`,
+`review_task_store.py`, `review_source_reader.py`; [контракт](modules/document-review.md).
+`document_task_database.py` — общий транспорт SQLite; `table_window_service.py`
+— адресные окна и чтение длинных ячеек; `bound_document_tools.py` — обязательный
+контекст привязанных инструментов и их место в shortlist.
 
 [Карта кода](CODE_MAP.md) · [Архитектура](LIGHT_ARCHITECTURE.md)

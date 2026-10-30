@@ -43,6 +43,8 @@ from proxy.services.context_governor_service import (
     ContextRequiredSectionOverflow,
 )
 from proxy.services.chat_section_context_service import ChatSectionReader, SectionReadError, visible_chunks
+from proxy.services.document_review_tool import bind_review_tool, TOOL_NAME as REVIEW_TOOL
+from proxy.services.bound_document_tools import document_tool_context, bound_contract_shortlist
 from proxy.services.evidence_packet_service import (
     build_retrieval_evidence_packet,
     render_retrieval_evidence_for_model,
@@ -497,6 +499,19 @@ async def _execute_chat_evidence_application(
         model_revision=resolved_connection.revision_id,
         input_budget=resolved_connection.effective_preset.input_token_limit,
     )
+    review_tool = await asyncio.to_thread(
+        bind_review_tool, req, rag_backend, dataset_ids=_dataset_ids if document_grounding_enabled and any(
+            name in {'search_sources', 'read_source', REVIEW_TOOL} for name in (profile_snapshot or {}).get('tools', [])) else [],
+        profile_revision=str((profile_snapshot or {}).get('revision_id') or ''),
+        model_revision=resolved_connection.revision_id,
+        input_budget=resolved_connection.effective_preset.input_token_limit,
+        file_names=target_doc_filter or (),
+        # Preserve a slot for existing source tools and the explicit table attachment.
+        available_slots=min(resolved_connection.effective_preset.max_tools,
+            max(1, _env_int('LES_CHAT_TOOL_SHORTLIST_LIMIT', 64))) - 1 - int(table_tool is not None),
+    )
+    if review_tool is not None:
+        use_semantic_cache = False
     if table_tool is not None:
         use_semantic_cache = False
         retrieval_trace["document_task"] = table_tool.state()
@@ -881,6 +896,8 @@ async def _execute_chat_evidence_application(
                 nonlocal active_model_result, active_pending_tool_calls, active_model_streamed
                 from proxy.services.chat_attachment_service import with_image_attachment
                 section_reader.assert_for_inference()
+                if review_tool is not None:
+                    await review_tool.assert_for_inference()
                 provider_messages = tuple(body.get("messages") or ())
                 provider_messages = with_image_attachment(provider_messages, getattr(req, "attachment_id", None))
                 inference_request = InferenceRequest(
@@ -923,6 +940,8 @@ async def _execute_chat_evidence_application(
                     ),
                 )
                 active_pending_tool_calls += active_model_result.pending_tool_calls
+                if review_tool is not None:
+                    review_tool.acknowledge_model_context(provider_messages)
                 if token_sink is not None and allow_stream and not active_model_streamed and active_model_result.response.text:
                     await token_sink(
                         {"event": "token", "data": active_model_result.response.text}
@@ -1005,6 +1024,8 @@ async def _execute_chat_evidence_application(
             )
             if table_tool is not None:
                 profile_tools = [TABLE_TOOL, *profile_tools]
+            if review_tool is not None:
+                profile_tools = [REVIEW_TOOL, *profile_tools]
             route_trace = canonical_route_trace_payload(
                 canonical_route,
                 execution_mode=canonical_execution_mode,
@@ -1037,9 +1058,14 @@ async def _execute_chat_evidence_application(
 
                     tool_harness = harness(web_config=web_research_config)
                     table_contract = table_tool.register(tool_harness) if table_tool is not None else None
+                    review_contract = review_tool.register(tool_harness) if review_tool is not None else None
 
                     async def _fallback_model_tool(tool_name: str, args: dict[str, Any]):
-                        return await asyncio.to_thread(tool_harness.call, tool_name, args)
+                        payload = await tool_harness.call_async(tool_name, args)
+                        if review_tool is not None and tool_name == REVIEW_TOOL:
+                            from proxy.services.model_research_tool_service import ModelResearchToolResult
+                            return ModelResearchToolResult(payload, review_tool.last_chunks if payload.get('status') == 'ok' else ())
+                        return payload
 
                     model_research_tools = ModelResearchToolService(
                         retrieve=retrieve_chat_chunks,
@@ -1101,12 +1127,7 @@ async def _execute_chat_evidence_application(
                         for tool in shortlist.get("tools", [])
                         if isinstance(tool, dict) and tool.get("name")
                     }
-                    if table_contract is not None:
-                        # The explicit attachment grants only this bound document tool.
-                        shortlist["tools"] = [table_contract, *[
-                            item for item in shortlist.get("tools", []) if item.get("name") != TABLE_TOOL
-                        ]][:shortlist_limit]
-                        allowed_tools = {item["name"] for item in shortlist["tools"]}
+                    allowed_tools = bound_contract_shortlist(shortlist, [table_contract, review_contract], shortlist_limit)
                     native_tools = native_model_tool_schemas(
                         shortlist.get("tools") or []
                     )
@@ -1120,6 +1141,9 @@ async def _execute_chat_evidence_application(
                         if table_tool is not None and call.get('tool') == TABLE_TOOL:
                             state = table_tool.state()
                             return f"{state['task_id']}:{state['revision']}:{identity}"
+                        if review_tool is not None and call.get('tool') == REVIEW_TOOL:
+                            return (f"{review_tool.current_state.get('task_id')}:{review_tool.current_state.get('revision')}:"
+                                    f"{review_tool.delivery_revision}:{identity}")
                         return identity
                     research_deadline_seconds = max(
                         1.0,
@@ -1192,7 +1216,7 @@ async def _execute_chat_evidence_application(
                             source_map=selector_source_map,
                             tool_exchange=prior_results,
                             dialogue=dialogue_context,
-                            **table_tool.model_context() if table_tool is not None else {},
+                            **document_tool_context(table_tool, review_tool),
                         )
                         retrieval_trace["context_governor"]["calls"].append(
                             {**context_packet_trace(selector_packet, purpose="tool_decision"), "sent_to_model": True}
@@ -1254,6 +1278,8 @@ async def _execute_chat_evidence_application(
                             payload = research_result.payload
                             if table_tool is not None and tool_name == TABLE_TOOL and payload.get('status') == 'error':
                                 table_tool.remember_validation_failure(call.get('args') or {}, payload)
+                            if review_tool is not None and tool_name == REVIEW_TOOL and payload.get('status') == 'error':
+                                review_tool.remember_validation_failure(call.get('args') or {}, payload)
                             if research_result.chunks:
                                 known_chunk_ids = {
                                     str((getattr(item, "meta", {}) or {}).get("chunk_id") or "")
@@ -1306,6 +1332,13 @@ async def _execute_chat_evidence_application(
                                 )
                                 selector_source_map = answer_source_map
                             selected_calls.append(call)
+                            if review_tool is not None and tool_name == REVIEW_TOOL:
+                                review_state = review_tool.current_state
+                                retrieval_trace['document_review'] = review_state
+                                if 'total' in review_state:
+                                    await chat_progress(token_sink, 'document',
+                                        f"Проверено разделов: {review_state['reviewed']} из {review_state['total']}; "
+                                        f"нужна перепроверка: {review_state['needs_recheck']}")
                             if payload.get("status") == "error" or payload.get("ok") is False:
                                 failed_calls.add(call_identity)
                             completed_reads.add(call_identity)
@@ -1547,7 +1580,7 @@ async def _execute_chat_evidence_application(
                         source_map=(answer_source_map),
                         tool_exchange=answer_tool_exchange,
                         dialogue=dialogue_context,
-                        required_evidence=[table_tool.context()] if table_tool is not None else (),
+                        **document_tool_context(table_tool, review_tool),
                     )
                 except ContextRequiredSectionOverflow as context_error:
                     retrieval_trace["context_governor"]["error"] = {

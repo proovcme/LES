@@ -58,6 +58,7 @@ class MetaDB:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_docs_dataset ON documents(dataset_id)"
             )
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_docs_source ON documents(dataset_id,file_name)')
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS structured_rules (
                     id          TEXT PRIMARY KEY,
@@ -699,13 +700,24 @@ class MetaDB:
 
     def dataset_integrity_rows(self, dataset_id: str) -> list[dict[str, Any]]:
         """Source and index metadata used by the explicit dataset integrity audit."""
+        return self._integrity_rows(dataset_id)
+
+    def document_integrity_row(self, dataset_id: str, file_name: str) -> dict[str, Any] | None:
+        """Exact source version lookup without loading the complete dataset catalog."""
+        rows = self._integrity_rows(dataset_id, file_name)
+        if len(rows) > 1:
+            raise ValueError('В каталоге несколько версий одного пути; восстановите однозначность источника')
+        return rows[0] if rows else None
+
+    def _integrity_rows(self, dataset_id: str, file_name: str | None = None) -> list[dict[str, Any]]:
         with self._get_conn() as conn:
             rows = conn.execute(
                 "SELECT id, file_name, status, COALESCE(file_hash, '') AS file_hash, "
                 "COALESCE(file_mtime, 0) AS file_mtime, COALESCE(file_size, 0) AS file_size, "
                 "COALESCE(chunk_count, 0) AS chunk_count, COALESCE(source_path, '') AS source_path "
-                "FROM documents WHERE dataset_id=? ORDER BY file_name",
-                (dataset_id,),
+                "FROM documents WHERE dataset_id=? " + ("AND file_name=? " if file_name is not None else '') +
+                "ORDER BY file_name",
+                (dataset_id, file_name) if file_name is not None else (dataset_id,),
             ).fetchall()
         return [dict(row) for row in rows]
 

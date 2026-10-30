@@ -240,10 +240,11 @@
       "inbound": [
         "backend/qdrant_support.py",
         "tests/test_light_code_review.py",
+        "tests/test_light_document_review.py",
         "tests/test_light_grounding_760.py",
         "tests/test_light_ingestion_races.py"
       ],
-      "lines": 1004,
+      "lines": 1016,
       "module": "backend.document_catalog",
       "outbound": [
         "backend/__init__.py",
@@ -368,6 +369,7 @@
         "proxy/services/chat_section_context_service.py",
         "proxy/services/dataset_deletion_service.py",
         "proxy/services/retrieval_service.py",
+        "proxy/services/review_source_reader.py",
         "tests/test_light_audit_regressions.py",
         "tests/test_light_bm25_incremental.py",
         "tests/test_light_bm25_index.py",
@@ -542,6 +544,7 @@
         "proxy/routers/dataset_cloud.py",
         "proxy/routers/dataset_parse.py",
         "proxy/services/chat_section_context_service.py",
+        "proxy/services/document_review_tool.py",
         "proxy/services/lexical_evidence_service.py",
         "proxy/services/lexical_index_service.py",
         "proxy/services/retrieval_service.py",
@@ -550,6 +553,7 @@
         "tests/test_light_bm25_index.py",
         "tests/test_light_chat_sections.py",
         "tests/test_light_code_review.py",
+        "tests/test_light_document_review.py",
         "tests/test_light_grounding_760.py",
         "tests/test_light_index_recovery.py",
         "tests/test_light_lexical_evidence.py",
@@ -908,6 +912,7 @@
         "proxy/services/dataset_deletion_service.py",
         "proxy/services/dataset_parse_service.py",
         "proxy/services/document_explorer_service.py",
+        "proxy/services/document_review_tool.py",
         "proxy/services/evidence_packet_service.py",
         "proxy/services/mail_registry_service.py",
         "proxy/services/prompt_registry_service.py",
@@ -1341,6 +1346,7 @@
         "proxy/services/dataset_contracts.py",
         "proxy/services/dataset_watch_service.py",
         "proxy/services/doc_review_service.py",
+        "proxy/services/document_review_tool.py",
         "proxy/services/forms_service.py",
         "proxy/services/fsem_machinist_service.py",
         "proxy/services/harvest_service.py",
@@ -1616,6 +1622,7 @@
         "proxy/services/asbuilt_ocr.py",
         "proxy/services/background_summary_service.py",
         "proxy/services/bor_service.py",
+        "proxy/services/bound_document_tools.py",
         "proxy/services/cad_bim_graph.py",
         "proxy/services/cad_bim_highlight.py",
         "proxy/services/candidate_acceptance_service.py",
@@ -1675,7 +1682,9 @@
         "proxy/services/document_explorer_service.py",
         "proxy/services/document_object_model.py",
         "proxy/services/document_outline_service.py",
+        "proxy/services/document_review_tool.py",
         "proxy/services/document_set_model.py",
+        "proxy/services/document_task_database.py",
         "proxy/services/document_task_store.py",
         "proxy/services/drawing_manifest_service.py",
         "proxy/services/edge_service.py",
@@ -1783,6 +1792,8 @@
         "proxy/services/retrieval_quality_service.py",
         "proxy/services/retrieval_service.py",
         "proxy/services/retrieval_trial_policy.py",
+        "proxy/services/review_source_reader.py",
+        "proxy/services/review_task_store.py",
         "proxy/services/runtime_admission.py",
         "proxy/services/runtime_config_registry_service.py",
         "proxy/services/runtime_dispatcher.py",
@@ -1808,6 +1819,7 @@
         "proxy/services/table_document_tool.py",
         "proxy/services/table_query_service.py",
         "proxy/services/table_sql_service.py",
+        "proxy/services/table_window_service.py",
         "proxy/services/tabular_document_service.py",
         "proxy/services/task_service.py",
         "proxy/services/title_block_extract_service.py",
@@ -3100,6 +3112,7 @@
         "proxy/services/asbuilt_ocr.py",
         "proxy/services/background_summary_service.py",
         "proxy/services/bor_service.py",
+        "proxy/services/bound_document_tools.py",
         "proxy/services/cad_bim_graph.py",
         "proxy/services/cad_bim_highlight.py",
         "proxy/services/candidate_acceptance_service.py",
@@ -3159,7 +3172,9 @@
         "proxy/services/document_explorer_service.py",
         "proxy/services/document_object_model.py",
         "proxy/services/document_outline_service.py",
+        "proxy/services/document_review_tool.py",
         "proxy/services/document_set_model.py",
+        "proxy/services/document_task_database.py",
         "proxy/services/document_task_store.py",
         "proxy/services/drawing_manifest_service.py",
         "proxy/services/edge_service.py",
@@ -3267,6 +3282,8 @@
         "proxy/services/retrieval_quality_service.py",
         "proxy/services/retrieval_service.py",
         "proxy/services/retrieval_trial_policy.py",
+        "proxy/services/review_source_reader.py",
+        "proxy/services/review_task_store.py",
         "proxy/services/runtime_admission.py",
         "proxy/services/runtime_config_registry_service.py",
         "proxy/services/runtime_dispatcher.py",
@@ -3292,6 +3309,7 @@
         "proxy/services/table_document_tool.py",
         "proxy/services/table_query_service.py",
         "proxy/services/table_sql_service.py",
+        "proxy/services/table_window_service.py",
         "proxy/services/tabular_document_service.py",
         "proxy/services/task_service.py",
         "proxy/services/title_block_extract_service.py",
@@ -3489,6 +3507,21 @@
         "proxy/services/__init__.py"
       ],
       "path": "proxy/services/bor_service.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "proxy/services/chat_evidence_application_service.py",
+        "tests/test_light_document_review.py"
+      ],
+      "lines": 19,
+      "module": "proxy.services.bound_document_tools",
+      "outbound": [
+        "proxy/__init__.py",
+        "proxy/services/__init__.py"
+      ],
+      "path": "proxy/services/bound_document_tools.py",
       "status": "PRODUCT_REACHABLE",
       "windows_runtime_explicit": false
     },
@@ -3705,7 +3738,7 @@
         "tests/test_light_prompt_boundary.py",
         "tests/test_workspace_context.py"
       ],
-      "lines": 2003,
+      "lines": 2036,
       "module": "proxy.services.chat_evidence_application_service",
       "outbound": [
         "backend/inference/routing.py",
@@ -3713,6 +3746,7 @@
         "proxy/__init__.py",
         "proxy/services/__init__.py",
         "proxy/services/answer_form_service.py",
+        "proxy/services/bound_document_tools.py",
         "proxy/services/cad_bim_highlight.py",
         "proxy/services/canonical_route_service.py",
         "proxy/services/chat_attachment_service.py",
@@ -3725,6 +3759,7 @@
         "proxy/services/chat_profile_service.py",
         "proxy/services/chat_section_context_service.py",
         "proxy/services/context_governor_service.py",
+        "proxy/services/document_review_tool.py",
         "proxy/services/evidence_packet_service.py",
         "proxy/services/generation_guard_service.py",
         "proxy/services/lexical_index_service.py",
@@ -3758,6 +3793,7 @@
       "inbound": [
         "proxy/services/chat_evidence_application_service.py",
         "tests/test_light_chat_sections.py",
+        "tests/test_light_document_review.py",
         "tests/test_light_document_tasks.py",
         "tests/test_light_rerank_audit.py",
         "tests/test_light_section_coverage.py",
@@ -4059,7 +4095,9 @@
       "inbound": [
         "proxy/routers/dataset_search.py",
         "proxy/services/chat_evidence_application_service.py",
+        "proxy/services/document_review_tool.py",
         "tests/test_light_chat_sections.py",
+        "tests/test_light_document_review.py",
         "tests/test_light_lexical_evidence.py",
         "tools/evaluate_light_semantics.py",
         "tools/evaluate_rag_pipeline.py"
@@ -4711,6 +4749,32 @@
     },
     {
       "inbound": [
+        "proxy/services/chat_evidence_application_service.py",
+        "tests/test_light_document_review.py"
+      ],
+      "lines": 217,
+      "module": "proxy.services.document_review_tool",
+      "outbound": [
+        "backend/interface.py",
+        "backend/product_edition.py",
+        "backend/runtime_paths.py",
+        "proxy/__init__.py",
+        "proxy/services/__init__.py",
+        "proxy/services/chat_section_context_service.py",
+        "proxy/services/document_task_store.py",
+        "proxy/services/review_source_reader.py",
+        "proxy/services/review_task_store.py",
+        "proxy/services/tabular_document_service.py",
+        "proxy/services/tool_contract_service.py",
+        "proxy/services/tool_harness_service.py",
+        "proxy/services/tool_registry_service.py"
+      ],
+      "path": "proxy/services/document_review_tool.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
         "proxy/services/doc_review_service.py",
         "proxy/services/project_document_registry_service.py"
       ],
@@ -4727,14 +4791,34 @@
     },
     {
       "inbound": [
-        "proxy/services/table_document_tool.py",
-        "tests/test_light_document_tasks.py"
+        "proxy/services/document_task_store.py",
+        "proxy/services/review_task_store.py"
       ],
-      "lines": 209,
+      "lines": 22,
+      "module": "proxy.services.document_task_database",
+      "outbound": [
+        "proxy/__init__.py",
+        "proxy/services/__init__.py"
+      ],
+      "path": "proxy/services/document_task_database.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "proxy/services/document_review_tool.py",
+        "proxy/services/review_source_reader.py",
+        "proxy/services/review_task_store.py",
+        "proxy/services/table_document_tool.py",
+        "tests/test_light_document_tasks.py",
+        "tests/test_light_table_windows.py"
+      ],
+      "lines": 201,
       "module": "proxy.services.document_task_store",
       "outbound": [
         "proxy/__init__.py",
         "proxy/services/__init__.py",
+        "proxy/services/document_task_database.py",
         "proxy/services/tabular_document_service.py"
       ],
       "path": "proxy/services/document_task_store.py",
@@ -4850,6 +4934,7 @@
         "proxy/services/chat_evidence_application_service.py",
         "tests/test_evidence_packet_service.py",
         "tests/test_light_chat_sections.py",
+        "tests/test_light_document_review.py",
         "tests/test_light_index_recovery.py",
         "tools/evaluate_light_semantics.py",
         "tools/evaluate_rag_pipeline.py"
@@ -5785,6 +5870,7 @@
         "proxy/services/model_reasoning_service.py",
         "tests/test_chat_mail_query.py",
         "tests/test_context_governor_service.py",
+        "tests/test_light_document_review.py",
         "tests/test_light_document_tasks.py",
         "tests/test_light_reasoning_761.py",
         "tests/test_openai_compatible_transport_service.py",
@@ -5821,9 +5907,10 @@
     },
     {
       "inbound": [
-        "proxy/services/chat_evidence_application_service.py"
+        "proxy/services/chat_evidence_application_service.py",
+        "tests/test_light_document_review.py"
       ],
-      "lines": 224,
+      "lines": 226,
       "module": "proxy.services.model_research_tool_service",
       "outbound": [
         "proxy/__init__.py",
@@ -6761,6 +6848,41 @@
     },
     {
       "inbound": [
+        "proxy/services/document_review_tool.py",
+        "tests/test_light_document_review.py"
+      ],
+      "lines": 130,
+      "module": "proxy.services.review_source_reader",
+      "outbound": [
+        "backend/index_replacement.py",
+        "proxy/__init__.py",
+        "proxy/services/__init__.py",
+        "proxy/services/document_task_store.py"
+      ],
+      "path": "proxy/services/review_source_reader.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "proxy/services/document_review_tool.py",
+        "tests/test_light_document_review.py"
+      ],
+      "lines": 201,
+      "module": "proxy.services.review_task_store",
+      "outbound": [
+        "proxy/__init__.py",
+        "proxy/services/__init__.py",
+        "proxy/services/document_task_database.py",
+        "proxy/services/document_task_store.py",
+        "proxy/services/tabular_document_service.py"
+      ],
+      "path": "proxy/services/review_task_store.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
         "proxy/routers/chat.py",
         "proxy/routers/runtime.py",
         "proxy/routers/workspace_memory.py",
@@ -7145,9 +7267,10 @@
     {
       "inbound": [
         "proxy/services/chat_evidence_application_service.py",
-        "tests/test_light_document_tasks.py"
+        "tests/test_light_document_tasks.py",
+        "tests/test_light_table_windows.py"
       ],
-      "lines": 204,
+      "lines": 224,
       "module": "proxy.services.table_document_tool",
       "outbound": [
         "backend/product_edition.py",
@@ -7156,6 +7279,7 @@
         "proxy/services/__init__.py",
         "proxy/services/chat_attachment_service.py",
         "proxy/services/document_task_store.py",
+        "proxy/services/table_window_service.py",
         "proxy/services/tabular_document_service.py",
         "proxy/services/tool_contract_service.py",
         "proxy/services/tool_harness_service.py",
@@ -7195,10 +7319,30 @@
     },
     {
       "inbound": [
-        "proxy/services/chat_attachment_read_service.py",
-        "proxy/services/document_task_store.py",
         "proxy/services/table_document_tool.py",
-        "tests/test_light_document_tasks.py"
+        "tests/test_light_table_windows.py"
+      ],
+      "lines": 74,
+      "module": "proxy.services.table_window_service",
+      "outbound": [
+        "proxy/__init__.py",
+        "proxy/services/__init__.py",
+        "proxy/services/tabular_document_service.py"
+      ],
+      "path": "proxy/services/table_window_service.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "proxy/services/chat_attachment_read_service.py",
+        "proxy/services/document_review_tool.py",
+        "proxy/services/document_task_store.py",
+        "proxy/services/review_task_store.py",
+        "proxy/services/table_document_tool.py",
+        "proxy/services/table_window_service.py",
+        "tests/test_light_document_tasks.py",
+        "tests/test_light_table_windows.py"
       ],
       "lines": 147,
       "module": "proxy.services.tabular_document_service",
@@ -7249,6 +7393,7 @@
     {
       "inbound": [
         "proxy/services/capability_broker_service.py",
+        "proxy/services/document_review_tool.py",
         "proxy/services/extension_tool_service.py",
         "proxy/services/installed_skill_service.py",
         "proxy/services/mcp_connection_service.py",
@@ -7275,12 +7420,14 @@
         "proxy/routers/tools.py",
         "proxy/services/chat_evidence_application_service.py",
         "proxy/services/chat_profile_service.py",
+        "proxy/services/document_review_tool.py",
         "proxy/services/extension_tool_service.py",
         "proxy/services/installed_skill_service.py",
         "proxy/services/mcp_connection_service.py",
         "proxy/services/skill_compute_service.py",
         "proxy/services/table_document_tool.py",
         "proxy/services/tool_registry_service.py",
+        "tests/test_light_document_review.py",
         "tests/test_light_document_tasks.py",
         "tests/test_light_installed_skills.py",
         "tests/test_light_mcp_connections.py",
@@ -7334,6 +7481,7 @@
       "inbound": [
         "proxy/routers/tools.py",
         "proxy/services/capability_broker_service.py",
+        "proxy/services/document_review_tool.py",
         "proxy/services/extension_tool_service.py",
         "proxy/services/installed_skill_service.py",
         "proxy/services/mcp_connection_service.py",
@@ -9417,6 +9565,28 @@
     },
     {
       "inbound": [],
+      "lines": 374,
+      "module": "tests.test_light_document_review",
+      "outbound": [
+        "backend/document_catalog.py",
+        "backend/interface.py",
+        "proxy/services/bound_document_tools.py",
+        "proxy/services/chat_evidence_context.py",
+        "proxy/services/chat_section_context_service.py",
+        "proxy/services/document_review_tool.py",
+        "proxy/services/evidence_packet_service.py",
+        "proxy/services/model_execution_preset_service.py",
+        "proxy/services/model_research_tool_service.py",
+        "proxy/services/review_source_reader.py",
+        "proxy/services/review_task_store.py",
+        "proxy/services/tool_harness_service.py"
+      ],
+      "path": "tests/test_light_document_review.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
       "lines": 308,
       "module": "tests.test_light_document_tasks",
       "outbound": [
@@ -10063,6 +10233,20 @@
         "proxy/routers/runtime.py"
       ],
       "path": "tests/test_light_system_memory.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
+      "lines": 82,
+      "module": "tests.test_light_table_windows",
+      "outbound": [
+        "proxy/services/document_task_store.py",
+        "proxy/services/table_document_tool.py",
+        "proxy/services/table_window_service.py",
+        "proxy/services/tabular_document_service.py"
+      ],
+      "path": "tests/test_light_table_windows.py",
       "status": "TEST_OR_TOOL_ONLY",
       "windows_runtime_explicit": false
     },
@@ -13101,12 +13285,12 @@
   "summary": {
     "dormant_candidates": 35,
     "parse_warnings": 0,
-    "product_reachable": 374,
+    "product_reachable": 380,
     "registered_api_routes": 292,
     "runtime_support": 5,
-    "test_or_tool_only": 168,
-    "tracked_python_files": 582,
-    "tracked_python_lines": 158981
+    "test_or_tool_only": 170,
+    "tracked_python_files": 590,
+    "tracked_python_lines": 160159
   },
   "warnings": []
 }
