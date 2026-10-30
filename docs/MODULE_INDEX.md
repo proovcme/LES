@@ -50,5 +50,7 @@ PDF из цитаты: `proxy/routers/documents.py` и `proxy/services/pdf_viewe
 `document_task_database.py` — общий транспорт SQLite; `table_window_service.py`
 — адресные окна и чтение длинных ячеек; `bound_document_tools.py` — обязательный
 контекст привязанных инструментов и их место в shortlist.
+`native_tool_message_service.py` — адаптер канонических assistant/tool к native
+chat: объект arguments и имя tool_name без изменения сохранённого диалога.
 
 [Карта кода](CODE_MAP.md) · [Архитектура](LIGHT_ARCHITECTURE.md)

@@ -303,7 +303,8 @@ class CapabilityProbe:
                 "messages": [{"role": "user", "content": "capability probe"}],
                 "think": False,
                 "stream": False,
-                "options": {"num_predict": 1, "temperature": 0},
+                "options": {"num_predict": 1, "temperature": 0,
+                            "num_ctx": connection.requested_context_tokens or 8192},
             }
             try:
                 async with self.client.stream(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from dataclasses import replace
 import json
 
 import httpx
@@ -116,7 +117,8 @@ async def test_probe_records_supported_unsupported_unknown_without_model_text() 
 
 
 @pytest.mark.asyncio
-async def test_probe_records_native_chat_profile_only_after_live_probe() -> None:
+@pytest.mark.parametrize('context_tokens', [8192, 4096, None])
+async def test_probe_records_native_chat_profile_only_after_live_probe(context_tokens) -> None:
     requests: list[tuple[str, str, dict[str, object]]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -143,7 +145,7 @@ async def test_probe_records_native_chat_profile_only_after_live_probe() -> None
             peer_verifier=_peer_ok,
             clock=lambda: NOW,
         ).probe(
-            _connection(extension_type="ollama"),
+            replace(_connection(extension_type="ollama"), requested_context_tokens=context_tokens),
             requested={CapabilityName.CHAT_COMPLETIONS},
         )
 
@@ -151,6 +153,7 @@ async def test_probe_records_native_chat_profile_only_after_live_probe() -> None
     assert snapshot.transport_options["observed_context_tokens"] == "32768"
     native = next(item for item in requests if item[1] == "/api/chat")
     assert native[2]["think"] is False
+    assert native[2]['options']['num_ctx'] == (context_tokens or 8192)
     show = next(item for item in requests if item[1] == "/api/show")
     assert show[2] == {"model": "qwen-test"}
 

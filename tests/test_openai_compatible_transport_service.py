@@ -42,6 +42,58 @@ def test_native_image_transport_preserves_pixels_and_text():
     assert isinstance(request.messages[0]["content"], list)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize('arguments', ['{"operation":"status","offset":0,"confirm":false}',
+                                     {'operation': 'status', 'offset': 0, 'confirm': False}])
+async def test_native_tool_continuation_sends_object_arguments_and_tool_name(tmp_path, arguments):
+    messages = ({'role': 'assistant', 'content': None, 'tool_calls': [
+        {'id': 'review_call', 'type': 'function', 'function': {'name': 'document_review', 'arguments': arguments}}]},
+        {'role': 'tool', 'tool_call_id': 'review_call', 'name': 'document_review', 'content': '{"pending":1}'})
+    before = json.dumps(messages, ensure_ascii=False)
+    def handler(request):
+        body = json.loads(request.content)
+        assert body['messages'][0]['tool_calls'][0]['function']['arguments'] == {
+            'operation': 'status', 'offset': 0, 'confirm': False}
+        assert body['messages'][1]['tool_name'] == 'document_review'
+        assert body['messages'][1]['tool_call_id'] == 'review_call'
+        return httpx.Response(200, json={'message': {'content': 'Продолжаю'}, 'done': True, 'done_reason': 'stop'})
+    transport, client = _transport(tmp_path, handler)
+    try:
+        result = await transport.complete(_resolved(chat_protocol='native_chat_v1'),
+            InferenceRequest(messages=messages, max_output_tokens=32))
+        assert result.text == 'Продолжаю'
+    finally:
+        await client.aclose()
+    assert json.dumps(messages, ensure_ascii=False) == before
+
+
+@pytest.mark.parametrize('arguments', ['{broken', '[1,2]', 'null', 2])
+def test_native_tool_arguments_reject_invalid_or_nonobject_json(arguments):
+    with pytest.raises(ModelTransportError, match='INVALID_NATIVE_TOOL_ARGUMENTS'):
+        OpenAICompatibleTransport._native_chat_body(_resolved(), InferenceRequest(messages=(
+            {'role': 'assistant', 'tool_calls': [{'function': {'name': 'read', 'arguments': arguments}}]},),
+            max_output_tokens=1))
+
+
+@pytest.mark.asyncio
+async def test_openai_tool_continuation_keeps_argument_string(tmp_path):
+    arguments = '{"operation":"status"}'
+    def handler(request):
+        body = json.loads(request.content)
+        assert body['messages'][0]['tool_calls'][0]['function']['arguments'] == arguments
+        assert 'tool_name' not in body['messages'][1]
+        return httpx.Response(200, json={'choices': [{'message': {'content': 'ok'}, 'finish_reason': 'stop'}]})
+    transport, client = _transport(tmp_path, handler)
+    try:
+        response = await transport.complete(_resolved(), InferenceRequest(messages=(
+            {'role': 'assistant', 'content': None, 'tool_calls': [{'id': 'call', 'type': 'function',
+                'function': {'name': 'document_review', 'arguments': arguments}}]},
+            {'role': 'tool', 'name': 'document_review', 'tool_call_id': 'call', 'content': '{}'}), max_output_tokens=1))
+        assert response.text == 'ok'
+    finally:
+        await client.aclose()
+
+
 def _resolved(
     *,
     display_name: str = "Connection",

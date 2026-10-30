@@ -21,6 +21,7 @@ from proxy.services.model_connection_security_service import (
     validate_connected_peer,
 )
 from proxy.services.model_secret_service import EnvironmentSecretStore, ModelSecretError
+from proxy.services.native_tool_message_service import native_tool_message
 
 
 class ModelTransportError(RuntimeError):
@@ -231,7 +232,10 @@ class OpenAICompatibleTransport:
         connection: ResolvedModelConnection,
         request: InferenceRequest,
     ) -> dict[str, Any]:
-        messages = [dict(item) for item in request.messages]
+        try:
+            messages = [native_tool_message(item) for item in request.messages]
+        except ValueError as error:
+            raise ModelTransportError(str(error)) from error
         for message in messages:
             if isinstance(message.get("content"), list):
                 parts = message["content"]

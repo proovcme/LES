@@ -1746,6 +1746,7 @@
         "proxy/services/model_secret_service.py",
         "proxy/services/model_streaming_service.py",
         "proxy/services/native_open_service.py",
+        "proxy/services/native_tool_message_service.py",
         "proxy/services/normcontrol_review_map_service.py",
         "proxy/services/normcontrol_service.py",
         "proxy/services/notebook_service.py",
@@ -3236,6 +3237,7 @@
         "proxy/services/model_secret_service.py",
         "proxy/services/model_streaming_service.py",
         "proxy/services/native_open_service.py",
+        "proxy/services/native_tool_message_service.py",
         "proxy/services/normcontrol_review_map_service.py",
         "proxy/services/normcontrol_service.py",
         "proxy/services/notebook_service.py",
@@ -5703,7 +5705,7 @@
         "tests/test_light_embedding_762.py",
         "tests/test_model_capability_service.py"
       ],
-      "lines": 437,
+      "lines": 438,
       "module": "proxy.services.model_capability_service",
       "outbound": [
         "proxy/__init__.py",
@@ -5996,6 +5998,20 @@
     },
     {
       "inbound": [
+        "proxy/services/openai_compatible_transport_service.py"
+      ],
+      "lines": 24,
+      "module": "proxy.services.native_tool_message_service",
+      "outbound": [
+        "proxy/__init__.py",
+        "proxy/services/__init__.py"
+      ],
+      "path": "proxy/services/native_tool_message_service.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
         "proxy/services/doc_review_service.py"
       ],
       "lines": 137,
@@ -6129,7 +6145,7 @@
         "tests/test_model_connection_embeddings_integration.py",
         "tests/test_openai_compatible_transport_service.py"
       ],
-      "lines": 671,
+      "lines": 675,
       "module": "proxy.services.openai_compatible_transport_service",
       "outbound": [
         "proxy/__init__.py",
@@ -6140,7 +6156,8 @@
         "proxy/services/model_connection_security_service.py",
         "proxy/services/model_reasoning_service.py",
         "proxy/services/model_secret_service.py",
-        "proxy/services/model_streaming_service.py"
+        "proxy/services/model_streaming_service.py",
+        "proxy/services/native_tool_message_service.py"
       ],
       "path": "proxy/services/openai_compatible_transport_service.py",
       "status": "PRODUCT_REACHABLE",
@@ -10446,7 +10463,7 @@
       "inbound": [
         "tests/test_light_embedding_762.py"
       ],
-      "lines": 341,
+      "lines": 344,
       "module": "tests.test_model_capability_service",
       "outbound": [
         "proxy/services/model_capability_service.py",
@@ -10553,7 +10570,7 @@
       "inbound": [
         "tests/test_light_embedding_762.py"
       ],
-      "lines": 589,
+      "lines": 641,
       "module": "tests.test_openai_compatible_transport_service",
       "outbound": [
         "proxy/services/model_connection_contracts.py",
@@ -13285,12 +13302,12 @@
   "summary": {
     "dormant_candidates": 35,
     "parse_warnings": 0,
-    "product_reachable": 380,
+    "product_reachable": 381,
     "registered_api_routes": 292,
     "runtime_support": 5,
     "test_or_tool_only": 170,
-    "tracked_python_files": 590,
-    "tracked_python_lines": 160159
+    "tracked_python_files": 591,
+    "tracked_python_lines": 160243
   },
   "warnings": []
 }
