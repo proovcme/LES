@@ -9,6 +9,44 @@ from backend.light_processes import InstanceLock
 from tools import install_light_macos as installer
 
 
+def test_publish_retries_transient_handle_and_preserves_bundle(tmp_path, monkeypatch):
+    candidate = tmp_path/'staging/LES.app'; candidate.mkdir(parents=True)
+    (candidate/'keep').write_text('complete bundle')
+    target = tmp_path/'LES.app'; calls = []; sleeps = []
+    original = Path.rename
+    def rename(path, destination):
+        calls.append(path)
+        if len(calls) < 3:
+            error = PermissionError('scanner handle'); error.winerror = 5; raise error
+        return original(path, destination)
+    monkeypatch.setattr(Path, 'rename', rename)
+    monkeypatch.setattr(installer.time, 'sleep', sleeps.append)
+    installer._publish_app(candidate, target)
+    assert len(calls) == 3 and len(sleeps) == 2
+    assert (target/'keep').read_text() == 'complete bundle' and not candidate.exists()
+
+
+def test_publish_retry_is_bounded_and_does_not_remove_source(tmp_path, monkeypatch):
+    candidate = tmp_path/'candidate'; candidate.mkdir(); target = tmp_path/'LES.app'; calls = []
+    def rename(path, destination):
+        calls.append(path); error = PermissionError('locked'); error.winerror = 32; raise error
+    monkeypatch.setattr(Path, 'rename', rename)
+    monkeypatch.setattr(installer.time, 'sleep', lambda _: None)
+    with pytest.raises(PermissionError): installer._publish_app(candidate, target)
+    assert len(calls) == 8 and candidate.exists() and not target.exists()
+
+
+def test_publish_retry_preserves_application_created_during_wait(tmp_path, monkeypatch):
+    candidate = tmp_path/'candidate'; candidate.mkdir(); target = tmp_path/'LES.app'
+    def rename(path, destination):
+        target.mkdir(); (target/'user-file').write_text('preserve')
+        error = PermissionError('locked'); error.winerror = 5; raise error
+    monkeypatch.setattr(Path, 'rename', rename)
+    monkeypatch.setattr(installer.time, 'sleep', lambda _: None)
+    with pytest.raises(FileExistsError): installer._publish_app(candidate, target)
+    assert candidate.exists() and (target/'user-file').read_text() == 'preserve'
+
+
 @pytest.fixture
 def build_environment(tmp_path, monkeypatch):
     monkeypatch.setattr(installer.sys, 'platform', 'darwin')

@@ -20,7 +20,7 @@
 | Метрика | Значение |
 | --- | --- |
 | Python-файлов под git | 591 |
-| Строк Python | 160243 |
+| Строк Python | 160464 |
 | PRODUCT_REACHABLE | 381 |
 | RUNTIME_SUPPORT | 5 |
 | TEST_OR_TOOL_ONLY | 170 |
@@ -36,7 +36,7 @@
 | proxy/services/dataset_memory_service.py | 2284 | 9 |
 | mlx_host.py | 2216 | 0 |
 | sovushka/pages/chat.py | 2200 | 2 |
-| proxy/services/chat_evidence_application_service.py | 2036 | 7 |
+| proxy/services/chat_evidence_application_service.py | 2010 | 7 |
 | proxy/services/project_pdf_table_service.py | 1653 | 2 |
 | sovushka/pages/diag.py | 1606 | 1 |
 | proxy/services/checklist_review_service.py | 1518 | 1 |

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from uuid import uuid4
 
 from proxy.services.document_task_store import digest
@@ -30,6 +31,19 @@ class ReviewTaskStore(DocumentTaskDatabase):
                     task_id TEXT NOT NULL REFERENCES review_tasks(id), request_id TEXT NOT NULL,
                     digest TEXT NOT NULL, revision INTEGER NOT NULL, PRIMARY KEY(task_id,request_id));
             ''')
+
+    def resolve_reference(self, owner, question):
+        """Resolve an exact owned ID or a unique retry; never infer a task from topic/history."""
+        ids = sorted(set(re.findall(r'(?<![0-9a-fA-F])[0-9a-fA-F]{32}(?![0-9a-fA-F])', question)))
+        with self.connect() as db:
+            if ids:
+                placeholders = ','.join('?' for _ in ids)
+                rows = db.execute(f'SELECT id FROM review_tasks WHERE owner=? AND id IN ({placeholders}) LIMIT 2',
+                                  (owner, *[value.lower() for value in ids])).fetchall()
+            else:
+                rows = db.execute('SELECT id FROM review_tasks WHERE owner=? AND question=? LIMIT 2',
+                                  (owner, question)).fetchall()
+        return rows[0]['id'] if len(rows) == 1 else None
 
     def create(self, owner, question, selectors):
         if not isinstance(question, str) or not question.strip() or len(question) > 20000:

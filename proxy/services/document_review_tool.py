@@ -18,7 +18,7 @@ class DocumentReviewTool:
     def __init__(self, store, reader, owner, question, max_chars=4000):
         self.store, self.reader, self.owner, self.question = store, reader, owner, question
         self.max_chars = min(4000, max(200, max_chars))
-        self.task_id = None
+        self.task_id = store.resolve_reference(owner, question)
         self.last_exchange = []
         self.current_read = {}
         self.last_chunks = ()
@@ -30,11 +30,32 @@ class DocumentReviewTool:
         return {'document_review': self.current_state, 'current_read': self.current_read,
                 'instruction': 'Resume only the review the user requests. The inventory covers selected indexed '
                 'text units, not the whole project or visual pages. Conclusions are model-authored, never accepted '
-                'by this tool. Use read cursors before record; needs_recheck requires a fresh read and new revision.'}
+                'by this tool. Never infer completion from chat history: only the current ledger counts establish '
+                'saved progress. Use read cursors before record; needs_recheck requires a fresh read and new revision.'}
 
     def model_context(self):
         return ({'native_tool_exchange': [self.last_exchange]} if self.last_exchange
                 else {'required_evidence': [self.context()]})
+
+    async def prepare_context(self):
+        if self.task_id:
+            await self.refresh(self.task_id)
+
+    async def coverage_notice(self):
+        if not self.task_id:
+            return ''
+        state, _ = await self.refresh(self.task_id)
+        if state['needs_recheck']:
+            return (f"**Проверка требует обновления: {state['needs_recheck']} из {state['total']} разделов "
+                    'нуждаются в перепроверке. Прежние выводы сохранены в истории.**')
+        if state['pending']:
+            saved = state['total'] - state['pending']
+            return (f"**Проверка не завершена: в журнале есть решения для {saved} из {state['total']} разделов.** "
+                    'Текст модели ниже не подтверждает завершение проверки.')
+        if state['needs_review']:
+            return (f"**В журнале остаются вопросы: {state['needs_review']} из {state['total']} разделов "
+                    'отмечены как требующие проверки.**')
+        return ''
 
     def remember_validation_failure(self, arguments, result):
         self.remember(arguments, {'status': 'error', 'missing': result.get('missing', []),

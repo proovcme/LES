@@ -86,6 +86,72 @@ class _Lexical:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('kind', ['identifier', 'escaped_directory'])
+async def test_unsafe_storage_is_rejected_before_any_mutation(tmp_path, monkeypatch, kind):
+    db = tmp_path / 'meta.db'
+    _db(db)
+    root = tmp_path / 'storage'
+    root.mkdir()
+    dataset_id = '../outside' if kind == 'identifier' else 'ds-1'
+    if kind == 'identifier':
+        with sqlite3.connect(db) as conn:
+            conn.execute('UPDATE datasets SET id=?', (dataset_id,))
+    else:
+        original = Path.resolve
+        def resolve(path, *args, **kwargs):
+            return tmp_path / 'outside/ds-1' if path == root / 'ds-1' else original(path, *args, **kwargs)
+        monkeypatch.setattr(Path, 'resolve', resolve)
+    def forbidden(*args, **kwargs):
+        pytest.fail('unsafe path reached a mutation')
+    monkeypatch.setattr(service, '_new_recovery_dir', forbidden)
+    monkeypatch.setattr(service.httpx, 'AsyncClient', forbidden)
+    with pytest.raises(service.DatasetDeletionError, match='unsafe dataset storage'):
+        await service.delete_datasets_safely(dataset_ids=[dataset_id], qdrant_url='http://unused',
+            collection='docs', meta_db_path=db, storage_root=root, lexical_index=_Lexical())
+    with sqlite3.connect(db) as conn:
+        assert conn.execute('SELECT id FROM datasets').fetchall() == [(dataset_id,)]
+        assert conn.execute('SELECT id FROM documents').fetchall() == [('doc-1',)]
+    assert not (tmp_path / 'recovery').exists()
+
+
+def test_storage_alias_requires_actual_directory_identity(tmp_path, monkeypatch):
+    root, alias = tmp_path / 'storage', tmp_path / 'redirected'
+    root.mkdir(); alias.mkdir()
+    original_resolve, original_samefile = Path.resolve, Path.samefile
+    def resolve(path, *args, **kwargs):
+        return alias / 'ds-1' if path == root / 'ds-1' else original_resolve(path, *args, **kwargs)
+    monkeypatch.setattr(Path, 'resolve', resolve)
+    with pytest.raises(service.DatasetDeletionError, match='unsafe'):
+        service._dataset_storage_dirs(root, ['ds-1'])
+    def samefile(path, other):
+        return True if path == alias and other == root else original_samefile(path, other)
+    monkeypatch.setattr(Path, 'samefile', samefile)
+    assert service._dataset_storage_dirs(root, ['ds-1']) == [alias / 'ds-1']
+
+
+@pytest.mark.asyncio
+async def test_quarantine_failure_preserves_catalog_and_recovery(tmp_path, monkeypatch):
+    monkeypatch.setenv('LES_LIGHT_QDRANT_URL', 'http://127.0.0.1:45678')
+    monkeypatch.setenv('LES_LIGHT_QDRANT_API_KEY', 'fixture-only')
+    db = tmp_path / 'data/meta.db'
+    db.parent.mkdir(); _db(db)
+    source = tmp_path / 'storage/ds-1/a.pdf'
+    source.parent.mkdir(parents=True); source.write_bytes(b'original')
+    monkeypatch.setattr(service.httpx, 'AsyncClient', lambda **kwargs: _Client())
+    def fail(*args):
+        raise PermissionError('synthetic file lock')
+    monkeypatch.setattr(service, '_quarantine_storage', fail)
+    with pytest.raises(PermissionError, match='synthetic file lock'):
+        await service.delete_datasets_safely(dataset_ids=['ds-1'], qdrant_url='http://127.0.0.1:45678',
+            collection='docs', meta_db_path=db, storage_root=tmp_path / 'storage', lexical_index=_Lexical())
+    with sqlite3.connect(db) as conn:
+        assert conn.execute('SELECT id FROM datasets').fetchall() == [('ds-1',)]
+        assert conn.execute('SELECT ref FROM les_project_links').fetchall() == [('ds-1',)]
+    assert source.read_bytes() == b'original'
+    assert list((tmp_path / 'recovery/dataset-deletions').glob('*/meta.db'))
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("phase", ["snapshot", "count_before", "delete", "count_after"])
 @pytest.mark.parametrize("failure", [401, 403, 404, 409, 429, 500, 503, "timeout"])
 async def test_remote_failure_preserves_catalog_source_and_recovery(tmp_path, monkeypatch, phase, failure):

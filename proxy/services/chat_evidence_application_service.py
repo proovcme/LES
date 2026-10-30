@@ -110,7 +110,7 @@ from proxy.services.chat_evidence_context import selector_evidence_payload
 from proxy.services.chat_evidence_context import selector_context_shortlist
 from proxy.services.chat_evidence_context import initial_selector_context
 from proxy.services.chat_evidence_context import profile_system_prompt
-from proxy.services.chat_evidence_context import profile_tool_selector_prompt
+from proxy.services.chat_evidence_context import tool_decision_profile
 from proxy.services.chat_evidence_contracts import EvidenceRequestContext
 from proxy.services.chat_evidence_contracts import EvidenceRuntimeDeps
 from proxy.services.chat_evidence_contracts import ResponseBoundary
@@ -512,6 +512,7 @@ async def _execute_chat_evidence_application(
     )
     if review_tool is not None:
         use_semantic_cache = False
+        await review_tool.prepare_context()
     if table_tool is not None:
         use_semantic_cache = False
         retrieval_trace["document_task"] = table_tool.state()
@@ -1159,41 +1160,8 @@ async def _execute_chat_evidence_application(
                             _compact_tool_result_for_prompt(item, max_chars=2400)
                             for item in without_table_replays(tool_results_for_model[-max_calls:])
                         ]
-                        tool_call_instruction = (
-                            "Вызывай предоставленные инструменты напрямую. "
-                            if canonical_execution_mode is CanonicalRouteMode.ACTIVE
-                            else "Верни только JSON {\"calls\":[{\"tool\":\"...\",\"args\":{...}}]}. "
-                        )
-                        selector_profile = "".join(
-                            (
-                                profile_tool_selector_prompt(profile_snapshot),
-                                "\n\nТы управляешь коротким исследовательским чтением LES. ",
-                                "Явно прикреплённый текст ниже уже доступен тебе как evidence и не требует индексации. "
-                                "Сначала прочитай его и используй read-only инструменты, чтобы закрыть конкретные пробелы. "
-                                "Если оператор просит артефакт, после получения достаточного evidence вызови "
-                                "подходящий draft-инструмент; предметные решения и поисковые запросы выбираешь ты. "
-                                "Не объявляй вложение отсутствующим, когда его текст присутствует в пакете. ",
-                                "Если оператор явно просит посмотреть глазами страницу или лист PDF, ",
-                                "обязательно выбери look_at_pdf_page с указанными файлом и номером страницы; ",
-                                "текстовый read_pdf_source не заменяет просмотр пикселей. ",
-                                "Инструменты не отвечают за тебя и не заменяют источники. ",
-                                tool_call_instruction,
-                                "Если evidence достаточно, заверши исследование без нового вызова. ",
-                                "Не выбирай инструмент вне списка и не выходи за выбранные dataset/file scope.",
-                            )
-                        )
-                        selector_checkpoint = tuple(
-                            item
-                            for candidate in memory_candidates
-                            if candidate.kind == ContextKind.CHECKPOINT
-                            for item in candidate.objects
-                        )
-                        selector_profile = sys_normal
-                        selector_working_memory = tuple(
-                            item
-                            for candidate in memory_candidates
-                            if candidate.kind == ContextKind.WORKING_MEMORY
-                            for item in candidate.objects
+                        selector_profile = tool_decision_profile(
+                            sys_normal, native=canonical_execution_mode is CanonicalRouteMode.ACTIVE,
                         )
                         selector_checkpoint = ()
                         selector_working_memory = workspace_memory_objects(
@@ -1719,6 +1687,12 @@ async def _execute_chat_evidence_application(
             if table_tool is not None and (getattr(req, 'attachment_id', None) or any(
                     item.get('tool') == TABLE_TOOL for item in tool_results_for_model)):
                 notice = table_tool.coverage_notice()
+                if notice:
+                    answer = notice + '\n\n' + answer
+                    await chat_progress(token_sink, 'document', notice.replace('**', ''))
+
+            if review_tool is not None:
+                notice = await review_tool.coverage_notice()
                 if notice:
                     answer = notice + '\n\n' + answer
                     await chat_progress(token_sink, 'document', notice.replace('**', ''))

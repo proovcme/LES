@@ -140,6 +140,32 @@ def test_store_rejects_a_different_unit_snapshot(tmp_path):
             evidence=[{'fragment_id': 'point', 'quote': '12 м'}], dependencies=[])
 
 
+def test_exact_owned_reference_and_retry_resolve_without_topic_guessing(tmp_path):
+    store, task, _ = setup_store(tmp_path, 1)
+    assert store.resolve_reference('owner', 'Продолжи task_id '+task) == task
+    assert store.resolve_reference('owner', 'Проверить выбранные разделы') == task
+    assert store.resolve_reference('owner', 'Что было в документе?') is None
+    assert store.resolve_reference('foreign', 'Продолжи '+task) is None
+    other = store.create('owner', 'Другая цель', [{'dataset_id': 'D', 'file_name': 'other.txt'}])
+    assert store.resolve_reference('owner', task+' и '+other) is None
+    store.create('owner', 'Проверить выбранные разделы', [{'dataset_id': 'D', 'file_name': 'other.txt'}])
+    assert store.resolve_reference('owner', 'Проверить выбранные разделы') is None
+
+
+def test_resumed_context_and_notice_use_ledger_not_model_completion_claim(tmp_path):
+    adapter, path, _, _ = backend(tmp_path)
+    store = ReviewTaskStore(tmp_path/'tasks.db')
+    task = store.create('owner', 'Проверить', [{'dataset_id': 'D', 'file_name': 'source.txt'}])
+    resumed = DocumentReviewTool(store, ReviewSourceReader(adapter, ['D']), 'owner', 'Продолжи task_id '+task)
+    asyncio.run(resumed.prepare_context())
+    assert resumed.context()['document_review']['pending'] == 1
+    assert '0 из 1' in asyncio.run(resumed.coverage_notice())
+    # No model claim is persisted or translated into a successful review event.
+    assert store.history('owner', task)['events'] == []
+    unrelated = DocumentReviewTool(store, resumed.reader, 'owner', 'Другой вопрос')
+    assert asyncio.run(unrelated.coverage_notice()) == ''
+
+
 def backend(tmp_path):
     path = tmp_path/'original.txt'
     path.write_text('Проверяемые данные', encoding='utf-8')

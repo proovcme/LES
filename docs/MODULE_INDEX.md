@@ -22,6 +22,9 @@ FTS ID с Qdrant; `section_coverage_service.py` формирует модель�
 - tools/light_launcher.py: собственные процессы приложения.
 - installers/windows/light: установка и откат.
 
+Удаление набора с recovery и проверкой границы до изменений:
+`proxy/services/dataset_deletion_service.py`, [контракт](modules/dataset-deletion.md).
+
 Пакетирование embeddings: `backend/embedding_client.py` — явная роль, ограниченный
 размер ответа, сохранение порядка и проверка контракта между пакетами.
 Кандидат 762: короткий кэш векторов запросов, нативный протокол после live probe,

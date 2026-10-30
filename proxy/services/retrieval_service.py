@@ -998,7 +998,7 @@ async def retrieve_chat_chunks(
         )
         if retry_top_k > merged_top_k:
             try:
-                retry_native = await rag_backend.retrieve_native_hybrid(
+                retry_native = await native_method(
                     retry_query,
                     dataset_ids=dataset_ids,
                     top_k=retry_top_k,

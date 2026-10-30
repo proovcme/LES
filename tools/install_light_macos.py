@@ -8,11 +8,26 @@ import plistlib
 import shutil
 import subprocess
 import sys
+import time
 from tempfile import TemporaryDirectory
 
 from backend.light_processes import InstanceLock
 from tools.build_light_package import stage_code
 from tools.light_runtime_assets import stage, host_target
+
+
+def _publish_app(candidate: Path, app: Path) -> None:
+    """Publish once; bounded retries tolerate transient Windows scanner handles."""
+    for attempt in range(8):
+        if app.exists():
+            raise FileExistsError('Application appeared during installation; it was preserved')
+        try:
+            candidate.rename(app)
+            return
+        except PermissionError as error:
+            if getattr(error, 'winerror', None) not in {5, 32} or attempt == 7:
+                raise
+            time.sleep(.05 * (attempt + 1))
 
 
 def install(app: Path, state: Path) -> Path:
@@ -38,7 +53,7 @@ def install(app: Path, state: Path) -> Path:
             _build_app(candidate, state, uv)
             if app.exists():
                 raise FileExistsError('Application appeared during installation; it was preserved')
-            candidate.rename(app)
+            _publish_app(candidate, app)
         return app
     finally:
         lock.release()
