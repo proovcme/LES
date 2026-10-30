@@ -1,5 +1,10 @@
 # Модули LES RAG
 
+Rust-ядро документов: `core/src/lexical.rs`, `files.rs`, `jobs.rs`;
+`backend/native_core.py` — загрузка и ограниченный C ABI, `lexical_preparation.py`
+— подготовка postings, `file_fingerprint.py` — проверка байтов, `job_policy.py`
+— переходы заданий. [Контракт и откат](modules/native-core.md).
+
 Порядок RRF/реранкера, контекст, worker и ошибки: [контракт RAG](modules/rag-ranking.md).
 `backend/bm25_store.py` — postings и точная оценка при запросе;
 `backend/sparse_index.py` — миграция и журнал областей изменений;

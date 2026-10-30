@@ -239,7 +239,7 @@ def stage_mail_collector(payload):
     return target
 
 
-def build(destination, executable, qdrant=None):
+def build(destination, executable, qdrant=None, native_core=None):
     destination = destination.resolve()
     if destination.exists():
         raise FileExistsError("Use a new empty output directory; existing artifacts are never removed by this builder")
@@ -261,6 +261,11 @@ def build(destination, executable, qdrant=None):
         shutil.copy2(receipt, native / "asset-receipt.json")
     else:
         stage_qdrant(native)
+    from tools.build_native_core import build as build_core, stage_asset
+    if native_core is None:
+        build_core(destination/'native/core')
+    else:
+        stage_asset(destination/'native/core', native_core)
     stage_mail_collector(destination)
     from tools.light_license_audit import stage_notices
     stage_notices(ROOT, destination)
@@ -272,6 +277,8 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--desktop-exe", type=Path, required=True)
     parser.add_argument("--qdrant", type=Path)
+    parser.add_argument("--native-core", type=Path)
     args = parser.parse_args()
-    result = build(args.output, args.desktop_exe.resolve(), args.qdrant.resolve() if args.qdrant else None)
+    result = build(args.output, args.desktop_exe.resolve(), args.qdrant.resolve() if args.qdrant else None,
+                   args.native_core.resolve() if args.native_core else None)
     print(json.dumps({"files": len(result["files"]), "version": result["version"], "output": str(args.output)}))

@@ -24,11 +24,21 @@ jobs:
           enable-cache: true
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: desktop/light/src-tauri
+          workspaces: |
+            desktop/light/src-tauri
+            core
       - name: Prepare build tools
         run: choco install make --yes --no-progress
       - name: Install frozen Python environment
         run: uv sync --frozen --extra mcp
+      - name: Build and test native document core
+        run: |
+          make test-core
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          uv run python tools/build_native_core.py --output native/core
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          "LES_CORE_LIBRARY=$((Resolve-Path native/core/les_core.dll).Path)" >> $env:GITHUB_ENV
+          "LES_CORE_MODE=native" >> $env:GITHUB_ENV
       - name: Verify code and offline behavior
         run: |
           make verify

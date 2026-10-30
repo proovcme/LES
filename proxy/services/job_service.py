@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager, closing
 import json
 import sqlite3
 import time
@@ -10,6 +11,7 @@ from datetime import datetime
 from typing import Any, Dict, Optional
 
 from proxy.config import META_DB_PATH
+from backend.job_policy import normalize_patch, recovery_patch
 
 
 class JobService:
@@ -17,12 +19,13 @@ class JobService:
         self.db_path = db_path
         self.init_db()
 
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path, timeout=30.0)
-        conn.execute("PRAGMA busy_timeout=30000")
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA synchronous=NORMAL")
-        return conn
+    @contextmanager
+    def _connect(self):
+        with closing(sqlite3.connect(self.db_path, timeout=30.0)) as conn, conn:
+            conn.execute("PRAGMA busy_timeout=30000")
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=FULL")
+            yield conn
 
     def _with_retry(self, fn):
         last_error = None
@@ -72,13 +75,16 @@ class JobService:
     ) -> Dict[str, Any]:
         job_id = str(uuid.uuid4())[:12]
         now = datetime.now().isoformat()
+        patch = normalize_patch({'status':'queued'}, {'status':status, 'source':source,
+            'dataset_id':dataset_id, 'dataset_name':dataset_name, 'total':total, 'message':message}, now)['patch']
         def _insert():
             with self._connect() as conn:
                 conn.execute(
                     "INSERT INTO jobs "
-                    "(id, type, status, source, dataset_id, dataset_name, total, processed, errors, message, result, started_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, '{}', ?, ?)",
-                    (job_id, job_type, status, source, dataset_id, dataset_name, total, message, now, now),
+                    "(id, type, status, source, dataset_id, dataset_name, total, processed, errors, message, result, started_at, updated_at, finished_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, '{}', ?, ?, ?)",
+                    (job_id, job_type, patch['status'], source, dataset_id, dataset_name, total, message,
+                     now, now, patch.get('finished_at')),
                 )
         self._with_retry(_insert)
         return self.get(job_id) or {}
@@ -86,18 +92,22 @@ class JobService:
     def update(self, job_id: str, **updates) -> Dict[str, Any]:
         if not updates:
             return self.get(job_id) or {}
-        updates["updated_at"] = datetime.now().isoformat()
-        if updates.get("status") in {"completed", "failed", "cancelled"} and "finished_at" not in updates:
-            updates["finished_at"] = updates["updated_at"]
-        if "result" in updates and not isinstance(updates["result"], str):
-            updates["result"] = json.dumps(updates["result"], ensure_ascii=False)
-        keys = list(updates.keys())
-        set_clause = ", ".join(f"{k}=?" for k in keys)
         def _update():
             with self._connect() as conn:
+                conn.execute('BEGIN IMMEDIATE')
+                conn.row_factory = sqlite3.Row
+                row = conn.execute('SELECT * FROM jobs WHERE id=?', (job_id,)).fetchone()
+                if row is None:
+                    return
+                decision = normalize_patch(dict(row), updates, datetime.now().isoformat())
+                if decision['ignored']:
+                    return
+                patch = decision['patch']
+                keys = list(patch)
+                set_clause = ', '.join(f'{key}=?' for key in keys)
                 conn.execute(
                     f"UPDATE jobs SET {set_clause} WHERE id=?",
-                    [updates[k] for k in keys] + [job_id],
+                    [patch[key] for key in keys] + [job_id],
                 )
         self._with_retry(_update)
         return self.get(job_id) or {}
@@ -139,27 +149,24 @@ class JobService:
 
     def mark_interrupted_active_jobs(self, reason: str) -> int:
         """Mark durable active jobs as interrupted after process restart."""
-        now = datetime.now().isoformat()
-        message = f"Interrupted by {reason}"
-
         def _update():
             with self._connect() as conn:
-                cursor = conn.execute(
-                    """
-                    UPDATE jobs
-                    SET status='cancelled',
-                        message=CASE
-                            WHEN COALESCE(message, '') = '' THEN ?
-                            ELSE message || ' | ' || ?
-                        END,
-                        updated_at=?,
-                        finished_at=?
-                    WHERE finished_at IS NULL
-                      AND lower(status) IN ('queued', 'parsing', 'running')
-                    """,
-                    (message, message, now, now),
-                )
-                return cursor.rowcount
+                conn.execute('BEGIN IMMEDIATE')
+                conn.row_factory = sqlite3.Row
+                count = 0
+                now = datetime.now().isoformat()
+                while rows := conn.execute("SELECT * FROM jobs WHERE finished_at IS NULL "
+                        "AND lower(status) IN ('queued','parsing','running') LIMIT 128").fetchall():
+                    for row in rows:
+                        decision = recovery_patch(dict(row), reason, now)
+                        if decision['ignored']:
+                            raise RuntimeError('Active job was not recoverable')
+                        patch = decision['patch']
+                        keys = list(patch)
+                        conn.execute('UPDATE jobs SET ' + ', '.join(f'{key}=?' for key in keys) + ' WHERE id=?',
+                                     [patch[key] for key in keys] + [row['id']])
+                        count += 1
+                return count
 
         return int(self._with_retry(_update) or 0)
 

@@ -1,6 +1,6 @@
 # LES Light 0.1.0: offline checks and local packaging only.
 # Public release and installation are separate, explicitly authorized actions.
-.PHONY: help version-sync verify test test-mail test-tauri public-check package validate-package
+.PHONY: help version-sync verify test test-mail test-tauri test-core public-check package validate-package
 
 PYTEST_BASETEMP ?= .test-tmp
 PKGS := backend proxy sovushka tools sovushka_ng.py proxy_server.py mlx_host.py
@@ -42,6 +42,10 @@ test-mail:
 
 test-tauri:
 	cargo check --manifest-path desktop/light/src-tauri/Cargo.toml
+
+test-core:
+	cargo fmt --manifest-path core/Cargo.toml --check
+	cargo test --locked --manifest-path core/Cargo.toml
 
 public-check:
 	uv run python tools/publication_check.py

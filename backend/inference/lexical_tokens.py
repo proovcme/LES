@@ -43,10 +43,15 @@ _STOP_WORDS = (NO_STEM_WORDS - {"сп", "гост"}) | _SHORT_FUNCTION_WORDS
 _HYPHENS = str.maketrans({"‐": "-", "‑": "-", "−": "-"})
 
 
+def normalized_text(text):
+    """One Unicode authority for both Python and native lexical preparation."""
+    source = unicodedata.normalize("NFKC", str(text or "")).translate(_HYPHENS)
+    return source.casefold().replace("ё", "е")
+
+
 def normalized_words(text):
     """Case and compatibility normalization shared by queries and documents."""
-    source = unicodedata.normalize("NFKC", str(text or "")).translate(_HYPHENS)
-    return _V2_RE.findall(source.casefold().replace("ё", "е"))
+    return _V2_RE.findall(normalized_text(text))
 
 
 def tokenize_current(text):

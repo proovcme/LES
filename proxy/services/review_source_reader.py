@@ -2,13 +2,13 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 from collections import OrderedDict
 from pathlib import Path
 
 from qdrant_client import models
 
 from backend.index_replacement import ReplacementJournal
+from backend.file_fingerprint import fingerprint
 from proxy.services.document_task_store import digest
 
 
@@ -43,16 +43,13 @@ class ReviewSourceReader:
             path = (root / selector['file_name']).resolve()
             if not path.is_relative_to(root):
                 raise ValueError('Источник находится вне каталога набора')
-        checksum = hashlib.sha256()
         try:
-            with path.open('rb') as stream:
-                for block in iter(lambda: stream.read(1024 * 1024), b''):
-                    checksum.update(block)
+            checksum = fingerprint(path)['sha256']
         except OSError as error:
             raise ValueError('Оригинал недоступен; проверьте файл и права чтения') from error
-        if checksum.hexdigest() != row['file_hash']:
+        if checksum != row['file_hash']:
             raise ValueError('Файл изменился; обновите индекс перед проверкой')
-        return {'sha256': checksum.hexdigest(), 'document_id': row['id']}
+        return {'sha256': checksum, 'document_id': row['id']}
 
     async def read(self, selector, *, originals=None):
         selector = validate_selector(selector, self.allowed)

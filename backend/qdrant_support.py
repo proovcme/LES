@@ -86,11 +86,8 @@ def _pdf_page_node_overlap_chars() -> int:
 
 
 def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
+    from backend.file_fingerprint import fingerprint
+    return fingerprint(path)['sha256']
 
 
 class UnsupportedIndexingSourceError(RuntimeError):

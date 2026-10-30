@@ -75,6 +75,7 @@
         "backend/document_router.py",
         "backend/embedding_client.py",
         "backend/external_scan.py",
+        "backend/file_fingerprint.py",
         "backend/http_client_policy.py",
         "backend/imap_names.py",
         "backend/index_replacement.py",
@@ -86,6 +87,8 @@
         "backend/inference/routing.py",
         "backend/inference/validator.py",
         "backend/interface.py",
+        "backend/job_policy.py",
+        "backend/lexical_preparation.py",
         "backend/light_health_monitor.py",
         "backend/light_processes.py",
         "backend/light_qdrant_connection.py",
@@ -99,6 +102,7 @@
         "backend/metrics_collector.py",
         "backend/mlx_adapter.py",
         "backend/msg_reader.py",
+        "backend/native_core.py",
         "backend/ocr_parser.py",
         "backend/olm_reader.py",
         "backend/parquet_writer.py",
@@ -179,14 +183,16 @@
         "backend/qdrant_collection.py",
         "backend/sparse_index.py",
         "tests/test_light_bm25_incremental.py",
-        "tests/test_light_bm25_index.py"
+        "tests/test_light_bm25_index.py",
+        "tools/benchmark_native_core.py"
       ],
-      "lines": 142,
+      "lines": 150,
       "module": "backend.bm25_store",
       "outbound": [
         "backend/__init__.py",
         "backend/inference/lexical_tokens.py",
-        "backend/interface.py"
+        "backend/interface.py",
+        "backend/lexical_preparation.py"
       ],
       "path": "backend/bm25_store.py",
       "status": "PRODUCT_REACHABLE",
@@ -325,6 +331,22 @@
     },
     {
       "inbound": [
+        "backend/qdrant_support.py",
+        "proxy/services/review_source_reader.py",
+        "tests/test_light_core_jobs_files.py"
+      ],
+      "lines": 33,
+      "module": "backend.file_fingerprint",
+      "outbound": [
+        "backend/__init__.py",
+        "backend/native_core.py"
+      ],
+      "path": "backend/file_fingerprint.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
         "backend/metrics_collector.py",
         "backend/reranker.py",
         "proxy/app.py",
@@ -377,6 +399,7 @@
         "tests/test_light_index_recovery.py",
         "tests/test_light_ingestion_races.py",
         "tests/test_light_rerank_audit.py",
+        "tools/benchmark_native_core.py",
         "tools/benchmark_sparse_index.py",
         "tools/evaluate_light_semantics.py",
         "tools/evaluate_rag_pipeline.py",
@@ -465,15 +488,18 @@
       "inbound": [
         "backend/bm25_store.py",
         "backend/inference/bm25_sparse.py",
+        "backend/lexical_preparation.py",
         "backend/qdrant_retrieval.py",
         "backend/sparse_index.py",
         "backend/sparse_legacy.py",
         "proxy/services/lexical_index_service.py",
         "proxy/services/retrieval_quality_service.py",
         "tests/test_light_bm25_index.py",
-        "tests/test_light_lexical_v2.py"
+        "tests/test_light_lexical_v2.py",
+        "tests/test_light_native_core.py",
+        "tools/benchmark_native_core.py"
       ],
-      "lines": 66,
+      "lines": 71,
       "module": "backend.inference.lexical_tokens",
       "outbound": [
         "backend/__init__.py",
@@ -568,6 +594,37 @@
         "backend/__init__.py"
       ],
       "path": "backend/interface.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "proxy/services/job_service.py",
+        "tests/test_light_core_jobs_files.py"
+      ],
+      "lines": 71,
+      "module": "backend.job_policy",
+      "outbound": [
+        "backend/__init__.py",
+        "backend/native_core.py"
+      ],
+      "path": "backend/job_policy.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "backend/bm25_store.py",
+        "tests/test_light_native_core.py"
+      ],
+      "lines": 37,
+      "module": "backend.lexical_preparation",
+      "outbound": [
+        "backend/__init__.py",
+        "backend/inference/lexical_tokens.py",
+        "backend/native_core.py"
+      ],
+      "path": "backend/lexical_preparation.py",
       "status": "PRODUCT_REACHABLE",
       "windows_runtime_explicit": false
     },
@@ -797,6 +854,23 @@
         "backend/__init__.py"
       ],
       "path": "backend/msg_reader.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "backend/file_fingerprint.py",
+        "backend/job_policy.py",
+        "backend/lexical_preparation.py",
+        "tests/test_light_core_jobs_files.py",
+        "tests/test_light_native_core.py"
+      ],
+      "lines": 102,
+      "module": "backend.native_core",
+      "outbound": [
+        "backend/__init__.py"
+      ],
+      "path": "backend/native_core.py",
       "status": "PRODUCT_REACHABLE",
       "windows_runtime_explicit": false
     },
@@ -1107,7 +1181,7 @@
         "tests/test_light_rerank_audit.py",
         "tests/test_qdrant_adapter_parse.py"
       ],
-      "lines": 566,
+      "lines": 563,
       "module": "backend.qdrant_support",
       "outbound": [
         "backend/__init__.py",
@@ -1115,6 +1189,7 @@
         "backend/document_catalog.py",
         "backend/document_router.py",
         "backend/embedding_client.py",
+        "backend/file_fingerprint.py",
         "backend/inference/bm25_sparse.py",
         "backend/interface.py",
         "backend/light_qdrant_connection.py",
@@ -5209,11 +5284,13 @@
     {
       "inbound": [
         "proxy/app.py",
-        "proxy/services/dataset_runtime.py"
+        "proxy/services/dataset_runtime.py",
+        "tests/test_light_core_jobs_files.py"
       ],
-      "lines": 172,
+      "lines": 179,
       "module": "proxy.services.job_service",
       "outbound": [
+        "backend/job_policy.py",
         "proxy/__init__.py",
         "proxy/config.py",
         "proxy/services/__init__.py"
@@ -6508,7 +6585,7 @@
         "tests/test_light_rerank_audit.py",
         "tests/test_public_error_service.py"
       ],
-      "lines": 91,
+      "lines": 96,
       "module": "proxy.services.public_error_service",
       "outbound": [
         "proxy/__init__.py",
@@ -6870,9 +6947,10 @@
         "proxy/services/document_review_tool.py",
         "tests/test_light_document_review.py"
       ],
-      "lines": 130,
+      "lines": 127,
       "module": "proxy.services.review_source_reader",
       "outbound": [
+        "backend/file_fingerprint.py",
         "backend/index_replacement.py",
         "proxy/__init__.py",
         "proxy/services/__init__.py",
@@ -9575,6 +9653,31 @@
     },
     {
       "inbound": [],
+      "lines": 110,
+      "module": "tests.test_light_core_jobs_files",
+      "outbound": [
+        "backend/file_fingerprint.py",
+        "backend/job_policy.py",
+        "backend/native_core.py",
+        "proxy/services/job_service.py"
+      ],
+      "path": "tests/test_light_core_jobs_files.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
+      "lines": 18,
+      "module": "tests.test_light_core_package",
+      "outbound": [
+        "tools/build_native_core.py"
+      ],
+      "path": "tests/test_light_core_package.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
       "lines": 85,
       "module": "tests.test_light_document_browser",
       "outbound": [
@@ -9937,6 +10040,19 @@
         "tests/test_light_ui_handlers.py"
       ],
       "path": "tests/test_light_model_setup.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
+      "lines": 74,
+      "module": "tests.test_light_native_core",
+      "outbound": [
+        "backend/inference/lexical_tokens.py",
+        "backend/lexical_preparation.py",
+        "backend/native_core.py"
+      ],
+      "path": "tests/test_light_native_core.py",
       "status": "TEST_OR_TOOL_ONLY",
       "windows_runtime_explicit": false
     },
@@ -10852,11 +10968,13 @@
     {
       "inbound": [
         "tools/backup_suharik.py",
+        "tools/benchmark_native_core.py",
         "tools/benchmark_sparse_index.py",
         "tools/build_light_installers.py",
         "tools/build_light_package.py",
         "tools/build_macos_app.py",
         "tools/build_macos_dmg.py",
+        "tools/build_native_core.py",
         "tools/build_rag_contract_sibling.py",
         "tools/build_release_artifacts.py",
         "tools/build_tauri_app.py",
@@ -10919,6 +11037,20 @@
     },
     {
       "inbound": [],
+      "lines": 113,
+      "module": "tools.benchmark_native_core",
+      "outbound": [
+        "backend/bm25_store.py",
+        "backend/index_replacement.py",
+        "backend/inference/lexical_tokens.py",
+        "tools/__init__.py"
+      ],
+      "path": "tools/benchmark_native_core.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
       "lines": 94,
       "module": "tools.benchmark_sparse_index",
       "outbound": [
@@ -10948,10 +11080,11 @@
         "tests/test_light_package.py",
         "tools/install_light_macos.py"
       ],
-      "lines": 277,
+      "lines": 284,
       "module": "tools.build_light_package",
       "outbound": [
         "tools/__init__.py",
+        "tools/build_native_core.py",
         "tools/build_release_artifacts.py",
         "tools/build_tauri_app.py",
         "tools/light_license_audit.py",
@@ -10987,6 +11120,20 @@
         "tools/build_macos_app.py"
       ],
       "path": "tools/build_macos_dmg.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "tests/test_light_core_package.py",
+        "tools/build_light_package.py"
+      ],
+      "lines": 60,
+      "module": "tools.build_native_core",
+      "outbound": [
+        "tools/__init__.py"
+      ],
+      "path": "tools/build_native_core.py",
       "status": "TEST_OR_TOOL_ONLY",
       "windows_runtime_explicit": false
     },
@@ -11303,7 +11450,7 @@
       "inbound": [
         "tools/build_light_package.py"
       ],
-      "lines": 83,
+      "lines": 87,
       "module": "tools.light_license_audit",
       "outbound": [
         "tools/__init__.py"
@@ -13306,12 +13453,12 @@
   "summary": {
     "dormant_candidates": 35,
     "parse_warnings": 0,
-    "product_reachable": 381,
+    "product_reachable": 385,
     "registered_api_routes": 292,
     "runtime_support": 5,
-    "test_or_tool_only": 170,
-    "tracked_python_files": 591,
-    "tracked_python_lines": 160464
+    "test_or_tool_only": 175,
+    "tracked_python_files": 600,
+    "tracked_python_lines": 161112
   },
   "warnings": []
 }

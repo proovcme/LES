@@ -21,7 +21,9 @@ jobs:
           python-version: '3.13.12'
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: desktop/light/src-tauri
+          workspaces: |
+            desktop/light/src-tauri
+            core
       - name: Install frozen build environment
         run: uv sync --frozen --extra mcp
       - name: Build desktop shell

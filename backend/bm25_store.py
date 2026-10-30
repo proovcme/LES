@@ -1,12 +1,13 @@
 """Exact, transactional BM25 postings. Only changed records update corpus statistics."""
-from collections import Counter
 from contextlib import contextmanager
+from itertools import islice
 import json
 import math
 import sqlite3
 
 from backend.inference.lexical_tokens import tokenize_current
 from backend.interface import EmbeddingContractError
+from backend.lexical_preparation import prepare
 
 
 @contextmanager
@@ -86,21 +87,28 @@ def clear_scope(db, scope):
 
 
 def put(db, points):
-    for point in points:
-        point_id = json.dumps(point.id)
-        remove(db, point_id)
-        payload = point.payload or {}
-        terms = Counter(tokenize_current(str(payload.get("text") or "")))
-        length = sum(terms.values())
-        db.execute("INSERT INTO docs VALUES (?, ?, ?, ?, ?)", (
-            point_id, length, payload.get("dataset_id"), payload.get("file_name"), payload.get("node_role")))
-        db.executemany("INSERT INTO postings VALUES (?, ?, ?)",
-                       ((term, point_id, tf) for term, tf in terms.items()))
-        db.executemany("INSERT INTO frequencies VALUES (?, 1) ON CONFLICT(term) DO UPDATE SET df=df+1",
-                       ((term,) for term in terms))
-        db.executemany("INSERT OR IGNORE INTO ancestors VALUES (?, ?)",
-                       ((ancestor, point_id) for ancestor in payload.get("ancestor_ids") or []))
-        db.execute("UPDATE corpus SET n=n+1, length=length+? WHERE id=1", (length,))
+    iterator = iter(points)
+    while batch := list(islice(iterator, 256)):
+        # Prepare a bounded batch before modifying any of its postings.
+        terms = prepare([str((point.payload or {}).get('text') or '') for point in batch])
+        for point, counts in zip(batch, terms, strict=True):
+            _put_point(db, point, counts)
+
+
+def _put_point(db, point, terms):
+    point_id = json.dumps(point.id)
+    remove(db, point_id)
+    payload = point.payload or {}
+    length = sum(terms.values())
+    db.execute("INSERT INTO docs VALUES (?, ?, ?, ?, ?)", (
+        point_id, length, payload.get("dataset_id"), payload.get("file_name"), payload.get("node_role")))
+    db.executemany("INSERT INTO postings VALUES (?, ?, ?)",
+                   ((term, point_id, tf) for term, tf in terms.items()))
+    db.executemany("INSERT INTO frequencies VALUES (?, 1) ON CONFLICT(term) DO UPDATE SET df=df+1",
+                   ((term,) for term in terms))
+    db.executemany("INSERT OR IGNORE INTO ancestors VALUES (?, ?)",
+                   ((ancestor, point_id) for ancestor in payload.get("ancestor_ids") or []))
+    db.execute("UPDATE corpus SET n=n+1, length=length+? WHERE id=1", (length,))
 
 
 def search(journal, text, *, limit=24, dataset_ids=None, doc_filter=None,

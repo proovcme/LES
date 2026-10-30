@@ -54,24 +54,28 @@ def stage_notices(root: Path, payload: Path):
     collect(payload / 'python/Lib/site-packages', output / 'python')
     shutil.copy2(payload / 'python/LICENSE.txt', output / 'Python-LICENSE.txt')
     shutil.copytree(root / 'licenses', output / 'native', dirs_exist_ok=True)
-    result = subprocess.run(['cargo', 'metadata', '--locked', '--format-version', '1',
-        '--filter-platform', 'x86_64-pc-windows-msvc', '--manifest-path',
-        str(root / 'desktop/light/src-tauri/Cargo.toml')], capture_output=True, check=True, encoding='utf-8')
-    cargo = json.loads(result.stdout)
-    resolved = {node['id'] for node in cargo['resolve']['nodes']}
-    packages = []
-    for package in cargo['packages']:
-        if package['id'] not in resolved or package['name'] == 'les-light': continue
-        source = Path(package['manifest_path']).parent
-        directory = output / 'rust' / f"{package['name']}-{package['version']}"
-        directory.mkdir(parents=True, exist_ok=True)
-        for path in source.rglob('*'):
-            if path.is_file() and re.search(r'(?i)(licen[sc]e|copying|notice|copyright)', path.name):
-                target = directory / path.relative_to(source)
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(path, target)
-        packages.append({'name':package['name'], 'version':package['version'], 'license':package['license'],
-                         'source':f"https://crates.io/crates/{package['name']}/{package['version']}"})
+    packages, seen = [], set()
+    for manifest in ('desktop/light/src-tauri/Cargo.toml', 'core/Cargo.toml'):
+        result = subprocess.run(['cargo', 'metadata', '--locked', '--offline', '--format-version', '1',
+            '--filter-platform', 'x86_64-pc-windows-msvc', '--manifest-path', str(root / manifest)],
+            capture_output=True, check=True, encoding='utf-8')
+        cargo = json.loads(result.stdout)
+        resolved = {node['id'] for node in cargo['resolve']['nodes']}
+        for package in cargo['packages']:
+            identity = (package['name'], package['version'])
+            if package['id'] not in resolved or package['name'] in {'les-light','les-core'} or identity in seen:
+                continue
+            seen.add(identity)
+            source = Path(package['manifest_path']).parent
+            directory = output / 'rust' / f"{package['name']}-{package['version']}"
+            directory.mkdir(parents=True, exist_ok=True)
+            for path in source.rglob('*'):
+                if path.is_file() and re.search(r'(?i)(licen[sc]e|copying|notice|copyright)', path.name):
+                    target = directory / path.relative_to(source)
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(path, target)
+            packages.append({'name':package['name'], 'version':package['version'], 'license':package['license'],
+                             'source':f"https://crates.io/crates/{package['name']}/{package['version']}"})
     (output / 'rust-packages.json').write_text(json.dumps(packages,indent=2),encoding='utf-8')
 
 
