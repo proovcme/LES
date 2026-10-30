@@ -5,12 +5,14 @@ from backend import bm25_store
 from backend.interface import EmbeddingContractError
 
 
-def fuse(dense, lexical, limit):
+def fuse(dense, lexical, limit, *, rank_constant=2.):
+    if not 0 < rank_constant < float('inf'):
+        raise ValueError('RRF rank constant must be finite and positive')
     scores, points = {}, {}
     for channel in (dense, lexical):
         for position, point in enumerate(channel):
             points.setdefault(point.id, point)
-            scores[point.id] = scores.get(point.id, 0.) + 1. / (2. + position)
+            scores[point.id] = scores.get(point.id, 0.) + 1. / (rank_constant + position)
     return [points[key].model_copy(update={"score": score}) for key, score in
             sorted(scores.items(), key=lambda row: row[1], reverse=True)[:limit]]
 
@@ -31,4 +33,5 @@ async def query(adapter, journal, text, dense_vec, query_filter, *, dense_name,
     lexical_points = [models.ScoredPoint(id=point_id, score=score, version=0,
         payload=by_id[point_id].payload) for point_id, score in lexical]
     journal.assert_unchanged(stamp)
-    return dense.model_copy(update={"points": fuse(dense.points, lexical_points, limit)})
+    return dense.model_copy(update={"points": fuse(dense.points, lexical_points, limit,
+        rank_constant=getattr(adapter, 'rrf_rank_constant', 2.))})

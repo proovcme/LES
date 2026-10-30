@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from backend.interface import EmbeddingContractError
+from proxy.services.retrieval_trial_policy import CURRENT, RetrievalTrialPolicy
+from proxy.services.lexical_evidence_service import canonicalize_lexical_hits
 from backend.rag_config import index_contract_status, query_embedding_instruction_id
 from proxy.services.kot_service import analyze_question, extract_norm_refs
 from proxy.services.lexical_index_service import LexicalIndex, RetrievalTrace, lexical_enabled, merge_rrf
@@ -645,7 +647,9 @@ async def retrieve_chat_chunks(
     result_limit: int | None = None,
     candidate_limit: int | None = None,
     document_diversity_k: int | None = None,
+    trial_policy: RetrievalTrialPolicy | None = None,
 ):
+    policy = trial_policy or CURRENT
     kot = analyze_question(question)
     retrieval_query = expand_retrieval_query(question)
     log_error = getattr(logger, "error", logger.warning)
@@ -721,6 +725,10 @@ async def retrieve_chat_chunks(
             "retrieve_native_hierarchical",
             rag_backend.retrieve_native_hybrid,
         )
+        if not policy.hierarchy:
+            # The flat trial still excludes navigation from answer evidence.
+            async def native_method(query, **kwargs):
+                return await rag_backend.retrieve_native_hybrid(query, node_roles=["evidence"], **kwargs)
         native_chunks = await native_method(
             retrieval_query,
             dataset_ids=dataset_ids,
@@ -760,7 +768,7 @@ async def retrieve_chat_chunks(
         scope_source=scope_source,
         mode=(
             "qdrant_native_hierarchical"
-            if hasattr(rag_backend, "retrieve_native_hierarchical")
+            if policy.hierarchy and hasattr(rag_backend, "retrieve_native_hierarchical")
             else "qdrant_native_hybrid"
         ),
         vector_count=len(native_chunks),
@@ -770,21 +778,21 @@ async def retrieve_chat_chunks(
         retrieval_channels=["dense"] if dense_only else ["dense", lexical_channel],
         fusion=(
             "global_rrf+descendant_rrf"
-            if hasattr(rag_backend, "retrieve_native_hierarchical")
+            if policy.hierarchy and hasattr(rag_backend, "retrieve_native_hierarchical")
             else "rrf"
         ),
     )
     if dynamic_bm25:
         trace.mode = trace.mode.replace("qdrant_native", "dense_bm25")
     if dense_only:
-        hierarchical = hasattr(rag_backend, "retrieve_native_hierarchical")
+        hierarchical = policy.hierarchy and hasattr(rag_backend, "retrieve_native_hierarchical")
         trace.mode = "dense_hierarchical" if hierarchical else "dense_only"
         trace.score_kind = "rrf" if hierarchical else "dense_similarity"
         trace.fusion = "global_dense+descendant_rrf" if hierarchical else "none"
     if effective_doc_filter:
         trace.exact_refs.extend([f"file:{name}" for name in effective_doc_filter])
     chunks = native_chunks
-    if bounded_result_limit is None:
+    if bounded_result_limit is None and policy.lexical_safety:
         try:
             merged_chunks, merged_trace = _hybrid_merge(
                 question,
@@ -798,6 +806,7 @@ async def retrieve_chat_chunks(
                 doc_filter=effective_doc_filter or None,
             )
             if merged_trace.lexical_count:
+                merged_chunks = await canonicalize_lexical_hits(merged_chunks, rag_backend, dataset_ids, effective_doc_filter)
                 chunks = merged_chunks
                 trace = merged_trace
                 trace.status = "ok"
@@ -811,6 +820,8 @@ async def retrieve_chat_chunks(
                     trace.exact_refs.extend([f"file:{name}" for name in effective_doc_filter])
                 _rt["native_lexical"] = merged_trace.lexical_count
         except Exception as native_merge_error:  # noqa: BLE001
+            if isinstance(native_merge_error, EmbeddingContractError):
+                return blocked_result(str(native_merge_error))
             logger.warning("[HYBRID] qdrant_native lexical safety merge skipped: %s", native_merge_error)
     logger.info("[RETR] подфазы=%s", _rt)
     trace.query_embedding = query_embedding_instruction_id()
@@ -821,7 +832,7 @@ async def retrieve_chat_chunks(
     raptor_mode = str(raptor_policy["mode"])
     raptor_ready = str(raptor_status.get("readiness") or "") == "ready"
     raptor_should_run = (
-        raptor_mode != "off"
+        policy.raptor and raptor_mode != "off"
         and raptor_ready
         and len(chunks) > 0
         and hasattr(rag_backend, "retrieve_raptor_evidence")
@@ -919,35 +930,37 @@ async def retrieve_chat_chunks(
             "reason": raptor_reason,
             "mode": raptor_mode,
         }
-    chunks, exact_terms = _promote_exact_source_matches(chunks, question)
-    if exact_terms:
-        if "source_exact" not in trace.mode:
-            trace.mode = f"{trace.mode}+source_exact"
-        for term in exact_terms:
-            ref = f"source:{term}"
-            if ref not in trace.exact_refs:
-                trace.exact_refs.append(ref)
-    chunks, exact_identifiers = _promote_exact_identifier_matches(chunks, question)
-    if exact_identifiers:
-        if "identifier_exact" not in trace.mode:
-            trace.mode = f"{trace.mode}+identifier_exact"
-        for term in exact_identifiers:
-            ref = f"identifier:{term}"
-            if ref not in trace.exact_refs:
-                trace.exact_refs.append(ref)
-    chunks, exact_norm_refs = _promote_explicit_norm_reference_matches(chunks, question)
-    _record_exact_norm_refs(trace, exact_norm_refs)
-    if not exact_terms and not exact_norm_refs and any(token in question.casefold() for token in ("cad", "bim", "dwg", "dxf", "rvt", "ifc", "атм", "гсв")):
-        chunks, source_name_terms = _promote_source_name_matches(chunks, question)
-        if source_name_terms and "source_name_boost" not in trace.mode:
-            trace.mode = f"{trace.mode}+source_name_boost"
+    exact_terms, exact_norm_refs = [], []
+    if policy.exact_promotions:
+        chunks, exact_terms = _promote_exact_source_matches(chunks, question)
+        if exact_terms:
+            if "source_exact" not in trace.mode:
+                trace.mode = f"{trace.mode}+source_exact"
+            for term in exact_terms:
+                ref = f"source:{term}"
+                if ref not in trace.exact_refs:
+                    trace.exact_refs.append(ref)
+        chunks, exact_identifiers = _promote_exact_identifier_matches(chunks, question)
+        if exact_identifiers:
+            if "identifier_exact" not in trace.mode:
+                trace.mode = f"{trace.mode}+identifier_exact"
+            for term in exact_identifiers:
+                ref = f"identifier:{term}"
+                if ref not in trace.exact_refs:
+                    trace.exact_refs.append(ref)
+        chunks, exact_norm_refs = _promote_explicit_norm_reference_matches(chunks, question)
+        _record_exact_norm_refs(trace, exact_norm_refs)
+        if not exact_terms and not exact_norm_refs and any(token in question.casefold() for token in ("cad", "bim", "dwg", "dxf", "rvt", "ifc", "атм", "гсв")):
+            chunks, source_name_terms = _promote_source_name_matches(chunks, question)
+            if source_name_terms and "source_name_boost" not in trace.mode:
+                trace.mode = f"{trace.mode}+source_name_boost"
     # ADR-12 (Ц9): подъём ТАБЛИЧНЫХ ПРИЛОЖЕНИЙ норм. Если узлы-документы известны
     # (doc_filter из стадии-1) и запрос «табличный» (перечень/приложение/категория
     # помещений) — аддитивно подмешиваем pipe-table чанки ЭТИХ узлов в пул, чтобы
     # реранк поднял приложение (эмбеддинг строки таблицы ≠ запрос → плоско тонет).
     # Пусто/нет интента/нет узлов → no-op, плоский пул нетронут.
     table_appendix_chunks: list[Any] = []
-    if effective_doc_filter:
+    if effective_doc_filter and policy.table_appendix:
         try:
             from proxy.services.table_appendix_service import (
                 fetch_table_appendix_chunks,
@@ -976,7 +989,7 @@ async def retrieve_chat_chunks(
         )
     quality = evaluate_retrieval_quality(question=question, chunks=chunks, trace=trace, kot=kot)
 
-    if return_trace and quality.status == "weak":
+    if return_trace and quality.status == "weak" and policy.weak_retry:
         retry_query = expanded_quality_query(question, kot)
         retry_top_k = (
             merged_top_k
@@ -1002,6 +1015,8 @@ async def retrieve_chat_chunks(
                     limit=retry_top_k,
                     doc_filter=effective_doc_filter or None,
                 )
+                if retry_trace.lexical_count:
+                    retry_chunks = await canonicalize_lexical_hits(retry_chunks, rag_backend, dataset_ids, effective_doc_filter)
                 retry_trace.mode = (
                     f"qdrant_native_{retry_trace.mode}"
                     if retry_trace.lexical_count
@@ -1059,6 +1074,8 @@ async def retrieve_chat_chunks(
                 if retry_quality.status != "weak" or len(retry_chunks) >= len(chunks):
                     chunks, trace, quality = retry_chunks, retry_trace, retry_quality
             except Exception as retry_error:  # noqa: BLE001
+                if isinstance(retry_error, EmbeddingContractError):
+                    return blocked_result(str(retry_error))
                 logger.warning("[RETR] weak-query native retry skipped: %s", retry_error)
                 trace.retry = {
                     "status": "error",
@@ -1087,7 +1104,7 @@ async def retrieve_chat_chunks(
     )
     exact_early_exit = bool(advanced_policy["execution"]["exact_early_exit"])
     colbert_should_run = (
-        colbert_readiness["ready"]
+        policy.colbert and colbert_readiness["ready"]
         and len(chunks) > 1
         and hasattr(rag_backend, "rerank_colbert")
         and not (colbert_mode == "adaptive" and exact_early_exit and (exact_terms or exact_norm_refs))
@@ -1227,23 +1244,24 @@ async def retrieve_chat_chunks(
                 if idx not in seen:
                     reordered.append(chunk)
             chunks = reordered
-            chunks, exact_terms = _promote_exact_source_matches(chunks, question)
-            if exact_terms and "source_exact_guard" not in trace.mode:
-                trace.mode = f"{trace.mode}+source_exact_guard"
-            chunks, exact_identifiers = _promote_exact_identifier_matches(chunks, question)
-            if exact_identifiers:
-                if "identifier_exact_guard" not in trace.mode:
-                    trace.mode = f"{trace.mode}+identifier_exact_guard"
-                for term in exact_identifiers:
-                    ref = f"identifier:{term}"
-                    if ref not in trace.exact_refs:
-                        trace.exact_refs.append(ref)
-            chunks, exact_norm_refs = _promote_explicit_norm_reference_matches(chunks, question)
-            _record_exact_norm_refs(trace, exact_norm_refs)
-            if not exact_terms and not exact_norm_refs and any(token in question.casefold() for token in ("cad", "bim", "dwg", "dxf", "rvt", "ifc", "атм", "гсв")):
-                chunks, source_name_terms = _promote_source_name_matches(chunks, question)
-                if source_name_terms and "source_name_boost" not in trace.mode:
-                    trace.mode = f"{trace.mode}+source_name_boost"
+            if policy.exact_promotions:
+                chunks, exact_terms = _promote_exact_source_matches(chunks, question)
+                if exact_terms and "source_exact_guard" not in trace.mode:
+                    trace.mode = f"{trace.mode}+source_exact_guard"
+                chunks, exact_identifiers = _promote_exact_identifier_matches(chunks, question)
+                if exact_identifiers:
+                    if "identifier_exact_guard" not in trace.mode:
+                        trace.mode = f"{trace.mode}+identifier_exact_guard"
+                    for term in exact_identifiers:
+                        ref = f"identifier:{term}"
+                        if ref not in trace.exact_refs:
+                            trace.exact_refs.append(ref)
+                chunks, exact_norm_refs = _promote_explicit_norm_reference_matches(chunks, question)
+                _record_exact_norm_refs(trace, exact_norm_refs)
+                if not exact_terms and not exact_norm_refs and any(token in question.casefold() for token in ("cad", "bim", "dwg", "dxf", "rvt", "ifc", "атм", "гсв")):
+                    chunks, source_name_terms = _promote_source_name_matches(chunks, question)
+                    if source_name_terms and "source_name_boost" not in trace.mode:
+                        trace.mode = f"{trace.mode}+source_name_boost"
             trace.mode = f"{trace.mode}+rerank"
             trace.rerank = {
                 "status": "applied",
@@ -1281,13 +1299,14 @@ async def retrieve_chat_chunks(
         except Exception as _g_err:  # noqa: BLE001 — best-effort
             logger.warning("[TABLE_APPENDIX] guarantee fallback: %s", _g_err)
 
-    chunks, ordinal_promoted = _promote_first_ordinal_chunks(
-        chunks,
-        question,
-        doc_filter=effective_doc_filter or None,
-    )
-    if ordinal_promoted and "first_ordinal_guard" not in trace.mode:
-        trace.mode = f"{trace.mode}+first_ordinal_guard"
+    if policy.exact_promotions:
+        chunks, ordinal_promoted = _promote_first_ordinal_chunks(
+            chunks,
+            question,
+            doc_filter=effective_doc_filter or None,
+        )
+        if ordinal_promoted and "first_ordinal_guard" not in trace.mode:
+            trace.mode = f"{trace.mode}+first_ordinal_guard"
 
     # Real parent reads belong to the bounded chat context stage, after ranking.
     trace.parent_hydration = {"schema": "les.chat-section-context.v1", "status": "deferred_to_chat"}

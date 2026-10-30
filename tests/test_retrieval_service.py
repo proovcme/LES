@@ -36,6 +36,17 @@ class FakeBackend:
         self.calls = []
         self.doc_filters = []
         self.collection_name = "test_collection"
+        self.aclient = SimpleNamespace(retrieve=self._retrieve_lexical_fixture)
+
+    async def _retrieve_lexical_fixture(self, collection_name, ids, **kwargs):
+        # The production boundary resolves FTS IDs back to current Qdrant payloads.
+        # This fake uses its explicit test FTS fixture as the canonical record.
+        with LexicalIndex().connect() as conn:
+            rows = conn.execute('SELECT * FROM lexical_chunks WHERE collection=?', (collection_name,)).fetchall()
+        return [SimpleNamespace(id=row['point_id'], payload={
+            'text': row['text'], 'dataset_id': row['dataset_id'], 'file_name': row['doc_name'],
+            'doc_id': row['doc_id'], 'parent_id': row['parent_id'], 'chunk_ord': row['chunk_ord'],
+        }) for row in rows if row['point_id'] in ids]
 
     async def list_datasets(self):
         return [

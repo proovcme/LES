@@ -1,0 +1,618 @@
+{
+  "schema": "les.rag-architecture-764.v1",
+  "date": "2026-10-30",
+  "baseline": "d9e27f0",
+  "scope": "exploratory retrieval and production packet packing; no independent domain answer-quality acceptance",
+  "domain": {
+    "current/rrf=2": {
+      "cases": 40,
+      "errors": 0,
+      "answerable": 32,
+      "unanswerable": 8,
+      "unanswerable_good_search": 8,
+      "semantic_accuracy": null,
+      "semantic_accuracy_reason": "No generator or judge called",
+      "search": {
+        "recall5": 0.5,
+        "recall10": 0.96875,
+        "mrr": 0.45693204365079365,
+        "complete_support": 1
+      },
+      "model_packet": {
+        "recall5": 0.5,
+        "recall10": 0.96875,
+        "mrr": 0.45432787698412697,
+        "complete_support": 0.96875
+      },
+      "search_ms": {
+        "p50": 156.07604995602742,
+        "p95": 181.3169899629429
+      },
+      "context_ms": {
+        "p50": 43.001300015021116,
+        "p95": 48.02571000182069
+      },
+      "context_tokens": {
+        "p50": 6170.0,
+        "p95": 6232.25
+      },
+      "python_rss_bytes": {
+        "p50": 207652864.0,
+        "p95": 216463155.2
+      }
+    },
+    "minimal/rrf=2": {
+      "cases": 40,
+      "errors": 0,
+      "answerable": 32,
+      "unanswerable": 8,
+      "unanswerable_good_search": 8,
+      "semantic_accuracy": null,
+      "semantic_accuracy_reason": "No generator or judge called",
+      "search": {
+        "recall5": 1.0,
+        "recall10": 1.0,
+        "mrr": 0.81875,
+        "complete_support": 1
+      },
+      "model_packet": {
+        "recall5": 1.0,
+        "recall10": 1.0,
+        "mrr": 0.81875,
+        "complete_support": 1
+      },
+      "search_ms": {
+        "p50": 116.67565000243485,
+        "p95": 132.2195450484287
+      },
+      "context_ms": {
+        "p50": 42.73595003178343,
+        "p95": 48.25133002595975
+      },
+      "context_tokens": {
+        "p50": 6171.5,
+        "p95": 6230.65
+      },
+      "python_rss_bytes": {
+        "p50": 206098432.0,
+        "p95": 215027097.6
+      }
+    },
+    "hierarchy/rrf=2": {
+      "cases": 40,
+      "errors": 0,
+      "answerable": 32,
+      "unanswerable": 8,
+      "unanswerable_good_search": 8,
+      "semantic_accuracy": null,
+      "semantic_accuracy_reason": "No generator or judge called",
+      "search": {
+        "recall5": 0.3125,
+        "recall10": 0.3125,
+        "mrr": 0.29951486686166545,
+        "complete_support": 1
+      },
+      "model_packet": {
+        "recall5": 0.3125,
+        "recall10": 0.3125,
+        "mrr": 0.2760416666666667,
+        "complete_support": 0.3125
+      },
+      "search_ms": {
+        "p50": 144.125199993141,
+        "p95": 156.00674497545697
+      },
+      "context_ms": {
+        "p50": 43.680750008206815,
+        "p95": 48.045895039103925
+      },
+      "context_tokens": {
+        "p50": 6182.5,
+        "p95": 6251.55
+      },
+      "python_rss_bytes": {
+        "p50": 207861760.0,
+        "p95": 215579852.79999998
+      }
+    },
+    "without_lexical_safety/rrf=2": {
+      "cases": 40,
+      "errors": 0,
+      "answerable": 32,
+      "unanswerable": 8,
+      "unanswerable_good_search": 8,
+      "semantic_accuracy": null,
+      "semantic_accuracy_reason": "No generator or judge called",
+      "search": {
+        "recall5": 0.40625,
+        "recall10": 0.5,
+        "mrr": 0.35581441225065047,
+        "complete_support": 1
+      },
+      "model_packet": {
+        "recall5": 0.40625,
+        "recall10": 0.5,
+        "mrr": 0.3375,
+        "complete_support": 0.5
+      },
+      "search_ms": {
+        "p50": 141.2850500200875,
+        "p95": 154.06291992403567
+      },
+      "context_ms": {
+        "p50": 42.9569500265643,
+        "p95": 46.20146003435366
+      },
+      "context_tokens": {
+        "p50": 6180.5,
+        "p95": 6251.55
+      },
+      "python_rss_bytes": {
+        "p50": 208556032.0,
+        "p95": 215969587.2
+      }
+    },
+    "without_exact_promotions/rrf=2": {
+      "cases": 40,
+      "errors": 0,
+      "answerable": 32,
+      "unanswerable": 8,
+      "unanswerable_good_search": 8,
+      "semantic_accuracy": null,
+      "semantic_accuracy_reason": "No generator or judge called",
+      "search": {
+        "recall5": 0.40625,
+        "recall10": 0.875,
+        "mrr": 0.40364126461988303,
+        "complete_support": 1
+      },
+      "model_packet": {
+        "recall5": 0.40625,
+        "recall10": 0.875,
+        "mrr": 0.39455605158730156,
+        "complete_support": 0.875
+      },
+      "search_ms": {
+        "p50": 152.26694999728352,
+        "p95": 167.6072399888653
+      },
+      "context_ms": {
+        "p50": 44.01000001234934,
+        "p95": 48.86525007896125
+      },
+      "context_tokens": {
+        "p50": 6172.5,
+        "p95": 6237.5
+      },
+      "python_rss_bytes": {
+        "p50": 207689728.0,
+        "p95": 214072934.4
+      }
+    },
+    "without_retry/rrf=2": {
+      "cases": 40,
+      "errors": 0,
+      "answerable": 32,
+      "unanswerable": 8,
+      "unanswerable_good_search": 8,
+      "semantic_accuracy": null,
+      "semantic_accuracy_reason": "No generator or judge called",
+      "search": {
+        "recall5": 0.5,
+        "recall10": 0.96875,
+        "mrr": 0.45693204365079365,
+        "complete_support": 1
+      },
+      "model_packet": {
+        "recall5": 0.5,
+        "recall10": 0.96875,
+        "mrr": 0.45432787698412697,
+        "complete_support": 0.96875
+      },
+      "search_ms": {
+        "p50": 161.514800041914,
+        "p95": 173.15359509666447
+      },
+      "context_ms": {
+        "p50": 43.483100016601384,
+        "p95": 48.07153491419739
+      },
+      "context_tokens": {
+        "p50": 6170.0,
+        "p95": 6232.25
+      },
+      "python_rss_bytes": {
+        "p50": 207202304.0,
+        "p95": 214116761.6
+      }
+    },
+    "without_advanced/rrf=2": {
+      "cases": 40,
+      "errors": 0,
+      "answerable": 32,
+      "unanswerable": 8,
+      "unanswerable_good_search": 8,
+      "semantic_accuracy": null,
+      "semantic_accuracy_reason": "No generator or judge called",
+      "search": {
+        "recall5": 0.5,
+        "recall10": 0.96875,
+        "mrr": 0.45693204365079365,
+        "complete_support": 1
+      },
+      "model_packet": {
+        "recall5": 0.5,
+        "recall10": 0.96875,
+        "mrr": 0.45432787698412697,
+        "complete_support": 0.96875
+      },
+      "search_ms": {
+        "p50": 158.00450003007427,
+        "p95": 175.90606004814617
+      },
+      "context_ms": {
+        "p50": 43.57880004681647,
+        "p95": 48.25261993100867
+      },
+      "context_tokens": {
+        "p50": 6170.0,
+        "p95": 6232.25
+      },
+      "python_rss_bytes": {
+        "p50": 208519168.0,
+        "p95": 216026521.6
+      }
+    }
+  },
+  "synthetic": {
+    "current/rrf=2": {
+      "cases": 100,
+      "errors": 0,
+      "answerable": 80,
+      "unanswerable": 20,
+      "unanswerable_good_search": 19,
+      "semantic_accuracy": null,
+      "semantic_accuracy_reason": "No generator or judge called",
+      "search": {
+        "recall5": 0.9875,
+        "recall10": 1.0,
+        "mrr": 0.9601190476190476,
+        "complete_support": 1
+      },
+      "model_packet": {
+        "recall5": 0.9875,
+        "recall10": 1.0,
+        "mrr": 0.9601190476190476,
+        "complete_support": 1
+      },
+      "search_ms": {
+        "p50": 96.57690004678443,
+        "p95": 130.04242504248393
+      },
+      "context_ms": {
+        "p50": 22.025149955879897,
+        "p95": 25.716969976201653
+      },
+      "context_tokens": {
+        "p50": 2859.0,
+        "p95": 4859.6
+      },
+      "python_rss_bytes": {
+        "p50": 189335552.0,
+        "p95": 192013312.0
+      }
+    },
+    "minimal/rrf=2": {
+      "cases": 100,
+      "errors": 0,
+      "answerable": 80,
+      "unanswerable": 20,
+      "unanswerable_good_search": 19,
+      "semantic_accuracy": null,
+      "semantic_accuracy_reason": "No generator or judge called",
+      "search": {
+        "recall5": 1.0,
+        "recall10": 1.0,
+        "mrr": 0.9625,
+        "complete_support": 1
+      },
+      "model_packet": {
+        "recall5": 1.0,
+        "recall10": 1.0,
+        "mrr": 0.9625,
+        "complete_support": 1
+      },
+      "search_ms": {
+        "p50": 79.19540000148118,
+        "p95": 93.53342003887519
+      },
+      "context_ms": {
+        "p50": 21.493549982551485,
+        "p95": 24.92657999973744
+      },
+      "context_tokens": {
+        "p50": 2854.0,
+        "p95": 4842.2
+      },
+      "python_rss_bytes": {
+        "p50": 189374464.0,
+        "p95": 192727859.2
+      }
+    }
+  },
+  "rrf_sweep": {
+    "minimal/rrf=2": {
+      "cases": 40,
+      "errors": 0,
+      "answerable": 32,
+      "unanswerable": 8,
+      "unanswerable_good_search": 8,
+      "semantic_accuracy": null,
+      "semantic_accuracy_reason": "No generator or judge called",
+      "search": {
+        "recall5": 1.0,
+        "recall10": 1.0,
+        "mrr": 0.81875,
+        "complete_support": 1
+      },
+      "model_packet": {
+        "recall5": 1.0,
+        "recall10": 1.0,
+        "mrr": 0.81875,
+        "complete_support": 1
+      },
+      "search_ms": {
+        "p50": 120.07224996341392,
+        "p95": 134.49609497911297
+      },
+      "context_ms": {
+        "p50": 42.184150021057576,
+        "p95": 46.93698998889886
+      },
+      "context_tokens": {
+        "p50": 6160.5,
+        "p95": 6240.0
+      }
+    },
+    "minimal/rrf=20": {
+      "cases": 40,
+      "errors": 0,
+      "answerable": 32,
+      "unanswerable": 8,
+      "unanswerable_good_search": 8,
+      "semantic_accuracy": null,
+      "semantic_accuracy_reason": "No generator or judge called",
+      "search": {
+        "recall5": 1.0,
+        "recall10": 1.0,
+        "mrr": 0.8307291666666666,
+        "complete_support": 1
+      },
+      "model_packet": {
+        "recall5": 1.0,
+        "recall10": 1.0,
+        "mrr": 0.8307291666666666,
+        "complete_support": 1
+      },
+      "search_ms": {
+        "p50": 115.12140004197136,
+        "p95": 131.387560069561
+      },
+      "context_ms": {
+        "p50": 41.77635000087321,
+        "p95": 45.42874506441876
+      },
+      "context_tokens": {
+        "p50": 6157.5,
+        "p95": 6227.35
+      }
+    },
+    "minimal/rrf=60": {
+      "cases": 40,
+      "errors": 0,
+      "answerable": 32,
+      "unanswerable": 8,
+      "unanswerable_good_search": 8,
+      "semantic_accuracy": null,
+      "semantic_accuracy_reason": "No generator or judge called",
+      "search": {
+        "recall5": 0.96875,
+        "recall10": 1.0,
+        "mrr": 0.8255208333333334,
+        "complete_support": 1
+      },
+      "model_packet": {
+        "recall5": 0.96875,
+        "recall10": 1.0,
+        "mrr": 0.8255208333333334,
+        "complete_support": 1
+      },
+      "search_ms": {
+        "p50": 113.6529499781318,
+        "p95": 137.31249003903937
+      },
+      "context_ms": {
+        "p50": 41.27375007374212,
+        "p95": 45.5695649900008
+      },
+      "context_tokens": {
+        "p50": 6165.5,
+        "p95": 6219.4
+      }
+    },
+    "hierarchy/rrf=2": {
+      "cases": 40,
+      "errors": 0,
+      "answerable": 32,
+      "unanswerable": 8,
+      "unanswerable_good_search": 8,
+      "semantic_accuracy": null,
+      "semantic_accuracy_reason": "No generator or judge called",
+      "search": {
+        "recall5": 0.3125,
+        "recall10": 0.3125,
+        "mrr": 0.29951486686166545,
+        "complete_support": 1
+      },
+      "model_packet": {
+        "recall5": 0.3125,
+        "recall10": 0.3125,
+        "mrr": 0.2760416666666667,
+        "complete_support": 0.3125
+      },
+      "search_ms": {
+        "p50": 143.5148500604555,
+        "p95": 162.17057998292148
+      },
+      "context_ms": {
+        "p50": 40.72350001661107,
+        "p95": 46.6258849890437
+      },
+      "context_tokens": {
+        "p50": 6175.5,
+        "p95": 6248.9
+      }
+    },
+    "hierarchy/rrf=20": {
+      "cases": 40,
+      "errors": 0,
+      "answerable": 32,
+      "unanswerable": 8,
+      "unanswerable_good_search": 8,
+      "semantic_accuracy": null,
+      "semantic_accuracy_reason": "No generator or judge called",
+      "search": {
+        "recall5": 0.3125,
+        "recall10": 0.3125,
+        "mrr": 0.3047379959604184,
+        "complete_support": 1
+      },
+      "model_packet": {
+        "recall5": 0.3125,
+        "recall10": 0.3125,
+        "mrr": 0.28125,
+        "complete_support": 0.3125
+      },
+      "search_ms": {
+        "p50": 142.36014994094148,
+        "p95": 160.6340249883942
+      },
+      "context_ms": {
+        "p50": 41.687850025482476,
+        "p95": 45.99111997522414
+      },
+      "context_tokens": {
+        "p50": 6180.5,
+        "p95": 6247.15
+      }
+    },
+    "hierarchy/rrf=60": {
+      "cases": 40,
+      "errors": 0,
+      "answerable": 32,
+      "unanswerable": 8,
+      "unanswerable_good_search": 8,
+      "semantic_accuracy": null,
+      "semantic_accuracy_reason": "No generator or judge called",
+      "search": {
+        "recall5": 0.3125,
+        "recall10": 0.3125,
+        "mrr": 0.2994883266482491,
+        "complete_support": 1
+      },
+      "model_packet": {
+        "recall5": 0.3125,
+        "recall10": 0.3125,
+        "mrr": 0.2760416666666667,
+        "complete_support": 0.3125
+      },
+      "search_ms": {
+        "p50": 140.32015000702813,
+        "p95": 158.95644496195018
+      },
+      "context_ms": {
+        "p50": 39.85929995542392,
+        "p95": 45.314020093064755
+      },
+      "context_tokens": {
+        "p50": 6188.5,
+        "p95": 6251.45
+      }
+    }
+  },
+  "judges": {
+    "qwen3.5:2b": {
+      "metrics": {
+        "cases": 24,
+        "valid": 24,
+        "errors": 0,
+        "correct": 18,
+        "accuracy": 0.75,
+        "unsupported_cases": 16,
+        "false_accepts": 1,
+        "false_accept_rate_lower": 0.0625,
+        "false_accept_rate_upper": 0.0625,
+        "confusion": {
+          "supported": {
+            "supported": 5,
+            "contradicted": 3,
+            "not_found": 0
+          },
+          "contradicted": {
+            "supported": 1,
+            "contradicted": 7,
+            "not_found": 0
+          },
+          "not_found": {
+            "supported": 0,
+            "contradicted": 2,
+            "not_found": 6
+          }
+        }
+      },
+      "latency_median_ms": 169.69215002609417
+    },
+    "gemma2:2b": {
+      "metrics": {
+        "cases": 24,
+        "valid": 24,
+        "errors": 0,
+        "correct": 11,
+        "accuracy": 0.4583333333333333,
+        "unsupported_cases": 16,
+        "false_accepts": 0,
+        "false_accept_rate_lower": 0.0,
+        "false_accept_rate_upper": 0.0,
+        "confusion": {
+          "supported": {
+            "supported": 2,
+            "contradicted": 6,
+            "not_found": 0
+          },
+          "contradicted": {
+            "supported": 0,
+            "contradicted": 8,
+            "not_found": 0
+          },
+          "not_found": {
+            "supported": 0,
+            "contradicted": 7,
+            "not_found": 1
+          }
+        }
+      },
+      "latency_median_ms": 190.7037000055425
+    }
+  },
+  "answer_trial": {
+    "model": "qwen3.5:9b",
+    "nonempty_answers": 6,
+    "completed_answers": 2,
+    "output_limited_answers": 4,
+    "output_limit": 256,
+    "blocked_next_request": true,
+    "memory_free_gb_at_block": 3.8,
+    "required_memory_free_gb": 4.0,
+    "semantic_accuracy": null
+  }
+}

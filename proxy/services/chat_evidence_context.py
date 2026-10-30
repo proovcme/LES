@@ -8,6 +8,7 @@ from typing import Any, Sequence
 from proxy.services.context_governor_service import ContextCandidate, ContextGovernor, ContextKind, ContextObject, ContextPacket
 from proxy.services.prompt_registry_service import build_mode_system_prompt
 from proxy.services.model_execution_preset_service import ModelExecutionPreset
+from proxy.services.section_coverage_service import coverage_reservation, finalize_coverage
 
 
 
@@ -89,6 +90,9 @@ def govern_inference_messages(
         ContextCandidate(ContextKind.TOOL_EXCHANGE, _context_objects("exchange", tool_exchange)),
         ContextCandidate(ContextKind.DIALOGUE, _context_objects("dialogue", dialogue), required=bool(dialogue)),
     ]
+    reservation = coverage_reservation(source_map)
+    if reservation is not None:
+        candidates.append(ContextCandidate(ContextKind.REQUEST, (reservation,), required=True))
     packet = ContextGovernor(preset).pack(candidates)
     # A label without its evidence must not be advertised to the model either.
     # EVIDENCE precedes optional SOURCE_MAP, so this second pass cannot evict
@@ -104,6 +108,8 @@ def govern_inference_messages(
         for candidate in candidates
     ]
     packet = ContextGovernor(preset).pack(candidates)
+    if reservation is not None:
+        packet = finalize_coverage(packet, source_map, model_visible_source_map(packet, source_map))
     return packet.as_messages(request_last=True), packet
 
 
