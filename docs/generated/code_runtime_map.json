@@ -75,6 +75,7 @@
         "backend/document_catalog.py",
         "backend/document_router.py",
         "backend/embedding_client.py",
+        "backend/external_registration.py",
         "backend/external_scan.py",
         "backend/file_fingerprint.py",
         "backend/http_client_policy.py",
@@ -128,6 +129,7 @@
         "backend/reranker.py",
         "backend/retrieval_candidate.py",
         "backend/rules_extractor.py",
+        "backend/runtime_events.py",
         "backend/runtime_paths.py",
         "backend/smart_index.py",
         "backend/sparse_index.py",
@@ -265,6 +267,7 @@
         "tests/test_light_collection_safety.py",
         "tests/test_light_document_review.py",
         "tests/test_light_grounding_760.py",
+        "tests/test_light_import_responsiveness.py",
         "tests/test_light_ingestion_races.py"
       ],
       "lines": 1016,
@@ -328,6 +331,19 @@
         "proxy/services/openai_compatible_transport_service.py"
       ],
       "path": "backend/embedding_client.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "backend/qdrant_adapter.py"
+      ],
+      "lines": 19,
+      "module": "backend.external_registration",
+      "outbound": [
+        "backend/__init__.py"
+      ],
+      "path": "backend/external_registration.py",
       "status": "PRODUCT_REACHABLE",
       "windows_runtime_explicit": false
     },
@@ -653,7 +669,7 @@
         "tests/test_light_health_monitor.py",
         "tools/light_launcher.py"
       ],
-      "lines": 32,
+      "lines": 34,
       "module": "backend.light_health_monitor",
       "outbound": [
         "backend/__init__.py"
@@ -1058,6 +1074,7 @@
         "tests/test_chunking_w2.py",
         "tests/test_datasets_router.py",
         "tests/test_light_conversation_context.py",
+        "tests/test_light_import_responsiveness.py",
         "tests/test_light_rerank_audit.py",
         "tests/test_mail_registry_service.py",
         "tests/test_model_connection_embeddings_integration.py",
@@ -1067,10 +1084,11 @@
         "tools/build_rag_contract_sibling.py",
         "tools/rag_rrf_readiness.py"
       ],
-      "lines": 268,
+      "lines": 248,
       "module": "backend.qdrant_adapter",
       "outbound": [
         "backend/__init__.py",
+        "backend/external_registration.py",
         "backend/product_edition.py",
         "backend/qdrant_collection.py",
         "backend/qdrant_ingestion.py",
@@ -1200,6 +1218,7 @@
         "tests/test_light_audit_regressions.py",
         "tests/test_light_collection_safety.py",
         "tests/test_light_grounding_760.py",
+        "tests/test_light_import_responsiveness.py",
         "tests/test_light_index_recovery.py",
         "tests/test_light_ingestion_races.py",
         "tests/test_light_rerank_audit.py",
@@ -1417,6 +1436,20 @@
       ],
       "path": "backend/rules_extractor.py",
       "status": "DORMANT_CANDIDATE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "tests/test_light_lifecycle.py",
+        "tools/light_launcher.py"
+      ],
+      "lines": 34,
+      "module": "backend.runtime_events",
+      "outbound": [
+        "backend/__init__.py"
+      ],
+      "path": "backend/runtime_events.py",
+      "status": "TEST_OR_TOOL_ONLY",
       "windows_runtime_explicit": false
     },
     {
@@ -2511,9 +2544,10 @@
       "inbound": [
         "proxy/routers/dataset_cloud.py",
         "proxy/routers/datasets.py",
-        "tests/test_datasets_router.py"
+        "tests/test_datasets_router.py",
+        "tests/test_light_import_responsiveness.py"
       ],
-      "lines": 617,
+      "lines": 620,
       "module": "proxy.routers.dataset_external",
       "outbound": [
         "backend/external_scan.py",
@@ -4681,6 +4715,7 @@
         "proxy/routers/datasets.py",
         "proxy/services/dataset_parse_service.py",
         "tests/test_datasets_router.py",
+        "tests/test_light_import_responsiveness.py",
         "tests/test_mail_router.py"
       ],
       "lines": 71,
@@ -5376,7 +5411,8 @@
       "inbound": [
         "proxy/app.py",
         "proxy/services/dataset_runtime.py",
-        "tests/test_light_core_jobs_files.py"
+        "tests/test_light_core_jobs_files.py",
+        "tests/test_light_import_responsiveness.py"
       ],
       "lines": 179,
       "module": "proxy.services.job_service",
@@ -9985,6 +10021,22 @@
     },
     {
       "inbound": [],
+      "lines": 115,
+      "module": "tests.test_light_import_responsiveness",
+      "outbound": [
+        "backend/document_catalog.py",
+        "backend/qdrant_adapter.py",
+        "backend/qdrant_support.py",
+        "proxy/routers/dataset_external.py",
+        "proxy/services/dataset_runtime.py",
+        "proxy/services/job_service.py"
+      ],
+      "path": "tests/test_light_import_responsiveness.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
       "lines": 251,
       "module": "tests.test_light_index_recovery",
       "outbound": [
@@ -10082,6 +10134,18 @@
         "sovushka/components/chat_failure_notice.py"
       ],
       "path": "tests/test_light_lexical_v2.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
+      "lines": 52,
+      "module": "tests.test_light_lifecycle",
+      "outbound": [
+        "backend/runtime_events.py",
+        "tools/light_launcher.py"
+      ],
+      "path": "tests/test_light_lifecycle.py",
       "status": "TEST_OR_TOOL_ONLY",
       "windows_runtime_explicit": false
     },
@@ -11599,16 +11663,18 @@
       "inbound": [
         "tests/test_light_frontend_assets.py",
         "tests/test_light_launcher.py",
+        "tests/test_light_lifecycle.py",
         "tests/test_light_macos.py",
         "tools/light_model_journey.py",
         "tools/light_state_journey.py"
       ],
-      "lines": 256,
+      "lines": 310,
       "module": "tools.light_launcher",
       "outbound": [
         "backend/light_health_monitor.py",
         "backend/light_processes.py",
         "backend/light_qdrant_runtime.py",
+        "backend/runtime_events.py",
         "tools/__init__.py"
       ],
       "path": "tools/light_launcher.py",
@@ -13634,12 +13700,12 @@
   "summary": {
     "dormant_candidates": 35,
     "parse_warnings": 0,
-    "product_reachable": 389,
+    "product_reachable": 390,
     "registered_api_routes": 294,
     "runtime_support": 5,
-    "test_or_tool_only": 180,
-    "tracked_python_files": 609,
-    "tracked_python_lines": 161907
+    "test_or_tool_only": 183,
+    "tracked_python_files": 613,
+    "tracked_python_lines": 162166
   },
   "warnings": []
 }

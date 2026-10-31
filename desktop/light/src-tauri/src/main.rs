@@ -1,14 +1,17 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::{fs, io::{Read, Write}, net::{TcpStream, SocketAddr}, path::PathBuf,
-    process::{Child, Command, Stdio}, sync::Mutex, thread, time::{Duration, Instant}};
+    process::{Child, Command, Stdio}, sync::{Mutex, atomic::{AtomicBool, Ordering}}, thread, time::{Duration, Instant}};
 use tauri::Manager;
 use tauri::{menu::{Menu, MenuItem}, tray::TrayIconBuilder};
 use serde_json::{json, Value};
 mod close_guard;
+mod lifecycle;
+mod supervisor;
 #[cfg(windows)] use std::os::windows::process::CommandExt;
 
-struct Runtime { directory: PathBuf, state: PathBuf, child: Mutex<Option<Child>>, close: Mutex<close_guard::CloseGuard> }
+struct Runtime { directory: PathBuf, state: PathBuf, child: Mutex<Option<Child>>, close: Mutex<close_guard::CloseGuard>,
+                 stopping: AtomicBool, launch_id: Option<String> }
 
 fn read_status(runtime: &Runtime) -> Value {
     let path = runtime.state.join("launcher-status.json");
@@ -44,15 +47,20 @@ fn instance_ready(status: &Value) -> bool {
     serde_json::from_str::<Value>(body).ok().and_then(|v| v.get("instance_id").and_then(Value::as_str).map(|s| s == expected)).unwrap_or(false)
 }
 
-fn stop_child(runtime: &Runtime) {
+fn stop_child(runtime: &Runtime, reason: &str) {
     if let Ok(mut guard) = runtime.child.lock() {
         if let Some(mut child) = guard.take() {
+            lifecycle::event(&runtime.state,"desktop","launcher_stop_requested",json!({"child_pid":child.id(),"reason":reason}));
             if let Some(mut input) = child.stdin.take() { let _ = input.write_all(b"stop\n"); }
             let deadline = Instant::now() + Duration::from_secs(12);
             while Instant::now() < deadline {
-                if child.try_wait().ok().flatten().is_some() { return; }
+                if let Some(code) = child.try_wait().ok().flatten() {
+                    lifecycle::event(&runtime.state,"desktop","launcher_stopped",json!({"child_pid":child.id(),"exit_code":code.code(),"reason":reason}));
+                    return;
+                }
                 thread::sleep(Duration::from_millis(100));
             }
+            lifecycle::event(&runtime.state,"desktop","launcher_forced_stop",json!({"child_pid":child.id(),"reason":"shutdown_timeout","requested_reason":reason}));
             let _ = child.kill(); // owned launcher; its Windows job stops its descendants
             let _ = child.wait();
         }
@@ -60,6 +68,9 @@ fn stop_child(runtime: &Runtime) {
 }
 
 fn start_child(runtime: &Runtime) -> Result<(), String> {
+    let mut owned = runtime.child.lock().map_err(|_| "Запуск занят")?;
+    if runtime.stopping.load(Ordering::SeqCst) { return Err("Приложение закрывается".into()); }
+    if owned.as_mut().is_some_and(|child| child.try_wait().ok().flatten().is_none()) { return Err("Компоненты уже запущены".into()); }
     let python = runtime.directory.join("python/python.exe");
     let root = runtime.directory.join("runtime");
     let launcher = root.join("tools/light_launcher.py");
@@ -73,9 +84,11 @@ fn start_child(runtime: &Runtime) -> Result<(), String> {
         .arg("--qdrant").arg(runtime.directory.join("native/qdrant/qdrant.exe")).arg("--parent-pipe")
         .current_dir(&runtime.state).stdin(Stdio::piped()).stdout(Stdio::from(output.try_clone().map_err(|e| e.to_string())?)).stderr(Stdio::from(output));
     if std::env::args().any(|arg| arg == "--svelte") { command.args(["--frontend", "svelte"]); }
+    if std::env::args().any(|arg| arg == "--read-only") { command.arg("--read-only"); }
     #[cfg(windows)] command.creation_flags(0x08000000);
     let child = command.spawn().map_err(|_| "Windows не смог запустить компоненты LES RAG. Проверьте защитное ПО или восстановите установку.")?;
-    *runtime.child.lock().map_err(|_| "Запуск занят")? = Some(child);
+    lifecycle::event(&runtime.state,"desktop","launcher_started",json!({"child_pid":child.id()}));
+    *owned = Some(child);
     Ok(())
 }
 
@@ -112,7 +125,7 @@ fn editor_close_result(window: tauri::WebviewWindow, runtime: tauri::State<Runti
 
 #[tauri::command]
 fn retry_start(runtime: tauri::State<Runtime>) -> Result<(), String> {
-    stop_child(&runtime);
+    stop_child(&runtime, "user_retry");
     start_child(&runtime)
 }
 
@@ -159,9 +172,27 @@ fn main() {
         None => { eprintln!("Windows не сообщил папку локальных данных пользователя"); return; }
     };
     if fs::create_dir_all(&state).is_err() { eprintln!("Нет доступа к папке данных LES RAG"); return; }
+    let panic_state=state.clone();
+    std::panic::set_hook(Box::new(move |info| {
+        lifecycle::event(&panic_state,"desktop","panic",json!({"reason":"rust_panic",
+            "location":info.location().map(|at| format!("{}:{}",at.file(),at.line()))}));
+    }));
+    #[cfg(windows)]
+    if !args.iter().any(|arg| arg == "--supervised-child") {
+        let executable = std::env::current_exe().expect("executable path");
+        if let Err(error) = supervisor::run(&executable, &state, &args) {
+            lifecycle::event(&state,"supervisor","startup_failed",json!({"reason":error}));
+            lifecycle::status(&state,"launcher-status.json",json!({"schema":"les.light-launcher.v1","phase":"error","message":error,"reason":"supervisor_startup_failed","updated_at":lifecycle::stamp()}));
+        }
+        return;
+    }
+    let launch_id = if args.iter().any(|arg| arg == "--supervised-child") {
+        match supervisor::child_handshake(&args) { Ok(id) => Some(id), Err(_) => return }
+    } else { None };
     let _ = fs::write(state.join("desktop-status.json"), json!({"phase":"opening_window"}).to_string());
     tauri::Builder::default()
-        .manage(Runtime { directory, state, child: Mutex::new(None), close: Mutex::new(close_guard::CloseGuard::default()) })
+        .manage(Runtime { directory, state, child: Mutex::new(None), close: Mutex::new(close_guard::CloseGuard::default()),
+                          stopping: AtomicBool::new(false), launch_id })
         .invoke_handler(tauri::generate_handler![startup_status, retry_start, open_browser, editor_ready, editor_close_result])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -222,15 +253,33 @@ fn main() {
             let initial_url = tauri::Url::parse("http://tauri.localhost/index.html")?;
             thread::spawn(move || {
                 let mut displayed = String::new();
+                let mut recovery = lifecycle::Recovery::default();
                 loop {
                     thread::sleep(Duration::from_millis(800));
                     let Some(window) = handle.get_webview_window("main") else { break; };
                     let runtime = handle.state::<Runtime>();
+                    if runtime.stopping.load(Ordering::SeqCst) { break; }
                     let mut status = read_status(&runtime);
-                    let exit = runtime.child.lock().ok().and_then(|mut guard| guard.as_mut().and_then(|child| child.try_wait().ok().flatten()));
-                    if exit.is_some_and(|code| code.code() != Some(10)) && status["phase"] != "error" {
-                        status = json!({"phase":"error","message":"Компонент запуска остановился. Повторите запуск; журнал доступен через значок LES RAG рядом с часами."});
-                        let _ = fs::write(runtime.state.join("launcher-status.json"), status.to_string());
+                    let exit = runtime.child.lock().ok().and_then(|mut guard| {
+                        let code = guard.as_mut()?.try_wait().ok().flatten()?;
+                        guard.take(); Some(code)
+                    });
+                    if let Some(code) = exit {
+                        lifecycle::event(&runtime.state,"desktop","launcher_exited",json!({"exit_code":code.code(),"reason":"unexpected_exit"}));
+                        let delay = if code.code() == Some(10) { None } else { recovery.next(Instant::now()) };
+                        if let Some(delay) = delay {
+                            lifecycle::status(&runtime.state,"launcher-status.json",json!({"schema":"les.light-launcher.v1","phase":"recovering","reason":"launcher_exit","exit_code":code.code(),"message":"Компонент запуска остановился. Восстанавливаю Лес…","updated_at":lifecycle::stamp()}));
+                            let _=window.navigate(initial_url.clone()); displayed.clear();
+                            thread::sleep(delay);
+                            if let Err(error) = start_child(&runtime) {
+                                lifecycle::event(&runtime.state,"desktop","launcher_restart_failed",json!({"reason":error}));
+                                lifecycle::status(&runtime.state,"launcher-status.json",json!({"schema":"les.light-launcher.v1","phase":"error","message":error,"updated_at":lifecycle::stamp()}));
+                            }
+                            continue;
+                        }
+                        status=json!({"schema":"les.light-launcher.v1","phase":"error","reason":if code.code()==Some(10) {"state_already_owned"} else {"recovery_limit"},"exit_code":code.code(),"message":"Автовосстановление приостановлено: повторные остановки или папка занята другим Лесом. Откройте журнал запуска.","updated_at":lifecycle::stamp()});
+                        lifecycle::status(&runtime.state,"launcher-status.json",status.clone());
+                        lifecycle::event(&runtime.state,"desktop","recovery_stopped",json!({"reason":status["reason"]}));
                     }
                     let id = status.get("instance_id").and_then(Value::as_str).unwrap_or("");
                     if status["phase"] == "ready" && id != displayed && instance_ready(&status) {
@@ -245,7 +294,11 @@ fn main() {
         })
         .build(tauri::generate_context!())
         .expect("LES RAG: не удалось открыть окно")
-        .run(|app, event| { if matches!(event, tauri::RunEvent::Exit) { stop_child(&app.state::<Runtime>()); } });
+        .run(|app, event| { if matches!(event, tauri::RunEvent::Exit) {
+            let runtime=app.state::<Runtime>(); runtime.stopping.store(true,Ordering::SeqCst);
+            if let Some(id)=&runtime.launch_id { supervisor::exit_intent(&runtime.state,id); }
+            stop_child(&runtime,"normal_exit");
+        } });
 }
 
 #[cfg(test)]

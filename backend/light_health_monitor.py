@@ -9,6 +9,7 @@ class HealthMonitor:
         self.next_probe = 0.0
         self.failures = {}
         self.reason = ''
+        self.details = {}
 
     def failed(self, api_url, ui_url, instance_id, qdrant_url, qdrant_key):
         now = self.clock()
@@ -26,6 +27,7 @@ class HealthMonitor:
                 except (httpx.HTTPError, ValueError):
                     healthy = False
                 self.failures[name] = 0 if healthy else self.failures.get(name, 0) + 1
+                self.details[name] = {'healthy': healthy, 'consecutive_failures': self.failures[name]}
         self.next_probe = self.clock() + self.interval
         stalled = [name for name, count in self.failures.items() if count >= self.failure_limit]
         self.reason = 'Не отвечает служба: ' + ', '.join(stalled) if stalled else ''

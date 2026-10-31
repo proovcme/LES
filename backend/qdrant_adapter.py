@@ -241,28 +241,8 @@ class QdrantLlamaIndexAdapter(QdrantCollection, QdrantIngestion, QdrantIntegrity
         производные (Parquet/_parquet). file_name — ключ дока (rel-путь под корнем),
         source_path — абсолютный путь, по которому _sync_parse прочитает файл.
         """
-        rel = support.Path(file_name)
-        if rel.is_absolute() or ".." in rel.parts:
-            raise ValueError(f"unsafe file_name: {file_name}")
-        # Каталог датасета нужен для производных (Parquet) и для прохода _sync_parse.
-        (self.content_dir / dataset_id).mkdir(parents=True, exist_ok=True)
-
-        src = support.Path(source_path)
-        stat = src.stat() if src.exists() else None
-        mtime = stat.st_mtime if stat else 0.0
-        size = stat.st_size if stat else 0
-
-        doc_id, _, needs_reindex = self.db.add_document(
-            dataset_id, rel.as_posix(), file_mtime=mtime, file_size=size, source_path=str(src),
-            **({"force_reindex": True} if force_reindex else {}),
-        )
-        try:
-            route = support.route_document(src)
-            if needs_reindex:
-                self.db.update_document_status(dataset_id, rel.as_posix(), "PENDING", 0, route=route)
-            else:
-                self.db.update_document_route(dataset_id, rel.as_posix(), route)
-        except Exception as error:
-            support.logger.warning("[EXT_DOC] classification skipped for %s: %s", rel.as_posix(), error)
-        return doc_id
+        from backend.external_registration import register
+        return await support.asyncio.to_thread(
+            register, self.db, self.content_dir, dataset_id, source_path, file_name,
+            force_reindex=force_reindex)
 

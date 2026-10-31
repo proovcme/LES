@@ -1,5 +1,10 @@
 # Модули LES RAG
 
+Импорт без чтения PDF/Office при регистрации: `backend/external_registration.py`.
+Причины остановки: `backend/runtime_events.py`; внешний Windows-наблюдатель и
+восстановление launcher: `desktop/light/src-tauri/src/supervisor.rs`, `lifecycle.rs`.
+[Контракт](modules/runtime-recovery.md), [приёмка 773](acceptance/runtime-recovery-773.md).
+
 Безопасный старт коллекции: `backend/collection_layout.py` (lease/exact count/
 сверка каталога). `execution_receipt_service.py` — состояние зафиксированных
 действий, `desktop/light/src-tauri/src/close_guard.rs` и frontend/native-close —
