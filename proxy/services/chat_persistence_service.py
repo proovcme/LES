@@ -55,23 +55,20 @@ def ensure_chat_history_schema(conn: sqlite3.Connection) -> None:
         """
     )
     cols = [r[1] for r in conn.execute("PRAGMA table_info(chat_history)").fetchall()]
+    migrate_success = 'success' not in cols
     if "session_id" not in cols:
         conn.execute("ALTER TABLE chat_history ADD COLUMN session_id TEXT DEFAULT NULL")
         cols.append("session_id")
     for name, ddl in CHAT_HISTORY_EXTRA_COLUMNS.items():
         if name not in cols:
             conn.execute(f"ALTER TABLE chat_history ADD COLUMN {name} {ddl}")
-    conn.execute(
-        """
-        UPDATE chat_history
-        SET success=1
-        WHERE COALESCE(success, 0)=0
-          AND crag_status IN ('VERIFIED', 'UNVALIDATED')
-          AND COALESCE(answer, '') <> ''
-          AND answer <> ?
-        """,
-        (SAFE_FALLBACK,),
-    )
+    if migrate_success:
+        conn.execute(
+            """UPDATE chat_history SET success=1
+            WHERE crag_status IN ('VERIFIED', 'UNVALIDATED')
+              AND COALESCE(answer, '') <> '' AND answer <> ?""",
+            (SAFE_FALLBACK,),
+        )
 
 
 def _json_text(value: Any) -> str:
@@ -120,6 +117,9 @@ def save_chat_history(
         quality = str(trace["quality"].get("status") or "")
     quality = quality or str(trace.get("quality_status") or "")
     success_value = _history_success(crag_status, answer) if success is None else int(bool(success))
+    from proxy.services.execution_receipt_service import execution_incomplete
+    if execution_incomplete(trace):
+        success_value = 0
     with sqlite3.connect(rag_meta_db_path()) as conn:
         ensure_chat_history_schema(conn)
         from proxy.services.chat_durability_service import write_history_row

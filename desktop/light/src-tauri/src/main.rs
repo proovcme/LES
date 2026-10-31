@@ -5,9 +5,10 @@ use std::{fs, io::{Read, Write}, net::{TcpStream, SocketAddr}, path::PathBuf,
 use tauri::Manager;
 use tauri::{menu::{Menu, MenuItem}, tray::TrayIconBuilder};
 use serde_json::{json, Value};
+mod close_guard;
 #[cfg(windows)] use std::os::windows::process::CommandExt;
 
-struct Runtime { directory: PathBuf, state: PathBuf, child: Mutex<Option<Child>> }
+struct Runtime { directory: PathBuf, state: PathBuf, child: Mutex<Option<Child>>, close: Mutex<close_guard::CloseGuard> }
 
 fn read_status(runtime: &Runtime) -> Value {
     let path = runtime.state.join("launcher-status.json");
@@ -21,7 +22,7 @@ fn read_status(runtime: &Runtime) -> Value {
 fn owned_url(status: &Value) -> Option<tauri::Url> {
     let url = tauri::Url::parse(status.get("ui_url")?.as_str()?).ok()?;
     if url.scheme() != "http" || url.host_str() != Some("127.0.0.1") || url.port().is_none()
-        || url.path() != "/classic" || !url.username().is_empty() || url.password().is_some()
+        || !matches!(url.path(), "/classic" | "/app/") || !url.username().is_empty() || url.password().is_some()
         || url.query().is_some() || url.fragment().is_some() { return None; }
     Some(url)
 }
@@ -33,7 +34,9 @@ fn instance_ready(status: &Value) -> bool {
     let Ok(mut socket) = TcpStream::connect_timeout(&address, Duration::from_millis(600)) else { return false; };
     let _ = socket.set_read_timeout(Some(Duration::from_secs(1)));
     let _ = socket.set_write_timeout(Some(Duration::from_secs(1)));
-    if socket.write_all(b"GET /healthz HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n").is_err() { return false; }
+    let probe = if url.path() == "/app/" { "/api/light/instance" } else { "/healthz" };
+    let request = format!("GET {probe} HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    if socket.write_all(request.as_bytes()).is_err() { return false; }
     let mut response = String::new();
     if socket.take(65536).read_to_string(&mut response).is_err() { return false; }
     let Some((headers, body)) = response.split_once("\r\n\r\n") else { return false; };
@@ -69,6 +72,7 @@ fn start_child(runtime: &Runtime) -> Result<(), String> {
     command.arg("-B").arg(launcher).args(["--root"]).arg(&root).arg("--state").arg(&runtime.state)
         .arg("--qdrant").arg(runtime.directory.join("native/qdrant/qdrant.exe")).arg("--parent-pipe")
         .current_dir(&runtime.state).stdin(Stdio::piped()).stdout(Stdio::from(output.try_clone().map_err(|e| e.to_string())?)).stderr(Stdio::from(output));
+    if std::env::args().any(|arg| arg == "--svelte") { command.args(["--frontend", "svelte"]); }
     #[cfg(windows)] command.creation_flags(0x08000000);
     let child = command.spawn().map_err(|_| "Windows не смог запустить компоненты LES RAG. Проверьте защитное ПО или восстановите установку.")?;
     *runtime.child.lock().map_err(|_| "Запуск занят")? = Some(child);
@@ -77,6 +81,34 @@ fn start_child(runtime: &Runtime) -> Result<(), String> {
 
 #[tauri::command]
 fn startup_status(runtime: tauri::State<Runtime>) -> Value { read_status(&runtime) }
+
+fn validate_editor(window: &tauri::WebviewWindow, runtime: &Runtime) -> Result<(), String> {
+    let actual = window.url().map_err(|_| "Не удалось проверить окно")?;
+    let status = read_status(runtime);
+    let expected = status.get("api_url").and_then(Value::as_str).and_then(close_guard::editor_url).ok_or("Приложение не готово")?;
+    if window.label() != "main" || !close_guard::owned_editor(&actual, &expected) {
+        return Err("Подтверждение разрешено только текущему чату Леса".into());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn editor_ready(window: tauri::WebviewWindow, runtime: tauri::State<Runtime>) -> Result<(), String> {
+    validate_editor(&window, &runtime)?;
+    runtime.close.lock().map_err(|_| "Закрытие занято")?.register();
+    let _ = fs::write(runtime.state.join("editor-close-status.json"), json!({"phase":"registered","instance_id":read_status(&runtime)["instance_id"]}).to_string());
+    Ok(())
+}
+
+#[tauri::command]
+fn editor_close_result(window: tauri::WebviewWindow, runtime: tauri::State<Runtime>, nonce: u64, saved: bool) -> Result<(), String> {
+    validate_editor(&window, &runtime)?;
+    let exit = runtime.close.lock().map_err(|_| "Закрытие занято")?.acknowledge(nonce, saved)?;
+    let _ = fs::write(runtime.state.join("editor-close-status.json"), json!({"phase":if saved {"saved"} else {"blocked"}}).to_string());
+    if !saved { let _ = window.set_title("LES RAG"); }
+    if exit { window.app_handle().exit(0); }
+    Ok(())
+}
 
 #[tauri::command]
 fn retry_start(runtime: tauri::State<Runtime>) -> Result<(), String> {
@@ -103,20 +135,59 @@ fn open_logs(runtime: &Runtime) {
     let _ = command.spawn();
 }
 
+fn explicit_state(args: &[String]) -> Result<Option<PathBuf>, String> {
+    let positions: Vec<usize> = args.iter().enumerate().filter_map(|(index, value)| (value == "--state").then_some(index)).collect();
+    if positions.len() > 1 { return Err("Папка состояния указана несколько раз".into()); }
+    let Some(index) = positions.first() else { return Ok(None); };
+    let path = args.get(index + 1).filter(|value| !value.starts_with("--")).map(PathBuf::from)
+        .ok_or("После --state нужен полный путь к отдельной папке состояния")?;
+    if !path.is_absolute() { return Err("Путь состояния должен быть абсолютным".into()); }
+    Ok(Some(path))
+}
+
 fn main() {
     let directory = std::env::current_exe().expect("executable path").parent().unwrap().to_path_buf();
-    let state = match std::env::var_os("LOCALAPPDATA") {
-        Some(base) => PathBuf::from(base).join("LES Light"),
+    // An explicit separate state makes candidate acceptance possible without
+    // opening or copying the user's documents, models or ongoing conversation.
+    let args: Vec<String> = std::env::args().collect();
+    let candidate_state = match explicit_state(&args) {
+        Ok(value) => value,
+        Err(message) => { eprintln!("{message}"); return; }
+    };
+    let state = match candidate_state.or_else(|| std::env::var_os("LOCALAPPDATA").map(|base| PathBuf::from(base).join("LES Light"))) {
+        Some(path) => path,
         None => { eprintln!("Windows не сообщил папку локальных данных пользователя"); return; }
     };
     if fs::create_dir_all(&state).is_err() { eprintln!("Нет доступа к папке данных LES RAG"); return; }
     let _ = fs::write(state.join("desktop-status.json"), json!({"phase":"opening_window"}).to_string());
     tauri::Builder::default()
-        .manage(Runtime { directory, state, child: Mutex::new(None) })
-        .invoke_handler(tauri::generate_handler![startup_status, retry_start, open_browser])
+        .manage(Runtime { directory, state, child: Mutex::new(None), close: Mutex::new(close_guard::CloseGuard::default()) })
+        .invoke_handler(tauri::generate_handler![startup_status, retry_start, open_browser, editor_ready, editor_close_result])
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let runtime = window.state::<Runtime>();
+                let nonce = runtime.close.lock().ok().and_then(|mut guard| guard.request());
+                if let Some(nonce) = nonce {
+                    api.prevent_close();
+                    let _ = fs::write(runtime.state.join("editor-close-status.json"), json!({"phase":"requested","nonce":nonce}).to_string());
+                    if let Some(webview) = window.app_handle().get_webview_window("main") {
+                        let _ = webview.set_title("Лес — сохраняю диалог…");
+                        let script = format!("window.dispatchEvent(new CustomEvent('les:close-request', {{detail:{{nonce:{nonce}}}}}))");
+                        if webview.eval(script).is_err() {
+                            let _ = webview.set_title("Лес — не удалось подтвердить сохранение");
+                            if let Ok(mut guard) = runtime.close.lock() { let _ = guard.acknowledge(nonce, false); }
+                        }
+                    }
+                }
+            }
+        })
         .on_page_load(|webview, payload| {
             let url = payload.url();
-            if payload.event() == tauri::webview::PageLoadEvent::Finished && url.host_str() == Some("127.0.0.1") && matches!(url.path(), "/classic" | "/les/classic") {
+            if payload.event() == tauri::webview::PageLoadEvent::Started
+                && (url.host_str() == Some("tauri.localhost") || matches!(url.path(), "/app/" | "/classic" | "/les/classic")) {
+                if let Ok(mut guard) = webview.state::<Runtime>().close.lock() { guard.invalidate(); }
+            }
+            if payload.event() == tauri::webview::PageLoadEvent::Finished && url.host_str() == Some("127.0.0.1") && matches!(url.path(), "/classic" | "/les/classic" | "/app/") {
                 let runtime = webview.state::<Runtime>();
                 let _ = fs::write(runtime.state.join("desktop-status.json"), json!({"phase":"loaded","url":url.as_str()}).to_string());
             }
@@ -131,7 +202,7 @@ fn main() {
                 match event.id.as_ref() {
                     "browser" => { let _ = open_browser(app.state::<Runtime>()); },
                     "logs" => open_logs(&app.state::<Runtime>()),
-                    "quit" => app.exit(0),
+                    "quit" => { if let Some(window) = app.get_webview_window("main") { let _ = window.close(); } else { app.exit(0); } },
                     _ => {}
                 }
             });
@@ -175,4 +246,25 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("LES RAG: не удалось открыть окно")
         .run(|app, event| { if matches!(event, tauri::RunEvent::Exit) { stop_child(&app.state::<Runtime>()); } });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn navigation_is_limited_to_our_two_loopback_renderers() {
+        for value in ["http://127.0.0.1:54321/classic", "http://127.0.0.1:54321/app/"] {
+            assert!(owned_url(&json!({"ui_url":value})).is_some());
+        }
+        for value in ["https://example.org/app/", "http://127.0.0.1/app/", "http://user@127.0.0.1:54321/app/", "http://127.0.0.1:54321/app/?url=other", "http://127.0.0.1:54321/api/private", "http://localhost:54321/app/"] {
+            assert!(owned_url(&json!({"ui_url":value})).is_none());
+        }
+    }
+    #[test]
+    fn bad_candidate_argument_never_falls_back_to_user_state() {
+        for args in [vec!["les", "--state"], vec!["les", "--state", "--svelte"], vec!["les", "--state", "relative"], vec!["les", "--state", "x", "--state", "y"]] {
+            assert!(explicit_state(&args.iter().map(|value| value.to_string()).collect::<Vec<_>>()).is_err());
+        }
+        assert!(explicit_state(&["les".into(), "--svelte".into()]).unwrap().is_none());
+    }
 }

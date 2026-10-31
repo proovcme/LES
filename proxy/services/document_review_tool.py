@@ -61,6 +61,13 @@ class DocumentReviewTool:
         self.remember(arguments, {'status': 'error', 'missing': result.get('missing', []),
                                   'warnings': result.get('warnings', [])})
 
+    async def completion_receipt(self):
+        if not self.task_id:
+            return None
+        from proxy.services.execution_receipt_service import ledger_receipt
+        state, _ = await self.refresh(self.task_id)
+        return ledger_receipt(TOOL_NAME, state)
+
     def remember(self, arguments, payload):
         call_id = 'review_' + uuid4().hex
         self.last_exchange = [

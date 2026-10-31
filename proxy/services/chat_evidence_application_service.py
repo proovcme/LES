@@ -1684,18 +1684,14 @@ async def _execute_chat_evidence_application(
                 break
 
 
-            if table_tool is not None and (getattr(req, 'attachment_id', None) or any(
-                    item.get('tool') == TABLE_TOOL for item in tool_results_for_model)):
-                notice = table_tool.coverage_notice()
-                if notice:
-                    answer = notice + '\n\n' + answer
-                    await chat_progress(token_sink, 'document', notice.replace('**', ''))
-
-            if review_tool is not None:
-                notice = await review_tool.coverage_notice()
-                if notice:
-                    answer = notice + '\n\n' + answer
-                    await chat_progress(token_sink, 'document', notice.replace('**', ''))
+            from proxy.services.execution_receipt_service import summarize
+            execution = summarize([
+                table_tool.completion_receipt() if table_tool is not None else None,
+                await review_tool.completion_receipt() if review_tool is not None else None,
+            ])
+            if execution is not None:
+                retrieval_trace['execution'] = execution
+                await chat_progress(token_sink, 'document', execution['notice'])
 
             try:
                 from proxy.services.evidence_packet_service import verify_answer_source_labels
@@ -1892,6 +1888,7 @@ async def _execute_chat_evidence_application(
                 "class_suggestions": class_suggestions,
                 "versions": _version_stamp(),
                 "numeric_unverified": _num_unverified,
+                "execution": execution,
                 "source_scope": source_scope,
                 "source_counts": source_counts,
             }

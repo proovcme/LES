@@ -18,6 +18,11 @@ jobs:
       UV_FROZEN: '1'
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.14.0'
+          cache: npm
+          cache-dependency-path: desktop/light/frontend/package-lock.json
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: '3.13.12'
@@ -39,6 +44,12 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           "LES_CORE_LIBRARY=$((Resolve-Path native/core/les_core.dll).Path)" >> $env:GITHUB_ENV
           "LES_CORE_MODE=native" >> $env:GITHUB_ENV
+      - name: Check static frontend
+        run: |
+          uv run python tools/build_light_frontend.py
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          npm.cmd test --prefix desktop/light/frontend
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Verify code and offline behavior
         run: |
           make verify

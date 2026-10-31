@@ -40,13 +40,15 @@ def child_environment(root, state, qdrant, api_port, ui_port, instance_id):
         "LES_RUNTIME_HOME": str(root), "LES_REPO_ROOT": str(root), "RAG_META_DB_PATH": str(state / "data/meta.db"),
         "QDRANT_URL": qdrant.url, "LES_LIGHT_QDRANT_URL": qdrant.url, "LES_LIGHT_QDRANT_API_KEY": qdrant.api_key,
         "LES_LIGHT_INSTANCE_ID": instance_id, "PROXY_URL": f"http://127.0.0.1:{api_port}", "LES_PROXY_URL": f"http://127.0.0.1:{api_port}",
+        "LES_LIGHT_LEGACY_UI_URL": f"http://127.0.0.1:{ui_port}/classic",
+        "LES_LIGHT_SVELTE_URL": f"http://127.0.0.1:{api_port}/app/",
         "SOVUSHKA_UI_PORT": str(ui_port), "SOVUSHKA_UI_HOST": "127.0.0.1", "NICEGUI_STORAGE_PATH": str(state / ".nicegui"),
         "LES_STARTUP_MODEL_WARMUP": "false", "LES_STARTUP_BACKGROUND_MUTATIONS": "true"})
     return env
 
 
 class LightStack:
-    def __init__(self, root, state, executable, *, read_only=False):
+    def __init__(self, root, state, executable, *, read_only=False, frontend='classic'):
         self.root, self.state = root, state
         self.qdrant = LightQdrantRuntime(executable, state)
         self.children = []
@@ -54,6 +56,9 @@ class LightStack:
         self.api_port, self.ui_port = 0, 0
         self.instance_id = ""
         self.read_only = read_only
+        if frontend not in {'classic', 'svelte'}:
+            raise ValueError('Unknown frontend')
+        self.frontend = frontend
         self.health_monitor = HealthMonitor()
 
     def spawn(self, command, environment, log_name):
@@ -82,6 +87,8 @@ class LightStack:
         raise InterruptedError("Запуск отменён")
 
     def start(self, stop):
+        if self.frontend == 'svelte' and not (self.root / 'desktop/light/frontend/dist/index.html').is_file():
+            raise RuntimeError('В установке нет нового интерфейса. Соберите frontend или запустите прежний Лес.')
         self.health_monitor = HealthMonitor()
         for attempt in range(3):
             self.qdrant.start()
@@ -100,7 +107,8 @@ class LightStack:
             try:
                 self.wait_ready(api, f"http://127.0.0.1:{self.api_port}/api/light/instance", stop)
                 self.wait_ready(ui, f"http://127.0.0.1:{self.ui_port}/healthz", stop)
-                return f"http://127.0.0.1:{self.ui_port}/classic"
+                return (f"http://127.0.0.1:{self.api_port}/app/" if self.frontend == 'svelte'
+                        else f"http://127.0.0.1:{self.ui_port}/classic")
             except RuntimeError:
                 collision = any(process.poll() is not None and not port_is_free(port)
                                 for process, port in ((api, self.api_port), (ui, self.ui_port)))
@@ -142,7 +150,9 @@ def reopen_owned_browser(state):
         for url in (api,ui):
             if url.scheme != 'http' or url.hostname != '127.0.0.1' or not url.port or url.username or url.password or url.query or url.fragment:
                 return False
-        if api.path not in {'','/'} or ui.path != '/classic':
+        if api.path not in {'','/'} or ui.path not in {'/classic', '/app/'}:
+            return False
+        if ui.path == '/app/' and ui.netloc != api.netloc:
             return False
         with httpx.Client(timeout=3,trust_env=False) as client:
             probe=client.get(status['api_url']+'/api/light/instance')
@@ -177,7 +187,7 @@ def run(args):
                 sys.stdin.readline()  # command or EOF on desktop crash
                 stop.set()
             threading.Thread(target=parent_input, daemon=True).start()
-        stack = LightStack(root, state, Path(args.qdrant).resolve(), read_only=args.read_only)
+        stack = LightStack(root, state, Path(args.qdrant).resolve(), read_only=args.read_only, frontend=getattr(args, 'frontend', 'classic'))
         opened_url = ""
         restart_times = []
         while not stop.is_set():
@@ -238,6 +248,7 @@ def main(argv=None):
     parser.add_argument("--parent-pipe", action="store_true")
     parser.add_argument("--browser", action="store_true")
     parser.add_argument("--read-only", action="store_true", help="Disable background mutations for isolated acceptance")
+    parser.add_argument("--frontend", choices=('classic', 'svelte'), default='classic', help='Opt-in renderer; classic remains the rollback during migration')
     return run(parser.parse_args(argv))
 
 

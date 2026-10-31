@@ -688,6 +688,8 @@ def create_app():
     if is_light():
         from proxy.light_boundary import LightBrowserBoundary
         fastapi_app.add_middleware(LightBrowserBoundary)
+        from proxy.light_frontend import mount_frontend
+        mount_frontend(fastapi_app)
         @fastapi_app.get("/api/light/instance", include_in_schema=False)
         async def light_instance():
             return {"instance_id": os.getenv("LES_LIGHT_INSTANCE_ID", "")}

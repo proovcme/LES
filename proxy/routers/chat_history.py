@@ -190,6 +190,7 @@ async def get_chat_history(limit: int = 40, session_id: Optional[str] = None, _u
                 else {}
             )
             meta = {
+                "execution": retrieval_trace.get('execution') if isinstance(retrieval_trace.get('execution'), dict) else None,
                 "history_id": history_id,
                 "query_route": _json_object(route),
                 "retrieval_trace": retrieval_trace,
@@ -227,7 +228,7 @@ async def get_chat_history(limit: int = 40, session_id: Optional[str] = None, _u
         return messages
     except Exception as e:
         logger.warning("[HISTORY] %s", e)
-        return []
+        raise HTTPException(503, 'Не удалось прочитать историю диалога. Переписка не удалена; повторите загрузку или откройте диагностику.') from e
 
 
 @router.get("/sessions")

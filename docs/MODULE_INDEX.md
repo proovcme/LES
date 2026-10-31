@@ -1,5 +1,14 @@
 # Модули LES RAG
 
+Безопасный старт коллекции: `backend/collection_layout.py` (lease/exact count/
+сверка каталога). `execution_receipt_service.py` — состояние зафиксированных
+действий, `desktop/light/src-tauri/src/close_guard.rs` и frontend/native-close —
+протокол закрытия. [Приёмка 772](acceptance/safety-ui-772.md).
+
+Кандидат интерфейса Svelte/TypeScript: `desktop/light/frontend`; статическая
+раздача `proxy/light_frontend.py`, черновики `chat_draft_service.py` и workspace
+API. Запуск Tauri с `--svelte`, прежний UI — откат. [Границы переноса](modules/svelte-desktop.md).
+
 Rust-ядро документов: `core/src/lexical.rs`, `files.rs`, `jobs.rs`;
 `backend/native_core.py` — загрузка и ограниченный C ABI, `lexical_preparation.py`
 — подготовка postings, `file_fingerprint.py` — проверка байтов, `job_policy.py`

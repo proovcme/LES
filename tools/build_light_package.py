@@ -169,6 +169,8 @@ def stage_code(payload):
     shutil.copy2(ROOT / "docs/public/les-light/assets/les-light.svg", payload / "assets/les-light.svg")
     shutil.copy2(payload / "README.md", runtime / "README.md")
     shutil.copy2(ROOT / 'tools/les-light.cmd', payload / 'les.cmd')
+    from tools.build_light_frontend import stage as stage_frontend
+    stage_frontend(ROOT, runtime)
     return runtime
 
 

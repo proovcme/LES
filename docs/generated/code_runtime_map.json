@@ -70,6 +70,7 @@
         "backend/bm25_hybrid.py",
         "backend/bm25_store.py",
         "backend/colbert_late_interaction.py",
+        "backend/collection_layout.py",
         "backend/converter.py",
         "backend/document_catalog.py",
         "backend/document_router.py",
@@ -215,6 +216,21 @@
     },
     {
       "inbound": [
+        "backend/qdrant_collection.py"
+      ],
+      "lines": 92,
+      "module": "backend.collection_layout",
+      "outbound": [
+        "backend/__init__.py",
+        "backend/index_replacement.py",
+        "backend/qdrant_support.py"
+      ],
+      "path": "backend/collection_layout.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
         "backend/document_catalog.py",
         "backend/qdrant_support.py",
         "proxy/services/chat_attachment_read_service.py",
@@ -246,6 +262,7 @@
       "inbound": [
         "backend/qdrant_support.py",
         "tests/test_light_code_review.py",
+        "tests/test_light_collection_safety.py",
         "tests/test_light_document_review.py",
         "tests/test_light_grounding_760.py",
         "tests/test_light_ingestion_races.py"
@@ -384,6 +401,7 @@
     },
     {
       "inbound": [
+        "backend/collection_layout.py",
         "backend/qdrant_collection.py",
         "backend/qdrant_ingestion.py",
         "backend/qdrant_integrity.py",
@@ -396,6 +414,7 @@
         "tests/test_light_bm25_incremental.py",
         "tests/test_light_bm25_index.py",
         "tests/test_light_chat_sections.py",
+        "tests/test_light_collection_safety.py",
         "tests/test_light_index_recovery.py",
         "tests/test_light_ingestion_races.py",
         "tests/test_light_rerank_audit.py",
@@ -579,6 +598,7 @@
         "tests/test_light_bm25_index.py",
         "tests/test_light_chat_sections.py",
         "tests/test_light_code_review.py",
+        "tests/test_light_collection_safety.py",
         "tests/test_light_document_review.py",
         "tests/test_light_grounding_760.py",
         "tests/test_light_index_recovery.py",
@@ -1065,13 +1085,15 @@
     },
     {
       "inbound": [
-        "backend/qdrant_adapter.py"
+        "backend/qdrant_adapter.py",
+        "tests/test_light_collection_safety.py"
       ],
-      "lines": 333,
+      "lines": 246,
       "module": "backend.qdrant_collection",
       "outbound": [
         "backend/__init__.py",
         "backend/bm25_store.py",
+        "backend/collection_layout.py",
         "backend/index_replacement.py",
         "backend/qdrant_support.py",
         "backend/sparse_index.py",
@@ -1167,6 +1189,7 @@
     },
     {
       "inbound": [
+        "backend/collection_layout.py",
         "backend/index_replacement.py",
         "backend/qdrant_adapter.py",
         "backend/qdrant_collection.py",
@@ -1175,6 +1198,7 @@
         "backend/qdrant_nodes.py",
         "backend/qdrant_retrieval.py",
         "tests/test_light_audit_regressions.py",
+        "tests/test_light_collection_safety.py",
         "tests/test_light_grounding_760.py",
         "tests/test_light_index_recovery.py",
         "tests/test_light_ingestion_races.py",
@@ -1638,6 +1662,7 @@
         "proxy/app.py",
         "proxy/config.py",
         "proxy/light_boundary.py",
+        "proxy/light_frontend.py",
         "proxy/local_model_registry.py",
         "proxy/memory_core/__init__.py",
         "proxy/memory_core/config.py",
@@ -1708,6 +1733,7 @@
         "proxy/services/chat_attachment_read_service.py",
         "proxy/services/chat_attachment_service.py",
         "proxy/services/chat_capability_scope_service.py",
+        "proxy/services/chat_draft_service.py",
         "proxy/services/chat_durability_service.py",
         "proxy/services/chat_evidence_application_service.py",
         "proxy/services/chat_evidence_context.py",
@@ -1768,6 +1794,7 @@
         "proxy/services/electrical_schematic_service.py",
         "proxy/services/evidence_contract.py",
         "proxy/services/evidence_packet_service.py",
+        "proxy/services/execution_receipt_service.py",
         "proxy/services/extension_tool_service.py",
         "proxy/services/external_radar_service.py",
         "proxy/services/extract_service.py",
@@ -1933,7 +1960,7 @@
         "proxy_server.py",
         "tests/test_light_router_boundary.py"
       ],
-      "lines": 757,
+      "lines": 759,
       "module": "proxy.app",
       "outbound": [
         "backend/http_client_policy.py",
@@ -1947,6 +1974,7 @@
         "proxy/__init__.py",
         "proxy/config.py",
         "proxy/light_boundary.py",
+        "proxy/light_frontend.py",
         "proxy/local_model_registry.py",
         "proxy/routers/artifacts.py",
         "proxy/routers/auth.py",
@@ -2043,6 +2071,21 @@
         "proxy/__init__.py"
       ],
       "path": "proxy/light_boundary.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "proxy/app.py",
+        "tests/test_light_frontend_assets.py"
+      ],
+      "lines": 41,
+      "module": "proxy.light_frontend",
+      "outbound": [
+        "proxy/__init__.py",
+        "proxy/security.py"
+      ],
+      "path": "proxy/light_frontend.py",
       "status": "PRODUCT_REACHABLE",
       "windows_runtime_explicit": false
     },
@@ -2351,9 +2394,10 @@
     },
     {
       "inbound": [
-        "proxy/app.py"
+        "proxy/app.py",
+        "tests/test_light_frontend_drafts.py"
       ],
-      "lines": 430,
+      "lines": 431,
       "module": "proxy.routers.chat_history",
       "outbound": [
         "backend/rag_config.py",
@@ -2646,7 +2690,7 @@
         "proxy/app.py",
         "tests/test_document_explorer_service.py"
       ],
-      "lines": 366,
+      "lines": 367,
       "module": "proxy.routers.documents",
       "outbound": [
         "backend/runtime_paths.py",
@@ -3083,14 +3127,16 @@
     {
       "inbound": [
         "proxy/app.py",
+        "tests/test_light_frontend_drafts.py",
         "tests/test_workspace_router.py"
       ],
-      "lines": 60,
+      "lines": 87,
       "module": "proxy.routers.workspace",
       "outbound": [
         "proxy/__init__.py",
         "proxy/routers/__init__.py",
         "proxy/security.py",
+        "proxy/services/chat_draft_service.py",
         "proxy/services/chat_session_service.py"
       ],
       "path": "proxy/routers/workspace.py",
@@ -3122,6 +3168,7 @@
     },
     {
       "inbound": [
+        "proxy/light_frontend.py",
         "proxy/routers/artifacts.py",
         "proxy/routers/auth.py",
         "proxy/routers/chat.py",
@@ -3199,6 +3246,7 @@
         "proxy/services/chat_attachment_read_service.py",
         "proxy/services/chat_attachment_service.py",
         "proxy/services/chat_capability_scope_service.py",
+        "proxy/services/chat_draft_service.py",
         "proxy/services/chat_durability_service.py",
         "proxy/services/chat_evidence_application_service.py",
         "proxy/services/chat_evidence_context.py",
@@ -3259,6 +3307,7 @@
         "proxy/services/electrical_schematic_service.py",
         "proxy/services/evidence_contract.py",
         "proxy/services/evidence_packet_service.py",
+        "proxy/services/execution_receipt_service.py",
         "proxy/services/extension_tool_service.py",
         "proxy/services/external_radar_service.py",
         "proxy/services/extract_service.py",
@@ -3787,6 +3836,22 @@
     },
     {
       "inbound": [
+        "proxy/routers/workspace.py",
+        "tests/test_light_frontend_drafts.py"
+      ],
+      "lines": 40,
+      "module": "proxy.services.chat_draft_service",
+      "outbound": [
+        "proxy/__init__.py",
+        "proxy/services/__init__.py",
+        "proxy/services/chat_session_service.py"
+      ],
+      "path": "proxy/services/chat_draft_service.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
         "proxy/app.py",
         "proxy/routers/chat.py",
         "proxy/services/chat_persistence_service.py",
@@ -3815,7 +3880,7 @@
         "tests/test_light_prompt_boundary.py",
         "tests/test_workspace_context.py"
       ],
-      "lines": 2010,
+      "lines": 2007,
       "module": "proxy.services.chat_evidence_application_service",
       "outbound": [
         "backend/inference/routing.py",
@@ -3838,6 +3903,7 @@
         "proxy/services/context_governor_service.py",
         "proxy/services/document_review_tool.py",
         "proxy/services/evidence_packet_service.py",
+        "proxy/services/execution_receipt_service.py",
         "proxy/services/generation_guard_service.py",
         "proxy/services/lexical_index_service.py",
         "proxy/services/memory_port.py",
@@ -3994,6 +4060,7 @@
         "proxy/services/chat_durability_service.py",
         "proxy/services/chat_request_service.py",
         "tests/test_light_durable_chat.py",
+        "tests/test_light_execution_receipts.py",
         "tests/test_light_stream_lifecycle.py"
       ],
       "lines": 224,
@@ -4005,6 +4072,7 @@
         "proxy/services/chat_durability_service.py",
         "proxy/services/chat_request_contracts.py",
         "proxy/services/context_memory_service.py",
+        "proxy/services/execution_receipt_service.py",
         "proxy/services/saferag_service.py"
       ],
       "path": "proxy/services/chat_persistence_service.py",
@@ -4196,12 +4264,14 @@
       "inbound": [
         "proxy/routers/workspace.py",
         "proxy/routers/workspace_memory.py",
+        "proxy/services/chat_draft_service.py",
         "proxy/services/chat_durability_service.py",
         "proxy/services/conversation_context_service.py",
         "proxy/services/typed_memory_projection_service.py",
         "tests/test_chat_session_service.py",
         "tests/test_light_conversation_context.py",
         "tests/test_light_durable_chat.py",
+        "tests/test_light_frontend_drafts.py",
         "tests/test_workspace_context.py",
         "tests/test_workspace_memory_router.py",
         "tests/test_workspace_router.py"
@@ -4828,9 +4898,10 @@
     {
       "inbound": [
         "proxy/services/chat_evidence_application_service.py",
-        "tests/test_light_document_review.py"
+        "tests/test_light_document_review.py",
+        "tests/test_light_execution_receipts.py"
       ],
-      "lines": 238,
+      "lines": 245,
       "module": "proxy.services.document_review_tool",
       "outbound": [
         "backend/interface.py",
@@ -4840,6 +4911,7 @@
         "proxy/services/__init__.py",
         "proxy/services/chat_section_context_service.py",
         "proxy/services/document_task_store.py",
+        "proxy/services/execution_receipt_service.py",
         "proxy/services/review_source_reader.py",
         "proxy/services/review_task_store.py",
         "proxy/services/tabular_document_service.py",
@@ -5032,6 +5104,25 @@
     },
     {
       "inbound": [
+        "proxy/services/chat_evidence_application_service.py",
+        "proxy/services/chat_persistence_service.py",
+        "proxy/services/document_review_tool.py",
+        "proxy/services/table_document_tool.py",
+        "sovushka/answer_render.py",
+        "tests/test_light_execution_receipts.py"
+      ],
+      "lines": 38,
+      "module": "proxy.services.execution_receipt_service",
+      "outbound": [
+        "proxy/__init__.py",
+        "proxy/services/__init__.py"
+      ],
+      "path": "proxy/services/execution_receipt_service.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
         "proxy/services/tool_harness_service.py"
       ],
       "lines": 53,
@@ -5120,7 +5211,7 @@
         "proxy/routers/files.py",
         "proxy/services/native_open_service.py"
       ],
-      "lines": 312,
+      "lines": 314,
       "module": "proxy.services.file_viewer_service",
       "outbound": [
         "proxy/__init__.py",
@@ -6585,7 +6676,7 @@
         "tests/test_light_rerank_audit.py",
         "tests/test_public_error_service.py"
       ],
-      "lines": 96,
+      "lines": 101,
       "module": "proxy.services.public_error_service",
       "outbound": [
         "proxy/__init__.py",
@@ -6963,7 +7054,8 @@
     {
       "inbound": [
         "proxy/services/document_review_tool.py",
-        "tests/test_light_document_review.py"
+        "tests/test_light_document_review.py",
+        "tests/test_light_execution_receipts.py"
       ],
       "lines": 215,
       "module": "proxy.services.review_task_store",
@@ -7367,7 +7459,7 @@
         "tests/test_light_document_tasks.py",
         "tests/test_light_table_windows.py"
       ],
-      "lines": 224,
+      "lines": 233,
       "module": "proxy.services.table_document_tool",
       "outbound": [
         "backend/product_edition.py",
@@ -7376,6 +7468,7 @@
         "proxy/services/__init__.py",
         "proxy/services/chat_attachment_service.py",
         "proxy/services/document_task_store.py",
+        "proxy/services/execution_receipt_service.py",
         "proxy/services/table_window_service.py",
         "proxy/services/tabular_document_service.py",
         "proxy/services/tool_contract_service.py",
@@ -7961,13 +8054,15 @@
         "sovushka/components/source_panels.py",
         "tests/test_answer_render_v16.py",
         "tests/test_light_citations.py",
+        "tests/test_light_execution_receipts.py",
         "tests/test_light_profile_integrity.py",
         "tests/test_light_unicode_documents.py",
         "tools/light_model_journey.py"
       ],
-      "lines": 695,
+      "lines": 698,
       "module": "sovushka.answer_render",
       "outbound": [
+        "proxy/services/execution_receipt_service.py",
         "sovushka/__init__.py"
       ],
       "path": "sovushka/answer_render.py",
@@ -8250,7 +8345,7 @@
         "sovushka/pages/chat.py",
         "tests/test_light_ui_handlers.py"
       ],
-      "lines": 667,
+      "lines": 670,
       "module": "sovushka.components.chat_rendering",
       "outbound": [
         "sovushka/__init__.py",
@@ -8527,7 +8622,7 @@
         "sovushka_ng.py",
         "tests/test_light_navigation.py"
       ],
-      "lines": 33,
+      "lines": 49,
       "module": "sovushka.components.navigation",
       "outbound": [
         "sovushka/__init__.py",
@@ -9360,7 +9455,7 @@
     },
     {
       "inbound": [],
-      "lines": 454,
+      "lines": 485,
       "module": "tests.test_document_explorer_service",
       "outbound": [
         "proxy/routers/dataset_catalog.py",
@@ -9624,6 +9719,21 @@
     },
     {
       "inbound": [],
+      "lines": 149,
+      "module": "tests.test_light_collection_safety",
+      "outbound": [
+        "backend/document_catalog.py",
+        "backend/index_replacement.py",
+        "backend/interface.py",
+        "backend/qdrant_collection.py",
+        "backend/qdrant_support.py"
+      ],
+      "path": "tests/test_light_collection_safety.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
       "lines": 11,
       "module": "tests.test_light_commands_boundary",
       "outbound": [
@@ -9764,6 +9874,21 @@
     },
     {
       "inbound": [],
+      "lines": 92,
+      "module": "tests.test_light_execution_receipts",
+      "outbound": [
+        "proxy/services/chat_persistence_service.py",
+        "proxy/services/document_review_tool.py",
+        "proxy/services/execution_receipt_service.py",
+        "proxy/services/review_task_store.py",
+        "sovushka/answer_render.py"
+      ],
+      "path": "tests/test_light_execution_receipts.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
       "lines": 43,
       "module": "tests.test_light_extracted_bindings",
       "outbound": [],
@@ -9791,6 +9916,33 @@
         "proxy/routers/forms.py"
       ],
       "path": "tests/test_light_forms_boundary.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
+      "lines": 110,
+      "module": "tests.test_light_frontend_assets",
+      "outbound": [
+        "proxy/light_frontend.py",
+        "tools/build_light_frontend.py",
+        "tools/light_launcher.py"
+      ],
+      "path": "tests/test_light_frontend_assets.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
+      "lines": 96,
+      "module": "tests.test_light_frontend_drafts",
+      "outbound": [
+        "proxy/routers/chat_history.py",
+        "proxy/routers/workspace.py",
+        "proxy/services/chat_draft_service.py",
+        "proxy/services/chat_session_service.py"
+      ],
+      "path": "tests/test_light_frontend_drafts.py",
       "status": "TEST_OR_TOOL_ONLY",
       "windows_runtime_explicit": false
     },
@@ -10970,6 +11122,7 @@
         "tools/backup_suharik.py",
         "tools/benchmark_native_core.py",
         "tools/benchmark_sparse_index.py",
+        "tools/build_light_frontend.py",
         "tools/build_light_installers.py",
         "tools/build_light_package.py",
         "tools/build_macos_app.py",
@@ -11065,6 +11218,20 @@
       "windows_runtime_explicit": false
     },
     {
+      "inbound": [
+        "tests/test_light_frontend_assets.py",
+        "tools/build_light_package.py"
+      ],
+      "lines": 107,
+      "module": "tools.build_light_frontend",
+      "outbound": [
+        "tools/__init__.py"
+      ],
+      "path": "tools/build_light_frontend.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
       "inbound": [],
       "lines": 86,
       "module": "tools.build_light_installers",
@@ -11080,10 +11247,11 @@
         "tests/test_light_package.py",
         "tools/install_light_macos.py"
       ],
-      "lines": 284,
+      "lines": 286,
       "module": "tools.build_light_package",
       "outbound": [
         "tools/__init__.py",
+        "tools/build_light_frontend.py",
         "tools/build_native_core.py",
         "tools/build_release_artifacts.py",
         "tools/build_tauri_app.py",
@@ -11429,12 +11597,13 @@
     },
     {
       "inbound": [
+        "tests/test_light_frontend_assets.py",
         "tests/test_light_launcher.py",
         "tests/test_light_macos.py",
         "tools/light_model_journey.py",
         "tools/light_state_journey.py"
       ],
-      "lines": 245,
+      "lines": 256,
       "module": "tools.light_launcher",
       "outbound": [
         "backend/light_health_monitor.py",
@@ -13407,6 +13576,18 @@
       "source": "proxy/routers/workspace.py"
     },
     {
+      "handler": "draft_get",
+      "method": "GET",
+      "path": "/api/workspace/sessions/{session_id}/draft",
+      "source": "proxy/routers/workspace.py"
+    },
+    {
+      "handler": "draft_put",
+      "method": "PUT",
+      "path": "/api/workspace/sessions/{session_id}/draft",
+      "source": "proxy/routers/workspace.py"
+    },
+    {
       "handler": "chat_completions",
       "method": "POST",
       "path": "/v1/chat/completions",
@@ -13453,12 +13634,12 @@
   "summary": {
     "dormant_candidates": 35,
     "parse_warnings": 0,
-    "product_reachable": 385,
-    "registered_api_routes": 292,
+    "product_reachable": 389,
+    "registered_api_routes": 294,
     "runtime_support": 5,
-    "test_or_tool_only": 175,
-    "tracked_python_files": 600,
-    "tracked_python_lines": 161112
+    "test_or_tool_only": 180,
+    "tracked_python_files": 609,
+    "tracked_python_lines": 161907
   },
   "warnings": []
 }

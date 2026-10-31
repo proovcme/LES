@@ -23,6 +23,7 @@ class TableDocumentTool:
     question: str = ''
     current: dict = field(default_factory=dict)
     last_exchange: list = field(default_factory=list)
+    work_requested: bool = False
 
     def model_context(self):
         return ({'native_tool_exchange': [self.last_exchange]} if self.last_exchange
@@ -67,12 +68,20 @@ class TableDocumentTool:
                 'save with record, then next until pending is zero. Continue a prior task only '
                 'when the user asks to continue it; for a different objective call start once.'}
 
+    def completion_receipt(self):
+        if not self.work_requested:
+            return None  # Reading a cell does not request a review of the whole table.
+        from proxy.services.execution_receipt_service import ledger_receipt
+        return ledger_receipt(TOOL_NAME, self.state())
+
     def execute(self, arguments):
         task_id = arguments.get('task_id') or self.task_id
         self.store.status(self.owner, task_id)  # Check binding before switching or disclosing data.
         self.store.activate(self.owner, task_id)
         self.task_id = task_id
         operation = arguments['operation']
+        if operation in {'start', 'next', 'record'}:
+            self.work_requested = True
         if operation == 'start':
             if self.store.matches_question(self.owner, task_id, self.question):
                 action = 'record' if self.current.get('packet_id') and self.current.get('rows') else 'next'

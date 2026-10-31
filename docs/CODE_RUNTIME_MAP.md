@@ -19,13 +19,13 @@
 
 | Метрика | Значение |
 | --- | --- |
-| Python-файлов под git | 600 |
-| Строк Python | 161112 |
-| PRODUCT_REACHABLE | 385 |
+| Python-файлов под git | 609 |
+| Строк Python | 161907 |
+| PRODUCT_REACHABLE | 389 |
 | RUNTIME_SUPPORT | 5 |
-| TEST_OR_TOOL_ONLY | 175 |
+| TEST_OR_TOOL_ONLY | 180 |
 | DORMANT_CANDIDATE | 35 |
-| Зарегистрированных API-маршрутов | 292 |
+| Зарегистрированных API-маршрутов | 294 |
 | Ошибок разбора | 0 |
 
 ## Крупнейшие продуктовые модули
@@ -36,7 +36,7 @@
 | proxy/services/dataset_memory_service.py | 2284 | 9 |
 | mlx_host.py | 2216 | 0 |
 | sovushka/pages/chat.py | 2200 | 2 |
-| proxy/services/chat_evidence_application_service.py | 2010 | 7 |
+| proxy/services/chat_evidence_application_service.py | 2007 | 7 |
 | proxy/services/project_pdf_table_service.py | 1653 | 2 |
 | sovushka/pages/diag.py | 1606 | 1 |
 | proxy/services/checklist_review_service.py | 1518 | 1 |
@@ -48,7 +48,7 @@
 | sovushka/pages/samovar.py | 1143 | 3 |
 | backend/document_router.py | 1124 | 7 |
 | tools/build_rag_contract_sibling.py | 1114 | 2 |
-| backend/document_catalog.py | 1016 | 5 |
+| backend/document_catalog.py | 1016 | 6 |
 | tools/reindex_datasets_guarded.py | 1016 | 1 |
 | proxy/services/drawing_manifest_service.py | 1012 | 3 |
 | sovushka/components/header.py | 968 | 2 |

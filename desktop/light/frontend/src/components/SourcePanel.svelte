@@ -1,0 +1,79 @@
+<script lang="ts">
+  import { onMount } from 'svelte';
+  import { errorMessage, request } from '../lib/api';
+  import type { Source } from '../lib/contracts';
+  import { sourcePage } from '../lib/contracts';
+  import Modal from './Modal.svelte';
+  import Icon from './Icon.svelte';
+  let { source, close }: { source: Source; close: () => void } = $props();
+  let loading = $state(true); let error = $state(''); let documentError = $state('');
+  let doc = $state<{ id: string; file_name: string } | null>(null);
+  let preview = $state(false); let preparing = $state(false);
+  let page = $state(1); let imageURL = $state(''); let viewURL = $state('');
+  let imageLoading = $state(false);
+  let alive = true;
+  const identity = $derived(new URLSearchParams({ dataset_id: source.dataset_id || '', doc_name: source.doc_name || '' }));
+  const base = $derived(doc ? `/api/documents/by-id/${encodeURIComponent(doc.id)}` : '');
+  onMount(() => {
+    page = sourcePage(source);
+    void request<{ document: { id: string; file_name: string } }>(`/api/documents/by-id/${encodeURIComponent(source.doc_id || 'source')}?${identity}`)
+      .then((value) => { if (alive) doc = value.document; })
+      .catch((failure) => { if (alive) error = errorMessage(failure); })
+      .finally(() => { if (alive) loading = false; });
+    return () => { alive = false; if (imageURL) URL.revokeObjectURL(imageURL); };
+  });
+  async function showOriginal() {
+    if (!doc || preparing) return;
+    preparing = true; documentError = '';
+    try {
+      if (doc.file_name.toLowerCase().endsWith('.pdf')) {
+        const result = await fetch(`${base}/pdf-contour/pages/${page}/preview`, { signal: AbortSignal.timeout(30000) });
+        if (!result.ok) throw new Error('preview');
+        const blob = await result.blob();
+        if (!alive) return;
+        if (imageURL) URL.revokeObjectURL(imageURL);
+        imageURL = URL.createObjectURL(blob); viewURL = ''; imageLoading = true;
+      } else {
+        const url = `${base}/viewer?${identity}&page=${page}`;
+        const response = await fetch(url, { signal: AbortSignal.timeout(30000) });
+        if (!response.ok) throw new Error('preview');
+        await response.body?.cancel();
+        if (!alive) return;
+        viewURL = url;
+      }
+      preview = true;
+    } catch { documentError = 'Не удалось показать эту страницу. Можно скачать оригинал или открыть его в приложении.'; }
+    finally { preparing = false; }
+  }
+  async function openNative() {
+    documentError = '';
+    try { await request(`${base}/open-native?${identity}`, { method: 'POST' }); }
+    catch (failure) { documentError = errorMessage(failure); }
+  }
+</script>
+<Modal title={source.doc_name || 'Доказательство'} {close} wide>
+  <p class="eyebrow">Источник {source.index}{source.source_page || source.page || source.page_number ? ` · страница ${sourcePage(source)}` : ''}</p>
+  {#if source.quote || source.snippet}<blockquote class="evidence">{source.quote || source.snippet}</blockquote>{:else}<p class="muted">У этого источника не сохранена цитата. Проверьте оригинал.</p>{/if}
+  {#if loading}<p role="status">Проверяю оригинал…</p>{/if}
+  {#if error}<p class="error" role="alert">{error}</p>{/if}
+  {#if doc}
+    <div class="source-actions">
+      <button onclick={showOriginal} disabled={preparing}><Icon name="file" />{preparing ? 'Открываю…' : 'Показать оригинал'}</button>
+      <a class="button quiet" href={`${base}/raw?${identity}`} download={doc.file_name}><Icon name="external" />Скачать</a>
+      <button class="quiet" onclick={openNative}>Открыть в приложении</button>
+    </div>
+    {#if preview && doc.file_name.toLowerCase().endsWith('.pdf')}
+      <form class="page-selector" onsubmit={(event) => { event.preventDefault(); void showOriginal(); }}>
+        <label for="source-page">Страница</label><input id="source-page" type="number" min="1" step="1" bind:value={page} required /><button class="quiet" disabled={preparing}>Перейти</button>
+      </form>
+    {/if}
+    {#if documentError}<p class="error" role="alert">{documentError}</p>{/if}
+    {#if imageURL && preview}
+      {#if imageLoading}<p role="status">Показываю страницу…</p>{/if}
+      <img class="pdf-page" src={imageURL} alt={`Страница ${page}: ${doc.file_name}`} onload={() => imageLoading = false} onerror={() => { imageLoading = false; documentError = 'Не удалось отобразить страницу.'; }} />
+    {:else if viewURL && preview}
+      <iframe class="document-frame" title={`Оригинал: ${doc.file_name}`} src={viewURL} sandbox="allow-scripts allow-downloads"></iframe>
+    {/if}
+  {/if}
+  <div class="modal-footer"><button class="quiet" onclick={close}><Icon name="back" />Вернуться к ответу</button></div>
+</Modal>

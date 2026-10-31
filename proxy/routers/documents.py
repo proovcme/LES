@@ -154,6 +154,7 @@ async def document_viewer_by_id(
             path_id=doc_id,
             locator=locator,
             sheet=sheet,
+            document_id=str(document['id']),
         )
     except (FileNotFoundError, ValueError, OSError) as exc:
         raise HTTPException(status_code=400, detail=f"Не удалось открыть предпросмотр: {str(exc)[:240]}") from exc

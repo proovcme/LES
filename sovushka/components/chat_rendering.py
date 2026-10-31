@@ -303,6 +303,9 @@ def _render_evidence_header(meta: dict | None, srcs: list | None) -> None:
             'role="status" aria-live="polite"'
         ).classes("sov-ui-section-detail")
     tool_notice = tool_execution_notice(meta.get("retrieval_trace"))
+    execution = (meta.get('retrieval_trace') or {}).get('execution')
+    if isinstance(execution, dict) and execution.get('status') == 'recorded':
+        ui.label(str(execution.get('notice') or '')).props('role="status"').classes('sov-ui-section-detail')
     if tool_notice:
         render_feedback_state("error", detail=tool_notice)
     h = header_summary(meta.get("query_route"), meta.get("evidence_summary"),
