@@ -71,3 +71,18 @@ def test_shared_navigation_script_is_in_both_shells_and_package():
     assert 'navigation.js' in Path('sovushka_ng.py').read_text(encoding='utf-8')
     assert 'navigation.js' in Path('qdrant_visualizer/index.html').read_text(encoding='utf-8')
     assert 'qdrant_visualizer/navigation.js' in Path('tools/build_light_package.py').read_text(encoding='utf-8')
+
+
+def test_return_to_svelte_is_a_separate_link_and_accepts_only_owned_loopback(monkeypatch):
+    monkeypatch.setenv('LES_LIGHT_SVELTE_URL', 'http://127.0.0.1:54321/app/')
+    with Client(page('/__return_svelte')) as client:
+        return_controls()
+        links = [el for el in client.elements.values() if isinstance(el, ui.link)]
+        chat = next(el for el in links if el.text == 'Новый чат')
+        assert chat._props['href'] == 'http://127.0.0.1:54321/app/'
+        assert 'les-chat-return-link' in chat._classes
+        assert any(el._props['href'] == '/qdrant-visualizer/index.html' for el in links)
+    monkeypatch.setenv('LES_LIGHT_SVELTE_URL', 'https://example.com/app/')
+    with Client(page('/__return_external')) as client:
+        return_controls()
+        assert not any(isinstance(el, ui.link) and el.text == 'Новый чат' for el in client.elements.values())

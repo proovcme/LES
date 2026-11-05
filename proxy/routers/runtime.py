@@ -38,6 +38,7 @@ from proxy.services.runtime_admission import (
     count_active_jobs,
     evaluate_chat_admission,
     evaluate_memory_pressure,
+    live_memory_metrics,
 )
 from proxy.services.runtime_dispatcher import DEFAULT_DATASETS, DispatcherError, RuntimeDispatcher
 from proxy.services.version_service import version_info
@@ -150,7 +151,7 @@ def chat_admission_for_state(state: RuntimeRouterState):
         active_reindex_jobs = 0
     return evaluate_chat_admission(
         current_mode=state.current_mode,
-        metrics_cache=state.metrics_cache,
+        metrics_cache=live_memory_metrics(state.metrics_cache),
         active_jobs=count_active_jobs(state.job_service, state.job_tracker) + active_reindex_jobs,
     )
 
@@ -396,7 +397,7 @@ async def _host_memory() -> dict[str, Any]:
 async def get_indexing_mode():
     state = get_runtime_state()
     admission = chat_admission_for_state(state)
-    memory_pressure = evaluate_memory_pressure(state.metrics_cache)
+    memory_pressure = evaluate_memory_pressure(admission.memory)
     effective_mode = _effective_mode_payload(state.current_mode, admission)
     return {
         "active": is_indexing_mode(state.current_mode),
@@ -643,7 +644,7 @@ async def get_status():
             logger.warning("Docker ps error: %s", e)
 
     admission = chat_admission_for_state(state)
-    memory_pressure = evaluate_memory_pressure(state.metrics_cache)
+    memory_pressure = evaluate_memory_pressure(admission.memory)
     effective_mode = _effective_mode_payload(state.current_mode, admission)
     return {
         "mode": effective_mode,

@@ -19,13 +19,13 @@
 
 | Метрика | Значение |
 | --- | --- |
-| Python-файлов под git | 613 |
-| Строк Python | 162166 |
-| PRODUCT_REACHABLE | 390 |
+| Python-файлов под git | 653 |
+| Строк Python | 166873 |
+| PRODUCT_REACHABLE | 402 |
 | RUNTIME_SUPPORT | 5 |
-| TEST_OR_TOOL_ONLY | 183 |
+| TEST_OR_TOOL_ONLY | 211 |
 | DORMANT_CANDIDATE | 35 |
-| Зарегистрированных API-маршрутов | 294 |
+| Зарегистрированных API-маршрутов | 296 |
 | Ошибок разбора | 0 |
 
 ## Крупнейшие продуктовые модули
@@ -36,24 +36,24 @@
 | proxy/services/dataset_memory_service.py | 2284 | 9 |
 | mlx_host.py | 2216 | 0 |
 | sovushka/pages/chat.py | 2200 | 2 |
-| proxy/services/chat_evidence_application_service.py | 2007 | 7 |
+| proxy/services/chat_evidence_application_service.py | 2041 | 7 |
 | proxy/services/project_pdf_table_service.py | 1653 | 2 |
 | sovushka/pages/diag.py | 1606 | 1 |
 | proxy/services/checklist_review_service.py | 1518 | 1 |
 | proxy/routers/mail.py | 1502 | 4 |
 | proxy/services/retrieval_service.py | 1427 | 12 |
-| proxy/services/cad_bim_graph.py | 1425 | 2 |
-| proxy/services/tool_harness_service.py | 1396 | 16 |
+| proxy/services/cad_bim_graph.py | 1425 | 3 |
+| proxy/services/tool_harness_service.py | 1404 | 19 |
 | proxy/services/context_memory_service.py | 1175 | 8 |
 | sovushka/pages/samovar.py | 1143 | 3 |
-| backend/document_router.py | 1124 | 7 |
 | tools/build_rag_contract_sibling.py | 1114 | 2 |
-| backend/document_catalog.py | 1016 | 7 |
+| backend/document_router.py | 1109 | 8 |
+| backend/document_catalog.py | 1025 | 8 |
 | tools/reindex_datasets_guarded.py | 1016 | 1 |
 | proxy/services/drawing_manifest_service.py | 1012 | 3 |
 | sovushka/components/header.py | 968 | 2 |
 | backend/parquet_writer.py | 965 | 3 |
-| proxy/routers/runtime.py | 920 | 3 |
+| proxy/routers/runtime.py | 921 | 3 |
 | proxy/services/project_pdf_extract_service.py | 915 | 4 |
 | proxy/services/chat_profile_service.py | 914 | 8 |
 | tools/les_runtime_control.py | 913 | 4 |

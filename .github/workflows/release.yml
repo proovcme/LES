@@ -29,14 +29,22 @@ jobs:
           workspaces: |
             desktop/light/src-tauri
             core
+            runtime
+            api
       - name: Install frozen build environment
         run: uv sync --frozen --extra mcp
       - name: Build desktop shell
         run: cargo build --locked --release --manifest-path desktop/light/src-tauri/Cargo.toml
       - name: Build locked static frontend
         run: uv run python tools/build_light_frontend.py
+      - name: Build native service owner and API
+        run: |
+          uv run python tools/build_native_runtime.py --output native/runtime
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          uv run python tools/build_native_api.py --output native/api
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Build pinned offline payload
-        run: uv run python tools/build_light_package.py --output dist/payload --desktop-exe desktop/light/src-tauri/target/release/les-light.exe
+        run: uv run python tools/build_light_package.py --output dist/payload --desktop-exe desktop/light/src-tauri/target/release/les-light.exe --native-runtime native/runtime/les-runtime.exe --native-api native/api/les-api.exe
       - name: Validate packaged files
         run: pwsh -NoProfile -File installers/windows/light/package.ps1 -Mode Validate -Source dist/payload
       - name: Build offline and web installers

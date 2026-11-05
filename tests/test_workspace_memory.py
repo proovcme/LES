@@ -6,7 +6,7 @@ from proxy.services import memory_service as ms
 
 
 @pytest.fixture(autouse=True)
-def db(tmp_path, monkeypatch):
+def db(tmp_path, monkeypatch, catalog_engine):
     path = tmp_path / 'meta.db'
     monkeypatch.setattr(ms, 'rag_meta_db_path', lambda: str(path))
     return path

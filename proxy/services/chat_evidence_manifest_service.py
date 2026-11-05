@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import copy
-import re
 from typing import Any, Mapping, Sequence
 
-from proxy.services.source_locator_service import citation_indexes, source_map_item
+from proxy.services.source_locator_service import normalize_answer_citations, source_map_item
 
 
 SCHEMA = "les.chat-evidence-manifest.v1"
@@ -18,20 +17,15 @@ def _mapping(value: Any) -> dict[str, Any]:
 
 def _cited_ids(answer: str, visible: Sequence[Mapping[str, Any]]) -> list[str]:
     index_to_id: dict[int, str] = {}
-    valid: set[str] = set()
     for position, raw in enumerate(visible, 1):
         item = _mapping(raw)
         identity = str(item.get("id") or f"S{position}").strip().upper()
         index_to_id[position] = identity
-        valid.add(identity)
     cited: set[str] = set()
-    for value in citation_indexes(answer):
+    sources = [{'index':index, 'evidence_ref':identity} for index,identity in index_to_id.items()]
+    for value in normalize_answer_citations(answer, sources)['indexes']:
         identity = index_to_id.get(value)
         if identity:
-            cited.add(identity)
-    for value in re.findall(r"Q\d+\.H\d+", str(answer or ""), flags=re.IGNORECASE):
-        identity = value.upper()
-        if identity in valid:
             cited.add(identity)
     return [str(item.get("id") or "") for item in visible if str(item.get("id") or "").upper() in cited]
 

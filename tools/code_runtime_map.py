@@ -22,6 +22,7 @@ PRODUCT_ENTRYPOINTS = (
     "sovushka_ng.py",
     "mlx_host.py",
     "lemonade_host.py",
+    "tools/light_document_worker.py",  # Native host launches this through -m.
 )
 FOCUS_MODULES = ("proxy/routers/chat.py",)
 ROUTE_METHODS = {"delete", "get", "head", "options", "patch", "post", "put"}

@@ -16,3 +16,12 @@ it('rejects scripts, HTML event handlers, fake evidence buttons and local file l
   expect([...div.querySelectorAll('a[href]')].map((link) => link.getAttribute('href'))).toEqual(['https://example.org']);
   expect(div.querySelector('a[href]')?.getAttribute('rel')).toBe('noopener noreferrer');
 });
+
+it('repairs only exact supplied source headers in saved answers, outside code and links', () => {
+  const sources = [{index:1,doc_name:'файл 87.pdf',header:'[Источник 1 | файл 87.pdf | TABLE]'}];
+  const div = document.createElement('div');
+  div.innerHTML = answerHTML('*Источник 1 | файл 87.pdf | TABLE]* [Источник 1 | файл 87.pdf | TABLE] `Источник 1 | файл 87.pdf | TABLE]` Источник 1. [999]', sources);
+  expect([...div.querySelectorAll('button')].map((b) => b.dataset.citation)).toEqual(['1','1']);
+  expect(div.querySelector('code')?.textContent).toContain('файл 87.pdf');
+  expect(div.textContent).toContain('Источник 1. [999]');
+});

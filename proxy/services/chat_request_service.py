@@ -58,7 +58,8 @@ async def _run_chat_with_provider(req: chat_request_contracts.ChatRequest, token
     if not is_light():
         return await _run_chat_bound(req, token_sink)
     from proxy.services.background_summary_service import foreground_request
-    async with foreground_request(req.session_id):
+    from proxy.services.request_memory_service import managed_request_memory
+    async with foreground_request(req.session_id), managed_request_memory(token_sink):
         return await _run_chat_bound(req, token_sink)
 
 
@@ -628,6 +629,22 @@ async def _run_chat(req: chat_request_contracts.ChatRequest, token_sink=None):
         metrics_cache=fresh_metrics,
         active_jobs=count_active_jobs(state.job_service, state.job_tracker) + chat_runtime._active_dispatcher_reindex_jobs(state),
     )
+    if (not admission.allowed and not admission.active_jobs
+            and any(item.startswith(('ram_free_gb=', 'swap_pct=')) for item in admission.failures)):
+        from proxy.services.request_memory_service import settle_transient_memory
+        await settle_transient_memory(token_sink)
+        fresh_metrics = await asyncio.to_thread(live_memory_metrics, state.metrics_cache)
+        admission = evaluate_chat_admission(
+            current_mode=state.current_mode, metrics_cache=fresh_metrics,
+            active_jobs=count_active_jobs(state.job_service, state.job_tracker) + chat_runtime._active_dispatcher_reindex_jobs(state))
+        if (not admission.allowed and not admission.active_jobs
+                and any(item.startswith(('ram_free_gb=', 'swap_pct=')) for item in admission.failures)):
+            from proxy.services.request_memory_service import prepare_assigned_model
+            await prepare_assigned_model(state, token_sink)
+            fresh_metrics = await asyncio.to_thread(live_memory_metrics, state.metrics_cache)
+            admission = evaluate_chat_admission(
+                current_mode=state.current_mode, metrics_cache=fresh_metrics,
+                active_jobs=count_active_jobs(state.job_service, state.job_tracker) + chat_runtime._active_dispatcher_reindex_jobs(state))
     if not admission.allowed:
         logger.info("[CHAT] admission blocked: %s", admission.reason)
         if any(item.startswith(("ram_free_gb=", "swap_pct=")) for item in admission.failures):

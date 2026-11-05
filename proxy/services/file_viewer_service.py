@@ -32,7 +32,7 @@ _TEXT_SUFFIXES = {
 }
 _TABLE_SUFFIXES = {".csv", ".tsv"}
 VIEWABLE_SUFFIXES = {
-    ".pdf", ".docx", ".xlsx", ".xlsm", ".pptx", ".eml",
+    ".pdf", ".doc", ".docx", ".xlsx", ".xlsm", ".pptx", ".eml",
     *_IMAGE_SUFFIXES, *_TEXT_SUFFIXES, *_TABLE_SUFFIXES,
 }
 
@@ -45,7 +45,7 @@ def viewer_kind(path: str | Path) -> str:
     suffix = Path(path).suffix.lower()
     if suffix == ".pdf":
         return "pdf"
-    if suffix == ".docx":
+    if suffix in {".doc", ".docx"}:
         return "word"
     if suffix in {".xlsx", ".xlsm"}:
         return "excel"
@@ -291,7 +291,15 @@ def file_viewer_html(
         raise ValueError("Встроенный просмотр для этого формата пока недоступен")
     try:
         if kind == "word":
-            body, note = _docx_view(path, locator)
+            if path.suffix.lower() == '.doc':
+                from backend import native_core
+                value = native_core.call('document', request={'action':'legacy_doc','path':str(path)})['text']
+                body = f'<pre class="text-view">{_e(value[:MAX_TEXT_CHARS])}</pre>'
+                note = 'Текстовый предпросмотр DOC. Оформление и разбиение на страницы Word здесь не отображаются.'
+                if len(value) > MAX_TEXT_CHARS:
+                    note += ' Текст сокращён в предпросмотре.'
+            else:
+                body, note = _docx_view(path, locator)
         elif kind == "excel":
             body, note = _xlsx_view(path, sheet=sheet, locator=locator)
         elif kind == "presentation":

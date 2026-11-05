@@ -10,7 +10,7 @@ from proxy.services import chat_draft_service as drafts, chat_session_service as
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
+def client(tmp_path, monkeypatch, workspace_engine):
     path = tmp_path / 'catalog.sqlite'
     monkeypatch.setattr(sessions, 'rag_meta_db_path', lambda: str(path))
     app = FastAPI()

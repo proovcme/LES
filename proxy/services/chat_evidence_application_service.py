@@ -42,6 +42,7 @@ from proxy.services.context_governor_service import (
     ContextPacket,
     ContextRequiredSectionOverflow,
 )
+from proxy.services.harness_loop_service import HarnessLoop
 from proxy.services.chat_section_context_service import ChatSectionReader, SectionReadError, visible_chunks
 from proxy.services.document_review_tool import bind_review_tool, TOOL_NAME as REVIEW_TOOL
 from proxy.services.bound_document_tools import document_tool_context, bound_contract_shortlist
@@ -987,6 +988,9 @@ async def _execute_chat_evidence_application(
                 )
 
             tool_results_for_model: list[dict[str, Any]] = []
+            local_file_receipts: list[dict[str, Any]] = []
+            local_file_epoch = 0
+            local_agent_tools = False
 
             tool_context = ""
             visual_tool_requested = any(
@@ -1027,6 +1031,15 @@ async def _execute_chat_evidence_application(
                 profile_tools = [TABLE_TOOL, *profile_tools]
             if review_tool is not None:
                 profile_tools = [REVIEW_TOOL, *profile_tools]
+            from proxy.services.agent_workspace_tools import enabled as agent_workspace_enabled
+            local_agent_tools = agent_workspace_enabled(str(req.session_id or ''), str((profile_snapshot or {}).get('mode') or req.mode or ''))
+            if local_agent_tools:
+                from proxy.services.agent_workspace_tools import TOOL_NAMES, instructions as agent_instructions, current_request as current_agent_request
+                profile_tools = list(TOOL_NAMES) + profile_tools
+                workspace_instructions = agent_instructions()
+                sys_normal += '\n\n' + workspace_instructions
+                sys_strict += '\n\n' + workspace_instructions
+                retrieval_trace['local_agent_tools'] = {'scope':'registered_session_workspace','tools':list(TOOL_NAMES)}
             route_trace = canonical_route_trace_payload(
                 canonical_route,
                 execution_mode=canonical_execution_mode,
@@ -1058,11 +1071,23 @@ async def _execute_chat_evidence_application(
                     from proxy.services.tool_harness_service import harness
 
                     tool_harness = harness(web_config=web_research_config)
+                    if local_agent_tools:
+                        from proxy.services.agent_workspace_tools import bind as bind_agent_workspace
+                        bind_agent_workspace(tool_harness, str(req.session_id))
                     table_contract = table_tool.register(tool_harness) if table_tool is not None else None
                     review_contract = review_tool.register(tool_harness) if review_tool is not None else None
 
                     async def _fallback_model_tool(tool_name: str, args: dict[str, Any]):
+                        nonlocal local_file_epoch
                         payload = await tool_harness.call_async(tool_name, args)
+                        if tool_name == 'agent_workspace' and args.get('operation') in {'save', 'edit', 'delete', 'restore'}:
+                            from proxy.services.execution_receipt_service import local_file_receipt
+                            local_file_receipts.append(local_file_receipt(payload))
+                            outcome = payload.get('result') or {}
+                            if outcome.get('changed') is True or outcome.get('code') == 'AGENT_CONFLICT':
+                                local_file_epoch += 1
+                            if payload.get('status') == 'ok' and (payload.get('result') or {}).get('changed') is True:
+                                retrieval_trace['route_comparison']['persisted_effects'] += 1
                         if review_tool is not None and tool_name == REVIEW_TOOL:
                             from proxy.services.model_research_tool_service import ModelResearchToolResult
                             return ModelResearchToolResult(payload, review_tool.last_chunks if payload.get('status') == 'ok' else ())
@@ -1135,10 +1160,10 @@ async def _execute_chat_evidence_application(
                     selected_calls: list[dict[str, Any]] = []
                     selector_usage: list[dict[str, Any]] = []
                     research_rounds: list[dict[str, Any]] = []
-                    failed_calls: set[str] = set()
-                    completed_reads: set[str] = set()
                     def iteration_call_identity(call):
                         identity = tool_call_identity(call)
+                        if call.get('tool') == 'agent_workspace':
+                            return f"agent:{local_file_epoch}:{identity}"
                         if table_tool is not None and call.get('tool') == TABLE_TOOL:
                             state = table_tool.state()
                             return f"{state['task_id']}:{state['revision']}:{identity}"
@@ -1150,12 +1175,12 @@ async def _execute_chat_evidence_application(
                         1.0,
                         _env_float("LES_CHAT_RESEARCH_DEADLINE_SECONDS", 120.0),
                     )
-                    research_deadline = time.monotonic() + research_deadline_seconds
-                    research_round = 0
+                    research_loop = HarnessLoop(max_calls=max_calls,
+                        deadline_seconds=research_deadline_seconds)
                     calls_remaining = max_calls
                     stop_reason = "deadline"
-                    while time.monotonic() < research_deadline and calls_remaining > 0:
-                        research_round += 1
+                    while research_loop.enter_round():
+                        research_round = research_loop.round
                         prior_results = [
                             _compact_tool_result_for_prompt(item, max_chars=2400)
                             for item in without_table_replays(tool_results_for_model[-max_calls:])
@@ -1171,7 +1196,8 @@ async def _execute_chat_evidence_application(
                         selector_messages, selector_packet = govern_inference_messages(
                             preset=execution_preset,
                             profile_prefix=selector_profile,
-                            request_payload=req.question,
+                            request_payload=(current_agent_request(req.question, local_file_receipts)
+                                             if local_agent_tools else req.question),
                             shortlist=selector_context_shortlist(
                                 shortlist.get("tools") or [],
                                 native_tool_schemas=(
@@ -1218,19 +1244,15 @@ async def _execute_chat_evidence_application(
                                 max_calls=calls_remaining,
                             )
                         ]
-                        calls = [call for call in proposed_calls[:calls_remaining]
-                                 if iteration_call_identity(call) not in failed_calls
-                                 and iteration_call_identity(call) not in completed_reads]
+                        selected_indexes = research_loop.select([
+                            iteration_call_identity(call) for call in proposed_calls])
+                        calls = [proposed_calls[index] for index in selected_indexes]
                         research_rounds.append(
-                            {"round": research_round, "proposed": len(proposed_calls), "executed": len(calls)}
+                            {"round": research_round, "proposed": len(proposed_calls), "executed": 0}
                         )
                         if not calls:
-                            stop_reason = "model_stop"
-                            if proposed_calls:
-                                stop_reason = "repeated_tool_failure"
-                                if any(iteration_call_identity(call) in completed_reads for call in proposed_calls):
-                                    stop_reason = "repeated_read"
-                            else:
+                            stop_reason = research_loop.reason
+                            if not proposed_calls:
                                 response = active_model_result.response
                                 if response.text.strip() and not response.tool_calls:
                                     terminal_model_answer = (response.text, dict(response.usage))
@@ -1242,6 +1264,12 @@ async def _execute_chat_evidence_application(
                             tool_loop_stage = "tool_execution"
                             tool_name = str(call.get("tool") or "")
                             await chat_progress(token_sink, "tool", "Читаю и проверяю найденные материалы")
+                            if not research_loop.begin(call_identity):
+                                if research_loop.stopped:
+                                    stop_reason = research_loop.reason
+                                    break
+                                continue
+                            research_rounds[-1]['executed'] += 1
                             research_result = await model_research_tools.execute(call)
                             payload = research_result.payload
                             if table_tool is not None and tool_name == TABLE_TOOL and payload.get('status') == 'error':
@@ -1307,10 +1335,8 @@ async def _execute_chat_evidence_application(
                                     await chat_progress(token_sink, 'document',
                                         f"Проверено разделов: {review_state['reviewed']} из {review_state['total']}; "
                                         f"нужна перепроверка: {review_state['needs_recheck']}")
-                            if payload.get("status") == "error" or payload.get("ok") is False:
-                                failed_calls.add(call_identity)
-                            completed_reads.add(call_identity)
-                            calls_remaining -= 1
+                            research_loop.finish(failed=(payload.get("status") == "error" or payload.get("ok") is False))
+                            calls_remaining = research_loop.remaining
                             tool_results_for_model.append(payload)
                             if table_tool is not None and tool_name == TABLE_TOOL:
                                 task_status = table_tool.state()
@@ -1323,9 +1349,10 @@ async def _execute_chat_evidence_application(
                             )
                             selector_source_map = answer_source_map
 
-                        if calls_remaining <= 0:
-                            stop_reason = "calls_budget"
+                        if research_loop.stopped:
+                            stop_reason = research_loop.reason
                             break
+                    stop_reason = research_loop.reason
                     tool_context = _format_tool_results_for_model(without_table_replays(tool_results_for_model))
                     web_research_trace = public_web_research_config(
                         web_research_config
@@ -1490,7 +1517,7 @@ async def _execute_chat_evidence_application(
                     "Дай итоговый инженерный ответ. Не выдумывай факты и используй только существующие "
                     "номера [Источник N]. Если материалов недостаточно, отдели это от подтверждённых выводов."
                 )
-                question_tail = req.question
+                question_tail = current_agent_request(req.question, local_file_receipts) if local_agent_tools else req.question
                 answer_checkpoint = tuple(
                     item
                     for candidate in memory_candidates
@@ -1680,22 +1707,29 @@ async def _execute_chat_evidence_application(
                 )
 
                 crag_status = "MODEL_OUTPUT"
-                logger.info("[CHAT] model answer accepted unchanged; citation check is trace-only")
+                logger.info("[CHAT] model content accepted; citation syntax normalized separately")
                 break
 
 
-            from proxy.services.execution_receipt_service import summarize
+            from proxy.services.execution_receipt_service import summarize, no_local_changes
             execution = summarize([
+                *local_file_receipts,
                 table_tool.completion_receipt() if table_tool is not None else None,
                 await review_tool.completion_receipt() if review_tool is not None else None,
             ])
+            if execution is None and local_agent_tools:
+                execution = no_local_changes()
             if execution is not None:
                 retrieval_trace['execution'] = execution
                 await chat_progress(token_sink, 'document', execution['notice'])
 
             try:
                 from proxy.services.evidence_packet_service import verify_answer_source_labels
+                from proxy.services.source_locator_service import normalize_answer_citations
 
+                formatted = normalize_answer_citations(answer, answer_source_map)
+                answer = formatted.pop('answer')
+                retrieval_trace['citation_formatting'] = formatted
                 citation_check = verify_answer_source_labels(answer, answer_source_map)
                 retrieval_trace["citation_check"] = citation_check
             except Exception as citation_error:  # noqa: BLE001

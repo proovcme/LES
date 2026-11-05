@@ -32,6 +32,8 @@ jobs:
           workspaces: |
             desktop/light/src-tauri
             core
+            runtime
+            api
       - name: Prepare build tools
         run: choco install make --yes --no-progress
       - name: Install frozen Python environment
@@ -44,6 +46,21 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           "LES_CORE_LIBRARY=$((Resolve-Path native/core/les_core.dll).Path)" >> $env:GITHUB_ENV
           "LES_CORE_MODE=native" >> $env:GITHUB_ENV
+      - name: Test and build native service owner and API
+        run: |
+          make test-runtime
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          make test-api
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          uv run python tools/build_native_runtime.py --output native/runtime
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          uv run python tools/build_native_api.py --output native/api
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          uv run python tools/light_runtime_assets.py --destination native/qdrant
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          "LES_TEST_NATIVE_RUNTIME=$((Resolve-Path native/runtime/les-runtime.exe).Path)" >> $env:GITHUB_ENV
+          "LES_TEST_NATIVE_API=$((Resolve-Path native/api/les-api.exe).Path)" >> $env:GITHUB_ENV
+          "LES_TEST_NATIVE_QDRANT=$((Resolve-Path native/qdrant/qdrant.exe).Path)" >> $env:GITHUB_ENV
       - name: Check static frontend
         run: |
           uv run python tools/build_light_frontend.py

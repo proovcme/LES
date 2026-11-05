@@ -61,14 +61,19 @@ def build_environment(tmp_path, monkeypatch):
     def stage(destination, **kwargs):
         destination.mkdir(parents=True)
         (destination / 'qdrant').write_bytes(b'fixture')
+    def build_core(destination):
+        destination.mkdir(parents=True)
+        (destination / 'libles_core.dylib').write_bytes(b'fixture')
+        (destination / 'core-receipt.json').write_text('{}')
     monkeypatch.setattr(installer, 'stage_code', stage_code)
     monkeypatch.setattr(installer, 'stage', stage)
+    monkeypatch.setattr(installer, 'build_core', build_core)
     monkeypatch.setattr(installer, 'host_target', lambda: 'aarch64-apple-darwin')
     monkeypatch.setattr(installer.subprocess, 'run', lambda command, **kwargs: calls.append(command))
     return calls
 
 
-@pytest.mark.parametrize('failure', ['stage', 'download', 'compile', 'dependencies', 'interrupt'])
+@pytest.mark.parametrize('failure', ['stage', 'core', 'download', 'compile', 'dependencies', 'interrupt'])
 def test_failed_install_can_retry_same_path(tmp_path, monkeypatch, build_environment, failure):
     app = tmp_path / 'Приложения с пробелами/LES.app'
     state = tmp_path / 'state'
@@ -77,8 +82,8 @@ def test_failed_install_can_retry_same_path(tmp_path, monkeypatch, build_environ
     with monkeypatch.context() as fault:
         def fail(*args, **kwargs):
             raise OSError('simulated build failure')
-        if failure in {'stage', 'download'}:
-            fault.setattr(installer, 'stage_code' if failure == 'stage' else 'stage', fail)
+        if failure in {'stage', 'core', 'download'}:
+            fault.setattr(installer, {'stage': 'stage_code', 'core': 'build_core', 'download': 'stage'}[failure], fail)
         else:
             def run(command, **kwargs):
                 if failure == 'interrupt':
@@ -94,6 +99,8 @@ def test_failed_install_can_retry_same_path(tmp_path, monkeypatch, build_environ
     assert installer.install(app, state) == app.resolve()
     assert (app / 'Contents/MacOS/LES').is_file()
     assert (app / 'Contents/Info.plist').is_file()
+    assert (app / 'Contents/Resources/native/core/libles_core.dylib').is_file()
+    assert (app / 'Contents/Resources/native/core/core-receipt.json').is_file()
     assert not list(app.parent.glob(f'.{app.name}.install-*'))
     assert any('venv' in command and '--relocatable' in command for command in build_environment)
     assert any('sync' in command and '--no-editable' in command for command in build_environment)

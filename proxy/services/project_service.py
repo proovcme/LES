@@ -7,141 +7,46 @@
 """
 from __future__ import annotations
 
-import sqlite3
-import time
 from typing import Any
 
 from backend.rag_config import rag_meta_db_path
+from backend.workspace_native import catalog_call
 
 # Доменные виды привязок (что можно отнести к объекту). Расширяется по мере волны.
 LINK_KINDS = {"dataset", "cad_bim_import", "task", "field_zahvatka", "mail_thread", "note", "folder"}
 PROJECT_STATUSES = {"active", "archived", "on_hold"}
 
 
-def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(rag_meta_db_path())
-    conn.row_factory = sqlite3.Row
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS les_projects (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            code TEXT NOT NULL DEFAULT '',
-            address TEXT NOT NULL DEFAULT '',
-            status TEXT NOT NULL DEFAULT 'active',
-            created_at TEXT NOT NULL
-        )
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS les_project_links (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_id INTEGER NOT NULL,
-            kind TEXT NOT NULL,
-            ref TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            UNIQUE(project_id, kind, ref)
-        )
-        """
-    )
-    return conn
-
-
-def _now() -> str:
-    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-
-
-def create_project(name: str, code: str = "", address: str = "") -> dict[str, Any]:
-    name = (name or "").strip()
-    if not name:
-        raise ValueError("Пустое имя объекта")
-    with _connect() as conn:
-        cur = conn.execute(
-            "INSERT INTO les_projects(name, code, address, status, created_at) VALUES (?,?,?,?,?)",
-            (name, (code or "").strip(), (address or "").strip(), "active", _now()),
-        )
-        pid = cur.lastrowid
-    # get_project открывает новое соединение — читаем после коммита with-блока.
-    return get_project(pid) or {}
+def create_project(name: str, code: str = '', address: str = '') -> dict[str, Any]:
+    return catalog_call(rag_meta_db_path(), 'project_create', name=name or '', code=code or '', address=address or '')
 
 
 def list_projects(limit: int = 100) -> list[dict[str, Any]]:
-    with _connect() as conn:
-        rows = conn.execute(
-            "SELECT * FROM les_projects ORDER BY status='archived', id DESC LIMIT ?",
-            (min(limit, 500),),
-        ).fetchall()
-        return [dict(r) for r in rows]
+    return catalog_call(rag_meta_db_path(), 'project_list', limit=limit)
 
 
 def get_project(project_id: int) -> dict[str, Any] | None:
-    with _connect() as conn:
-        row = conn.execute("SELECT * FROM les_projects WHERE id=?", (project_id,)).fetchone()
-        if not row:
-            return None
-        project = dict(row)
-        project["links"] = list_links(project_id)
-        return project
+    return catalog_call(rag_meta_db_path(), 'project_get', project_id=project_id)
 
 
 def set_project_status(project_id: int, status: str) -> dict[str, Any] | None:
-    if status not in PROJECT_STATUSES:
-        raise ValueError(f"status: {sorted(PROJECT_STATUSES)}")
-    with _connect() as conn:
-        conn.execute("UPDATE les_projects SET status=? WHERE id=?", (status, project_id))
-    return get_project(project_id)
+    return catalog_call(rag_meta_db_path(), 'project_status', project_id=project_id, status=status)
 
 
 def delete_project(project_id: int) -> bool:
-    with _connect() as conn:
-        conn.execute("DELETE FROM les_project_links WHERE project_id=?", (project_id,))
-        cur = conn.execute("DELETE FROM les_projects WHERE id=?", (project_id,))
-        return cur.rowcount > 0
+    return catalog_call(rag_meta_db_path(), 'project_delete', project_id=project_id)
 
 
 def link_entity(project_id: int, kind: str, ref: str) -> dict[str, Any]:
-    if kind not in LINK_KINDS:
-        raise ValueError(f"kind: {sorted(LINK_KINDS)}")
-    ref = (ref or "").strip()
-    if not ref:
-        raise ValueError("Пустой ref")
-    with _connect() as conn:
-        if conn.execute("SELECT 1 FROM les_projects WHERE id=?", (project_id,)).fetchone() is None:
-            raise ValueError(f"Объект {project_id} не найден")
-        conn.execute(
-            "INSERT OR IGNORE INTO les_project_links(project_id, kind, ref, created_at) VALUES (?,?,?,?)",
-            (project_id, kind, ref, _now()),
-        )
-        row = conn.execute(
-            "SELECT * FROM les_project_links WHERE project_id=? AND kind=? AND ref=?",
-            (project_id, kind, ref),
-        ).fetchone()
-        return dict(row) if row else {}
+    return catalog_call(rag_meta_db_path(), 'project_link', project_id=project_id, kind=kind, ref=ref or '')
 
 
 def unlink_entity(project_id: int, kind: str, ref: str) -> bool:
-    with _connect() as conn:
-        cur = conn.execute(
-            "DELETE FROM les_project_links WHERE project_id=? AND kind=? AND ref=?",
-            (project_id, kind, (ref or "").strip()),
-        )
-        return cur.rowcount > 0
+    return catalog_call(rag_meta_db_path(), 'project_unlink', project_id=project_id, kind=kind, ref=ref or '')
 
 
 def list_links(project_id: int, kind: str | None = None) -> list[dict[str, Any]]:
-    with _connect() as conn:
-        if kind:
-            rows = conn.execute(
-                "SELECT * FROM les_project_links WHERE project_id=? AND kind=? ORDER BY id",
-                (project_id, kind),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM les_project_links WHERE project_id=? ORDER BY kind, id",
-                (project_id,),
-            ).fetchall()
-        return [dict(r) for r in rows]
+    return catalog_call(rag_meta_db_path(), 'project_links', project_id=project_id, kind=kind)
 
 
 def project_dataset_ids(project_id: int) -> list[str]:
@@ -151,63 +56,16 @@ def project_dataset_ids(project_id: int) -> list[str]:
 
 
 def project_for_dataset(dataset_id: str) -> int:
-    """Обратный поиск: к какому объекту привязан датасет (kind='dataset'). 0 — не привязан.
-
-    Симметрия датасет↔проект: выбор ДАТАСЕТА несёт контекст своего объекта (LES.md) так же, как
-    выбор ПРОЕКТА — проект это лишь именованная группа датасетов (ADR scope). Без этого режим
-    датасета терял LES.md, который есть в режиме проекта."""
-    if not dataset_id:
-        return 0
-    with _connect() as conn:
-        row = conn.execute(
-            "SELECT project_id FROM les_project_links WHERE kind='dataset' AND ref=? ORDER BY id LIMIT 1",
-            (str(dataset_id),),
-        ).fetchone()
-    return int(row["project_id"]) if row else 0
+    return catalog_call(rag_meta_db_path(), 'project_for_dataset', dataset_id=str(dataset_id)) if dataset_id else 0
 
 
 def _datasets_in_scope(dataset_ids: list[str]) -> list[dict[str, Any]]:
-    """Имена/счётчики привязанных датасетов из метабазы (нормативы в области)."""
-    if not dataset_ids:
-        return []
-    out: list[dict[str, Any]] = []
-    try:  # datasets/documents — таблицы RAG-бэкенда; в свежей метабазе их может не быть
-        with _connect() as conn:
-            qmarks = ",".join("?" * len(dataset_ids))
-            rows = conn.execute(
-                f"SELECT id, name, chunk_count FROM datasets WHERE id IN ({qmarks})", dataset_ids
-            ).fetchall()
-            for r in rows:
-                try:
-                    files = conn.execute(
-                        "SELECT COUNT(*) FROM documents WHERE dataset_id=?", (r["id"],)
-                    ).fetchone()[0]
-                except Exception:
-                    files = 0
-                out.append({"id": r["id"], "name": r["name"], "files": files, "chunks": r["chunk_count"]})
-    except Exception:
-        # таблицы нет → вернём хотя бы id-привязки (имена подтянутся на живой системе)
-        out = [{"id": did, "name": did, "files": 0, "chunks": 0} for did in dataset_ids]
-    return out
+    return catalog_call(rag_meta_db_path(), 'project_datasets', dataset_ids=dataset_ids)
 
 
 def build_registry() -> dict[str, Any]:
     """Реестр проектов (общая карта): все объекты + папки + мета из LES.md. Без LLM."""
-    import json
-    import sqlite3
-
-    le_meta: dict[int, dict] = {}
-    try:  # мета из LES.md-контекста (таблица создаётся les_md_service)
-        conn = sqlite3.connect(rag_meta_db_path())
-        conn.row_factory = sqlite3.Row
-        for r in conn.execute("SELECT project_id, meta_json FROM les_md_context").fetchall():
-            try:
-                le_meta[int(r["project_id"])] = json.loads(r["meta_json"] or "{}")
-            except (json.JSONDecodeError, TypeError):
-                pass
-        conn.close()
-    except sqlite3.OperationalError:
-        pass
+    le_meta = {int(key): value for key, value in catalog_call(rag_meta_db_path(), 'project_metadata').items()}
 
     out = []
     for p in list_projects(limit=500):

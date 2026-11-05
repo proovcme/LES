@@ -1,20 +1,20 @@
 """Fuse Qdrant dense and exact local BM25 with the existing RRF rank constant."""
 import asyncio
 from qdrant_client import models
-from backend import bm25_store
+from backend import bm25_store, native_core
 from backend.interface import EmbeddingContractError
 
 
 def fuse(dense, lexical, limit, *, rank_constant=2.):
     if not 0 < rank_constant < float('inf'):
         raise ValueError('RRF rank constant must be finite and positive')
-    scores, points = {}, {}
+    points = {}
     for channel in (dense, lexical):
-        for position, point in enumerate(channel):
+        for point in channel:
             points.setdefault(point.id, point)
-            scores[point.id] = scores.get(point.id, 0.) + 1. / (rank_constant + position)
-    return [points[key].model_copy(update={"score": score}) for key, score in
-            sorted(scores.items(), key=lambda row: row[1], reverse=True)[:limit]]
+    result = native_core.required('bm25', request=dict(action='fuse', rank_constant=rank_constant,
+        limit=limit, channels=[[point.id for point in channel] for channel in (dense, lexical)]))
+    return [points[key].model_copy(update={"score": score}) for key, score in result['hits']]
 
 
 async def query(adapter, journal, text, dense_vec, query_filter, *, dense_name,

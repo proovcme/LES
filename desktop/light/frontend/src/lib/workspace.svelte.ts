@@ -16,6 +16,7 @@ export class Workspace {
   loading = $state(true);
   busy = $state(false);
   closing = $state(false);
+  beforeClose?: () => Promise<void>;
   uploading = $state(false);
   error = $state('');
   notice = $state('');
@@ -226,6 +227,7 @@ export class Workspace {
       await generation;
       await this.persist();
       await this.writer?.flush();
+      await this.beforeClose?.();
     } catch (error) { this.closing = false; throw error; }
   }
   dispose(): void {

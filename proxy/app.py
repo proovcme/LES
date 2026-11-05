@@ -474,61 +474,15 @@ async def _raptor_resume_supervisor():
 
 
 async def _auto_resume_pending_parse():
-    """Автоматическое возобновление индексации ожидающих документов при запуске серверов."""
-    await asyncio.sleep(6)  # Дать бэкенду и Qdrant завершить стартовые задачи
+    """Restore pending work without leaving failed startup jobs active."""
+    await asyncio.sleep(6)
     try:
-        db_path = rag_meta_db_path()
-        conn = sqlite3.connect(db_path)
-        pending_count = int(conn.execute("SELECT COUNT(*) FROM documents WHERE upper(status) = 'PENDING'").fetchone()[0] or 0)
-        conn.close()
-        if pending_count > 0:
-            logger.info("[INIT] Авто-возобновление индексации для %s ожидающих файлов...", pending_count)
-            from proxy.routers.datasets import ParseSchedulerRequest, get_dataset_state, run_parse_scheduler
-            state = get_dataset_state()
-            req = ParseSchedulerRequest(
-                batch_limit=1,
-                max_batches=10000,
-                cooldown_sec=2.0,
-                background=True,
-                min_free_gb=2.5,
-                unload_before_start=False,
-                unload_between_batches=False,
-                warm_embedder=True,
-                unload_after_finish=False,
-            )
-            job = state.job_service.create(
-                "rag_parse_scheduler",
-                source="auto_resume",
-                status="running",
-                message=f"Auto-resumed indexing for {pending_count} pending files",
-                total=pending_count,
-            )
-            job_id = job["id"]
-            state.job_tracker[job_id] = {
-                "type": "rag_parse_scheduler",
-                "status": "QUEUED",
-                "total": req.max_batches,
-                "processed": 0,
-                "started_at": job["started_at"],
-                "message": f"Auto-resumed indexing for {pending_count} pending files",
-            }
+        from proxy.routers.datasets import get_dataset_state
+        from proxy.services.auto_parse_resume_service import resume_pending_parse
+        await resume_pending_parse(get_dataset_state())
+    except Exception as error:
+        logger.warning('[INIT] Auto-resume parse check failed: %s', error)
 
-            async def _run():
-                try:
-                    await run_parse_scheduler(state, req, job_id=job_id)
-                    # Остаток подхватит постоянный supervisor. Отдельную рекурсивную
-                    # задачу не создаём: это исключает два параллельных scheduler job.
-                    conn_check = sqlite3.connect(db_path)
-                    rem = int(conn_check.execute("SELECT COUNT(*) FROM documents WHERE upper(status) = 'PENDING'").fetchone()[0] or 0)
-                    conn_check.close()
-                    if rem > 0:
-                        logger.info("[AUTO_RESUME_PARSE] remaining=%s; supervisor will continue", rem)
-                except Exception as err:
-                    logger.error("[AUTO_RESUME_PARSE %s] Error: %s", job_id, err, exc_info=True)
-
-            asyncio.create_task(_run())
-    except Exception as exc:
-        logger.warning("[INIT] Auto-resume parse check failed: %s", exc)
 
 async def _warmup_reranker() -> bool:
     from proxy.services.retrieval_service import required_reranker_policy
@@ -717,6 +671,9 @@ def create_app():
     fastapi_app.include_router(mcp_connections_router)
     fastapi_app.include_router(model_connections_router)
     fastapi_app.include_router(checklist_review_router)
+    if is_light():
+        from proxy.routers.agent_state import router as agent_state_router
+        fastapi_app.include_router(agent_state_router)
     fastapi_app.include_router(documents_router)
     fastapi_app.include_router(tools_router)
     fastapi_app.include_router(_without_full_les_paths(settings_router, _FULL_LES_SETTINGS_PATHS) if is_light() else settings_router)
@@ -751,6 +708,9 @@ def create_app():
             except asyncio.CancelledError:
                 pass
     fastapi_app.on_event("shutdown")(stop_dataset_watch)
+    # Stop active conversions before Python waits for executor threads at exit.
+    from backend.format_process import stop as stop_format_worker
+    fastapi_app.on_event("shutdown")(stop_format_worker)
     fastapi_app.middleware("http")(track_errors)
     _app = fastapi_app
     return _app

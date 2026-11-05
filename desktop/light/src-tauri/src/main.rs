@@ -8,6 +8,7 @@ use serde_json::{json, Value};
 mod close_guard;
 mod lifecycle;
 mod supervisor;
+mod launcher;
 #[cfg(windows)] use std::os::windows::process::CommandExt;
 
 struct Runtime { directory: PathBuf, state: PathBuf, child: Mutex<Option<Child>>, close: Mutex<close_guard::CloseGuard>,
@@ -71,18 +72,13 @@ fn start_child(runtime: &Runtime) -> Result<(), String> {
     let mut owned = runtime.child.lock().map_err(|_| "Запуск занят")?;
     if runtime.stopping.load(Ordering::SeqCst) { return Err("Приложение закрывается".into()); }
     if owned.as_mut().is_some_and(|child| child.try_wait().ok().flatten().is_none()) { return Err("Компоненты уже запущены".into()); }
-    let python = runtime.directory.join("python/python.exe");
     let root = runtime.directory.join("runtime");
-    let launcher = root.join("tools/light_launcher.py");
-    if !python.is_file() || !launcher.is_file() {
-        return Err("В установке не хватает компонентов запуска. Восстановите LES RAG установщиком; ваши документы сохранятся.".into());
-    }
     fs::create_dir_all(runtime.state.join("logs")).map_err(|_| "Нет доступа к папке данных LES RAG. Проверьте права пользователя.")?;
     let output = fs::OpenOptions::new().create(true).append(true).open(runtime.state.join("logs/launcher.txt")).map_err(|_| "Не удалось открыть журнал запуска.")?;
-    let mut command = Command::new(python);
-    command.arg("-B").arg(launcher).args(["--root"]).arg(&root).arg("--state").arg(&runtime.state)
-        .arg("--qdrant").arg(runtime.directory.join("native/qdrant/qdrant.exe")).arg("--parent-pipe")
-        .current_dir(&runtime.state).stdin(Stdio::piped()).stdout(Stdio::from(output.try_clone().map_err(|e| e.to_string())?)).stderr(Stdio::from(output));
+    let native=std::env::args().any(|arg| arg=="--native-launcher" || arg=="--native-api");
+    let mut command=launcher::command(&runtime.directory,&root,&runtime.state,native).map_err(str::to_string)?;
+    if std::env::args().any(|arg|arg=="--native-api") {command.arg("--native-api");}
+    command.current_dir(&runtime.state).stdin(Stdio::piped()).stdout(Stdio::from(output.try_clone().map_err(|e| e.to_string())?)).stderr(Stdio::from(output));
     if std::env::args().any(|arg| arg == "--svelte") { command.args(["--frontend", "svelte"]); }
     if std::env::args().any(|arg| arg == "--read-only") { command.arg("--read-only"); }
     #[cfg(windows)] command.creation_flags(0x08000000);

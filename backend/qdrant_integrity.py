@@ -350,17 +350,14 @@ class QdrantIntegrity:
         if path.suffix.lower() not in support.PDF_PAGE_NODE_SUFFIXES:
             return set()
         try:
-            import pdfplumber
+            from backend.pdf_reader import text_pages
 
-            with pdfplumber.open(path) as document:
-                return {
-                    page_no
-                    for page_no, page in enumerate(document.pages, start=1)
-                    if len((page.extract_text() or "").strip()) >= support.MIN_CHUNK
-                }
+            return {number for number, text, _scan in text_pages(path)
+                    if len(text.strip()) >= support.MIN_CHUNK}
         except Exception as error:  # noqa: BLE001
             support.logger.warning("[INTEGRITY] PDF page inventory failed %s: %s", path, error)
-            return set()
+            from backend.extraction_errors import DocumentExtractionError
+            raise DocumentExtractionError('FORMAT_READ_FAILED') from error
 
     def _sync_count_file_vector_points(
         self,
@@ -495,7 +492,9 @@ class QdrantIntegrity:
                     indexed_pages = set(qrow.get("pages") or set())
                     expected_page_count = len(expected_pages)
                     indexed_page_count = len(indexed_pages)
-                    if expected_pages and indexed_pages != expected_pages:
+                    # Native text is a minimum coverage requirement. OCR and
+                    # short meaningful sheets legitimately add indexed pages.
+                    if expected_pages - indexed_pages:
                         file_issues.append(
                             f"Страницы PDF: {len(indexed_pages)} из {len(expected_pages)}"
                         )

@@ -17,7 +17,7 @@ export function connectNativeClose(workspace: Workspace, target: DesktopWindow =
       await invoke('editor_close_result', { nonce, saved: true });
     } catch (error) {
       workspace.closing = false;
-      workspace.error = `Окно остаётся открытым: диалог не удалось сохранить. ${errorMessage(error)}`;
+      workspace.error = `Окно остаётся открытым: изменения не удалось сохранить. ${errorMessage(error)}`;
       await invoke('editor_close_result', { nonce, saved: false }).catch(() => undefined);
     } finally { pending = false; }
   };

@@ -1,4 +1,4 @@
-"""Bounded, optional native accelerator. Never owns models or index publication."""
+"""Bounded native bridge for document, storage and harness operations."""
 from __future__ import annotations
 
 import ctypes
@@ -95,6 +95,22 @@ def available():
 def call(operation, **arguments):
     if not available():
         return None
+    return required(operation, **arguments)
+
+
+def supports(operation):
+    if not available():
+        return False
+    health = _invoke(_load(library_path()), b'{"schema":"les.core.v1","operation":"health"}')
+    if operation in health.get('operations', []):
+        return True
+    if mode() == 'native':
+        raise NativeCoreError('CORE_CAPABILITY_MISMATCH')
+    return False  # Compatibility with an explicitly retained older core asset.
+
+
+def required(operation, **arguments):
+    """Mandatory native owner, independent of the optional accelerator selector."""
     data = json.dumps({'schema': 'les.core.v1', 'operation': operation, **arguments},
                       ensure_ascii=False, separators=(',', ':'), allow_nan=False).encode('utf-8')
     if len(data) > MAX_INPUT:

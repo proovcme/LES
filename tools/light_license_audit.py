@@ -55,7 +55,12 @@ def stage_notices(root: Path, payload: Path):
     shutil.copy2(payload / 'python/LICENSE.txt', output / 'Python-LICENSE.txt')
     shutil.copytree(root / 'licenses', output / 'native', dirs_exist_ok=True)
     packages, seen = [], set()
-    for manifest in ('desktop/light/src-tauri/Cargo.toml', 'core/Cargo.toml'):
+    manifests = ['desktop/light/src-tauri/Cargo.toml', 'core/Cargo.toml']
+    if (payload / 'native/runtime/runtime-receipt.json').is_file():
+        manifests.append('runtime/Cargo.toml')
+    if (payload / 'native/api/api-receipt.json').is_file():
+        manifests.append('api/Cargo.toml')
+    for manifest in manifests:
         result = subprocess.run(['cargo', 'metadata', '--locked', '--offline', '--format-version', '1',
             '--filter-platform', 'x86_64-pc-windows-msvc', '--manifest-path', str(root / manifest)],
             capture_output=True, check=True, encoding='utf-8')
@@ -63,7 +68,7 @@ def stage_notices(root: Path, payload: Path):
         resolved = {node['id'] for node in cargo['resolve']['nodes']}
         for package in cargo['packages']:
             identity = (package['name'], package['version'])
-            if package['id'] not in resolved or package['name'] in {'les-light','les-core'} or identity in seen:
+            if package['id'] not in resolved or package['name'] in {'les-light','les-core','les-runtime','les-api'} or identity in seen:
                 continue
             seen.add(identity)
             source = Path(package['manifest_path']).parent

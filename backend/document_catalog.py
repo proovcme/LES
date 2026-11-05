@@ -135,6 +135,13 @@ class MetaDB:
             conn.execute(
                 "INSERT OR IGNORE INTO indexing_repair_state(singleton) VALUES (1)"
             )
+            from backend.smart_index import register_document_visibility
+            register_document_visibility(conn, exclude_temporary=True)
+            conn.execute("""UPDATE documents SET status='SKIPPED', stage='SOURCE_EXCLUDED',
+                error_code='TEMPORARY_SOURCE', retryable=0, retry_after=0,
+                last_error='Служебный файл Office или метаданные: не является документом.'
+                WHERE les_visible_document(file_name)=0 AND COALESCE(chunk_count,0)=0
+                AND status IN ('PENDING','ERROR','INDEXED')""")
 
     def ensure_system_datasets(self) -> list[str]:
         """Provision module-owned datasets only from the real runtime bootstrap.
@@ -675,7 +682,7 @@ class MetaDB:
 
     def get_pending_files(self, dataset_id: str, limit: int | None = None) -> List[str]:
         sql = (
-            "SELECT file_name FROM documents WHERE dataset_id=? AND status='PENDING' "
+            "SELECT file_name FROM documents WHERE dataset_id=? AND status='PENDING' AND les_visible_document(file_name)=1 "
             "ORDER BY "
             "CASE WHEN complexity='needs_ocr' OR pipeline='markdown_needs_ocr' THEN 1 ELSE 0 END, "
             "COALESCE(NULLIF(file_size, 0), 9223372036854775807), file_name"
@@ -685,6 +692,8 @@ class MetaDB:
             sql += " LIMIT ?"
             params.append(max(0, int(limit)))
         with self._get_conn() as conn:
+            from backend.smart_index import register_document_visibility
+            register_document_visibility(conn, exclude_temporary=True)
             rows = conn.execute(sql, params).fetchall()
         return [r["file_name"] for r in rows]
 

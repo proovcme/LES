@@ -40,5 +40,14 @@ async def generation_guard(state, connection, *, token_sink=None):
     async with acquire_generation_slot(semaphore, timeout_seconds=45):
         # Memory/mode/jobs can change while this request is queued.
         ensure_generation_allowed(state, connection)
+        from proxy.services.request_memory_service import remember_invocation
+        remember_invocation(connection)
         await chat_progress(token_sink, 'generation', 'Модель готовит ответ')
-        yield
+        try:
+            yield
+        finally:
+            from proxy.services.request_memory_service import release_after_request
+            try:await release_after_request(connection, state, token_sink, permit_held=True)
+            except Exception:
+                import logging
+                logging.getLogger(__name__).warning('Generation cleanup failed; outcome preserved', exc_info=True)

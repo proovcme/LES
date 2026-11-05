@@ -152,33 +152,18 @@ def _extract_document_passport_probe(probe: DocumentProbe, doc_type: str) -> dic
 def _probe_pdf(path: Path, size_bytes: int) -> DocumentProbe:
     probe = DocumentProbe(path=path, suffix=".pdf", size_bytes=size_bytes)
     try:
-        import pdfplumber
-
-        doc = pdfplumber.open(path)
-        try:
-            probe.page_count = len(doc.pages)
-            sample_text = []
-            text_pages = 0
-            table_count = 0
-            for page_no in range(min(_sample_limit(), len(doc.pages))):
-                page = doc.pages[page_no]
-                text = page.extract_text() or ""
-                if text.strip():
-                    text_pages += 1
-                    sample_text.append(text[:2000])
-                finder = getattr(page, "find_tables", None)
-                if finder:
-                    try:
-                        table_count += len(finder() or [])
-                    except Exception:
-                        pass
-            probe.text_sample = "\n".join(sample_text)[:6000]
-            probe.has_text_layer = text_pages > 0
-            probe.needs_ocr = not probe.has_text_layer and probe.page_count > 0
-            probe.has_tables = table_count > 0 or _text_has_table_signals(probe.text_sample)
-            probe.table_count_hint = table_count
-        finally:
-            doc.close()
+        import pypdfium2 as pdfium
+        from backend.pdf_reader import text_pages, _PDFIUM_LOCK
+        with _PDFIUM_LOCK, pdfium.PdfDocument(str(path)) as document:
+            probe.page_count = len(document)
+        samples = list(text_pages(path, limit=_sample_limit()))
+        probe.text_sample = '\n'.join(text[:2000] for _,text,_ in samples)[:6000]
+        probe.has_text_layer = any(text.strip() for _,text,_ in samples)
+        probe.needs_ocr = any(scan for _,_,scan in samples)
+        probe.has_tables = _text_has_table_signals(probe.text_sample)
+        # Table geometry belongs to conversion, not registration/classification.
+        # Intersections on an engineering drawing can exhaust the whole worker.
+        probe.signals['table_geometry'] = 'deferred_to_conversion'
     except Exception as e:
         probe.signals["probe_error"] = str(e)
     return probe

@@ -44,7 +44,15 @@ async def assert_parse_admission(
         try:
             await asyncio.to_thread(embedder._resolve_embedding_connection)
         except ModelConnectionResolutionError as error:
-            raise HTTPException(409, "Модель для поиска не назначена или не готова. Откройте Настройки → Модели, проверьте подключение и назначьте его для поиска по документам.") from error
+            from proxy.services.public_error_service import public_error_payload
+            detail = public_error_payload(status_code=409, detail=str(error))
+            if str(error).startswith('ROLE_BINDING_MISSING'):
+                message = 'Для поиска по документам назначьте модель эмбеддингов в настройках моделей.'
+            elif detail['code'] == 'REQUEST_REJECTED':
+                message = 'Подключение модели поиска не готово. Проверьте его в настройках моделей.'
+            else:
+                message = detail['detail']
+            raise HTTPException(409, message) from error
     try:
         qdrant_ok = await state.backend.health()
     except Exception as error:
@@ -117,6 +125,45 @@ def active_parse_scheduler_job(state: DatasetRouterState) -> tuple[str, dict[str
         if is_scheduler:
             return job_id, job
     return None
+
+
+def pending_document_count(database) -> int:
+    from backend.workspace_native import catalog_call
+
+    return catalog_call(database, "job_pending_documents")
+
+
+def claim_parse_scheduler(state, *, source: str, total: int, message: str):
+    if active_parse_scheduler_job(state):
+        return None
+    # Rust checks and inserts in the same write transaction, including claims
+    # made by a separate request or service instance with no shared tracker.
+    job = state.job_service.create("rag_parse_scheduler", source=source,
+                                   status="running", message=message, total=total)
+    if job is not None:
+        state.job_tracker[job["id"]] = {
+            "type": "rag_parse_scheduler", "status": "QUEUED", "total": total,
+            "processed": 0, "started_at": job["started_at"], "message": message,
+        }
+    return job
+
+
+def finish_scheduler_failure(state, job_id, error, *, cancelled=False, automatic=False):
+    status = "cancelled" if cancelled else "failed"
+    code = ("AUTO_RESUME_PARSE_" if automatic else "PARSE_SCHEDULER_") + status.upper()
+    detail = getattr(error, "detail", None)
+    explanation = (detail.get("detail") or detail.get("message")) if isinstance(detail, dict) else detail
+    explanation = explanation or str(error) or type(error).__name__
+    message = ("Обработка прервана." if cancelled else f"Индексация остановлена: {explanation}")
+    current = state.job_service.get(job_id) or {}
+    saved = state.job_service.update(
+        job_id, status=status, errors=max(int(current.get("errors") or 0), 0 if cancelled else 1),
+        message=message, result=dict(status=status, error_code=code, exception_type=type(error).__name__),
+    )
+    state.job_tracker[job_id].update(
+        {key: saved[key] for key in ("finished_at", "updated_at", "errors", "message", "result") if key in saved}
+    )
+    state.job_tracker[job_id]["status"] = str(saved.get("status") or status).upper()
 
 
 async def _dataset_name_for_id(state: DatasetRouterState, dataset_id: str) -> str:
@@ -374,7 +421,7 @@ async def run_dataset_parse_drain(
     return result
 
 
-async def run_parse_scheduler(
+async def _run_parse_scheduler_inner(
     state: DatasetRouterState,
     req: ParseSchedulerRequest,
     job_id: str | None = None,
@@ -448,6 +495,7 @@ async def run_parse_scheduler(
 
 
         try:
+            batches[-1]['memory_cleanup'] = result.get('memory_cleanup') if isinstance(result, dict) else None
             post_memory = await parse_memory_state()
             batches[-1]["post_memory"] = post_memory
             if post_memory["ram_free_gb"] < post_batch_min_free_gb:
@@ -472,6 +520,8 @@ async def run_parse_scheduler(
             await asyncio.sleep(req.cooldown_sec)
 
 
+    from backend.runtime_memory import collect_transient
+    final_cleanup = await asyncio.to_thread(collect_transient, 'queue_end')
     queue = await pending_parse_datasets(state, priority_order)
     remaining_pending = sum(item["pending_files"] for item in queue)
     status = "completed" if remaining_pending == 0 and errors == 0 else "partial" if batches else "idle"
@@ -491,6 +541,7 @@ async def run_parse_scheduler(
         "datasets_pending": queue,
         "stop_reason": stop_reason,
         "final_unload": final_unload,
+        "memory_cleanup": final_cleanup,
     }
 
     if job_id:
@@ -515,3 +566,16 @@ async def run_parse_scheduler(
             result=result,
         )
     return result
+
+
+async def run_parse_scheduler(state, req, job_id=None):
+    from backend.runtime_memory import collect_transient
+    completed = False
+    try:
+        result = await _run_parse_scheduler_inner(state, req, job_id)
+        completed = True
+        return result
+    finally:
+        if not completed:
+            try:await asyncio.to_thread(collect_transient, 'queue_end')
+            except Exception:logger.warning('Queue cleanup failed; original outcome preserved', exc_info=True)

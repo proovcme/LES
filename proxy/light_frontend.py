@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 from fastapi import Depends
 from starlette.staticfiles import StaticFiles
 
-from proxy.security import require_user
+from proxy.security import require_user, require_admin
 
 FRONTEND_ROOT = Path(__file__).resolve().parents[1] / 'desktop/light/frontend/dist'
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; "
@@ -26,6 +26,14 @@ class FrontendFiles(StaticFiles):
 
 
 def mount_frontend(app):
+    @app.get('/api/light/native-admin-authorization', include_in_schema=False)
+    async def native_admin_authorization(_user=Depends(require_admin)):
+        return {'allowed': True}
+
+    @app.get('/api/light/native-authorization', include_in_schema=False)
+    async def native_authorization(_user=Depends(require_user)):
+        return {'allowed': True}
+
     @app.get('/api/light/frontend', include_in_schema=False)
     async def frontend_config(_user=Depends(require_user)):
         value = os.getenv('LES_LIGHT_LEGACY_UI_URL', '')

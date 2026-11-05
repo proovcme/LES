@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import os
 import sqlite3
+from threading import Barrier
 import pytest
 
 from backend import native_core
@@ -16,6 +17,9 @@ def engine(request, monkeypatch):
     if request.param == 'native' and not os.getenv('LES_CORE_LIBRARY'):
         pytest.skip('Set LES_CORE_LIBRARY to run the native integration gate')
     monkeypatch.setenv('LES_CORE_MODE', request.param)
+    if request.param == 'python':
+        from tests.oracles.job_store import JobService as Oracle
+        monkeypatch.setitem(globals(), 'JobService', Oracle)
     return request.param
 
 
@@ -78,21 +82,27 @@ def test_invalid_job_patches_do_not_modify_sqlite(tmp_path, engine, updates):
 
 
 def test_failed_recovery_rolls_back_every_row_and_connections_close(tmp_path, engine, monkeypatch):
-    import proxy.services.job_service as module
     store = JobService(tmp_path/'jobs.sqlite')
     ids=[store.create('test')['id'] for _ in range(3)]
-    original=module.recovery_patch; calls=[]
-    def fail(current,reason,now):
-        calls.append(current)
-        if len(calls)==2:raise RuntimeError('synthetic crash')
-        return original(current,reason,now)
-    monkeypatch.setattr(module,'recovery_patch',fail)
-    with pytest.raises(RuntimeError,match='synthetic crash'):
-        store.mark_interrupted_active_jobs('restart')
+    if engine == 'python':
+        import tests.oracles.job_store as module
+        original=module.recovery_patch;calls=[]
+        def fail(current,reason,now):
+            calls.append(current)
+            if len(calls)==2:raise RuntimeError('synthetic crash')
+            return original(current,reason,now)
+        monkeypatch.setattr(module,'recovery_patch',fail)
+        with pytest.raises(RuntimeError,match='synthetic crash'):store.mark_interrupted_active_jobs('restart')
+    else:
+        with sqlite3.connect(store.db_path) as conn:
+            conn.execute("CREATE TRIGGER fail_second BEFORE UPDATE ON jobs WHEN OLD.id='"+ids[1]+"' BEGIN SELECT RAISE(ABORT,'synthetic crash'); END")
+        with pytest.raises(sqlite3.OperationalError):store.mark_interrupted_active_jobs('restart')
+        with sqlite3.connect(store.db_path) as conn:conn.execute('DROP TRIGGER fail_second')
     assert all(store.get(job)['status']=='queued' for job in ids)
-    with store._connect() as connection:
-        assert connection.execute('PRAGMA synchronous').fetchone()[0]==2
-    with pytest.raises(sqlite3.ProgrammingError):connection.execute('SELECT 1')
+    # No leaked transaction: another connection can immediately take the writer lease.
+    with sqlite3.connect(store.db_path, timeout=.1) as conn:
+        conn.execute('BEGIN EXCLUSIVE')
+        conn.rollback()
 
 
 def test_sqlite_serializes_competing_progress_and_completion(tmp_path, engine):
@@ -106,5 +116,39 @@ def test_sqlite_serializes_competing_progress_and_completion(tmp_path, engine):
 
 def test_terminal_job_recovery_is_noop():
     # Cross-engine parity is covered by the parameterized SQLite scenarios;
-    # this test also keeps basic pure policy behavior independent of a compiler.
+    # transition policy is now mandatory native code, including terminal no-ops.
     assert recovery_patch({'status':'completed'},'restart','now')['ignored']
+
+
+def test_competing_manual_and_auto_claims_have_one_durable_owner(tmp_path):
+    path = tmp_path / 'jobs.sqlite'
+    stores = [JobService(path) for _ in range(8)]
+    ready = Barrier(len(stores))
+
+    def claim(index):
+        ready.wait(timeout=10)
+        return stores[index].create(
+            'rag_parse_scheduler', source='auto_resume' if index % 2 else 'pending',
+            status='running', total=7,
+        )
+
+    with ThreadPoolExecutor(max_workers=len(stores)) as pool:
+        claims = [row for row in pool.map(claim, range(len(stores))) if row is not None]
+    assert len(claims) == 1
+    store = stores[0]
+    winner = claims[0]['id']
+    assert list(store.list()) == [winner]
+    store.update(winner, processed=3)
+    assert store.mark_interrupted_active_jobs('restart') == 1
+    assert store.get(winner)['processed'] == 3
+    assert store.create('rag_parse_scheduler', status='running', total=4) is not None
+
+def test_job_result_large_integer_unicode_and_float_roundtrip(tmp_path, engine):
+    store=JobService(tmp_path/'jobs.sqlite');job=store.create('exact metadata')
+    payload={'number':2**80+123,'time':1793563000.1234567,'name':'日本語 🌲','path':r'C:\folder with spaces\file.txt'}
+    store.update(job['id'],result=payload)
+    assert store.get(job['id'])['result']==payload
+    assert store.list()[job['id']]['result']==payload
+    with sqlite3.connect(store.db_path)as db:
+        import json
+        assert json.loads(db.execute('SELECT result FROM jobs WHERE id=?',(job['id'],)).fetchone()[0])==payload

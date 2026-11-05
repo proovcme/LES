@@ -1,4 +1,4 @@
-"""Compare Python/native BM25 preparation on identical authored data, without models."""
+"""Compare frozen Python/native BM25 storage and preparation on identical authored data, without models."""
 from __future__ import annotations
 
 import argparse
@@ -27,6 +27,7 @@ def worker(output, count, mode, library):
         from backend.inference import lexical_tokens
         lexical_tokens.stem_russian_word = functools.lru_cache(maxsize=32768)(lexical_tokens.stem_russian_word)
     if mode in {'python','python-cached'}:
+        from tests.oracles import bm25_store_779 as bm25_store
         from collections import Counter
         from backend.inference.lexical_tokens import tokenize_current
         # Original pre-770 implementation, with an explicit separate cache control.
@@ -41,14 +42,21 @@ def worker(output, count, mode, library):
             'dataset_id':'synthetic', 'file_name':f'file-{i//100}.txt', 'node_role':'evidence'})
                 for i in range(start, stop)]
     started = time.perf_counter()
-    with bm25_store.connect(journal, create=True) as db, db:
-        db.execute('BEGIN IMMEDIATE')
-        for offset in range(0,count,256):
-            bm25_store.put(db, points(offset,min(count,offset+256)))
-        db.execute("UPDATE corpus SET revision='benchmark'")
+    if mode == 'native':
+        with bm25_store.writer(journal) as db:
+            for offset in range(0,count,256):
+                bm25_store.put(db, points(offset,min(count,offset+256)))
+            bm25_store.commit(db,'benchmark',count)
+    else:
+        with bm25_store.connect(journal, create=True) as db, db:
+            db.execute('BEGIN IMMEDIATE')
+            for offset in range(0,count,256):
+                bm25_store.put(db, points(offset,min(count,offset+256)))
+            db.execute("UPDATE corpus SET revision='benchmark'")
     journal._save({'phase':'idle', 'revision':'benchmark'})
     build_seconds = time.perf_counter()-started
-    with bm25_store.connect(journal) as db:
+    import sqlite3
+    with sqlite3.connect(journal.directory/'bm25.sqlite') as db:
         digest = hashlib.sha256()
         for table, order in [('docs','id'),('postings','term,doc'),('frequencies','term'),('ancestors','ancestor,doc')]:
             for row in db.execute(f'SELECT * FROM {table} ORDER BY {order}'):

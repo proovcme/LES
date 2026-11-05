@@ -124,6 +124,27 @@ def _classify_parse_failure(error: Exception, *, attempts: int) -> ParseFailureD
             max_attempts=max_attempts,
         )
 
+    worker_code = getattr(error, 'code', '')
+    if worker_code in {
+        'WORKER_TIMEOUT', 'WORKER_QUEUE_TIMEOUT', 'WORKER_EXITED',
+        'WORKER_CANCELLED', 'WORKER_START_FAILED', 'WORKER_OUTPUT_LIMIT',
+        'WORKER_RESPONSE_INVALID', 'WORKER_RESPONSE_INCOMPLETE',
+        'FORMAT_READ_FAILED', 'FORMAT_WORKER_UNAVAILABLE',
+        'OCR_DISABLED', 'OCR_READ_FAILED', 'DOC_ENCRYPTED', 'DOC_VERSION_UNSUPPORTED',
+        'NO_SEARCHABLE_TEXT',
+        'DOC_TRUNCATED', 'DOC_CONTAINER_UNREADABLE', 'DOC_STREAM_MISSING',
+        'DOC_STREAM_UNREADABLE', 'DOC_PIECES_MISSING', 'DOC_PIECES_INVALID',
+        'DOC_UTF16_INVALID', 'DOC_LIMIT',
+    }:
+        transient = worker_code in {'WORKER_TIMEOUT', 'WORKER_QUEUE_TIMEOUT',
+                                   'WORKER_EXITED', 'WORKER_CANCELLED', 'WORKER_START_FAILED'}
+        retryable = transient and attempts < max_attempts
+        delay = min(300.0, 5.0 * (2 ** max(0, attempts - 1))) if retryable else 0.0
+        return ParseFailureDisposition(
+            error_code=worker_code, disposition='retryable' if retryable else 'terminal',
+            retryable=retryable, retry_after=time.time() + delay if retryable else 0.0,
+            attempts=attempts, max_attempts=max_attempts,
+        )
     message = str(error or "").casefold()
     transient_codes = (
         ("missing prevalidated sparse vector", "SPARSE_VECTOR_PREVALIDATION_MISSING"),

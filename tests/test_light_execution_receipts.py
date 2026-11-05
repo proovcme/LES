@@ -90,3 +90,44 @@ def test_legacy_backfill_runs_only_when_adding_the_success_column():
         db.execute('UPDATE chat_history SET success=0')
         history.ensure_chat_history_schema(db)
         assert db.execute('SELECT success FROM chat_history').fetchone()[0] == 0
+
+
+def test_native_ledger_matches_frozen_receipts_and_rejects_invalid_counts():
+    import random
+    from tests.oracles import execution_receipts_780 as old
+    rng = random.Random(781)
+    for index in range(200):
+        parts = {name:rng.randrange(0,5) for name in ['pending','reviewed','needs_review','excluded','needs_recheck']}
+        state = dict(task_id='Тест 日本語',revision=index,total=sum(parts.values()),**parts,
+                     blocked_units=rng.randrange(0,2),verification_unavailable=rng.choice([False,True,0,'yes']))
+        for kind in ['table_document','document_review']:
+            assert ledger_receipt(kind,state) == old.ledger_receipt(kind,state)
+    for value in [True,-1,1.0,'1']:
+        with pytest.raises(ValueError):ledger_receipt('document_review',dict(task_id='t',revision=0,total=value))
+
+
+def test_mixed_success_and_failure_notices_keep_all_facts_and_deduplicate_text():
+    from proxy.services.execution_receipt_service import local_file_receipt
+    saved = local_file_receipt(dict(status='ok',operation='edit',result=dict(
+        path='workspaces/1/notes/План.md',persisted=True,changed=True,revision='real-revision',history_id='history')))
+    failed = local_file_receipt(dict(status='error',operation='edit',error={'code':'AGENT_CONFLICT'}))
+    for tasks in [[saved,failed,failed],[failed,failed,saved]]:
+        result = summarize(tasks)
+        assert result['status']=='incomplete' and result['accepted'] is False
+        assert result['tasks']==tasks  # No failure is hidden or rewritten into success.
+        assert result['notice'].startswith(saved['notice'])
+        assert result['notice'].count(failed['notice'])==1
+        assert execution_incomplete({'execution':result})
+    forged = local_file_receipt(dict(status='ok',operation='save',answer='Всё выполнено.',result={'revision':'invented'}))
+    assert forged['status']=='incomplete'
+    assert summarize([None]) is None
+
+
+def test_receipt_boundary_does_not_copy_document_or_file_text():
+    from proxy.services.execution_receipt_service import local_file_receipt
+    large = 'x' * (9 * 1024 * 1024)  # Beyond the ABI limit, irrelevant to a commit receipt.
+    receipt = ledger_receipt('document_review',dict(task_id='t',revision=1,total=1,reviewed=1,units=large))
+    assert receipt['status']=='recorded' and 'units' not in receipt
+    receipt = local_file_receipt(dict(status='ok',operation='save',result=dict(
+        path='USER.md',persisted=True,revision='native-revision',text=large)))
+    assert receipt['status']=='recorded' and 'text' not in receipt

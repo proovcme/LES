@@ -233,6 +233,7 @@ class ToolHarness:
     ) -> dict[str, Any]:
         is_agent = str(mode).strip().casefold() == "agent"
         agent_order = {
+            "agent_workspace": -1,
             "web_search": 0,
             "web_read": 1,
             "filesystem_search": 2,
@@ -242,6 +243,13 @@ class ToolHarness:
             "filesystem_hash": 6,
             "filesystem_roots": 7,
         }
+        if dataset_ids:
+            # Explicit document scope keeps retrieval/read tools ahead of optional local work.
+            agent_order.update(search_sources=-3, read_source=-2)
+        if attachment_ids:
+            for item in self._registry.registrations():
+                if 'chat_attachment' in item.contract.scopes:
+                    agent_order[item.contract.name] = -4
         if allowed_tools is None:
             registrations = list(self._registry.registrations())
             if is_agent:

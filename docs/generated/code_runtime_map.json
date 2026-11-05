@@ -3,7 +3,8 @@
     "proxy_server.py",
     "sovushka_ng.py",
     "mlx_host.py",
-    "lemonade_host.py"
+    "lemonade_host.py",
+    "tools/light_document_worker.py"
   ],
   "focus": {
     "proxy/routers/chat.py": {
@@ -75,9 +76,12 @@
         "backend/document_catalog.py",
         "backend/document_router.py",
         "backend/embedding_client.py",
+        "backend/embedding_residency.py",
         "backend/external_registration.py",
         "backend/external_scan.py",
+        "backend/extraction_errors.py",
         "backend/file_fingerprint.py",
+        "backend/format_process.py",
         "backend/http_client_policy.py",
         "backend/imap_names.py",
         "backend/index_replacement.py",
@@ -130,6 +134,7 @@
         "backend/retrieval_candidate.py",
         "backend/rules_extractor.py",
         "backend/runtime_events.py",
+        "backend/runtime_memory.py",
         "backend/runtime_paths.py",
         "backend/smart_index.py",
         "backend/sparse_index.py",
@@ -138,7 +143,8 @@
         "backend/system_memory.py",
         "backend/text_decoding.py",
         "backend/trust_core.py",
-        "backend/windows_ocr.py"
+        "backend/windows_ocr.py",
+        "backend/workspace_native.py"
       ],
       "lines": 0,
       "module": "backend",
@@ -167,6 +173,7 @@
       "inbound": [
         "backend/qdrant_retrieval.py",
         "tests/test_light_bm25_incremental.py",
+        "tests/test_light_native_rag_harness.py",
         "tests/test_light_pipeline_trial.py"
       ],
       "lines": 37,
@@ -174,7 +181,8 @@
       "outbound": [
         "backend/__init__.py",
         "backend/bm25_store.py",
-        "backend/interface.py"
+        "backend/interface.py",
+        "backend/native_core.py"
       ],
       "path": "backend/bm25_hybrid.py",
       "status": "PRODUCT_REACHABLE",
@@ -187,15 +195,17 @@
         "backend/sparse_index.py",
         "tests/test_light_bm25_incremental.py",
         "tests/test_light_bm25_index.py",
+        "tests/test_light_native_rag_harness.py",
         "tools/benchmark_native_core.py"
       ],
-      "lines": 150,
+      "lines": 74,
       "module": "backend.bm25_store",
       "outbound": [
         "backend/__init__.py",
         "backend/inference/lexical_tokens.py",
         "backend/interface.py",
-        "backend/lexical_preparation.py"
+        "backend/lexical_preparation.py",
+        "backend/native_core.py"
       ],
       "path": "backend/bm25_store.py",
       "status": "PRODUCT_REACHABLE",
@@ -242,15 +252,18 @@
         "tests/test_converter_email.py",
         "tests/test_datasets_router.py",
         "tests/test_light_grounding_760.py",
+        "tests/test_light_native_document.py",
         "tests/test_light_ocr.py",
         "tests/test_light_pdf_readers.py",
         "tests/test_light_unicode_documents.py"
       ],
-      "lines": 693,
+      "lines": 705,
       "module": "backend.converter",
       "outbound": [
         "backend/__init__.py",
+        "backend/extraction_errors.py",
         "backend/mail_profile.py",
+        "backend/native_core.py",
         "backend/ocr_parser.py",
         "backend/pdf_reader.py",
         "backend/rag_config.py",
@@ -268,9 +281,10 @@
         "tests/test_light_document_review.py",
         "tests/test_light_grounding_760.py",
         "tests/test_light_import_responsiveness.py",
-        "tests/test_light_ingestion_races.py"
+        "tests/test_light_ingestion_races.py",
+        "tests/test_light_native_document.py"
       ],
-      "lines": 1016,
+      "lines": 1025,
       "module": "backend.document_catalog",
       "outbound": [
         "backend/__init__.py",
@@ -290,6 +304,7 @@
     {
       "inbound": [
         "backend/document_catalog.py",
+        "backend/format_process.py",
         "backend/qdrant_support.py",
         "backend/smart_index.py",
         "proxy/routers/dataset_uploads.py",
@@ -297,10 +312,11 @@
         "tests/test_mail_registry_service.py",
         "tests/test_qdrant_adapter_parse.py"
       ],
-      "lines": 1124,
+      "lines": 1109,
       "module": "backend.document_router",
       "outbound": [
-        "backend/__init__.py"
+        "backend/__init__.py",
+        "backend/pdf_reader.py"
       ],
       "path": "backend/document_router.py",
       "status": "PRODUCT_REACHABLE",
@@ -317,10 +333,11 @@
         "tests/test_model_connection_embeddings_integration.py",
         "tests/test_qdrant_adapter_parse.py"
       ],
-      "lines": 356,
+      "lines": 358,
       "module": "backend.embedding_client",
       "outbound": [
         "backend/__init__.py",
+        "backend/embedding_residency.py",
         "backend/interface.py",
         "backend/rag_config.py",
         "proxy/config.py",
@@ -331,6 +348,23 @@
         "proxy/services/openai_compatible_transport_service.py"
       ],
       "path": "backend/embedding_client.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "backend/embedding_client.py",
+        "backend/qdrant_ingestion.py",
+        "tests/test_light_resource_memory.py"
+      ],
+      "lines": 51,
+      "module": "backend.embedding_residency",
+      "outbound": [
+        "backend/__init__.py",
+        "backend/runtime_memory.py",
+        "proxy/services/model_resource_service.py"
+      ],
+      "path": "backend/embedding_residency.py",
       "status": "PRODUCT_REACHABLE",
       "windows_runtime_explicit": false
     },
@@ -350,15 +384,36 @@
     {
       "inbound": [
         "proxy/routers/dataset_external.py",
-        "tests/test_datasets_router.py"
+        "tests/test_datasets_router.py",
+        "tests/test_light_format_worker.py"
       ],
-      "lines": 19,
+      "lines": 37,
       "module": "backend.external_scan",
       "outbound": [
         "backend/__init__.py",
+        "backend/native_core.py",
         "backend/smart_index.py"
       ],
       "path": "backend/external_scan.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "backend/converter.py",
+        "backend/format_process.py",
+        "backend/qdrant_ingestion.py",
+        "backend/qdrant_integrity.py",
+        "proxy/services/chat_folder_service.py",
+        "tests/test_light_native_document.py",
+        "tools/light_document_worker.py"
+      ],
+      "lines": 15,
+      "module": "backend.extraction_errors",
+      "outbound": [
+        "backend/__init__.py"
+      ],
+      "path": "backend/extraction_errors.py",
       "status": "PRODUCT_REACHABLE",
       "windows_runtime_explicit": false
     },
@@ -375,6 +430,26 @@
         "backend/native_core.py"
       ],
       "path": "backend/file_fingerprint.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "backend/qdrant_ingestion.py",
+        "proxy/app.py",
+        "tests/test_light_format_worker.py",
+        "tests/test_light_native_document.py"
+      ],
+      "lines": 124,
+      "module": "backend.format_process",
+      "outbound": [
+        "backend/__init__.py",
+        "backend/document_router.py",
+        "backend/extraction_errors.py",
+        "backend/native_core.py",
+        "backend/rag_config.py"
+      ],
+      "path": "backend/format_process.py",
       "status": "PRODUCT_REACHABLE",
       "windows_runtime_explicit": false
     },
@@ -529,6 +604,7 @@
         "backend/sparse_legacy.py",
         "proxy/services/lexical_index_service.py",
         "proxy/services/retrieval_quality_service.py",
+        "tests/oracles/bm25_store_779.py",
         "tests/test_light_bm25_index.py",
         "tests/test_light_lexical_v2.py",
         "tests/test_light_native_core.py",
@@ -609,6 +685,7 @@
         "proxy/services/lexical_evidence_service.py",
         "proxy/services/lexical_index_service.py",
         "proxy/services/retrieval_service.py",
+        "tests/oracles/bm25_store_779.py",
         "tests/test_light_audit_regressions.py",
         "tests/test_light_bm25_incremental.py",
         "tests/test_light_bm25_index.py",
@@ -619,6 +696,7 @@
         "tests/test_light_grounding_760.py",
         "tests/test_light_index_recovery.py",
         "tests/test_light_lexical_evidence.py",
+        "tests/test_light_native_rag_harness.py",
         "tests/test_light_pipeline_trial.py",
         "tests/test_model_connection_embeddings_integration.py",
         "tests/test_qdrant_adapter_parse.py",
@@ -635,22 +713,22 @@
     },
     {
       "inbound": [
-        "proxy/services/job_service.py",
         "tests/test_light_core_jobs_files.py"
       ],
-      "lines": 71,
+      "lines": 12,
       "module": "backend.job_policy",
       "outbound": [
         "backend/__init__.py",
         "backend/native_core.py"
       ],
       "path": "backend/job_policy.py",
-      "status": "PRODUCT_REACHABLE",
+      "status": "TEST_OR_TOOL_ONLY",
       "windows_runtime_explicit": false
     },
     {
       "inbound": [
         "backend/bm25_store.py",
+        "tests/oracles/bm25_store_779.py",
         "tests/test_light_native_core.py"
       ],
       "lines": 37,
@@ -685,6 +763,7 @@
         "proxy/services/light_update_service.py",
         "tests/test_light_launcher.py",
         "tests/test_light_macos_install.py",
+        "tests/test_light_native_runtime.py",
         "tools/install_light_macos.py",
         "tools/light_launcher.py",
         "tools/skill_compute_worker.py"
@@ -895,13 +974,34 @@
     },
     {
       "inbound": [
+        "backend/bm25_hybrid.py",
+        "backend/bm25_store.py",
+        "backend/converter.py",
+        "backend/external_scan.py",
         "backend/file_fingerprint.py",
+        "backend/format_process.py",
         "backend/job_policy.py",
         "backend/lexical_preparation.py",
+        "backend/runtime_memory.py",
+        "backend/workspace_native.py",
+        "proxy/services/agent_state_service.py",
+        "proxy/services/context_governor_service.py",
+        "proxy/services/execution_receipt_service.py",
+        "proxy/services/file_viewer_service.py",
+        "proxy/services/harness_loop_service.py",
+        "proxy/services/request_memory_service.py",
+        "proxy/services/source_locator_service.py",
+        "tests/conftest.py",
+        "tests/oracles/job_policy.py",
+        "tests/test_datasets_router.py",
         "tests/test_light_core_jobs_files.py",
-        "tests/test_light_native_core.py"
+        "tests/test_light_format_worker.py",
+        "tests/test_light_native_core.py",
+        "tests/test_light_native_document.py",
+        "tests/test_light_native_rag_harness.py",
+        "tests/test_light_resource_memory.py"
       ],
-      "lines": 102,
+      "lines": 118,
       "module": "backend.native_core",
       "outbound": [
         "backend/__init__.py"
@@ -989,11 +1089,14 @@
     {
       "inbound": [
         "backend/converter.py",
+        "backend/document_router.py",
+        "backend/qdrant_integrity.py",
         "backend/windows_ocr.py",
         "proxy/services/pdf_contour_service.py",
+        "tests/test_light_native_document.py",
         "tests/test_light_pdf_readers.py"
       ],
-      "lines": 73,
+      "lines": 136,
       "module": "backend.pdf_reader",
       "outbound": [
         "backend/__init__.py"
@@ -1126,17 +1229,24 @@
       "inbound": [
         "backend/qdrant_adapter.py",
         "tests/test_light_audit_regressions.py",
+        "tests/test_light_format_worker.py",
         "tests/test_light_grounding_760.py",
-        "tests/test_light_ingestion_races.py"
+        "tests/test_light_ingestion_races.py",
+        "tests/test_light_resource_memory.py",
+        "tools/light_document_worker.py"
       ],
-      "lines": 604,
+      "lines": 648,
       "module": "backend.qdrant_ingestion",
       "outbound": [
         "backend/__init__.py",
         "backend/embedding_client.py",
+        "backend/embedding_residency.py",
+        "backend/extraction_errors.py",
+        "backend/format_process.py",
         "backend/index_replacement.py",
         "backend/qdrant_nodes.py",
-        "backend/qdrant_support.py"
+        "backend/qdrant_support.py",
+        "backend/runtime_memory.py"
       ],
       "path": "backend/qdrant_ingestion.py",
       "status": "PRODUCT_REACHABLE",
@@ -1145,13 +1255,16 @@
     {
       "inbound": [
         "backend/qdrant_adapter.py",
-        "tests/test_light_index_recovery.py"
+        "tests/test_light_index_recovery.py",
+        "tests/test_light_native_document.py"
       ],
-      "lines": 642,
+      "lines": 641,
       "module": "backend.qdrant_integrity",
       "outbound": [
         "backend/__init__.py",
+        "backend/extraction_errors.py",
         "backend/index_replacement.py",
+        "backend/pdf_reader.py",
         "backend/qdrant_support.py",
         "backend/sparse_index.py",
         "proxy/services/lexical_index_service.py"
@@ -1164,7 +1277,9 @@
       "inbound": [
         "backend/qdrant_adapter.py",
         "backend/qdrant_ingestion.py",
-        "tests/test_light_grounding_760.py"
+        "tests/test_light_format_worker.py",
+        "tests/test_light_grounding_760.py",
+        "tools/light_document_worker.py"
       ],
       "lines": 571,
       "module": "backend.qdrant_nodes",
@@ -1217,14 +1332,17 @@
         "backend/qdrant_retrieval.py",
         "tests/test_light_audit_regressions.py",
         "tests/test_light_collection_safety.py",
+        "tests/test_light_format_worker.py",
         "tests/test_light_grounding_760.py",
         "tests/test_light_import_responsiveness.py",
         "tests/test_light_index_recovery.py",
         "tests/test_light_ingestion_races.py",
+        "tests/test_light_native_document.py",
         "tests/test_light_rerank_audit.py",
-        "tests/test_qdrant_adapter_parse.py"
+        "tests/test_qdrant_adapter_parse.py",
+        "tools/light_document_worker.py"
       ],
-      "lines": 563,
+      "lines": 584,
       "module": "backend.qdrant_support",
       "outbound": [
         "backend/__init__.py",
@@ -1253,6 +1371,7 @@
         "backend/converter.py",
         "backend/document_catalog.py",
         "backend/embedding_client.py",
+        "backend/format_process.py",
         "backend/qdrant_support.py",
         "mlx_host.py",
         "proxy/app.py",
@@ -1265,6 +1384,8 @@
         "proxy/routers/dataset_watch.py",
         "proxy/routers/diagnostics.py",
         "proxy/routers/runtime.py",
+        "proxy/services/agent_state_service.py",
+        "proxy/services/auto_parse_resume_service.py",
         "proxy/services/cad_bim_graph.py",
         "proxy/services/canonical_promotion_service.py",
         "proxy/services/chat_durability_service.py",
@@ -1302,12 +1423,17 @@
         "proxy/services/source_adapters.py",
         "proxy/services/system_dataset_service.py",
         "proxy/services/task_service.py",
+        "tests/oracles/chat_session_python.py",
+        "tests/oracles/context_python.py",
+        "tests/oracles/memory_python.py",
+        "tests/oracles/project_python.py",
         "tests/test_chunking_w2.py",
         "tests/test_forest_visualizer.py",
         "tests/test_rag_config.py",
         "tools/backup_suharik.py",
         "tools/build_rag_contract_sibling.py",
         "tools/les_doctor.py",
+        "tools/light_document_worker.py",
         "tools/rag_rrf_readiness.py",
         "tools/reindex_datasets_guarded.py"
       ],
@@ -1454,6 +1580,26 @@
     },
     {
       "inbound": [
+        "backend/embedding_residency.py",
+        "backend/qdrant_ingestion.py",
+        "proxy/services/dataset_parse_service.py",
+        "proxy/services/request_memory_service.py",
+        "tests/test_light_resource_memory.py"
+      ],
+      "lines": 42,
+      "module": "backend.runtime_memory",
+      "outbound": [
+        "backend/__init__.py",
+        "backend/native_core.py",
+        "backend/system_memory.py",
+        "proxy/services/runtime_admission.py"
+      ],
+      "path": "backend/runtime_memory.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
         "backend/macos_ocr.py",
         "backend/ocr_parser.py",
         "backend/qdrant_support.py",
@@ -1559,7 +1705,7 @@
         "tools/evaluate_rag_pipeline.py",
         "tools/rebuild_sparse_index.py"
       ],
-      "lines": 159,
+      "lines": 155,
       "module": "backend.sparse_index",
       "outbound": [
         "backend/__init__.py",
@@ -1605,9 +1751,11 @@
     },
     {
       "inbound": [
+        "backend/runtime_memory.py",
         "proxy/app.py",
         "proxy/routers/runtime.py",
         "proxy/services/runtime_admission.py",
+        "tests/test_light_resource_memory.py",
         "tests/test_light_system_memory.py"
       ],
       "lines": 16,
@@ -1652,6 +1800,7 @@
       "inbound": [
         "backend/macos_ocr.py",
         "backend/ocr_parser.py",
+        "tests/test_light_native_document.py",
         "tests/test_light_ocr.py"
       ],
       "lines": 56,
@@ -1662,6 +1811,29 @@
         "backend/runtime_paths.py"
       ],
       "path": "backend/windows_ocr.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "proxy/routers/workspace.py",
+        "proxy/services/chat_draft_service.py",
+        "proxy/services/chat_session_service.py",
+        "proxy/services/conversation_context_service.py",
+        "proxy/services/dataset_parse_service.py",
+        "proxy/services/job_service.py",
+        "proxy/services/memory_service.py",
+        "proxy/services/native_storage_http.py",
+        "proxy/services/project_service.py"
+      ],
+      "lines": 45,
+      "module": "backend.workspace_native",
+      "outbound": [
+        "backend/__init__.py",
+        "backend/native_core.py",
+        "proxy/services/chat_session_service.py"
+      ],
+      "path": "backend/workspace_native.py",
       "status": "PRODUCT_REACHABLE",
       "windows_runtime_explicit": false
     },
@@ -1704,6 +1876,7 @@
         "proxy/memory_core/store.py",
         "proxy/memory_core/validation.py",
         "proxy/routers/__init__.py",
+        "proxy/routers/agent_state.py",
         "proxy/routers/artifacts.py",
         "proxy/routers/auth.py",
         "proxy/routers/chat.py",
@@ -1747,12 +1920,15 @@
         "proxy/services/__init__.py",
         "proxy/services/active_state_service.py",
         "proxy/services/agent_router_service.py",
+        "proxy/services/agent_state_service.py",
+        "proxy/services/agent_workspace_tools.py",
         "proxy/services/answer_contract_service.py",
         "proxy/services/answer_form_service.py",
         "proxy/services/artifact_revision_service.py",
         "proxy/services/asbuilt_chat_service.py",
         "proxy/services/asbuilt_intake_service.py",
         "proxy/services/asbuilt_ocr.py",
+        "proxy/services/auto_parse_resume_service.py",
         "proxy/services/background_summary_service.py",
         "proxy/services/bor_service.py",
         "proxy/services/bound_document_tools.py",
@@ -1840,6 +2016,7 @@
         "proxy/services/generation_guard_service.py",
         "proxy/services/glossary_chat_service.py",
         "proxy/services/graph_edges_service.py",
+        "proxy/services/harness_loop_service.py",
         "proxy/services/harvest_service.py",
         "proxy/services/help_chat_service.py",
         "proxy/services/installed_skill_service.py",
@@ -1881,6 +2058,7 @@
         "proxy/services/model_secret_service.py",
         "proxy/services/model_streaming_service.py",
         "proxy/services/native_open_service.py",
+        "proxy/services/native_storage_http.py",
         "proxy/services/native_tool_message_service.py",
         "proxy/services/normcontrol_review_map_service.py",
         "proxy/services/normcontrol_service.py",
@@ -1922,6 +2100,7 @@
         "proxy/services/reconcile_chat_service.py",
         "proxy/services/reconcile_service.py",
         "proxy/services/request_idempotency_service.py",
+        "proxy/services/request_memory_service.py",
         "proxy/services/resource_cost_service.py",
         "proxy/services/resource_governor.py",
         "proxy/services/retrieval_candidate_service.py",
@@ -1991,11 +2170,14 @@
         "proxy/routers/mail.py",
         "proxy/services/dataset_runtime.py",
         "proxy_server.py",
-        "tests/test_light_router_boundary.py"
+        "tests/test_light_format_worker.py",
+        "tests/test_light_router_boundary.py",
+        "tools/native_api_contract.py"
       ],
-      "lines": 759,
+      "lines": 719,
       "module": "proxy.app",
       "outbound": [
+        "backend/format_process.py",
         "backend/http_client_policy.py",
         "backend/mail_ingest.py",
         "backend/metrics_collector.py",
@@ -2009,6 +2191,7 @@
         "proxy/light_boundary.py",
         "proxy/light_frontend.py",
         "proxy/local_model_registry.py",
+        "proxy/routers/agent_state.py",
         "proxy/routers/artifacts.py",
         "proxy/routers/auth.py",
         "proxy/routers/chat.py",
@@ -2040,6 +2223,7 @@
         "proxy/routers/verify.py",
         "proxy/routers/workspace.py",
         "proxy/routers/workspace_memory.py",
+        "proxy/services/auto_parse_resume_service.py",
         "proxy/services/background_summary_service.py",
         "proxy/services/chat_durability_service.py",
         "proxy/services/colbert_generation_service.py",
@@ -2081,6 +2265,8 @@
         "proxy/services/external_radar_service.py",
         "proxy/services/job_service.py",
         "proxy/storage/file_storage.py",
+        "tests/oracles/context_python.py",
+        "tests/oracles/job_store.py",
         "tests/test_model_connections_router.py"
       ],
       "lines": 170,
@@ -2112,7 +2298,7 @@
         "proxy/app.py",
         "tests/test_light_frontend_assets.py"
       ],
-      "lines": 41,
+      "lines": 49,
       "module": "proxy.light_frontend",
       "outbound": [
         "proxy/__init__.py",
@@ -2265,6 +2451,7 @@
     },
     {
       "inbound": [
+        "proxy/routers/agent_state.py",
         "proxy/routers/artifacts.py",
         "proxy/routers/auth.py",
         "proxy/routers/chat.py",
@@ -2311,6 +2498,24 @@
         "proxy/__init__.py"
       ],
       "path": "proxy/routers/__init__.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "proxy/app.py",
+        "tests/test_light_agent_workspace.py"
+      ],
+      "lines": 51,
+      "module": "proxy.routers.agent_state",
+      "outbound": [
+        "proxy/__init__.py",
+        "proxy/routers/__init__.py",
+        "proxy/security.py",
+        "proxy/services/agent_state_service.py",
+        "proxy/services/native_storage_http.py"
+      ],
+      "path": "proxy/routers/agent_state.py",
       "status": "PRODUCT_REACHABLE",
       "windows_runtime_explicit": false
     },
@@ -2575,7 +2780,7 @@
         "proxy/routers/datasets.py",
         "tests/test_datasets_router.py"
       ],
-      "lines": 407,
+      "lines": 394,
       "module": "proxy.routers.dataset_parse",
       "outbound": [
         "backend/interface.py",
@@ -3000,6 +3205,7 @@
         "proxy/__init__.py",
         "proxy/routers/__init__.py",
         "proxy/security.py",
+        "proxy/services/native_storage_http.py",
         "proxy/services/project_service.py"
       ],
       "path": "proxy/routers/projects.py",
@@ -3051,7 +3257,7 @@
         "tests/test_light_runtime_identity.py",
         "tests/test_light_system_memory.py"
       ],
-      "lines": 920,
+      "lines": 921,
       "module": "proxy.routers.runtime",
       "outbound": [
         "backend/http_client_policy.py",
@@ -3164,9 +3370,10 @@
         "tests/test_light_frontend_drafts.py",
         "tests/test_workspace_router.py"
       ],
-      "lines": 87,
+      "lines": 90,
       "module": "proxy.routers.workspace",
       "outbound": [
+        "backend/workspace_native.py",
         "proxy/__init__.py",
         "proxy/routers/__init__.py",
         "proxy/security.py",
@@ -3193,6 +3400,7 @@
         "proxy/services/chat_session_service.py",
         "proxy/services/conversation_context_service.py",
         "proxy/services/memory_service.py",
+        "proxy/services/native_storage_http.py",
         "proxy/services/project_service.py",
         "proxy/services/runtime_admission.py"
       ],
@@ -3203,6 +3411,7 @@
     {
       "inbound": [
         "proxy/light_frontend.py",
+        "proxy/routers/agent_state.py",
         "proxy/routers/artifacts.py",
         "proxy/routers/auth.py",
         "proxy/routers/chat.py",
@@ -3261,12 +3470,15 @@
       "inbound": [
         "proxy/services/active_state_service.py",
         "proxy/services/agent_router_service.py",
+        "proxy/services/agent_state_service.py",
+        "proxy/services/agent_workspace_tools.py",
         "proxy/services/answer_contract_service.py",
         "proxy/services/answer_form_service.py",
         "proxy/services/artifact_revision_service.py",
         "proxy/services/asbuilt_chat_service.py",
         "proxy/services/asbuilt_intake_service.py",
         "proxy/services/asbuilt_ocr.py",
+        "proxy/services/auto_parse_resume_service.py",
         "proxy/services/background_summary_service.py",
         "proxy/services/bor_service.py",
         "proxy/services/bound_document_tools.py",
@@ -3354,6 +3566,7 @@
         "proxy/services/generation_guard_service.py",
         "proxy/services/glossary_chat_service.py",
         "proxy/services/graph_edges_service.py",
+        "proxy/services/harness_loop_service.py",
         "proxy/services/harvest_service.py",
         "proxy/services/help_chat_service.py",
         "proxy/services/installed_skill_service.py",
@@ -3395,6 +3608,7 @@
         "proxy/services/model_secret_service.py",
         "proxy/services/model_streaming_service.py",
         "proxy/services/native_open_service.py",
+        "proxy/services/native_storage_http.py",
         "proxy/services/native_tool_message_service.py",
         "proxy/services/normcontrol_review_map_service.py",
         "proxy/services/normcontrol_service.py",
@@ -3436,6 +3650,7 @@
         "proxy/services/reconcile_chat_service.py",
         "proxy/services/reconcile_service.py",
         "proxy/services/request_idempotency_service.py",
+        "proxy/services/request_memory_service.py",
         "proxy/services/resource_cost_service.py",
         "proxy/services/resource_governor.py",
         "proxy/services/retrieval_candidate_service.py",
@@ -3539,6 +3754,46 @@
     },
     {
       "inbound": [
+        "proxy/routers/agent_state.py",
+        "proxy/services/agent_workspace_tools.py",
+        "proxy/services/typed_memory_projection_service.py",
+        "tests/test_light_agent_workspace.py",
+        "tests/test_light_native_harness_loop.py"
+      ],
+      "lines": 40,
+      "module": "proxy.services.agent_state_service",
+      "outbound": [
+        "backend/native_core.py",
+        "backend/rag_config.py",
+        "proxy/__init__.py",
+        "proxy/services/__init__.py"
+      ],
+      "path": "proxy/services/agent_state_service.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "proxy/services/chat_evidence_application_service.py",
+        "tests/test_light_agent_workspace.py",
+        "tests/test_light_native_harness_loop.py"
+      ],
+      "lines": 57,
+      "module": "proxy.services.agent_workspace_tools",
+      "outbound": [
+        "proxy/__init__.py",
+        "proxy/services/__init__.py",
+        "proxy/services/agent_state_service.py",
+        "proxy/services/tool_contract_service.py",
+        "proxy/services/tool_harness_service.py",
+        "proxy/services/tool_registry_service.py"
+      ],
+      "path": "proxy/services/agent_workspace_tools.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
         "proxy/routers/chat.py",
         "tests/test_answer_contract_service.py"
       ],
@@ -3636,6 +3891,24 @@
     {
       "inbound": [
         "proxy/app.py",
+        "tests/test_light_auto_parse_resume.py"
+      ],
+      "lines": 51,
+      "module": "proxy.services.auto_parse_resume_service",
+      "outbound": [
+        "backend/rag_config.py",
+        "proxy/__init__.py",
+        "proxy/services/__init__.py",
+        "proxy/services/dataset_contracts.py",
+        "proxy/services/dataset_parse_service.py"
+      ],
+      "path": "proxy/services/auto_parse_resume_service.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "proxy/app.py",
         "proxy/services/chat_request_service.py",
         "tests/test_light_durable_chat.py"
       ],
@@ -3688,7 +3961,8 @@
     {
       "inbound": [
         "proxy/services/ontology_service.py",
-        "proxy/services/project_service.py"
+        "proxy/services/project_service.py",
+        "tests/oracles/project_python.py"
       ],
       "lines": 1425,
       "module": "proxy.services.cad_bim_graph",
@@ -3871,11 +4145,14 @@
     {
       "inbound": [
         "proxy/routers/workspace.py",
-        "tests/test_light_frontend_drafts.py"
+        "tests/conftest.py",
+        "tests/test_light_frontend_drafts.py",
+        "tests/test_light_native_workspace.py"
       ],
-      "lines": 40,
+      "lines": 12,
       "module": "proxy.services.chat_draft_service",
       "outbound": [
+        "backend/workspace_native.py",
         "proxy/__init__.py",
         "proxy/services/__init__.py",
         "proxy/services/chat_session_service.py"
@@ -3914,13 +4191,14 @@
         "tests/test_light_prompt_boundary.py",
         "tests/test_workspace_context.py"
       ],
-      "lines": 2007,
+      "lines": 2041,
       "module": "proxy.services.chat_evidence_application_service",
       "outbound": [
         "backend/inference/routing.py",
         "backend/runtime_paths.py",
         "proxy/__init__.py",
         "proxy/services/__init__.py",
+        "proxy/services/agent_workspace_tools.py",
         "proxy/services/answer_form_service.py",
         "proxy/services/bound_document_tools.py",
         "proxy/services/cad_bim_highlight.py",
@@ -3939,6 +4217,7 @@
         "proxy/services/evidence_packet_service.py",
         "proxy/services/execution_receipt_service.py",
         "proxy/services/generation_guard_service.py",
+        "proxy/services/harness_loop_service.py",
         "proxy/services/lexical_index_service.py",
         "proxy/services/memory_port.py",
         "proxy/services/memory_service.py",
@@ -3969,6 +4248,7 @@
     {
       "inbound": [
         "proxy/services/chat_evidence_application_service.py",
+        "tests/test_light_agent_workspace.py",
         "tests/test_light_chat_evidence.py",
         "tests/test_light_chat_sections.py",
         "tests/test_light_document_review.py",
@@ -4010,7 +4290,7 @@
         "proxy/services/chat_evidence_application_service.py",
         "proxy/services/chat_request_service.py"
       ],
-      "lines": 133,
+      "lines": 127,
       "module": "proxy.services.chat_evidence_manifest_service",
       "outbound": [
         "proxy/__init__.py",
@@ -4023,7 +4303,8 @@
     },
     {
       "inbound": [
-        "proxy/services/chat_evidence_application_service.py"
+        "proxy/services/chat_evidence_application_service.py",
+        "tests/test_light_native_harness_loop.py"
       ],
       "lines": 256,
       "module": "proxy.services.chat_evidence_tools",
@@ -4043,10 +4324,11 @@
         "proxy/routers/dataset_uploads.py",
         "tests/test_light_chat_folder.py"
       ],
-      "lines": 52,
+      "lines": 56,
       "module": "proxy.services.chat_folder_service",
       "outbound": [
         "backend/converter.py",
+        "backend/extraction_errors.py",
         "backend/runtime_paths.py",
         "backend/smart_index.py",
         "proxy/__init__.py",
@@ -4063,7 +4345,9 @@
         "proxy/services/chat_evidence_application_service.py",
         "proxy/services/chat_prompt_support.py",
         "proxy/services/chat_request_service.py",
+        "proxy/services/request_memory_service.py",
         "tests/test_chat_mail_query.py",
+        "tests/test_light_resource_memory.py",
         "tests/test_model_connection_chat_integration.py"
       ],
       "lines": 241,
@@ -4205,7 +4489,7 @@
         "tests/test_light_stream_lifecycle.py",
         "tests/test_model_connection_chat_integration.py"
       ],
-      "lines": 786,
+      "lines": 803,
       "module": "proxy.services.chat_request_service",
       "outbound": [
         "backend/inference/routing.py",
@@ -4240,6 +4524,7 @@
         "proxy/services/project_summary_service.py",
         "proxy/services/public_error_service.py",
         "proxy/services/query_router.py",
+        "proxy/services/request_memory_service.py",
         "proxy/services/retrieval_service.py",
         "proxy/services/runtime_admission.py",
         "proxy/services/scope_service.py",
@@ -4258,7 +4543,10 @@
         "proxy/services/chat_request_service.py",
         "proxy/services/conversation_context_service.py",
         "proxy/services/generation_guard_service.py",
-        "tests/test_chat_mail_query.py"
+        "proxy/services/request_memory_service.py",
+        "tests/oracles/context_python.py",
+        "tests/test_chat_mail_query.py",
+        "tests/test_light_resource_memory.py"
       ],
       "lines": 51,
       "module": "proxy.services.chat_runtime",
@@ -4296,24 +4584,31 @@
     },
     {
       "inbound": [
+        "backend/workspace_native.py",
         "proxy/routers/workspace.py",
         "proxy/routers/workspace_memory.py",
         "proxy/services/chat_draft_service.py",
         "proxy/services/chat_durability_service.py",
         "proxy/services/conversation_context_service.py",
         "proxy/services/typed_memory_projection_service.py",
+        "tests/conftest.py",
+        "tests/oracles/context_python.py",
         "tests/test_chat_session_service.py",
+        "tests/test_light_agent_workspace.py",
         "tests/test_light_conversation_context.py",
         "tests/test_light_durable_chat.py",
         "tests/test_light_frontend_drafts.py",
+        "tests/test_light_native_harness_loop.py",
+        "tests/test_light_native_workspace.py",
         "tests/test_workspace_context.py",
         "tests/test_workspace_memory_router.py",
         "tests/test_workspace_router.py"
       ],
-      "lines": 193,
+      "lines": 30,
       "module": "proxy.services.chat_session_service",
       "outbound": [
         "backend/rag_config.py",
+        "backend/workspace_native.py",
         "proxy/__init__.py",
         "proxy/services/__init__.py"
       ],
@@ -4528,16 +4823,19 @@
         "proxy/services/section_coverage_service.py",
         "proxy/services/typed_memory_projection_service.py",
         "tests/test_context_governor_service.py",
+        "tests/test_light_agent_workspace.py",
         "tests/test_light_chat_sections.py",
         "tests/test_light_document_tasks.py",
+        "tests/test_light_native_rag_harness.py",
         "tests/test_light_rerank_audit.py",
         "tests/test_light_section_coverage.py",
         "tests/test_workspace_context.py",
         "tools/evaluate_retrieval_candidate.py"
       ],
-      "lines": 262,
+      "lines": 159,
       "module": "proxy.services.context_governor_service",
       "outbound": [
+        "backend/native_core.py",
         "proxy/__init__.py",
         "proxy/services/__init__.py",
         "proxy/services/model_execution_preset_service.py"
@@ -4578,14 +4876,19 @@
         "proxy/services/context_memory_service.py",
         "proxy/services/memory_service.py",
         "proxy/services/typed_memory_projection_service.py",
+        "tests/conftest.py",
+        "tests/oracles/memory_python.py",
+        "tests/test_light_agent_workspace.py",
         "tests/test_light_conversation_context.py",
         "tests/test_light_durable_chat.py",
+        "tests/test_light_native_catalog.py",
         "tests/test_workspace_context.py"
       ],
-      "lines": 195,
+      "lines": 157,
       "module": "proxy.services.conversation_context_service",
       "outbound": [
         "backend/rag_config.py",
+        "backend/workspace_native.py",
         "proxy/__init__.py",
         "proxy/config.py",
         "proxy/services/__init__.py",
@@ -4613,6 +4916,7 @@
         "proxy/routers/dataset_uploads.py",
         "proxy/routers/dataset_watch.py",
         "proxy/routers/datasets.py",
+        "proxy/services/auto_parse_resume_service.py",
         "proxy/services/dataset_parse_service.py",
         "tests/test_datasets_router.py"
       ],
@@ -4681,20 +4985,26 @@
         "proxy/routers/dataset_uploads.py",
         "proxy/routers/dataset_watch.py",
         "proxy/routers/datasets.py",
+        "proxy/services/auto_parse_resume_service.py",
         "tests/test_datasets_router.py",
+        "tests/test_light_auto_parse_resume.py",
+        "tests/test_light_resource_memory.py",
         "tests/test_model_connection_embeddings_integration.py"
       ],
-      "lines": 517,
+      "lines": 581,
       "module": "proxy.services.dataset_parse_service",
       "outbound": [
         "backend/parse_admission.py",
         "backend/product_edition.py",
+        "backend/runtime_memory.py",
+        "backend/workspace_native.py",
         "proxy/__init__.py",
         "proxy/services/__init__.py",
         "proxy/services/dataset_contracts.py",
         "proxy/services/dataset_memory_service.py",
         "proxy/services/dataset_runtime.py",
         "proxy/services/model_connection_resolver_service.py",
+        "proxy/services/public_error_service.py",
         "proxy/services/resource_governor.py",
         "proxy/services/runtime_admission.py"
       ],
@@ -4754,7 +5064,8 @@
     {
       "inbound": [
         "proxy/services/agent_router_service.py",
-        "proxy/services/project_service.py"
+        "proxy/services/project_service.py",
+        "tests/oracles/project_python.py"
       ],
       "lines": 230,
       "module": "proxy.services.decision_service",
@@ -5035,7 +5346,10 @@
         "proxy/services/memory_service.py",
         "proxy/services/ontology_service.py",
         "proxy/services/project_service.py",
-        "proxy/services/task_service.py"
+        "proxy/services/task_service.py",
+        "tests/oracles/memory_python.py",
+        "tests/oracles/project_python.py",
+        "tests/test_light_native_catalog.py"
       ],
       "lines": 165,
       "module": "proxy.services.edge_service",
@@ -5144,11 +5458,13 @@
         "proxy/services/document_review_tool.py",
         "proxy/services/table_document_tool.py",
         "sovushka/answer_render.py",
+        "tests/test_light_agent_workspace.py",
         "tests/test_light_execution_receipts.py"
       ],
-      "lines": 38,
+      "lines": 41,
       "module": "proxy.services.execution_receipt_service",
       "outbound": [
+        "backend/native_core.py",
         "proxy/__init__.py",
         "proxy/services/__init__.py"
       ],
@@ -5212,7 +5528,8 @@
         "proxy/services/agent_router_service.py",
         "proxy/services/asbuilt_intake_service.py",
         "proxy/services/forms_service.py",
-        "proxy/services/project_service.py"
+        "proxy/services/project_service.py",
+        "tests/oracles/project_python.py"
       ],
       "lines": 411,
       "module": "proxy.services.field_intake_service",
@@ -5244,11 +5561,13 @@
       "inbound": [
         "proxy/routers/documents.py",
         "proxy/routers/files.py",
-        "proxy/services/native_open_service.py"
+        "proxy/services/native_open_service.py",
+        "tests/test_light_native_document.py"
       ],
-      "lines": 314,
+      "lines": 322,
       "module": "proxy.services.file_viewer_service",
       "outbound": [
+        "backend/native_core.py",
         "proxy/__init__.py",
         "proxy/services/__init__.py"
       ],
@@ -5309,15 +5628,18 @@
         "proxy/services/chat_evidence_application_service.py",
         "proxy/services/conversation_context_service.py",
         "proxy/services/model_capability_refresh_service.py",
+        "tests/oracles/context_python.py",
+        "tests/test_chat_mail_query.py",
         "tests/test_light_admission.py"
       ],
-      "lines": 44,
+      "lines": 53,
       "module": "proxy.services.generation_guard_service",
       "outbound": [
         "proxy/__init__.py",
         "proxy/services/__init__.py",
         "proxy/services/chat_runtime.py",
         "proxy/services/operation_progress_service.py",
+        "proxy/services/request_memory_service.py",
         "proxy/services/runtime_admission.py"
       ],
       "path": "proxy/services/generation_guard_service.py",
@@ -5354,6 +5676,22 @@
         "proxy/services/project_service.py"
       ],
       "path": "proxy/services/graph_edges_service.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "proxy/services/chat_evidence_application_service.py",
+        "tests/test_light_native_harness_loop.py"
+      ],
+      "lines": 42,
+      "module": "proxy.services.harness_loop_service",
+      "outbound": [
+        "backend/native_core.py",
+        "proxy/__init__.py",
+        "proxy/services/__init__.py"
+      ],
+      "path": "proxy/services/harness_loop_service.py",
       "status": "PRODUCT_REACHABLE",
       "windows_runtime_explicit": false
     },
@@ -5411,13 +5749,14 @@
       "inbound": [
         "proxy/app.py",
         "proxy/services/dataset_runtime.py",
+        "tests/test_light_auto_parse_resume.py",
         "tests/test_light_core_jobs_files.py",
         "tests/test_light_import_responsiveness.py"
       ],
-      "lines": 179,
+      "lines": 58,
       "module": "proxy.services.job_service",
       "outbound": [
-        "backend/job_policy.py",
+        "backend/workspace_native.py",
         "proxy/__init__.py",
         "proxy/config.py",
         "proxy/services/__init__.py"
@@ -5845,16 +6184,21 @@
         "proxy/services/chat_request_service.py",
         "proxy/services/project_service.py",
         "proxy/services/typed_memory_projection_service.py",
+        "tests/conftest.py",
+        "tests/oracles/project_python.py",
+        "tests/test_light_agent_workspace.py",
         "tests/test_light_conversation_context.py",
         "tests/test_light_durable_chat.py",
+        "tests/test_light_native_catalog.py",
         "tests/test_workspace_context.py",
         "tests/test_workspace_memory.py",
         "tests/test_workspace_memory_router.py"
       ],
-      "lines": 554,
+      "lines": 417,
       "module": "proxy.services.memory_service",
       "outbound": [
         "backend/rag_config.py",
+        "backend/workspace_native.py",
         "proxy/__init__.py",
         "proxy/services/__init__.py",
         "proxy/services/conversation_context_service.py",
@@ -5942,11 +6286,14 @@
         "proxy/services/model_connection_security_service.py",
         "proxy/services/model_resource_service.py",
         "proxy/services/openai_compatible_transport_service.py",
+        "proxy/services/request_memory_service.py",
+        "tests/oracles/context_python.py",
         "tests/test_chat_mail_query.py",
         "tests/test_light_admission.py",
         "tests/test_light_capability_refresh.py",
         "tests/test_light_embedding_762.py",
         "tests/test_light_reasoning_761.py",
+        "tests/test_light_resource_memory.py",
         "tests/test_light_runtime_identity.py",
         "tests/test_model_capability_service.py",
         "tests/test_model_connection_chat_integration.py",
@@ -5978,6 +6325,7 @@
         "proxy/services/model_capability_service.py",
         "proxy/services/model_connection_resolver_service.py",
         "proxy/services/model_resource_service.py",
+        "tests/oracles/context_python.py",
         "tests/test_light_admission.py",
         "tests/test_light_runtime_identity.py",
         "tests/test_model_capability_service.py",
@@ -6008,6 +6356,8 @@
         "proxy/services/dataset_parse_service.py",
         "proxy/services/model_capability_refresh_service.py",
         "proxy/services/openai_compatible_transport_service.py",
+        "tests/oracles/context_python.py",
+        "tests/test_light_auto_parse_resume.py",
         "tests/test_light_capability_refresh.py",
         "tests/test_model_connection_chat_integration.py",
         "tests/test_model_connection_embeddings_integration.py",
@@ -6075,6 +6425,7 @@
         "proxy/services/llm_transport_profile_service.py",
         "proxy/services/model_connection_resolver_service.py",
         "proxy/services/model_reasoning_service.py",
+        "tests/oracles/context_governor_779.py",
         "tests/test_chat_mail_query.py",
         "tests/test_context_governor_service.py",
         "tests/test_light_chat_evidence.py",
@@ -6130,13 +6481,16 @@
     },
     {
       "inbound": [
+        "backend/embedding_residency.py",
+        "proxy/services/request_memory_service.py",
         "proxy/services/runtime_admission.py",
         "tests/test_light_admission.py",
         "tests/test_light_grounding_760.py",
+        "tests/test_light_runtime_identity.py",
         "tests/test_runtime_admission.py",
         "tools/rag_trial_model.py"
       ],
-      "lines": 49,
+      "lines": 80,
       "module": "proxy.services.model_resource_service",
       "outbound": [
         "proxy/__init__.py",
@@ -6158,6 +6512,7 @@
         "proxy/services/model_capability_service.py",
         "proxy/services/model_connection_resolver_service.py",
         "proxy/services/openai_compatible_transport_service.py",
+        "tests/oracles/context_python.py",
         "tests/test_model_connection_resolver_service.py",
         "tests/test_model_connections_router.py",
         "tests/test_openai_compatible_transport_service.py"
@@ -6199,6 +6554,23 @@
         "proxy/services/file_viewer_service.py"
       ],
       "path": "proxy/services/native_open_service.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "proxy/routers/agent_state.py",
+        "proxy/routers/projects.py",
+        "proxy/routers/workspace_memory.py"
+      ],
+      "lines": 14,
+      "module": "proxy.services.native_storage_http",
+      "outbound": [
+        "backend/workspace_native.py",
+        "proxy/__init__.py",
+        "proxy/services/__init__.py"
+      ],
+      "path": "proxy/services/native_storage_http.py",
       "status": "PRODUCT_REACHABLE",
       "windows_runtime_explicit": false
     },
@@ -6319,7 +6691,8 @@
     {
       "inbound": [
         "proxy/services/cad_bim_graph.py",
-        "proxy/services/project_service.py"
+        "proxy/services/project_service.py",
+        "tests/oracles/project_python.py"
       ],
       "lines": 346,
       "module": "proxy.services.ontology_service",
@@ -6343,6 +6716,7 @@
         "proxy/services/chat_request_service.py",
         "proxy/services/conversation_context_service.py",
         "proxy/services/model_streaming_service.py",
+        "tests/oracles/context_python.py",
         "tests/test_chat_mail_query.py",
         "tests/test_light_admission.py",
         "tests/test_light_embedding_762.py",
@@ -6373,7 +6747,8 @@
       "inbound": [
         "proxy/services/chat_evidence_application_service.py",
         "proxy/services/chat_request_service.py",
-        "proxy/services/generation_guard_service.py"
+        "proxy/services/generation_guard_service.py",
+        "proxy/services/request_memory_service.py"
       ],
       "lines": 14,
       "module": "proxy.services.operation_progress_service",
@@ -6421,9 +6796,10 @@
         "proxy/routers/documents.py",
         "proxy/routers/files.py",
         "proxy/services/tool_harness_service.py",
+        "tests/test_light_native_document.py",
         "tests/test_light_pdf_readers.py"
       ],
-      "lines": 397,
+      "lines": 408,
       "module": "proxy.services.pdf_contour_service",
       "outbound": [
         "backend/pdf_reader.py",
@@ -6616,14 +6992,18 @@
         "proxy/services/les_md_service.py",
         "proxy/services/project_registry_chat_service.py",
         "proxy/services/scope_service.py",
+        "tests/conftest.py",
         "tests/test_chat_session_service.py",
         "tests/test_forest_visualizer.py",
+        "tests/test_light_agent_workspace.py",
+        "tests/test_light_native_catalog.py",
         "tests/test_workspace_memory_router.py"
       ],
-      "lines": 323,
+      "lines": 181,
       "module": "proxy.services.project_service",
       "outbound": [
         "backend/rag_config.py",
+        "backend/workspace_native.py",
         "proxy/__init__.py",
         "proxy/services/__init__.py",
         "proxy/services/cad_bim_graph.py",
@@ -6707,6 +7087,7 @@
         "proxy/routers/chat.py",
         "proxy/services/chat_evidence_application_service.py",
         "proxy/services/chat_request_service.py",
+        "proxy/services/dataset_parse_service.py",
         "proxy/services/retrieval_service.py",
         "tests/test_light_chat_sections.py",
         "tests/test_light_rerank_audit.py",
@@ -6945,6 +7326,30 @@
     },
     {
       "inbound": [
+        "proxy/services/chat_request_service.py",
+        "proxy/services/generation_guard_service.py",
+        "tests/test_light_resource_memory.py"
+      ],
+      "lines": 121,
+      "module": "proxy.services.request_memory_service",
+      "outbound": [
+        "backend/native_core.py",
+        "backend/runtime_memory.py",
+        "proxy/__init__.py",
+        "proxy/services/__init__.py",
+        "proxy/services/chat_inference_service.py",
+        "proxy/services/chat_runtime.py",
+        "proxy/services/model_connection_contracts.py",
+        "proxy/services/model_resource_service.py",
+        "proxy/services/operation_progress_service.py",
+        "proxy/services/runtime_admission.py"
+      ],
+      "path": "proxy/services/request_memory_service.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
         "proxy/services/unified_construction_harness_service.py"
       ],
       "lines": 801,
@@ -7108,6 +7513,7 @@
     },
     {
       "inbound": [
+        "backend/runtime_memory.py",
         "proxy/routers/chat.py",
         "proxy/routers/runtime.py",
         "proxy/routers/workspace_memory.py",
@@ -7115,9 +7521,13 @@
         "proxy/services/chat_request_service.py",
         "proxy/services/dataset_parse_service.py",
         "proxy/services/generation_guard_service.py",
+        "proxy/services/request_memory_service.py",
         "proxy/services/runtime_dispatcher.py",
+        "tests/test_chat_mail_query.py",
         "tests/test_light_admission.py",
+        "tests/test_light_auto_parse_resume.py",
         "tests/test_light_grounding_760.py",
+        "tests/test_light_resource_memory.py",
         "tests/test_runtime_admission.py",
         "tools/rag_trial_model.py"
       ],
@@ -7356,11 +7766,13 @@
         "proxy/services/chat_evidence_application_service.py",
         "proxy/services/chat_evidence_manifest_service.py",
         "proxy/services/chat_evidence_tools.py",
-        "proxy/services/evidence_packet_service.py"
+        "proxy/services/evidence_packet_service.py",
+        "tests/test_light_native_document.py"
       ],
-      "lines": 215,
+      "lines": 198,
       "module": "proxy.services.source_locator_service",
       "outbound": [
+        "backend/native_core.py",
         "proxy/__init__.py",
         "proxy/services/__init__.py"
       ],
@@ -7585,7 +7997,8 @@
       "inbound": [
         "proxy/routers/tasks.py",
         "proxy/services/agent_router_service.py",
-        "proxy/services/project_service.py"
+        "proxy/services/project_service.py",
+        "tests/oracles/project_python.py"
       ],
       "lines": 179,
       "module": "proxy.services.task_service",
@@ -7618,6 +8031,7 @@
     },
     {
       "inbound": [
+        "proxy/services/agent_workspace_tools.py",
         "proxy/services/capability_broker_service.py",
         "proxy/services/document_review_tool.py",
         "proxy/services/extension_tool_service.py",
@@ -7629,9 +8043,10 @@
         "proxy/services/tool_provider_projection_service.py",
         "proxy/services/tool_registry_service.py",
         "proxy/services/trusted_executor_service.py",
-        "proxy/services/workbook_tool_service.py"
+        "proxy/services/workbook_tool_service.py",
+        "tests/test_light_agent_workspace.py"
       ],
-      "lines": 130,
+      "lines": 131,
       "module": "proxy.services.tool_contract_service",
       "outbound": [
         "proxy/__init__.py",
@@ -7644,6 +8059,7 @@
     {
       "inbound": [
         "proxy/routers/tools.py",
+        "proxy/services/agent_workspace_tools.py",
         "proxy/services/chat_evidence_application_service.py",
         "proxy/services/chat_profile_service.py",
         "proxy/services/document_review_tool.py",
@@ -7653,14 +8069,16 @@
         "proxy/services/skill_compute_service.py",
         "proxy/services/table_document_tool.py",
         "proxy/services/tool_registry_service.py",
+        "tests/test_light_agent_workspace.py",
         "tests/test_light_document_review.py",
         "tests/test_light_document_tasks.py",
         "tests/test_light_installed_skills.py",
         "tests/test_light_mcp_connections.py",
+        "tests/test_light_native_harness_loop.py",
         "tests/test_product_edition.py",
         "tests/test_web_search_service.py"
       ],
-      "lines": 1396,
+      "lines": 1404,
       "module": "proxy.services.tool_harness_service",
       "outbound": [
         "backend/converter.py",
@@ -7706,6 +8124,7 @@
     {
       "inbound": [
         "proxy/routers/tools.py",
+        "proxy/services/agent_workspace_tools.py",
         "proxy/services/capability_broker_service.py",
         "proxy/services/document_review_tool.py",
         "proxy/services/extension_tool_service.py",
@@ -7716,6 +8135,7 @@
         "proxy/services/tool_harness_service.py",
         "proxy/services/trusted_executor_service.py",
         "proxy/services/workbook_tool_service.py",
+        "tests/test_light_agent_workspace.py",
         "tests/test_light_router_boundary.py"
       ],
       "lines": 82,
@@ -7748,9 +8168,10 @@
     {
       "inbound": [
         "proxy/routers/tools.py",
-        "proxy/services/tool_harness_service.py"
+        "proxy/services/tool_harness_service.py",
+        "tests/test_light_agent_workspace.py"
       ],
-      "lines": 786,
+      "lines": 796,
       "module": "proxy.services.trusted_executor_service",
       "outbound": [
         "proxy/__init__.py",
@@ -7768,13 +8189,15 @@
       "inbound": [
         "proxy/services/chat_evidence_application_service.py",
         "proxy/services/chat_request_service.py",
+        "tests/test_light_agent_workspace.py",
         "tests/test_workspace_context.py"
       ],
-      "lines": 311,
+      "lines": 325,
       "module": "proxy.services.typed_memory_projection_service",
       "outbound": [
         "proxy/__init__.py",
         "proxy/services/__init__.py",
+        "proxy/services/agent_state_service.py",
         "proxy/services/chat_session_service.py",
         "proxy/services/context_governor_service.py",
         "proxy/services/context_memory_service.py",
@@ -7885,7 +8308,9 @@
         "proxy/services/tool_harness_service.py",
         "proxy/services/web_page_reader_service.py",
         "proxy/services/web_search_service.py",
+        "tests/test_light_agent_workspace.py",
         "tests/test_light_chat_evidence.py",
+        "tests/test_light_native_harness_loop.py",
         "tests/test_web_search_service.py"
       ],
       "lines": 122,
@@ -8588,7 +9013,7 @@
         "sovushka_ng.py",
         "tests/test_light_shell.py"
       ],
-      "lines": 178,
+      "lines": 183,
       "module": "sovushka.components.light_shell",
       "outbound": [
         "sovushka/__init__.py",
@@ -9301,19 +9726,219 @@
     },
     {
       "inbound": [],
-      "lines": 19,
+      "lines": 70,
       "module": "tests.conftest",
-      "outbound": [],
+      "outbound": [
+        "backend/native_core.py",
+        "proxy/services/chat_draft_service.py",
+        "proxy/services/chat_session_service.py",
+        "proxy/services/conversation_context_service.py",
+        "proxy/services/memory_service.py",
+        "proxy/services/project_service.py",
+        "tests/oracles/chat_draft_python.py",
+        "tests/oracles/chat_session_python.py",
+        "tests/oracles/context_python.py",
+        "tests/oracles/memory_python.py",
+        "tests/oracles/project_python.py"
+      ],
       "path": "tests/conftest.py",
       "status": "TEST_OR_TOOL_ONLY",
       "windows_runtime_explicit": false
     },
     {
       "inbound": [
+        "tests/oracles/bm25_store_779.py",
+        "tests/oracles/chat_draft_python.py",
+        "tests/oracles/chat_session_python.py",
+        "tests/oracles/context_governor_779.py",
+        "tests/oracles/context_python.py",
+        "tests/oracles/execution_receipts_780.py",
+        "tests/oracles/job_policy.py",
+        "tests/oracles/job_store.py",
+        "tests/oracles/memory_python.py",
+        "tests/oracles/project_python.py"
+      ],
+      "lines": 1,
+      "module": "tests.oracles",
+      "outbound": [],
+      "path": "tests/oracles/__init__.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "tests/test_light_native_rag_harness.py",
+        "tools/benchmark_native_core.py"
+      ],
+      "lines": 150,
+      "module": "tests.oracles.bm25_store_779",
+      "outbound": [
+        "backend/inference/lexical_tokens.py",
+        "backend/interface.py",
+        "backend/lexical_preparation.py",
+        "tests/oracles/__init__.py"
+      ],
+      "path": "tests/oracles/bm25_store_779.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "tests/conftest.py",
+        "tests/test_light_native_workspace.py"
+      ],
+      "lines": 40,
+      "module": "tests.oracles.chat_draft_python",
+      "outbound": [
+        "tests/oracles/__init__.py",
+        "tests/oracles/chat_session_python.py"
+      ],
+      "path": "tests/oracles/chat_draft_python.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "tests/conftest.py",
+        "tests/oracles/chat_draft_python.py",
+        "tests/test_light_native_workspace.py"
+      ],
+      "lines": 193,
+      "module": "tests.oracles.chat_session_python",
+      "outbound": [
+        "backend/rag_config.py",
+        "tests/oracles/__init__.py"
+      ],
+      "path": "tests/oracles/chat_session_python.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "tests/test_light_native_rag_harness.py"
+      ],
+      "lines": 262,
+      "module": "tests.oracles.context_governor_779",
+      "outbound": [
+        "proxy/services/model_execution_preset_service.py",
+        "tests/oracles/__init__.py"
+      ],
+      "path": "tests/oracles/context_governor_779.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "tests/conftest.py",
+        "tests/test_light_native_catalog.py"
+      ],
+      "lines": 195,
+      "module": "tests.oracles.context_python",
+      "outbound": [
+        "backend/rag_config.py",
+        "proxy/config.py",
+        "proxy/services/chat_runtime.py",
+        "proxy/services/chat_session_service.py",
+        "proxy/services/generation_guard_service.py",
+        "proxy/services/model_connection_contracts.py",
+        "proxy/services/model_connection_registry_service.py",
+        "proxy/services/model_connection_resolver_service.py",
+        "proxy/services/model_secret_service.py",
+        "proxy/services/openai_compatible_transport_service.py",
+        "tests/oracles/__init__.py"
+      ],
+      "path": "tests/oracles/context_python.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "tests/test_light_execution_receipts.py"
+      ],
+      "lines": 58,
+      "module": "tests.oracles.execution_receipts_780",
+      "outbound": [
+        "tests/oracles/__init__.py"
+      ],
+      "path": "tests/oracles/execution_receipts_780.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "tests/oracles/job_store.py"
+      ],
+      "lines": 71,
+      "module": "tests.oracles.job_policy",
+      "outbound": [
+        "backend/native_core.py",
+        "tests/oracles/__init__.py"
+      ],
+      "path": "tests/oracles/job_policy.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "tests/test_light_core_jobs_files.py"
+      ],
+      "lines": 179,
+      "module": "tests.oracles.job_store",
+      "outbound": [
+        "proxy/config.py",
+        "tests/oracles/__init__.py",
+        "tests/oracles/job_policy.py"
+      ],
+      "path": "tests/oracles/job_store.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "tests/conftest.py",
+        "tests/test_light_native_catalog.py"
+      ],
+      "lines": 554,
+      "module": "tests.oracles.memory_python",
+      "outbound": [
+        "backend/rag_config.py",
+        "proxy/services/conversation_context_service.py",
+        "proxy/services/edge_service.py",
+        "tests/oracles/__init__.py"
+      ],
+      "path": "tests/oracles/memory_python.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "tests/conftest.py"
+      ],
+      "lines": 323,
+      "module": "tests.oracles.project_python",
+      "outbound": [
+        "backend/rag_config.py",
+        "proxy/services/cad_bim_graph.py",
+        "proxy/services/decision_service.py",
+        "proxy/services/edge_service.py",
+        "proxy/services/field_intake_service.py",
+        "proxy/services/memory_service.py",
+        "proxy/services/ontology_service.py",
+        "proxy/services/task_service.py",
+        "tests/oracles/__init__.py"
+      ],
+      "path": "tests/oracles/project_python.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "tests/test_light_format_worker.py",
+        "tests/test_light_native_document.py",
         "tests/test_light_ocr.py",
         "tests/test_light_pdf_readers.py"
       ],
-      "lines": 43,
+      "lines": 45,
       "module": "tests.pdf_fixtures",
       "outbound": [],
       "path": "tests/pdf_fixtures.py",
@@ -9346,7 +9971,7 @@
     },
     {
       "inbound": [],
-      "lines": 142,
+      "lines": 148,
       "module": "tests.test_chat_mail_query",
       "outbound": [
         "proxy/routers/chat.py",
@@ -9354,9 +9979,11 @@
         "proxy/services/chat_request_contracts.py",
         "proxy/services/chat_request_service.py",
         "proxy/services/chat_runtime.py",
+        "proxy/services/generation_guard_service.py",
         "proxy/services/model_connection_contracts.py",
         "proxy/services/model_execution_preset_service.py",
-        "proxy/services/openai_compatible_transport_service.py"
+        "proxy/services/openai_compatible_transport_service.py",
+        "proxy/services/runtime_admission.py"
       ],
       "path": "tests/test_chat_mail_query.py",
       "status": "TEST_OR_TOOL_ONLY",
@@ -9413,6 +10040,7 @@
     {
       "inbound": [
         "tests/test_light_chat_sections.py",
+        "tests/test_light_native_rag_harness.py",
         "tests/test_light_rerank_audit.py",
         "tests/test_light_section_coverage.py"
       ],
@@ -9462,11 +10090,12 @@
     },
     {
       "inbound": [],
-      "lines": 1813,
+      "lines": 1819,
       "module": "tests.test_datasets_router",
       "outbound": [
         "backend/converter.py",
         "backend/external_scan.py",
+        "backend/native_core.py",
         "backend/parse_admission.py",
         "backend/qdrant_adapter.py",
         "proxy/routers/dataset_catalog.py",
@@ -9580,6 +10209,32 @@
     },
     {
       "inbound": [],
+      "lines": 195,
+      "module": "tests.test_light_agent_workspace",
+      "outbound": [
+        "proxy/routers/agent_state.py",
+        "proxy/services/agent_state_service.py",
+        "proxy/services/agent_workspace_tools.py",
+        "proxy/services/chat_evidence_context.py",
+        "proxy/services/chat_session_service.py",
+        "proxy/services/context_governor_service.py",
+        "proxy/services/conversation_context_service.py",
+        "proxy/services/execution_receipt_service.py",
+        "proxy/services/memory_service.py",
+        "proxy/services/project_service.py",
+        "proxy/services/tool_contract_service.py",
+        "proxy/services/tool_harness_service.py",
+        "proxy/services/tool_registry_service.py",
+        "proxy/services/trusted_executor_service.py",
+        "proxy/services/typed_memory_projection_service.py",
+        "proxy/services/web_research_config_service.py"
+      ],
+      "path": "tests/test_light_agent_workspace.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
       "lines": 194,
       "module": "tests.test_light_audit_regressions",
       "outbound": [
@@ -9597,6 +10252,21 @@
         "tests/test_light_chat_sections.py"
       ],
       "path": "tests/test_light_audit_regressions.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
+      "lines": 86,
+      "module": "tests.test_light_auto_parse_resume",
+      "outbound": [
+        "proxy/services/auto_parse_resume_service.py",
+        "proxy/services/dataset_parse_service.py",
+        "proxy/services/job_service.py",
+        "proxy/services/model_connection_resolver_service.py",
+        "proxy/services/runtime_admission.py"
+      ],
+      "path": "tests/test_light_auto_parse_resume.py",
       "status": "TEST_OR_TOOL_ONLY",
       "windows_runtime_explicit": false
     },
@@ -9799,13 +10469,14 @@
     },
     {
       "inbound": [],
-      "lines": 110,
+      "lines": 154,
       "module": "tests.test_light_core_jobs_files",
       "outbound": [
         "backend/file_fingerprint.py",
         "backend/job_policy.py",
         "backend/native_core.py",
-        "proxy/services/job_service.py"
+        "proxy/services/job_service.py",
+        "tests/oracles/job_store.py"
       ],
       "path": "tests/test_light_core_jobs_files.py",
       "status": "TEST_OR_TOOL_ONLY",
@@ -9893,7 +10564,9 @@
       "windows_runtime_explicit": false
     },
     {
-      "inbound": [],
+      "inbound": [
+        "tests/test_light_resource_memory.py"
+      ],
       "lines": 195,
       "module": "tests.test_light_embedding_762",
       "outbound": [
@@ -9910,14 +10583,15 @@
     },
     {
       "inbound": [],
-      "lines": 92,
+      "lines": 133,
       "module": "tests.test_light_execution_receipts",
       "outbound": [
         "proxy/services/chat_persistence_service.py",
         "proxy/services/document_review_tool.py",
         "proxy/services/execution_receipt_service.py",
         "proxy/services/review_task_store.py",
-        "sovushka/answer_render.py"
+        "sovushka/answer_render.py",
+        "tests/oracles/execution_receipts_780.py"
       ],
       "path": "tests/test_light_execution_receipts.py",
       "status": "TEST_OR_TOOL_ONLY",
@@ -9941,6 +10615,26 @@
         "sovushka/windows_folder_picker.py"
       ],
       "path": "tests/test_light_folder_picker.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "tests/test_light_resource_memory.py"
+      ],
+      "lines": 246,
+      "module": "tests.test_light_format_worker",
+      "outbound": [
+        "backend/external_scan.py",
+        "backend/format_process.py",
+        "backend/native_core.py",
+        "backend/qdrant_ingestion.py",
+        "backend/qdrant_nodes.py",
+        "backend/qdrant_support.py",
+        "proxy/app.py",
+        "tests/pdf_fixtures.py"
+      ],
+      "path": "tests/test_light_format_worker.py",
       "status": "TEST_OR_TOOL_ONLY",
       "windows_runtime_explicit": false
     },
@@ -10165,7 +10859,7 @@
     },
     {
       "inbound": [],
-      "lines": 115,
+      "lines": 122,
       "module": "tests.test_light_macos_install",
       "outbound": [
         "backend/light_processes.py",
@@ -10261,6 +10955,42 @@
     },
     {
       "inbound": [],
+      "lines": 315,
+      "module": "tests.test_light_native_api",
+      "outbound": [],
+      "path": "tests/test_light_native_api.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
+      "lines": 12,
+      "module": "tests.test_light_native_api_contract",
+      "outbound": [
+        "tools/native_api_contract.py"
+      ],
+      "path": "tests/test_light_native_api_contract.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
+      "lines": 75,
+      "module": "tests.test_light_native_catalog",
+      "outbound": [
+        "proxy/services/conversation_context_service.py",
+        "proxy/services/edge_service.py",
+        "proxy/services/memory_service.py",
+        "proxy/services/project_service.py",
+        "tests/oracles/context_python.py",
+        "tests/oracles/memory_python.py"
+      ],
+      "path": "tests/test_light_native_catalog.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
       "lines": 74,
       "module": "tests.test_light_native_core",
       "outbound": [
@@ -10274,7 +11004,91 @@
     },
     {
       "inbound": [],
-      "lines": 73,
+      "lines": 277,
+      "module": "tests.test_light_native_document",
+      "outbound": [
+        "backend/converter.py",
+        "backend/document_catalog.py",
+        "backend/extraction_errors.py",
+        "backend/format_process.py",
+        "backend/native_core.py",
+        "backend/pdf_reader.py",
+        "backend/qdrant_integrity.py",
+        "backend/qdrant_support.py",
+        "backend/windows_ocr.py",
+        "proxy/services/file_viewer_service.py",
+        "proxy/services/pdf_contour_service.py",
+        "proxy/services/source_locator_service.py",
+        "tests/pdf_fixtures.py"
+      ],
+      "path": "tests/test_light_native_document.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
+      "lines": 84,
+      "module": "tests.test_light_native_harness_loop",
+      "outbound": [
+        "proxy/services/agent_state_service.py",
+        "proxy/services/agent_workspace_tools.py",
+        "proxy/services/chat_evidence_tools.py",
+        "proxy/services/chat_session_service.py",
+        "proxy/services/harness_loop_service.py",
+        "proxy/services/tool_harness_service.py",
+        "proxy/services/web_research_config_service.py"
+      ],
+      "path": "tests/test_light_native_harness_loop.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
+      "lines": 225,
+      "module": "tests.test_light_native_rag_harness",
+      "outbound": [
+        "backend/bm25_hybrid.py",
+        "backend/bm25_store.py",
+        "backend/interface.py",
+        "backend/native_core.py",
+        "proxy/services/context_governor_service.py",
+        "tests/oracles/bm25_store_779.py",
+        "tests/oracles/context_governor_779.py",
+        "tests/test_context_governor_service.py"
+      ],
+      "path": "tests/test_light_native_rag_harness.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
+      "lines": 237,
+      "module": "tests.test_light_native_runtime",
+      "outbound": [
+        "backend/light_processes.py",
+        "tools/build_native_runtime.py"
+      ],
+      "path": "tests/test_light_native_runtime.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
+      "lines": 68,
+      "module": "tests.test_light_native_workspace",
+      "outbound": [
+        "proxy/services/chat_draft_service.py",
+        "proxy/services/chat_session_service.py",
+        "tests/oracles/chat_draft_python.py",
+        "tests/oracles/chat_session_python.py"
+      ],
+      "path": "tests/test_light_native_workspace.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
+      "lines": 88,
       "module": "tests.test_light_navigation",
       "outbound": [
         "sovushka/components/activity.py",
@@ -10287,7 +11101,7 @@
     },
     {
       "inbound": [],
-      "lines": 62,
+      "lines": 63,
       "module": "tests.test_light_ocr",
       "outbound": [
         "backend/converter.py",
@@ -10321,7 +11135,7 @@
     },
     {
       "inbound": [],
-      "lines": 44,
+      "lines": 45,
       "module": "tests.test_light_pdf_readers",
       "outbound": [
         "backend/converter.py",
@@ -10441,6 +11255,29 @@
     },
     {
       "inbound": [],
+      "lines": 233,
+      "module": "tests.test_light_resource_memory",
+      "outbound": [
+        "backend/embedding_residency.py",
+        "backend/native_core.py",
+        "backend/qdrant_ingestion.py",
+        "backend/runtime_memory.py",
+        "backend/system_memory.py",
+        "proxy/services/chat_inference_service.py",
+        "proxy/services/chat_runtime.py",
+        "proxy/services/dataset_parse_service.py",
+        "proxy/services/model_connection_contracts.py",
+        "proxy/services/request_memory_service.py",
+        "proxy/services/runtime_admission.py",
+        "tests/test_light_embedding_762.py",
+        "tests/test_light_format_worker.py"
+      ],
+      "path": "tests/test_light_resource_memory.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
       "lines": 167,
       "module": "tests.test_light_retrieval_candidate",
       "outbound": [
@@ -10478,13 +11315,14 @@
     },
     {
       "inbound": [],
-      "lines": 53,
+      "lines": 87,
       "module": "tests.test_light_runtime_identity",
       "outbound": [
         "proxy/routers/runtime.py",
         "proxy/services/chat_request_service.py",
         "proxy/services/model_connection_contracts.py",
-        "proxy/services/model_connection_registry_service.py"
+        "proxy/services/model_connection_registry_service.py",
+        "proxy/services/model_resource_service.py"
       ],
       "path": "tests/test_light_runtime_identity.py",
       "status": "TEST_OR_TOOL_ONLY",
@@ -11191,7 +12029,9 @@
         "tools/build_light_package.py",
         "tools/build_macos_app.py",
         "tools/build_macos_dmg.py",
+        "tools/build_native_api.py",
         "tools/build_native_core.py",
+        "tools/build_native_runtime.py",
         "tools/build_rag_contract_sibling.py",
         "tools/build_release_artifacts.py",
         "tools/build_tauri_app.py",
@@ -11211,6 +12051,7 @@
         "tools/lesctl.py",
         "tools/light_child.py",
         "tools/light_cli.py",
+        "tools/light_document_worker.py",
         "tools/light_launcher.py",
         "tools/light_license_audit.py",
         "tools/light_mcp_server.py",
@@ -11219,6 +12060,8 @@
         "tools/light_runtime_assets.py",
         "tools/light_state_journey.py",
         "tools/live_workbook_acceptance.py",
+        "tools/native_api_contract.py",
+        "tools/native_asset.py",
         "tools/prepare_rag_trial_fixture.py",
         "tools/publication_check.py",
         "tools/rag_rrf_readiness.py",
@@ -11254,12 +12097,13 @@
     },
     {
       "inbound": [],
-      "lines": 113,
+      "lines": 121,
       "module": "tools.benchmark_native_core",
       "outbound": [
         "backend/bm25_store.py",
         "backend/index_replacement.py",
         "backend/inference/lexical_tokens.py",
+        "tests/oracles/bm25_store_779.py",
         "tools/__init__.py"
       ],
       "path": "tools/benchmark_native_core.py",
@@ -11297,7 +12141,7 @@
     },
     {
       "inbound": [],
-      "lines": 86,
+      "lines": 90,
       "module": "tools.build_light_installers",
       "outbound": [
         "tools/__init__.py"
@@ -11311,12 +12155,14 @@
         "tests/test_light_package.py",
         "tools/install_light_macos.py"
       ],
-      "lines": 286,
+      "lines": 298,
       "module": "tools.build_light_package",
       "outbound": [
         "tools/__init__.py",
         "tools/build_light_frontend.py",
+        "tools/build_native_api.py",
         "tools/build_native_core.py",
+        "tools/build_native_runtime.py",
         "tools/build_release_artifacts.py",
         "tools/build_tauri_app.py",
         "tools/light_license_audit.py",
@@ -11357,8 +12203,23 @@
     },
     {
       "inbound": [
-        "tests/test_light_core_package.py",
         "tools/build_light_package.py"
+      ],
+      "lines": 26,
+      "module": "tools.build_native_api",
+      "outbound": [
+        "tools/__init__.py",
+        "tools/native_asset.py"
+      ],
+      "path": "tools/build_native_api.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "tests/test_light_core_package.py",
+        "tools/build_light_package.py",
+        "tools/install_light_macos.py"
       ],
       "lines": 60,
       "module": "tools.build_native_core",
@@ -11366,6 +12227,21 @@
         "tools/__init__.py"
       ],
       "path": "tools/build_native_core.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "tests/test_light_native_runtime.py",
+        "tools/build_light_package.py"
+      ],
+      "lines": 29,
+      "module": "tools.build_native_runtime",
+      "outbound": [
+        "tools/__init__.py",
+        "tools/native_asset.py"
+      ],
+      "path": "tools/build_native_runtime.py",
       "status": "TEST_OR_TOOL_ONLY",
       "windows_runtime_explicit": false
     },
@@ -11426,7 +12302,7 @@
       "inbound": [
         "tests/test_code_runtime_map.py"
       ],
-      "lines": 424,
+      "lines": 425,
       "module": "tools.code_runtime_map",
       "outbound": [
         "tools/__init__.py"
@@ -11577,12 +12453,13 @@
       "inbound": [
         "tests/test_light_macos_install.py"
       ],
-      "lines": 119,
+      "lines": 123,
       "module": "tools.install_light_macos",
       "outbound": [
         "backend/light_processes.py",
         "tools/__init__.py",
         "tools/build_light_package.py",
+        "tools/build_native_core.py",
         "tools/light_runtime_assets.py"
       ],
       "path": "tools/install_light_macos.py",
@@ -11660,6 +12537,22 @@
       "windows_runtime_explicit": false
     },
     {
+      "inbound": [],
+      "lines": 87,
+      "module": "tools.light_document_worker",
+      "outbound": [
+        "backend/extraction_errors.py",
+        "backend/qdrant_ingestion.py",
+        "backend/qdrant_nodes.py",
+        "backend/qdrant_support.py",
+        "backend/rag_config.py",
+        "tools/__init__.py"
+      ],
+      "path": "tools/light_document_worker.py",
+      "status": "PRODUCT_REACHABLE",
+      "windows_runtime_explicit": false
+    },
+    {
       "inbound": [
         "tests/test_light_frontend_assets.py",
         "tests/test_light_launcher.py",
@@ -11668,7 +12561,7 @@
         "tools/light_model_journey.py",
         "tools/light_state_journey.py"
       ],
-      "lines": 310,
+      "lines": 311,
       "module": "tools.light_launcher",
       "outbound": [
         "backend/light_health_monitor.py",
@@ -11685,7 +12578,7 @@
       "inbound": [
         "tools/build_light_package.py"
       ],
-      "lines": 87,
+      "lines": 92,
       "module": "tools.light_license_audit",
       "outbound": [
         "tools/__init__.py"
@@ -11777,6 +12670,34 @@
       "path": "tools/live_workbook_acceptance.py",
       "status": "PRODUCT_REACHABLE",
       "windows_runtime_explicit": true
+    },
+    {
+      "inbound": [
+        "tests/test_light_native_api_contract.py"
+      ],
+      "lines": 68,
+      "module": "tools.native_api_contract",
+      "outbound": [
+        "proxy/app.py",
+        "tools/__init__.py"
+      ],
+      "path": "tools/native_api_contract.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "tools/build_native_api.py",
+        "tools/build_native_runtime.py"
+      ],
+      "lines": 69,
+      "module": "tools.native_asset",
+      "outbound": [
+        "tools/__init__.py"
+      ],
+      "path": "tools/native_asset.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
     },
     {
       "inbound": [
@@ -13570,6 +14491,18 @@
       "source": "proxy/routers/runtime.py"
     },
     {
+      "handler": "get_state",
+      "method": "GET",
+      "path": "/api/workspace/agent-state",
+      "source": "proxy/routers/agent_state.py"
+    },
+    {
+      "handler": "write_state",
+      "method": "POST",
+      "path": "/api/workspace/agent-state",
+      "source": "proxy/routers/agent_state.py"
+    },
+    {
       "handler": "list_memory",
       "method": "GET",
       "path": "/api/workspace/memory",
@@ -13700,12 +14633,12 @@
   "summary": {
     "dormant_candidates": 35,
     "parse_warnings": 0,
-    "product_reachable": 390,
-    "registered_api_routes": 294,
+    "product_reachable": 402,
+    "registered_api_routes": 296,
     "runtime_support": 5,
-    "test_or_tool_only": 183,
-    "tracked_python_files": 613,
-    "tracked_python_lines": 162166
+    "test_or_tool_only": 211,
+    "tracked_python_files": 653,
+    "tracked_python_lines": 166873
   },
   "warnings": []
 }

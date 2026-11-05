@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import sqlite3
 from datetime import datetime
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -360,44 +359,32 @@ async def parse_scheduler(req: ParseSchedulerRequest, _admin=Depends(require_adm
     max_swap_pct = req.max_swap_pct if req.max_swap_pct is not None else PARSE_MAX_SWAP_PCT
     await dataset_scheduler.assert_parse_admission(state, min_free_gb=min_free_gb, max_swap_pct=max_swap_pct)
 
-    if not req.background:
-        return await dataset_scheduler.run_parse_scheduler(state, req)
-
-    try:
-        conn = sqlite3.connect(rag_meta_db_path())
-        pending_count = int(conn.execute("SELECT COUNT(*) FROM documents WHERE upper(status) = 'PENDING'").fetchone()[0] or 0)
-        conn.close()
-    except Exception:
-        pending_count = req.max_batches
+    pending_count = await asyncio.to_thread(dataset_scheduler.pending_document_count, rag_meta_db_path())
     effective_total = min(req.max_batches, pending_count) if pending_count > 0 else req.max_batches
-
-    job = state.job_service.create(
-        "rag_parse_scheduler",
+    job = dataset_scheduler.claim_parse_scheduler(
+        state,
         source="pending",
-        status="running",
         message="Parse scheduler queued",
         total=effective_total,
     )
+    if job is None:
+        raise HTTPException(409, "Индексация уже запущена. Дождитесь завершения текущей очереди.")
     job_id = job["id"]
-    state.job_tracker[job_id] = {
-        "type": "rag_parse_scheduler",
-        "status": "QUEUED",
-        "total": effective_total,
-        "processed": 0,
-        "started_at": job["started_at"],
-        "message": "Parse scheduler queued",
-    }
 
     async def _run():
         try:
-            await dataset_scheduler.run_parse_scheduler(state, req, job_id=job_id)
+            return await dataset_scheduler.run_parse_scheduler(state, req, job_id=job_id)
+        except asyncio.CancelledError as error:
+            dataset_scheduler.finish_scheduler_failure(state, job_id, error, cancelled=True)
+            raise
         except Exception as error:
-            state.job_tracker[job_id]["status"] = "FAILED"
-            state.job_tracker[job_id]["finished_at"] = datetime.now().isoformat()
-            state.job_tracker[job_id]["message"] = f"Ошибка scheduler: {error}"
-            state.job_service.update(job_id, status="failed", errors=1, message=state.job_tracker[job_id]["message"])
+            dataset_scheduler.finish_scheduler_failure(state, job_id, error)
             logger.error("[PARSE_SCHEDULER %s] FAILED: %s", job_id, error, exc_info=True)
+            if not req.background:
+                raise
 
+    if not req.background:
+        return await _run()
     asyncio.create_task(_run())
     return {
         "status": "queued",

@@ -70,7 +70,11 @@ Section "LES RAG"
   Delete "$SMPROGRAMS\ЛЕС Light\Удалить ЛЕС Light.lnk"
   RMDir "$SMPROGRAMS\ЛЕС Light"
   CreateDirectory "$SMPROGRAMS\LES RAG"
+!ifdef NATIVE_LAUNCH
+  CreateShortcut "$SMPROGRAMS\LES RAG\LES RAG.lnk" "$INSTDIR\les-light.exe" "--native-api --svelte"
+!else
   CreateShortcut "$SMPROGRAMS\LES RAG\LES RAG.lnk" "$INSTDIR\les-light.exe"
+!endif
   CreateShortcut "$SMPROGRAMS\LES RAG\Удалить LES RAG.lnk" "$INSTDIR\Uninstall.exe"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\me.ovc.les-light" "DisplayName" "LES RAG"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\me.ovc.les-light" "DisplayVersion" "${PRODUCT_VERSION}"

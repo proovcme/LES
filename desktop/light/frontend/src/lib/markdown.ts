@@ -28,6 +28,16 @@ export function answerHTML(text: string, sources: Source[]): string {
     if (!node.parentElement?.closest('a,pre,code')) nodes.push(node);
   }
   for (const node of nodes) {
+    // Old saved answers may contain a copied context header with its opening
+    // bracket missing. Only an exact server-provided header can repair it.
+    let value = node.data;
+    for (const source of [...sources].sort((a, b) => (b.header?.length || 0) - (a.header?.length || 0))) {
+      if (source.header?.startsWith('[') && source.header.endsWith(']')) {
+        value = value.split(source.header).join(`[Источник ${source.index}]`)
+          .split(source.header.slice(1)).join(`[Источник ${source.index}]`);
+      }
+    }
+    node.data = value;
     const matches = [...node.data.matchAll(/\[(?:Источник\s+)?(\d+)\]/gi)];
     if (!matches.length) continue;
     const fragment = document.createDocumentFragment(); let cursor = 0;

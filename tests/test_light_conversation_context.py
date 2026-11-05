@@ -16,7 +16,7 @@ def test_extractive_summary_cannot_rewrite_plans_dates_or_languages():
 
 
 @pytest.fixture
-def conversation(tmp_path, monkeypatch):
+def conversation(tmp_path, monkeypatch, catalog_engine):
     path = tmp_path / 'meta.db'
     for module in (service, chat_session_service, memory_service):
         monkeypatch.setattr(module, 'rag_meta_db_path', lambda: str(path))

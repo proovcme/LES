@@ -45,7 +45,8 @@ def child_environment(root, state, qdrant, api_port, ui_port, instance_id):
         "LES_LIGHT_LEGACY_UI_URL": f"http://127.0.0.1:{ui_port}/classic",
         "LES_LIGHT_SVELTE_URL": f"http://127.0.0.1:{api_port}/app/",
         "SOVUSHKA_UI_PORT": str(ui_port), "SOVUSHKA_UI_HOST": "127.0.0.1", "NICEGUI_STORAGE_PATH": str(state / ".nicegui"),
-        "LES_STARTUP_MODEL_WARMUP": "false", "LES_STARTUP_BACKGROUND_MUTATIONS": "true"})
+        "LES_STARTUP_MODEL_WARMUP": "false", "LES_STARTUP_BACKGROUND_MUTATIONS": "true",
+        "LES_FORMAT_WORKER_MODE": "native"})
     return env
 
 

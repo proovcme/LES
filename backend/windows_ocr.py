@@ -36,21 +36,21 @@ class WindowsOCRParser:
         return str(payload.get('text') or '').strip()
 
     def parse_pdf(self, pdf_path: Path, prompt=None, dpi: int = 150) -> str:
-        import pdfplumber
-        from backend.pdf_reader import render_page
+        from backend.pdf_reader import render_page, text_pages
         pages = []
-        with pdfplumber.open(pdf_path) as document:
-            for number, page in enumerate(document.pages, 1):
-                text = (page.extract_text() or '').strip()
-                if len(text) < 20 and page.images:
-                    image, _, _ = render_page(pdf_path, number, dpi=dpi)
-                    try:
-                        text = self.ocr_page(image)
-                    finally:
-                        image.close()
-                    if not text:
-                        raise RuntimeError(f'На странице {number} не удалось распознать текст. Документ не считается готовым.')
-                if text:
-                    pages.append(f'## Стр. {number}\n\n{text}')
-                page.close()
+        for number, text, scan in text_pages(pdf_path):
+            if scan:
+                image, _, _ = render_page(pdf_path, number, dpi=dpi)
+                try:
+                    if image.getextrema() == ((255,255), (255,255), (255,255)):
+                        # A rendered, completely white sheet contains no visible
+                        # text. Do not turn a real blank separator into OCR failure.
+                        continue
+                    text = self.ocr_page(image)
+                finally:
+                    image.close()
+                if not text:
+                    raise RuntimeError(f'На странице {number} не удалось распознать текст. Документ не считается готовым.')
+            if text:
+                pages.append(f'## Стр. {number}\n\n{text}')
         return '\n\n'.join(pages)

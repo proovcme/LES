@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from proxy.security import require_user
 from proxy.services import chat_session_service
 from proxy.services import chat_draft_service
+from backend.workspace_native import WorkspaceUnavailable
 
 router = APIRouter(prefix='/api/workspace', tags=['workspace'])
 
@@ -50,6 +51,8 @@ async def _call(function, *args, **kwargs):
         raise HTTPException(404, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
+    except WorkspaceUnavailable as exc:
+        raise HTTPException(503, str(exc)) from exc
     except sqlite3.OperationalError as exc:
         raise HTTPException(503, 'Не удалось записать или прочитать диалог: база временно занята или недоступна. Текст остаётся в этом окне; повторите действие.') from exc
 

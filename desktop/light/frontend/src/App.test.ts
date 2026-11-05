@@ -58,6 +58,15 @@ it('does not submit during IME composition or Shift+Enter and submits Enter once
   expect(workspace.send).toHaveBeenCalledTimes(1);
 });
 
+it('keeps stop accessible when the compact composer hides its text', async () => {
+  await settle(() => !workspace.loading);
+  workspace.stop = vi.fn(); workspace.busy = true;
+  await settle(() => !!document.querySelector('[aria-label="Остановить ответ"]'));
+  const stop = document.querySelector<HTMLButtonElement>('[aria-label="Остановить ответ"]')!;
+  expect(stop.textContent).toContain('Остановить');
+  stop.click(); expect(workspace.stop).toHaveBeenCalledOnce();
+});
+
 it('keeps dialog controls keyboard-native and closes through the dialog close event', async () => {
   await settle(() => !workspace.loading);
   const picker = [...document.querySelectorAll('button')].find((button) => button.textContent?.includes('Без набора документов'))!;

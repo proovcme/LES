@@ -38,13 +38,13 @@ def workspace_memory_objects(
     candidates: Sequence[ContextCandidate], *, registered: bool,
 ) -> tuple[ContextObject, ...]:
     """User notes and inspectable conversation summaries are advisory, never evidence."""
-    if not registered:
-        return ()
     return tuple(
         item for candidate in candidates
         for item in candidate.objects
-        if (candidate.kind == ContextKind.WORKING_MEMORY and item.object_id.startswith("note:"))
-        or (candidate.kind == ContextKind.CHECKPOINT and item.object_id.startswith("conversation-summary:"))
+        if (candidate.kind == ContextKind.WORKING_MEMORY and item.object_id.startswith(('agent-file:', 'agent-memory-omitted:')))
+        or item.object_id == 'agent-memory-unavailable'
+        or (registered and candidate.kind == ContextKind.WORKING_MEMORY and item.object_id.startswith("note:"))
+        or (registered and candidate.kind == ContextKind.CHECKPOINT and item.object_id.startswith("conversation-summary:"))
     )
 
 

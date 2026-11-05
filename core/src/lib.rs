@@ -1,7 +1,21 @@
 //! Versioned C ABI. All returned buffers belong to this library until les_core_free.
+pub mod agent_files;
+mod bm25;
+pub mod catalog;
+mod citations;
+mod context;
+mod document;
 mod files;
+mod harness;
 mod jobs;
 mod lexical;
+mod memory;
+mod process_guard;
+mod receipts;
+mod source_scan;
+mod worker_host;
+pub mod workspace;
+pub use process_guard::{prepare as prepare_child, JobGuard};
 use serde_json::{json, Value};
 use std::{
     panic::{catch_unwind, AssertUnwindSafe},
@@ -17,11 +31,23 @@ fn dispatch(bytes: &[u8]) -> Result<Value, &'static str> {
     }
     match request["operation"].as_str() {
         Some("prepare_terms") => lexical::prepare(&request),
+        Some("bm25") => bm25::execute(&request["request"]),
+        Some("context") => context::execute(&request["request"]),
+        Some("memory") => memory::execute(&request["request"]),
+        Some("document") => document::execute(&request["request"]),
+        Some("citations") => citations::execute(&request["request"]),
+        Some("harness") => harness::execute(&request["request"]),
         Some("fingerprint") => files::fingerprint(&request),
         Some("job_patch") => jobs::patch(&request),
         Some("job_recovery") => jobs::recovery(&request),
+        Some("scan_sources") => source_scan::scan(&request),
+        Some("worker_run") => worker_host::run(&request["request"]),
+        Some("worker_stop") => worker_host::shutdown(),
+        Some("workspace") => Ok(workspace::execute(&request["request"])),
+        Some("catalog") => Ok(catalog::execute(&request["request"])),
+        Some("agent_files") => Ok(agent_files::execute(&request["request"])),
         Some("health") => Ok(
-            json!({"abi": 1, "operations":["prepare_terms","fingerprint","job_patch","job_recovery"], "tokenizer":"les.lexical.v2"}),
+            json!({"abi": 1, "operations":["prepare_terms","bm25","context","memory","document","citations","harness","fingerprint","job_patch","job_recovery","scan_sources","worker_run","worker_stop","workspace","catalog","agent_files"], "tokenizer":"les.lexical.v2"}),
         ),
         _ => Err("CORE_UNKNOWN_OPERATION"),
     }
@@ -104,5 +130,17 @@ mod tests {
         assert!(unsafe { les_core_call(ptr::null(), 0, &mut length) }.is_null());
         assert_eq!(length, 0);
         assert!(unsafe { les_core_call(ptr::dangling(), MAX_INPUT + 1, &mut length) }.is_null());
+    }
+    #[test]
+    fn json_transport_keeps_finite_metadata_numbers_bit_exact() {
+        for index in 0..1000 {
+            let original = 1793535000.0 + f64::from(index) / 10_000_000.0;
+            let encoded = serde_json::to_vec(&json!({"timestamp":original})).unwrap();
+            let decoded: Value = serde_json::from_slice(&encoded).unwrap();
+            assert_eq!(
+                decoded["timestamp"].as_f64().unwrap().to_bits(),
+                original.to_bits()
+            );
+        }
     }
 }

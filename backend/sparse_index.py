@@ -51,8 +51,7 @@ def rebuild_locked(client, journal, *, mode="bm25", vector_name="bm25_sparse", i
                        revision=uuid.uuid4().hex))
     revision = uuid.uuid4().hex
     touched = 0
-    with bm25_store.connect(journal, create=True) as db, db:
-        db.execute("BEGIN IMMEDIATE")
+    with bm25_store.writer(journal) as db:
         if full:
             bm25_store.reset(db)
         for scope in ([None] if full else scopes):
@@ -62,11 +61,8 @@ def rebuild_locked(client, journal, *, mode="bm25", vector_name="bm25_sparse", i
                 bm25_store.put(db, points)
                 touched += len(points)
                 LOG.info("[BM25] %s lexical records: %s", "Migrating" if full else "Updating", touched)
-        db.execute("DELETE FROM frequencies WHERE df=0")
-        db.execute("UPDATE corpus SET revision=? WHERE id=1", (revision,))
-        count, length, _ = db.execute("SELECT n, length, revision FROM corpus WHERE id=1").fetchone()
-        if count != int(client.count(journal.collection, exact=True).count):
-            raise EmbeddingContractError("INDEX_SPARSE_STALE")
+        count, length, _ = bm25_store.commit(db, revision,
+            int(client.count(journal.collection, exact=True).count))
     profile = BM25Profile(length / count if count and length else 1.)
     value = dict(schema="les.sparse-index.v2", mode=mode, storage=STORAGE,
         vector_name=vector_name, physical_collection=_physical_collection(client, journal.collection),

@@ -1,5 +1,10 @@
 # Чат на Svelte и граница desktop
 
+Кандидат 778 добавляет [редактор памяти/рабочих файлов](agent-workspace.md)
+с историей и сохранением перед закрытием. Он ещё не установлен. Отдельный
+[патч навигации classic](../acceptance/navigation-778.md) установлен поверх 773;
+это не установка всех кандидатов 774–778.
+
 В 772 добавлены нормальное закрытие через native flush/ack, execution receipts
 и живая приёмка интерфейса. [Точные границы и результаты](../acceptance/safety-ui-772.md).
 
@@ -33,6 +38,10 @@ Renderer использует тот же origin; ключи провайдер�
 Учитывается IME, Shift+Enter и reduced motion. DOM-тесты не доказывают WCAG целиком.
 
 ## Целостность состояния
+
+С кандидата 776 реализация SQLite диалогов/черновиков находится в
+`core/src/workspace/`; Python `chat_draft_service` — совместимый фасад.
+В режиме `--native-api` HTTP-маршруты также Rust. [Граница](native-workspace.md).
 
 `chat_draft_service` хранит отдельную таблицу `les_chat_drafts` в том же каталоге
 SQLite, что и диалоги. Compare-and-swap revision, BEGIN IMMEDIATE и сериализация

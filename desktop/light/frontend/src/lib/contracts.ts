@@ -20,7 +20,7 @@ export interface Message {
 export interface AnswerMeta {
   execution?: ExecutionSummary | null;
   source_map?: Source[]; partial?: boolean; completion_status?: string;
-  retrieval_trace?: { status?: string; tool_loop?: { status?: string }; execution?: ExecutionSummary };
+  retrieval_trace?: { status?: string; tool_loop?: { status?: string }; execution?: ExecutionSummary; citation_check?: { status?: string } };
   blocker?: { action?: string }; total_status?: string;
 }
 export interface ChatPayload {
@@ -31,7 +31,7 @@ export interface ChatPayload {
   blocker?: { action?: string }; total_status?: string; crag_status?: string;
 }
 export interface ExecutionSummary {
-  schema: 'les.execution-summary.v1'; status: 'incomplete' | 'recorded'; notice: string; accepted: false;
+  schema: 'les.execution-summary.v1'; status: 'incomplete' | 'recorded' | 'no_changes'; notice: string; accepted: false;
 }
 export interface StreamEvent { event: string; data: unknown }
 export interface Dataset { id: string; name: string; documents?: number; document_count?: number }

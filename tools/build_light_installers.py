@@ -56,9 +56,13 @@ def build(payload: Path, output: Path, makensis: Path) -> None:
     ], check=True)
     output.mkdir(parents=True)
     offline = output / "LES-RAG-Setup.exe"
+    native_launch = all((payload / relative).is_file() for relative in (
+        "native/runtime/les-runtime.exe", "native/api/les-api.exe",
+    ))
     subprocess.run([
         str(makensis), "/INPUTCHARSET", "UTF8", f"/DPAYLOAD_DIR={payload}", f"/DOUTPUT_FILE={offline}",
-        f"/DPRODUCT_VERSION={package['version']}", str(INSTALLERS / "setup.nsi"),
+        f"/DPRODUCT_VERSION={package['version']}", *(["/DNATIVE_LAUNCH"] if native_launch else []),
+        str(INSTALLERS / "setup.nsi"),
     ], cwd=INSTALLERS, check=True)
     verify_installer_description(offline)
     subprocess.run([

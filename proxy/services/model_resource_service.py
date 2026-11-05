@@ -47,3 +47,34 @@ def assigned_resource_target(role=ConnectionRole.ANSWER) -> ModelResourceTarget:
     except Exception:
         logger.exception('Unable to read model resource identity')
         return ModelResourceTarget(provider='unavailable')
+
+
+def local_ollama_native_url(connection, operation):
+    """Only authenticated-free literal loopback Ollama supports local residency IO."""
+    import ipaddress
+    from urllib.parse import urlsplit, urlunsplit
+    if operation not in {'generate', 'embed'}:
+        raise ValueError('Unsupported residency operation')
+    if (getattr(connection, 'extension_type', None) != 'ollama'
+            or getattr(connection, 'secret_ref', None)):
+        return None
+    locality = getattr(connection, 'locality', None)
+    if getattr(locality, 'value', locality) != 'loopback':
+        return None
+    endpoint = getattr(connection, 'endpoint', None)
+    url = urlsplit(getattr(endpoint, 'canonical_base_url', connection.base_url))
+    if (url.scheme not in {'http', 'https'} or url.username or url.password
+            or url.query or url.fragment):
+        return None
+    try:
+        loopback = ipaddress.ip_address(url.hostname).is_loopback
+    except ValueError:
+        loopback = url.hostname == 'localhost'
+    if not loopback:
+        return None
+    path = url.path.rstrip('/')
+    for suffix in ('/api/v1', '/v1'):
+        if path.endswith(suffix):
+            path = path[:-len(suffix)]
+            break
+    return urlunsplit((url.scheme, url.netloc, path + '/api/' + operation, '', ''))

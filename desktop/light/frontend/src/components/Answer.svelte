@@ -12,7 +12,7 @@
   {#if message.role === 'user'}
     <div class="question-text">{message.text}</div>
   {:else}
-    {#if execution}<p class={execution.status === 'incomplete' ? 'error' : 'notice'} role="status">{execution.notice}</p>{/if}
+    {#if execution}<p class={execution.status === 'incomplete' ? 'error' : execution.status === 'no_changes' ? 'muted' : 'notice'} role="status">{execution.notice}</p>{/if}
     {#if message.meta?.retrieval_trace?.tool_loop?.status === 'error'}
       <p class="error" role="status">Работа с инструментами прервалась. Текст модели не подтверждает выполнение всех действий. Проверьте подключение модели и повторите запрос.</p>
     {/if}
@@ -22,6 +22,9 @@
       <p class="notice" role="status">Поиск работает с ограничениями: часть поискового контура недоступна. Проверьте источники перед использованием ответа.</p>
     {/if}
     <div class="answer-text" use:citations={(index) => { const source = sources.find((item) => item.index === index); if (source) openSource(source); }}>{@html html}</div>
+    {#if ['missing_labels', 'invalid_labels', 'error'].includes(message.meta?.retrieval_trace?.citation_check?.status || '')}
+      <p class="notice" role="status">Часть ссылок в ответе не подтверждена. Сверьте утверждения с фрагментами источников ниже.</p>
+    {/if}
     {#if !message.text && !streaming}<p class="muted">Текст ответа не получен. Вопрос можно повторить.</p>{/if}
     {#if message.meta?.partial}<p class="partial">Ответ прерван. Полученный текст сохранён; проверьте его перед использованием.</p>{/if}
     {#if sources.length}

@@ -74,6 +74,12 @@ async def test_chat_does_not_replace_model_with_deterministic_mail_answer(tmp_pa
         )
     )
 
+    # This checks answer ownership, not the RAM available on the developer's host.
+    from proxy.services import runtime_admission, generation_guard_service
+    fixture_metrics = lambda *_: dict(chat_runtime.get_chat_state().metrics_cache)
+    monkeypatch.setattr(runtime_admission, 'live_memory_metrics', fixture_metrics)
+    monkeypatch.setattr(generation_guard_service, 'live_memory_metrics', fixture_metrics)
+
     connection = SimpleNamespace(
         connection_id="test-answer",
         revision_id="test-answer:r1",

@@ -9,11 +9,13 @@
   import Answer from './components/Answer.svelte';
   import SourcePanel from './components/SourcePanel.svelte';
   import ScopePicker from './components/ScopePicker.svelte';
+  import AgentMemory from './components/AgentMemory.svelte';
 
   let { workspace = new Workspace() }: { workspace?: Workspace } = $props();
   let modal = $state<'sessions' | 'scope' | 'options' | null>(null);
   let source = $state<Source | null>(null); let mobileNav = $state(false);
   let actionBusy = $state(false); let sessionQuery = $state('');
+  let memoryOpen = $state(false); let memoryDirty = $state(false); let memoryEditor: AgentMemory;
   let composer: HTMLTextAreaElement; let transcript = $state<HTMLDivElement>(); let fileInput: HTMLInputElement;
   let sourceTrigger: HTMLElement | null = null; let followAnswer = $state(true);
   const disabled = $derived(workspace.busy || workspace.uploading || workspace.closing || actionBusy || workspace.loading);
@@ -24,6 +26,7 @@
   const lastMessageText = $derived(workspace.messages.at(-1)?.text || '');
 
   onMount(() => {
+    workspace.beforeClose = async () => { await memoryEditor?.flush(); };
     const bridge = connectNativeClose(workspace);
     void bridge.ready.then(() => workspace.initialize()).catch(() => {
       workspace.loading = false;
@@ -38,7 +41,7 @@
   async function action(callback: () => Promise<void>) {
     if (actionBusy) return;
     actionBusy = true;
-    try { await callback(); modal = null; mobileNav = false; await tick(); composer?.focus(); }
+    try { await memoryEditor?.flush(); await callback(); modal = null; mobileNav = false; await tick(); composer?.focus(); }
     catch (error) { workspace.error = errorMessage(error); }
     finally { actionBusy = false; }
   }
@@ -65,7 +68,7 @@
     void workspace.attach(files[0]);
   }
   function beforeLeave(event: BeforeUnloadEvent) {
-    if (workspace.busy || workspace.uploading || workspace.draftStatus.startsWith('Сохраняю') || workspace.draftStatus.startsWith('Черновик пока')) event.preventDefault();
+    if (memoryDirty || workspace.busy || workspace.uploading || workspace.draftStatus.startsWith('Сохраняю') || workspace.draftStatus.startsWith('Черновик пока')) event.preventDefault();
   }
 </script>
 
@@ -78,6 +81,7 @@
     <div class="nav-links">
       <button class="nav-item selected" aria-current="page" onclick={() => { mobileNav = false; composer?.focus(); }}><Icon name="chat" />Чат</button>
       <button class="nav-item" disabled={disabled} onclick={() => { modal = 'sessions'; mobileNav = false; }}><Icon name="history" />Диалоги</button>
+      <button class="nav-item" disabled={disabled} onclick={() => { memoryOpen = true; mobileNav = false; }}><Icon name="file" />Память</button>
       {#if workspace.legacyURL}
         <button class="nav-item" disabled={disabled} onclick={() => legacy('/classic?tab=data')}><Icon name="folder" />Данные</button>
         <button class="nav-item" disabled={disabled} onclick={() => legacy('/qdrant-visualizer/index.html')}><Icon name="tree" />Лес знаний</button>
@@ -128,7 +132,7 @@
           <label for="question" class="sr-only">Ваш вопрос Лесу</label>
           <textarea id="question" bind:this={composer} bind:value={workspace.text} oninput={() => workspace.changed()} onkeydown={keyboard} ondragover={(event) => event.preventDefault()} ondrop={dropped} placeholder="Спросите Лес…" rows="2" maxlength="20000" disabled={workspace.loading || workspace.closing || !workspace.session} aria-describedby="composer-hint"></textarea>
           <div class="composer-actions"><input class="sr-only" type="file" bind:this={fileInput} tabindex="-1" aria-label="Выбрать файл для чтения" onchange={() => { const file = fileInput.files?.[0]; if (file) void workspace.attach(file); fileInput.value = ''; }} /><button type="button" class="icon-button quiet" aria-label="Прикрепить файл для чтения" disabled={disabled || !workspace.session} onclick={() => fileInput.click()}><Icon name="paperclip" /></button><button type="button" class="scope-button quiet" disabled={disabled || !workspace.session} onclick={() => modal = 'scope'} title={scopeLabel}><Icon name="folder" /><span>{scopeLabel}</span></button><button type="button" class="icon-button quiet options-button" aria-label="Параметры ответа" aria-pressed={workspace.reranker} disabled={disabled} onclick={() => modal = 'options'}><Icon name="settings" /></button>
-            {#if workspace.busy}<button type="button" class="stop-button" onclick={() => workspace.stop()}><Icon name="stop" />Остановить</button>{:else}<button type="submit" class="send-button" disabled={disabled || !workspace.session || !workspace.text.trim()} aria-label="Отправить вопрос"><Icon name="arrow" /><span class="send-label">Отправить</span></button>{/if}
+            {#if workspace.busy}<button type="button" class="stop-button" aria-label="Остановить ответ" onclick={() => workspace.stop()}><Icon name="stop" /><span class="send-label">Остановить</span></button>{:else}<button type="submit" class="send-button" disabled={disabled || !workspace.session || !workspace.text.trim()} aria-label="Отправить вопрос"><Icon name="arrow" /><span class="send-label">Отправить</span></button>{/if}
           </div>
         </form>
         <div class="composer-footnote"><p class="draft-status" aria-live="polite">{workspace.draftStatus}</p><span id="composer-hint">Shift + Enter — новая строка</span></div>
@@ -136,6 +140,7 @@
     </div>
   </main>
 </div>
+<AgentMemory bind:this={memoryEditor} bind:open={memoryOpen} projectId={workspace.session?.project_id || 0} onDirty={(value) => memoryDirty = value} />
 {#if modal === 'sessions'}
   <Modal title="Ваши диалоги" close={() => modal = null}>
     <label for="session-search">Найти диалог</label><input id="session-search" type="search" bind:value={sessionQuery} placeholder="Название или начало вопроса" />

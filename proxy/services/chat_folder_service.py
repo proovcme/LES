@@ -5,6 +5,7 @@ import tempfile
 from uuid import uuid4
 
 from backend.converter import SUPPORTED, convert_to_markdown
+from backend.extraction_errors import DocumentExtractionError
 from backend.runtime_paths import mutable_path
 from backend.smart_index import SKIP_DIRS, is_temporary_source_name
 from proxy.services.chat_attachment_service import preserve_read_attachment
@@ -33,7 +34,10 @@ def read_folder(root: Path) -> dict:
         raise ValueError('Папка велика для одного сообщения. Добавьте её в базу знаний.')
     parts = []
     for path in files:
-        text = convert_to_markdown(path)
+        try:
+            text = convert_to_markdown(path)
+        except DocumentExtractionError as error:
+            raise ValueError(f'Не удалось прочитать «{path.name}»: {error} Остальные файлы не будут отправлены как полный комплект.') from error
         if not text:
             raise ValueError(f'Не удалось прочитать «{path.name}». Остальные файлы не будут отправлены как полный комплект.')
         parts.append(f'## {path.relative_to(root).as_posix()}\n\n{text}')

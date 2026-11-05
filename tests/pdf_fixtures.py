@@ -3,7 +3,7 @@ from io import BytesIO
 from PIL import Image
 
 
-def write_pdf(path, pages):
+def write_pdf(path, pages, *, drawing_segments=0):
     """Each item is ASCII page text, or None for a raster-only page."""
     objects = [b'', b'']
     def add(data):
@@ -25,6 +25,8 @@ def write_pdf(path, pages):
         else:
             escaped = text.replace('\\', '\\\\').replace('(', '\\(').replace(')', '\\)')
             content = f'BT /F1 12 Tf 20 280 Td ({escaped}) Tj ET'.encode('ascii')
+        if drawing_segments:
+            content += b'\n' + b'\n'.join(f'{i%300} 0 m {i%300} 300 l S'.encode() for i in range(drawing_segments))
         content_id = add(stream(content))
         children.append(add(f'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Resources << {resources} >> /Contents {content_id} 0 R >>'.encode()))
     objects[0] = b'<< /Type /Catalog /Pages 2 0 R >>'

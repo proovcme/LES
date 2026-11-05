@@ -308,4 +308,18 @@ def project_memory(
                           kind=MemoryItemKind.CHECKPOINT, payload=summary,
                           revision_ref=str(summary['revision']), project_id=project_id)
         projection = replace(projection, items=(item,) + projection.items)
+    from proxy.services.agent_state_service import context_records, AgentStateError
+    try:
+        file_records = context_records(project_id)
+    except AgentStateError:
+        file_records = []
+        blocker = MemoryItem(item_id='agent-memory-unavailable', kind=MemoryItemKind.BLOCKER,
+            payload={'text':'Не удалось прочитать USER.md или MEMORY.md. Сохранённая память сейчас недоступна.',
+                     'is_evidence':False}, revision_ref=None, project_id=project_id)
+        projection = replace(projection, items=(blocker,) + projection.items)
+    if file_records:
+        file_items = tuple(MemoryItem(item_id=record['item_id'], kind=MemoryItemKind.ADVISORY_FACT,
+            payload=record['payload'], revision_ref=record['revision_ref'],
+            project_id=record['project_id'] or None) for record in file_records)
+        projection = replace(projection, items=file_items + projection.items)
     return projection

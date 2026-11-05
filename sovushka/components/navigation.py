@@ -27,7 +27,7 @@ def return_controls():
         ui.button("Назад", icon="o_arrow_back").props('flat no-caps data-les-back aria-label="На шаг назад"')
         ui.link("Главная", target=HOME).classes("les-home-link")
         if target := svelte_chat_url():
-            ui.link('Новый чат', target=target).classes('les-home-link')
+            ui.link('Новый чат', target=target).classes('les-home-link les-chat-return-link')
 
 
 def bind_route_tabs(tabs, refs, path):

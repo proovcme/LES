@@ -41,4 +41,5 @@ def test_parallel_rendering_and_invalid_regions(tmp_path):
 def test_disabled_ocr_does_not_index_partial_mixed_document(tmp_path, monkeypatch):
     path = write_pdf(tmp_path / 'mixed.pdf', ['A real text page with enough characters', None])
     monkeypatch.setenv('RAG_OCR_ENABLED', 'false')
-    assert converter._parse_pdf(path) is None
+    with pytest.raises(converter.DocumentExtractionError, match='распознавание'):
+        converter._parse_pdf(path)
