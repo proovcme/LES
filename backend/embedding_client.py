@@ -132,6 +132,8 @@ class EmbedClient:
         if not texts:
             return []
         connection = connection or self._resolve_embedding_connection()
+        from backend.embedding_residency import remember
+        remember(connection)
         if self.connection_transport is not None:
             return await self._encode_connection_batches(self.connection_transport, connection, texts, release_after=release_after)
         else:

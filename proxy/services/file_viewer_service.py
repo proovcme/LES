@@ -32,7 +32,7 @@ _TEXT_SUFFIXES = {
 }
 _TABLE_SUFFIXES = {".csv", ".tsv"}
 VIEWABLE_SUFFIXES = {
-    ".pdf", ".docx", ".xlsx", ".xlsm", ".pptx", ".eml",
+    ".pdf", ".doc", ".docx", ".xlsx", ".xlsm", ".pptx", ".eml",
     *_IMAGE_SUFFIXES, *_TEXT_SUFFIXES, *_TABLE_SUFFIXES,
 }
 
@@ -45,7 +45,7 @@ def viewer_kind(path: str | Path) -> str:
     suffix = Path(path).suffix.lower()
     if suffix == ".pdf":
         return "pdf"
-    if suffix == ".docx":
+    if suffix in {".doc", ".docx"}:
         return "word"
     if suffix in {".xlsx", ".xlsm"}:
         return "excel"
@@ -70,27 +70,28 @@ def _safe_json(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c")
 
 
-def _document_shell(*, path_id: str, file_name: str, kind: str, body: str, note: str = "") -> str:
+def _document_shell(*, path_id: str, file_name: str, kind: str, body: str, note: str = "", document_id: str = "") -> str:
     config = _safe_json({
         "schema": FILE_VIEWER_SCHEMA,
         "path": str(path_id),
         "name": str(file_name),
         "kind": kind,
+        "documentId": document_id,
     })
     note_html = f'<div class="notice">{_e(note)}</div>' if note else ""
     template = """<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Л.И.С.Т. — __TITLE__</title>
+<title>ЛЕС — __TITLE__</title>
 <style>
-:root{color-scheme:light;--bg:#eef3f7;--panel:#fff;--text:#18242e;--dim:#647482;--accent:#0f8b68;
---line:rgba(24,36,46,.13);--soft:rgba(15,139,104,.08);--shadow:0 12px 34px rgba(20,36,50,.12)}
+:root{color-scheme:light;--bg:#eef2e8;--panel:#fafbf6;--text:#143b2a;--dim:#536656;--accent:#246c43;
+--line:#d7dfcf;--soft:#e6eedc;--shadow:0 4px 16px #143b2a08}
 *{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);
-font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+font:16px/1.6 "Segoe UI Variable Text","Segoe UI",system-ui,sans-serif}
 body{min-height:100vh}.toolbar{position:sticky;top:0;z-index:8;display:flex;align-items:center;gap:8px;
 min-height:52px;padding:6px 12px;background:rgba(255,255,255,.95);box-shadow:0 1px 0 var(--line),0 8px 24px rgba(20,36,50,.07);backdrop-filter:blur(12px)}
-.name{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:800}
+.name{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:600}
 .kind{padding:4px 8px;border-radius:7px;background:var(--soft);color:var(--accent);font-size:10px;font-weight:850;text-transform:uppercase;letter-spacing:.04em}
-button,.open{display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding:0 12px;border:0;border-radius:9px;background:transparent;color:var(--text);font:750 12px/1 inherit;text-decoration:none;cursor:pointer;transition-property:background-color,color,scale;transition-duration:.14s}
+button,.open{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 12px;border:0;border-radius:10px;background:transparent;color:var(--text);font:600 14px/1 inherit;text-decoration:none;cursor:pointer;transition-property:background-color,color;transition-duration:.14s}
 button:hover,.open:hover{color:var(--accent);background:var(--soft)}button:active,.open:active{scale:.96}
 .content{width:min(1180px,calc(100% - 28px));margin:18px auto 40px}.notice{margin-bottom:12px;padding:9px 11px;border:1px solid var(--line);border-radius:10px;background:#fff9e8;color:#765b20;font-size:12px;line-height:1.45}
 .document{width:min(860px,100%);margin:auto;padding:52px 64px;background:var(--panel);outline:1px solid rgba(0,0,0,.08);box-shadow:var(--shadow)}
@@ -99,7 +100,7 @@ button:hover,.open:hover{color:var(--accent);background:var(--soft)}button:activ
 .table-wrap{max-width:100%;margin:14px 0;overflow:auto;border:1px solid var(--line);border-radius:10px;background:var(--panel);box-shadow:0 4px 14px rgba(20,36,50,.05)}
 table{border-collapse:separate;border-spacing:0;width:100%;font-size:12px;font-variant-numeric:tabular-nums}th,td{min-width:72px;padding:7px 9px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);text-align:left;vertical-align:top;white-space:pre-wrap}th{position:sticky;top:0;z-index:2;background:#f5f8fa;color:var(--dim);font-weight:800}tr:last-child td{border-bottom:0}th:last-child,td:last-child{border-right:0}.row-number{min-width:48px;width:48px;color:var(--dim);text-align:right;background:#f7f9fb;position:sticky;left:0;z-index:1}.formula{color:#705b20;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .sheets{display:flex;gap:6px;overflow:auto;margin:0 0 10px;padding:2px}.sheet{white-space:nowrap;background:var(--panel);box-shadow:inset 0 0 0 1px var(--line)}.sheet.active{color:#fff;background:var(--accent);box-shadow:none}
-.text-view{margin:0;padding:18px;overflow:auto;border-radius:10px;background:#101820;color:#e8f0f5;box-shadow:var(--shadow);font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
+.text-view{margin:0;padding:24px;overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--text);font:14px/1.7 Consolas,ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
 .image-stage{display:grid;place-items:center;min-height:calc(100vh - 100px)}.image-stage img{display:block;max-width:100%;max-height:calc(100vh - 110px);background:#fff;outline:1px solid rgba(0,0,0,.12);box-shadow:var(--shadow)}
 .slides{display:grid;gap:18px}.slide{aspect-ratio:16/9;padding:42px 52px;border-radius:4px;background:#fff;outline:1px solid rgba(0,0,0,.1);box-shadow:var(--shadow);overflow:auto}.slide-number{margin-bottom:16px;color:var(--dim);font-size:11px;font-weight:800}.slide p{font-size:16px;line-height:1.45}.mail-card{padding:26px;border-radius:4px;background:#fff;outline:1px solid rgba(0,0,0,.1);box-shadow:var(--shadow)}.mail-head{display:grid;grid-template-columns:auto 1fr;gap:7px 14px;padding-bottom:18px;border-bottom:1px solid var(--line);font-size:12px}.mail-key{color:var(--dim);font-weight:800}.mail-body{margin-top:20px;line-height:1.6;white-space:pre-wrap}
 .empty{padding:36px;border:1px dashed var(--line);border-radius:12px;background:var(--panel);color:var(--dim);text-align:center;line-height:1.5}
@@ -110,8 +111,8 @@ table{border-collapse:separate;border-spacing:0;width:100%;font-size:12px;font-v
 <script id="viewer-config" type="application/json">__CONFIG__</script>
 <script>
 const cfg=JSON.parse(document.getElementById('viewer-config').textContent);const api=location.pathname.startsWith('/lite-api/')?'/lite-api':'/api';
-document.getElementById('name').textContent=cfg.name;const raw=new URLSearchParams({path:cfg.path});document.getElementById('open').href=`${api}/rag/file/raw?${raw.toString()}`;
-const rawImage=document.querySelector('[data-raw-image]');if(rawImage)rawImage.src=`${api}/rag/file/raw?${raw.toString()}`;
+document.getElementById('name').textContent=cfg.name;const raw=new URLSearchParams({path:cfg.path});const rawUrl=cfg.documentId?`${api}/documents/by-id/${encodeURIComponent(cfg.documentId)}/raw`:`${api}/rag/file/raw?${raw.toString()}`;document.getElementById('open').href=rawUrl;
+const rawImage=document.querySelector('[data-raw-image]');if(rawImage)rawImage.src=rawUrl;
 document.querySelectorAll('[data-sheet]').forEach(button=>button.addEventListener('click',()=>{const url=new URL(location.href);url.searchParams.set('sheet',button.dataset.sheet);url.searchParams.delete('locator');location.href=url.toString()}));
 const hit=document.querySelector('.evidence-hit');if(hit)setTimeout(()=>hit.scrollIntoView({block:'center'}),40);
 </script></body></html>"""
@@ -280,6 +281,7 @@ def file_viewer_html(
     path_id: str,
     locator: str = "",
     sheet: str = "",
+    document_id: str = "",
 ) -> str:
     path = Path(source_path).expanduser().resolve()
     if not path.is_file():
@@ -289,7 +291,15 @@ def file_viewer_html(
         raise ValueError("Встроенный просмотр для этого формата пока недоступен")
     try:
         if kind == "word":
-            body, note = _docx_view(path, locator)
+            if path.suffix.lower() == '.doc':
+                from backend import native_core
+                value = native_core.call('document', request={'action':'legacy_doc','path':str(path)})['text']
+                body = f'<pre class="text-view">{_e(value[:MAX_TEXT_CHARS])}</pre>'
+                note = 'Текстовый предпросмотр DOC. Оформление и разбиение на страницы Word здесь не отображаются.'
+                if len(value) > MAX_TEXT_CHARS:
+                    note += ' Текст сокращён в предпросмотре.'
+            else:
+                body, note = _docx_view(path, locator)
         elif kind == "excel":
             body, note = _xlsx_view(path, sheet=sheet, locator=locator)
         elif kind == "presentation":
@@ -309,4 +319,4 @@ def file_viewer_html(
             raise ValueError("PDF использует отдельный постраничный просмотрщик")
     except (zipfile.BadZipFile, ElementTree.ParseError, KeyError) as exc:
         raise ValueError("Файл повреждён или имеет несовместимую структуру") from exc
-    return _document_shell(path_id=path_id, file_name=path.name, kind=kind, body=body, note=note)
+    return _document_shell(path_id=path_id, file_name=path.name, kind=kind, body=body, note=note, document_id=document_id)

@@ -2,43 +2,18 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import contextmanager
 import json
-from pathlib import Path
-import sqlite3
-import time
 
 from backend.rag_config import rag_meta_db_path
+from backend.workspace_native import catalog_call
 
 _locks: dict[str, asyncio.Lock] = {}
 _DEFAULT = dict(summary='', through_id=0, cutoff_id=0, enabled=True, auto_summary=True,
                 revision=0, updated_at=0.0, model_revision='', last_error='')
 
 
-@contextmanager
-def _db(write=False):
-    path = Path(rag_meta_db_path()).resolve()
-    if not write and not path.exists():
-        yield None
-        return
-    conn = sqlite3.connect(str(path) if write else path.as_uri() + '?mode=ro', uri=not write, timeout=10)
-    conn.row_factory = sqlite3.Row
-    try:
-        if write:
-            conn.execute('BEGIN IMMEDIATE')
-            conn.execute('CREATE TABLE IF NOT EXISTS les_conversation_context (session_id TEXT PRIMARY KEY, state_json TEXT NOT NULL)')
-        yield conn
-        if write: conn.commit()
-    finally:
-        conn.close()
-
-
 def get_context(session_id: str) -> dict:
-    with _db() as conn:
-        if conn is not None and conn.execute("SELECT 1 FROM sqlite_master WHERE name='les_conversation_context'").fetchone():
-            row = conn.execute('SELECT state_json FROM les_conversation_context WHERE session_id=?', (session_id,)).fetchone()
-            if row: return dict(_DEFAULT, **json.loads(row[0]))
-    return dict(_DEFAULT)
+    return catalog_call(rag_meta_db_path(), 'context_get', session_id=session_id)
 
 
 class ContextConflict(ValueError):
@@ -46,26 +21,16 @@ class ContextConflict(ValueError):
 
 
 def update_context(session_id: str, *, expected_revision: int, **changes) -> dict:
-    if set(changes) - set(_DEFAULT): raise ValueError('Unknown context field')
-    with _db(write=True) as conn:
-        row = conn.execute('SELECT state_json FROM les_conversation_context WHERE session_id=?', (session_id,)).fetchone()
-        current = dict(_DEFAULT, **json.loads(row[0])) if row else dict(_DEFAULT)
-        if current['revision'] != expected_revision: raise ContextConflict('Память изменилась в другом окне. Обновите её перед сохранением.')
-        current.update(changes, revision=expected_revision + 1, updated_at=time.time())
-        conn.execute('INSERT INTO les_conversation_context VALUES (?,?) ON CONFLICT(session_id) DO UPDATE SET state_json=excluded.state_json',
-                     (session_id, json.dumps(current, ensure_ascii=False)))
-    return current
+    from proxy.services.chat_session_service import SessionConflictError
+    try:
+        return catalog_call(rag_meta_db_path(), 'context_update', session_id=session_id,
+                            expected_revision=expected_revision, changes=changes)
+    except SessionConflictError as error:
+        raise ContextConflict(str(error)) from error
 
 
 def history_turns(session_id: str, *, after_id=0) -> list[dict]:
-    with _db() as conn:
-        if conn is None or not conn.execute("SELECT 1 FROM sqlite_master WHERE name='chat_history'").fetchone(): return []
-        columns = {row[1] for row in conn.execute('PRAGMA table_info(chat_history)')}
-        if not {'id', 'session_id', 'question', 'answer'} <= columns: return []
-        condition = ' AND success=1' if 'success' in columns else ''
-        rows = conn.execute('SELECT id, question, answer FROM chat_history WHERE session_id=? AND id>?' + condition + ' ORDER BY id',
-                            (session_id, after_id)).fetchall()
-    return [dict(row) for row in rows]
+    return catalog_call(rag_meta_db_path(), 'context_history', session_id=session_id, after_id=after_id)
 
 
 def prompt_cutoff(session_id: str) -> int | None:
@@ -75,18 +40,15 @@ def prompt_cutoff(session_id: str) -> int | None:
 
 
 def context_status(session_id: str) -> dict:
-    state = get_context(session_id)
-    turns = history_turns(session_id, after_id=state['cutoff_id'])
-    return dict(state, session_id=session_id, remembered_turns=len(turns),
-                summarized_turns=sum(row['id'] <= state['through_id'] for row in turns),
-                is_evidence=False, history_preserved=True)
+    return catalog_call(rag_meta_db_path(), 'context_status', session_id=session_id)
 
 
 def forget_context(session_id: str, *, expected_revision: int) -> dict:
-    rows = history_turns(session_id)
-    cutoff = max((row['id'] for row in rows), default=0)
-    return update_context(session_id, expected_revision=expected_revision, summary='',
-                          through_id=cutoff, cutoff_id=cutoff, last_error='', model_revision='')
+    from proxy.services.chat_session_service import SessionConflictError
+    try:
+        return catalog_call(rag_meta_db_path(), 'context_forget', session_id=session_id, expected_revision=expected_revision)
+    except SessionConflictError as error:
+        raise ContextConflict(str(error)) from error
 
 
 def summary_record(session_id: str) -> dict | None:

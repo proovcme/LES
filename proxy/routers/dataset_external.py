@@ -160,16 +160,31 @@ async def index_external(req: IndexExternalRequest, _admin=Depends(require_admin
         raise HTTPException(404, f"dataset_id не найден: {req.dataset_id} (создайте датасет заранее)")
 
     if req.background:
-        asyncio.create_task(_index_external_run_safe(state, req, root, dataset))
+        job = await asyncio.to_thread(state.job_service.create, 'dataset_intake',
+            source='external', dataset_id=req.dataset_id, dataset_name=dataset.name,
+            message='Проверяю состав папки', status='queued')
+        asyncio.create_task(_index_external_run_safe(state, req, root, dataset, job['id']))
         return {"status": "started", "dataset_id": req.dataset_id, "dataset_name": dataset.name,
+                "intake_job_id": job['id'],
                 "note": "регистрация и индексация идут в фоне — файлы появятся в датасете"}
     return await _index_external_run(state, req, root, dataset)
 
 
-async def _index_external_run_safe(state, req, root, dataset) -> dict:
+async def _index_external_run_safe(state, req, root, dataset, job_id=None) -> dict:
     try:
-        return await _index_external_run(state, req, root, dataset)
+        if job_id:
+            await asyncio.to_thread(state.job_service.update, job_id, status='running')
+        result = await _index_external_run(state, req, root, dataset, intake_job_id=job_id)
+        if job_id:
+            await asyncio.to_thread(state.job_service.update, job_id, status='completed',
+                processed=result['registered_files'], message='Файлы зарегистрированы; обработка показана отдельным заданием',
+                result={'registered_files': result['registered_files'], 'parse_job': result['parse_job']})
+        return result
     except Exception as err:
+        if job_id:
+            await asyncio.to_thread(state.job_service.update, job_id, status='failed', errors=1,
+                message='Не удалось завершить подключение папки. Уже зарегистрированные файлы сохранены; повторите подключение.',
+                result={'error_type': type(err).__name__})
         logger.error("[INDEX-EXT] Ошибка фонного индексирования %s: %s", req.dataset_id, err, exc_info=True)
         try:
             await state.backend.update_dataset_status(req.dataset_id, "ERROR")
@@ -178,36 +193,25 @@ async def _index_external_run_safe(state, req, root, dataset) -> dict:
         return {"status": "error", "error": str(err)}
 
 
-async def _index_external_run(state, req, root, dataset) -> dict:
-    """Тело in-place индексации: нарезка крупных PDF + регистрация файлов + LES.md + (опц.) парс.
-    Выносимо в фон (req.background) — не зависит от HTTP-таймаута на больших папках (758 файлов = ~47с)."""
-    suffixes = rag_upload_suffixes()
+async def _index_external_run(state, req, root, dataset, *, intake_job_id=None) -> dict:
+    """Enumerate and register metadata; heavy document reads run only in parsing workers."""
     registered = 0
     skipped_unsupported = 0
     skipped_outside_root = 0
     samples: list[str] = []
 
-    # 1. Сначала быстрая регистрация исходных файлов в SQLite: датасет мгновенно наполняется в UI.
-    for path in sorted(root.rglob("*")):
-        if not path.is_file():
-            continue
-        if "_originals" in path.parts:
-            continue
-        if not is_within_external_root(path, root):
-            skipped_outside_root += 1
-            continue
-        resolved = path.resolve()
-        if resolved.name in EXTERNAL_SERVICE_FILENAMES or is_temporary_source_name(resolved.name):
-            skipped_unsupported += 1
-            continue
-        if resolved.suffix.lower() not in suffixes:
-            skipped_unsupported += 1
-            continue
-        file_name = resolved.relative_to(root.parent).as_posix()
-        await state.backend.register_external_file(req.dataset_id, resolved, file_name)
+    intake_plan = await asyncio.to_thread(_external_intake_plan, root, dataset_name=dataset.name)
+    inventory = await asyncio.to_thread(_external_supported_files, root)
+    skipped_unsupported = intake_plan['skipped_count']
+    if intake_job_id:
+        await asyncio.to_thread(state.job_service.update, intake_job_id, total=len(inventory), message='Регистрирую документы')
+    for file_name, item in sorted(inventory.items()):
+        await state.backend.register_external_file(req.dataset_id, Path(item['source_path']), file_name)
         registered += 1
-        if registered % 20 == 0:
-            await asyncio.sleep(0)
+        if intake_job_id and registered % 25 == 0:
+            await asyncio.to_thread(state.job_service.update, intake_job_id, processed=registered,
+                message=f'Зарегистрировано {registered} из {len(inventory)}')
+        await asyncio.sleep(0)
         if len(samples) < 10:
             samples.append(file_name)
 
@@ -216,7 +220,6 @@ async def _index_external_run(state, req, root, dataset) -> dict:
     split_summary = {"split_files": 0, "parts": 0}
     les_md_summary = None
     map_summary = None
-    intake_plan = await asyncio.to_thread(_external_intake_plan, root, dataset_name=dataset.name)
 
     if registered == 0:
         raise HTTPException(400, f"в папке нет поддерживаемых документов: {root}")

@@ -1,0 +1,69 @@
+"""Shared reproducible asset handling for the native runtime/API build tools."""
+import hashlib
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+
+ROOT=Path(__file__).resolve().parents[1]
+SPECS={
+    'runtime':('les-runtime','les.native-runtime-asset.v1','runtime-receipt.json'),
+    'api':('les-api','les.native-api-asset.v1','api-receipt.json'),
+}
+
+
+def source_digest(component,root=ROOT):
+    SPECS[component]
+    paths=[root/'config/version.json']
+    for folder in ('core',component):
+        paths.extend(root.joinpath(folder,'src').rglob('*.rs'))
+        paths.extend(root.joinpath(folder,'src').rglob('*.sql'))
+        paths.extend(root/folder/name for name in ('Cargo.toml','Cargo.lock'))
+    digest=hashlib.sha256()
+    for path in sorted(paths):
+        if path.is_symlink():
+            raise ValueError('Native build inputs must not be symlinks')
+        digest.update(path.relative_to(root).as_posix().encode('utf-8')+b'\0'+path.read_bytes()+b'\0')
+    return digest.hexdigest()
+
+
+def stage_asset(component,output,source,expected_source):
+    _,schema,receipt_name=SPECS[component]
+    receipt=json.loads((source.parent/receipt_name).read_text(encoding='utf-8'))
+    if (receipt.get('schema')!=schema or receipt.get('file')!=source.name
+            or receipt.get('sha256')!=hashlib.sha256(source.read_bytes()).hexdigest()
+            or receipt.get('source_sha256')!=expected_source or receipt.get('remapped_paths') is not True):
+        raise ValueError('Native asset does not match its receipt/source')
+    output.mkdir(parents=True,exist_ok=False)
+    shutil.copy2(source,output/source.name);shutil.copy2(source.parent/receipt_name,output/receipt_name)
+    return output/source.name
+
+
+def build(component,output,*,offline=False):
+    if output.exists():
+        raise FileExistsError('Use a fresh output directory to preserve rollback assets')
+    name,schema,receipt_name=SPECS[component]
+    environment=os.environ.copy()
+    flags=(environment['CARGO_ENCODED_RUSTFLAGS'].split('\x1f') if environment.get('CARGO_ENCODED_RUSTFLAGS')
+           else environment.get('RUSTFLAGS','').split())
+    for source,replacement in ((Path.home(),'build-home'),
+            (Path(os.getenv('CARGO_HOME',str(Path.home()/'.cargo'))),'cargo'),(ROOT,'les')):
+        flags.append(f'--remap-path-prefix={source}={replacement}')
+    environment['CARGO_ENCODED_RUSTFLAGS']='\x1f'.join(flags)
+    command=['cargo','build','--locked','--release','--manifest-path',str(ROOT/component/'Cargo.toml')]
+    if offline:
+        command.append('--offline')
+    subprocess.run(command,env=environment,check=True)
+    file=name+('.exe' if sys.platform=='win32' else '')
+    source=ROOT/component/'target/release'/file
+    if not source.is_file():
+        raise FileNotFoundError('Native build did not produce its executable')
+    output.mkdir(parents=True);shutil.copy2(source,output/file)
+    version=json.loads((ROOT/'config/version.json').read_text(encoding='utf-8'))
+    receipt={'schema':schema,'file':file,'build_number':version['build_number'],
+             'sha256':hashlib.sha256(source.read_bytes()).hexdigest(),
+             'source_sha256':source_digest(component),'remapped_paths':True}
+    (output/receipt_name).write_text(json.dumps(receipt,indent=2),encoding='utf-8')
+    return output/file

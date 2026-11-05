@@ -1,24 +1,22 @@
 """Transactional, scoped row progress independent of chat history or summaries."""
 from __future__ import annotations
 
-from contextlib import contextmanager
 import hashlib
 import json
 from pathlib import Path
-import sqlite3
 from uuid import uuid4
 
 from proxy.services.tabular_document_service import encode
+from proxy.services.document_task_database import DocumentTaskDatabase
 
 
 def digest(value):
     return hashlib.sha256(encode(value).encode('utf-8')).hexdigest()
 
 
-class DocumentTaskStore:
+class DocumentTaskStore(DocumentTaskDatabase):
     def __init__(self, path: Path):
-        self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        super().__init__(path)
         with self.connect() as db:
             db.executescript('''
                 CREATE TABLE IF NOT EXISTS document_tasks (
@@ -39,18 +37,6 @@ class DocumentTaskStore:
             ''')
             if 'scope_key' not in {row['name'] for row in db.execute('PRAGMA table_info(document_tasks)')}:
                 db.execute("ALTER TABLE document_tasks ADD COLUMN scope_key TEXT NOT NULL DEFAULT ''")
-
-    @contextmanager
-    def connect(self):
-        db = sqlite3.connect(self.path, timeout=15)
-        db.row_factory = sqlite3.Row
-        try:
-            db.execute('PRAGMA foreign_keys=ON')
-            db.execute('PRAGMA journal_mode=WAL')
-            with db:
-                yield db
-        finally:
-            db.close()
 
     def open(self, owner: str, question: str, document: dict, *, scope_key='') -> str:
         identity = digest([owner, question, document['sha256'], document['schema']])
@@ -91,6 +77,12 @@ class DocumentTaskStore:
                 'SELECT source FROM document_rows WHERE task_id=? ORDER BY ordinal', (task_id,))]
             scope_key = task['scope_key']
         return self.open(owner, question, document, scope_key=scope_key)
+
+    def snapshot(self, owner, task_id):
+        with self.connect() as db:
+            task = self._task(db, owner, task_id)
+            return {**json.loads(task['source']), 'rows': [json.loads(row['source']) for row in db.execute(
+                'SELECT source FROM document_rows WHERE task_id=? ORDER BY ordinal', (task_id,))]}
 
     def _task(self, db, owner, task_id):
         row = db.execute('SELECT * FROM document_tasks WHERE id=? AND owner=?', (task_id, owner)).fetchone()

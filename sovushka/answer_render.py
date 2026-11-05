@@ -300,6 +300,9 @@ def source_usage(source: Any, index: int, answer: str = "") -> dict[str, str]:
 
 def tool_execution_notice(trace: dict | None) -> str:
     value = trace if isinstance(trace, dict) else {}
+    from proxy.services.execution_receipt_service import execution_incomplete
+    if execution_incomplete(value):
+        return str(value['execution'].get('notice') or 'Выполнение запрошенных действий не подтверждено.')
     loop = value.get("tool_loop")
     if not isinstance(loop, dict) or loop.get("status") != "error":
         return ""

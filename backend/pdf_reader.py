@@ -52,22 +52,85 @@ def clipped_box(box, width, height):
 
 def extract_markdown(path: Path, *, tables: bool = True) -> tuple[str, bool]:
     """Keep page provenance and table rows; report scans instead of inventing text."""
-    import pdfplumber
-
     parts = []
     needs_ocr = False
-    with pdfplumber.open(path) as document:
-        for number, page in enumerate(document.pages, 1):
-            text = (page.extract_text() or '').strip()
-            needs_ocr |= len(text) < 20 and bool(page.images)
-            if tables:
-                for rows in page.extract_tables() or []:
-                    clean = [[str(cell or '').replace('\n', ' ').replace('|', '\\|') for cell in row] for row in rows]
-                    if clean:
-                        rendered = [' | '.join(row) for row in clean]
-                        rendered.insert(1, ' | '.join('---' for _ in clean[0]))
-                        text += '\n\n' + '\n'.join(rendered)
-            if text:
-                parts.append(f'## Стр. {number}\n\n{text}')
-            page.close()  # Release pdfminer layout caches after each page.
+    for number, text, scan in text_pages(path):
+        needs_ocr |= scan
+        if text:
+            parts.append(f'## Стр. {number}\n\n{text}')
+    if tables:
+        import pdfplumber
+        import logging
+        deferred = complex_geometry_pages(path)
+        if deferred:
+            logging.getLogger(__name__).warning('PDF_TABLE_GEOMETRY_LIMIT document; text retained')
+            return '\n\n'.join(parts), needs_ocr
+        with pdfplumber.open(path) as document:
+            for number, page in enumerate(document.pages, 1):
+                try:
+                    if len(page.edges) > 2000:
+                        logging.getLogger(__name__).warning('PDF_TABLE_GEOMETRY_LIMIT page=%s; text retained', number)
+                        continue
+                    for rows in page.extract_tables() or []:
+                        clean = [[str(cell or '').replace('\n', ' ').replace('|', '\\|') for cell in row] for row in rows]
+                        if clean:
+                            rendered = [' | '.join(row) for row in clean]
+                            rendered.insert(1, ' | '.join('---' for _ in clean[0]))
+                            parts.append(f'## Стр. {number}\n\n' + '\n'.join(rendered))
+                finally:
+                    page.close()
     return '\n\n'.join(parts), needs_ocr
+
+
+def text_pages(path: Path, *, limit: int | None = None):
+    """Bounded PDFium page lifetimes, also for image-only and outlined drawings."""
+    import pypdfium2 as pdfium
+    with _PDFIUM_LOCK, pdfium.PdfDocument(str(path)) as document:
+        count = len(document) if limit is None else min(len(document), limit)
+        for index in range(count):
+            page = document[index]
+            textpage = None
+            try:
+                textpage = page.get_textpage()
+                text = textpage.get_text_range().strip()
+                scan = False
+                if len(text) < 20:
+                    # Empty TEXT operators are not a scan. Preserve short native
+                    # text on vector sheets (e.g. separator page numbers); OCR
+                    # must not replace it with an empty result. Images still
+                    # require OCR even when accompanied by a short page number.
+                    for obj in page.get_objects(max_depth=15):
+                        if obj.type == pdfium.raw.FPDF_PAGEOBJ_IMAGE or (
+                            not text and obj.type == pdfium.raw.FPDF_PAGEOBJ_PATH
+                        ):
+                            scan = True
+                            break
+            finally:
+                if textpage is not None:
+                    textpage.close()
+                page.close()
+            yield index + 1, text, scan
+
+
+def complex_geometry_pages(path: Path, *, pages=None, limit: int = 2000) -> set[int]:
+    """Check native object/segment counts before allocating pdfminer layouts."""
+    import pypdfium2 as pdfium
+    deferred = set()
+    with _PDFIUM_LOCK, pdfium.PdfDocument(str(path)) as document:
+        selected = range(1, len(document)+1) if pages is None else sorted(set(pages))
+        for number in selected:
+            if not 1 <= number <= len(document):
+                continue
+            page = document[number-1]
+            try:
+                complexity = 0
+                for obj in page.get_objects(max_depth=15):
+                    complexity += 1
+                    if obj.type == pdfium.raw.FPDF_PAGEOBJ_PATH:
+                        complexity += max(0, pdfium.raw.FPDFPath_CountSegments(obj.raw))
+                    if complexity > limit:
+                        deferred.add(number)
+                        break
+            finally:
+                page.close()
+    return deferred

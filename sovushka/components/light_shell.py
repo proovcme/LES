@@ -11,7 +11,7 @@ from nicegui import app, ui
 _LIGHT_SHELL_CSS = """
 .nicegui-content:has(> .light-shell){padding:0!important;gap:0!important}
 .light-shell.sov-app-shell{display:grid!important;grid-template-columns:216px minmax(0,1fr);grid-template-rows:minmax(0,1fr);height:100dvh;overflow:hidden;background:#f5f8f0;color:#143b2a}
-.light-shell .light-nav{grid-column:1;grid-row:1;min-width:0;display:flex;flex-direction:column;padding:27px 14px 18px;background:#fafbf6;border-right:1px solid #d7dfcf}
+.light-shell .light-nav{grid-column:1;grid-row:1;min-width:0;min-height:0;overflow-y:auto;display:flex;flex-direction:column;padding:27px 14px 18px;background:#fafbf6;border-right:1px solid #d7dfcf}
 .light-shell .light-brand{display:flex;align-items:center;gap:12px;padding:0 10px 27px;color:#143b2a;text-decoration:none}
 .light-shell .light-brand-icon{font-size:34px;color:#246c43}
 .light-shell .light-brand-name{font-size:24px;line-height:1;font-weight:800;letter-spacing:.035em}
@@ -27,6 +27,11 @@ _LIGHT_SHELL_CSS = """
 .light-shell .light-nav-tabs .q-tab--active{background:#e6eedc;color:#143b2a}
 .light-shell .light-nav-tabs .q-tabs__arrow,.light-shell .light-nav-tabs .q-tab__indicator{display:none}
 .light-shell .light-nav-footer{margin-top:auto;border-top:1px solid #d7dfcf;padding-top:15px}
+.light-shell .light-nav-footer .les-return-controls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px}
+.light-shell .light-nav-footer .les-return-controls .q-btn__content{flex-wrap:nowrap;gap:4px}
+.light-shell .light-nav-footer .les-return-controls .q-icon{margin:0}
+.light-shell .light-nav-footer .les-home-link{justify-content:center}
+.light-shell .light-nav-footer .les-chat-return-link{grid-column:1/-1;justify-content:flex-start;padding:0 13px}
 .light-shell .light-settings-link{display:flex;align-items:center;gap:12px;min-height:46px;padding:0 13px;border-radius:11px;color:#143b2a;text-decoration:none;font-size:14px;font-weight:650}
 .light-shell .light-settings-link:hover,.light-shell .light-brand:hover{background:#e6eedc}
 .light-shell .light-mobile-nav{display:none}

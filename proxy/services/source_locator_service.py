@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any, Mapping, Sequence
 
 
@@ -21,26 +20,16 @@ def _text(value: Any) -> str:
 def citation_indexes(answer: str) -> list[int]:
     """Read explicit visible source labels, including model-written ranges."""
 
-    indexes: set[int] = set()
-    for marker in re.findall(
-        r"\[Источники?\s+([^\]]+)\]",
-        _text(answer),
-        flags=re.IGNORECASE,
-    ):
-        for position, segment in enumerate(marker.split("|")):
-            value = segment.strip()
-            if position and not re.fullmatch(r"[0-9,;\s\-–—]+", value):
-                continue
-            for token in re.finditer(r"(\d+)\s*[\-–—]\s*(\d+)|(\d+)", value):
-                if token.group(3):
-                    indexes.add(int(token.group(3)))
-                    continue
-                start, end = int(token.group(1)), int(token.group(2))
-                if start <= end and end - start <= 1000:
-                    indexes.update(range(start, end + 1))
-                else:
-                    indexes.update((start, end))
-    return sorted(indexes)
+    from backend import native_core
+    return native_core.call('citations', request={'answer':_text(answer)})['indexes']
+
+
+def normalize_answer_citations(answer: str, source_map: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Canonical spelling of explicit references; never attach uncited evidence."""
+    from backend import native_core
+    sources = [{key:item[key] for key in ('index','header','evidence_ref') if key in item}
+               for item in source_map if isinstance(item, Mapping)]
+    return native_core.call('citations', request={'answer':answer,'sources':sources})
 
 
 def _relative_path(source_ref: str, doc_name: str) -> str:
@@ -191,23 +180,17 @@ def evidence_counts(
     """Count internal candidates, model-visible evidence, and valid citations separately."""
 
     index_to_handle: dict[int, str] = {}
-    valid_handles: set[str] = set()
     for position, raw in enumerate(source_map, 1):
         item = _mapping(raw)
         index = int(item.get("index") or position)
         handle = _text(item.get("evidence_ref")).upper() or f"S{index}"
         index_to_handle[index] = handle
-        valid_handles.add(handle)
 
     cited: set[str] = set()
-    for raw_index in citation_indexes(answer):
+    for raw_index in normalize_answer_citations(answer, source_map)['indexes']:
         handle = index_to_handle.get(raw_index)
         if handle:
             cited.add(handle)
-    for handle in re.findall(r"Q\d+\.H\d+", _text(answer), flags=re.IGNORECASE):
-        normalized = handle.upper()
-        if normalized in valid_handles:
-            cited.add(normalized)
     return {
         "found": max(0, int(found_count)),
         "model_visible": len(source_map),

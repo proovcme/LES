@@ -1,0 +1,139 @@
+//! Citation syntax only, never a factual validator or source selector.
+use regex::Regex;
+use serde_json::{json, Value};
+use std::collections::{BTreeSet, HashMap};
+use std::sync::LazyLock;
+
+static MARKER: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\[(?:Источники?\s+)?([0-9][0-9,;\s–—\-]*)(?:\|([^\]\n]*))?\]").unwrap()
+});
+static NUMBER: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(\d+)\s*[-–—]\s*(\d+)|(\d+)").unwrap());
+static CODE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?s)```.*?(?:```|$)|~~~.*?(?:~~~|$)|``.*?(?:``|$)|`[^`\n]*(?:`|$)|!?\[[^\]\n]*\]\([^\)\n]*\)").unwrap()
+});
+static HANDLE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\bQ[0-9]+\.H[0-9]+\b").unwrap());
+
+fn numbers(value: &str) -> BTreeSet<u32> {
+    let mut result = BTreeSet::new();
+    for item in NUMBER.captures_iter(value) {
+        if let Some(single) = item.get(3) {
+            if let Ok(n) = single.as_str().parse::<u32>() {
+                result.insert(n);
+            }
+        } else {
+            let a = item[1].parse::<u32>().unwrap_or(u32::MAX);
+            let b = item[2].parse::<u32>().unwrap_or(u32::MAX);
+            if a <= b && b - a <= 1000 {
+                result.extend(a..=b);
+            } else {
+                result.extend([a, b]);
+            }
+        }
+    }
+    result
+}
+
+pub fn execute(request: &Value) -> Result<Value, &'static str> {
+    let answer = request["answer"].as_str().ok_or("CITATION_INPUT_INVALID")?;
+    let map = request.get("sources").and_then(Value::as_array);
+    let mut headers = HashMap::new();
+    let mut valid = BTreeSet::new();
+    let mut handles = HashMap::new();
+    if let Some(sources) = map {
+        for source in sources {
+            if let Some(index) = source["index"].as_u64().and_then(|n| u32::try_from(n).ok()) {
+                valid.insert(index);
+                if let Some(handle) = source["evidence_ref"].as_str() {
+                    handles.insert(handle.to_uppercase(), index);
+                }
+                if let Some(header) = source["header"]
+                    .as_str()
+                    .filter(|s| s.starts_with('[') && s.ends_with(']') && s.len() < 16384)
+                {
+                    headers.insert(header.to_owned(), index);
+                }
+            }
+        }
+    }
+    let mut cited = BTreeSet::new();
+    let mut unknown = BTreeSet::new();
+    let mut repairs = 0;
+    let mut transform = |part: &str| {
+        let mut text = part.to_owned();
+        // Repair a missing opening bracket only when the whole supplied source
+        // header matches, including its document identity. Never infer a source.
+        let mut ordered: Vec<_> = headers.iter().collect();
+        ordered.sort_by_key(|(header, index)| (std::cmp::Reverse(header.len()), **index));
+        for (header, index) in ordered {
+            let token = format!("[Источник {index}]");
+            for form in [header.as_str(), &header[1..]] {
+                let count = text.matches(form).count();
+                if count > 0 {
+                    text = text.replace(form, &token);
+                    repairs += count;
+                }
+            }
+        }
+        text = HANDLE
+            .replace_all(&text, |cap: &regex::Captures| {
+                match handles.get(&cap[0].to_uppercase()) {
+                    Some(index) => format!("[Источник {index}]"),
+                    None => cap[0].to_owned(),
+                }
+            })
+            .into_owned();
+        MARKER
+            .replace_all(&text, |cap: &regex::Captures| {
+                let mut indexes = numbers(&cap[1]);
+                if let Some(extra) = cap.get(2) {
+                    for part in extra.as_str().split('|') {
+                        if part.chars().all(|ch| {
+                            ch.is_ascii_digit() || ch.is_whitespace() || ",;–—-".contains(ch)
+                        }) {
+                            indexes.extend(numbers(part));
+                        }
+                    }
+                }
+                let mut rendered = Vec::new();
+                for n in indexes {
+                    if map.is_none() || valid.contains(&n) {
+                        cited.insert(n);
+                        rendered.push(format!("[Источник {n}]"));
+                    } else {
+                        unknown.insert(n);
+                        rendered.push(format!("[Источник {n}]"));
+                    }
+                }
+                if rendered.is_empty() {
+                    cap[0].to_owned()
+                } else {
+                    rendered.join(" ")
+                }
+            })
+            .into_owned()
+    };
+    let mut output = String::new();
+    let mut cursor = 0;
+    for code in CODE.find_iter(answer) {
+        output.push_str(&transform(&answer[cursor..code.start()]));
+        output.push_str(code.as_str());
+        cursor = code.end();
+    }
+    output.push_str(&transform(&answer[cursor..]));
+    Ok(json!({"answer":output,"indexes":cited,"unknown_indexes":unknown,"header_repairs":repairs}))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn headers_ranges_code_and_unknowns_remain_distinct() {
+        let r=execute(&json!({"answer":"Значение *Источник 1 | файл 87.pdf | TABLE]* [Источники 1–2] `код [Источник 2]` [999]", "sources":[{"index":1,"header":"[Источник 1 | файл 87.pdf | TABLE]"},{"index":2}]})).unwrap();
+        assert_eq!(r["indexes"], json!([1, 2]));
+        assert_eq!(r["unknown_indexes"], json!([999]));
+        assert_eq!(r["header_repairs"], 1);
+        assert!(r["answer"].as_str().unwrap().contains("`код [Источник 2]`"));
+        assert!(!r["answer"].as_str().unwrap().contains("файл 87"));
+    }
+}

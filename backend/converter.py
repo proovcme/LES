@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 from backend.text_decoding import read_document_text
+from backend.extraction_errors import DocumentExtractionError
 
 logger = logging.getLogger(__name__)
 
@@ -75,8 +76,7 @@ def convert_to_markdown(file_path: Path, route=None) -> Optional[str]:
         elif suffix == ".docx":
             result = _parse_with_markitdown(file_path) or _parse_docx(file_path)
         elif suffix == ".doc":
-            # legacy бинарный .doc: markitdown/mammoth (только .docx) не берут → нативный textutil
-            result = _parse_with_markitdown(file_path) or _parse_legacy_doc(file_path)
+            result = _parse_legacy_doc(file_path)
         elif suffix in (".eml", ".emlx", ".msg"):
             result = _parse_email(file_path)
         elif suffix in (".xlsx", ".xlsm", ".xls", ".csv"):
@@ -92,15 +92,15 @@ def convert_to_markdown(file_path: Path, route=None) -> Optional[str]:
 
         return _limit_file_chars(file_path, result)
 
+    except DocumentExtractionError:
+        raise
     except Exception as e:
         logger.error(f"[CONVERT] Ошибка {file_path.name}: {e}", exc_info=True)
-        return None
+        raise DocumentExtractionError('FORMAT_READ_FAILED') from e
 
 
 def convert_to_markdown_for_indexing(file_path: Path, route=None) -> Optional[str]:
     """Indexing entrypoint: risky PDF/Excel converters run in a killable child."""
-    if not _isolated_conversion_enabled(file_path):
-        return convert_to_markdown(file_path, route=route)
     if _pdf_index_fast_text_first(file_path, route=route):
         fast = _parse_pdf_fast_text_layer(file_path, reason="pdf_index_text_first")
         if fast and fast.strip():
@@ -110,6 +110,8 @@ def convert_to_markdown_for_indexing(file_path: Path, route=None) -> Optional[st
                 env_name="RAG_PDF_FAST_TEXT_MAX_FILE_CHARS",
                 default=PDF_FAST_TEXT_MAX_FILE_CHARS,
             )
+    if not _isolated_conversion_enabled(file_path):
+        return convert_to_markdown(file_path, route=route)
     try:
         return convert_to_markdown_isolated(file_path, route=route)
     except RuntimeError as error:
@@ -249,16 +251,20 @@ def _parse_pdf_fast_text_layer(path: Path, *, reason: str = "") -> Optional[str]
 
 def _parse_pdf(path: Path, route=None) -> Optional[str]:
     from .pdf_reader import extract_markdown
-    text, scans = extract_markdown(path)
+    # Determine OCR before table geometry: scanned engineering sheets must not
+    # enter pdfminer's intersection search merely to discover missing text.
+    text, scans = extract_markdown(path, tables=False)
     if scans or (route and getattr(route, 'pipeline', '') == 'markdown_needs_ocr'):
         if not _env_bool('RAG_OCR_ENABLED', True):
-            return None
+            raise DocumentExtractionError('OCR_DISABLED')
         try:
             from .ocr_parser import make_ocr_parser
             text = make_ocr_parser().parse_pdf(path, dpi=int(os.getenv('RAG_OCR_DPI', '150')))
         except Exception as error:
             logger.error('[CONVERT] OCR failed for %s: %s', path.name, error)
-            return None
+            raise DocumentExtractionError('OCR_READ_FAILED') from error
+    else:
+        text, _ = extract_markdown(path)
     return strip_legal_boilerplate(normalize_pdf_text(text)) if text.strip() else None
 
 
@@ -365,10 +371,10 @@ def _pdf_image_extraction_enabled(path: Path) -> bool:
 
 def _pdf_page_count(path: Path) -> int:
     try:
-        import pdfplumber
-
-        with pdfplumber.open(path) as doc:
-            return len(doc.pages)
+        import pypdfium2 as pdfium
+        from backend.pdf_reader import _PDFIUM_LOCK
+        with _PDFIUM_LOCK, pdfium.PdfDocument(str(path)) as doc:
+            return len(doc)
     except Exception:
         return 0
 
@@ -392,11 +398,17 @@ def _parse_docx(path: Path) -> str:
 
 
 def _parse_legacy_doc(path: Path) -> Optional[str]:
-    """Бинарный .doc (Word 97-2003): mammoth/markitdown их не читают (только .docx).
-
-    macOS-нативный ``textutil`` конвертирует .doc/.rtf в txt без сторонних зависимостей.
-    Если textutil недоступен (не macOS) — мягко вернуть None (фолбэк на antiword/catdoc, если есть).
+    """Windows uses the bounded Rust MS-DOC reader; other platforms retain
+    their existing textutil/antiword/catdoc adapters for compatibility.
     """
+    if os.name == 'nt':
+        from backend import native_core
+        try:
+            result = native_core.call('document', request={'action':'legacy_doc','path':str(path.resolve())})
+        except native_core.NativeCoreError as error:
+            raise DocumentExtractionError(str(error)) from error
+        return str(result['text']).strip() or None
+
     import shutil
     import subprocess
 

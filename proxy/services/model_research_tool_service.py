@@ -79,6 +79,8 @@ class ModelResearchToolService:
             payload = self._fallback(tool, args)
             if inspect.isawaitable(payload):
                 payload = await payload
+            if isinstance(payload, ModelResearchToolResult):
+                return payload
             return ModelResearchToolResult(payload=payload)
 
         query = str(args.get("q") or "").strip()

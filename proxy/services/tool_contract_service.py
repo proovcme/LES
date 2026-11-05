@@ -37,6 +37,7 @@ class EffectClass(str, Enum):
     COMMIT = "commit"
     EXTERNAL = "external"
     DESTRUCTIVE = "destructive"
+    LOCAL_STATE = "local_state"
 
 
 class RetryPolicy(str, Enum):

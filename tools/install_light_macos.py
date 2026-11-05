@@ -8,11 +8,27 @@ import plistlib
 import shutil
 import subprocess
 import sys
+import time
 from tempfile import TemporaryDirectory
 
 from backend.light_processes import InstanceLock
 from tools.build_light_package import stage_code
+from tools.build_native_core import build as build_core
 from tools.light_runtime_assets import stage, host_target
+
+
+def _publish_app(candidate: Path, app: Path) -> None:
+    """Publish once; bounded retries tolerate transient Windows scanner handles."""
+    for attempt in range(8):
+        if app.exists():
+            raise FileExistsError('Application appeared during installation; it was preserved')
+        try:
+            candidate.rename(app)
+            return
+        except PermissionError as error:
+            if getattr(error, 'winerror', None) not in {5, 32} or attempt == 7:
+                raise
+            time.sleep(.05 * (attempt + 1))
 
 
 def install(app: Path, state: Path) -> Path:
@@ -25,6 +41,8 @@ def install(app: Path, state: Path) -> Path:
     uv = shutil.which('uv')
     if not uv:
         raise RuntimeError('Install uv before running this developer installer')
+    if not shutil.which('cargo'):
+        raise RuntimeError('Install the Rust toolchain before building this developer preview')
     lock = InstanceLock(app.parent / f'.{app.name}.install.lock')
     if not lock.acquire():
         raise RuntimeError('Another installation is using this application path')
@@ -38,7 +56,7 @@ def install(app: Path, state: Path) -> Path:
             _build_app(candidate, state, uv)
             if app.exists():
                 raise FileExistsError('Application appeared during installation; it was preserved')
-            candidate.rename(app)
+            _publish_app(candidate, app)
         return app
     finally:
         lock.release()
@@ -49,6 +67,7 @@ def _build_app(app: Path, state: Path, uv: str) -> None:
     resources.mkdir(parents=True)
     stage_code(resources)
     runtime = resources / 'runtime'
+    build_core(resources / 'native/core')
     # Reuse only the locally checksum-verified download, or fetch the pinned asset.
     source=Path(__file__).resolve().parents[1]/'native/qdrant'
     receipt=source/'asset-receipt.json'

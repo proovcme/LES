@@ -479,9 +479,9 @@ html {
   box-shadow: var(--sov-ui-shadow-focus) !important;
 }
 
-.les-return-controls { display:flex; align-items:center; gap:8px; flex-shrink:0; }
+.les-return-controls { display:flex; flex-wrap:wrap; align-items:center; gap:8px; flex-shrink:0; }
 .les-return-controls .q-btn, .les-home-link { min-height:44px; min-width:44px; }
-.les-home-link { display:inline-flex; align-items:center; padding:0 8px; color:var(--accent); }
+.les-home-link { display:inline-flex; align-items:center; padding:0 8px; color:var(--accent); white-space:nowrap; }
 .les-skip-link { position:fixed; left:12px; top:8px; transform:translateY(-180%); z-index:9999;
   padding:12px 16px; background:var(--bg-panel); color:var(--text); border:2px solid var(--accent); }
 .les-skip-link:focus { transform:translateY(0); }

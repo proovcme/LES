@@ -32,6 +32,7 @@ _APPROVAL_EFFECTS = {
     EffectClass.DESTRUCTIVE,
 }
 _SHADOW_BLOCKED_EFFECTS = {
+    EffectClass.LOCAL_STATE,
     EffectClass.DRAFT,
     EffectClass.COMMIT,
     EffectClass.EXTERNAL,
@@ -380,6 +381,7 @@ class TrustedExecutor:
         cursor_ttl_seconds: int = 300,
         cursor_capacity: int = 128,
         scope_resolver: Callable[[ToolContract, Mapping[str, Any]], tuple[str, ...]] | None = None,
+        local_state_authorizer: Callable[[ExecutionRequest], bool] | None = None,
     ) -> None:
         self.registry = registry
         self.store = store
@@ -390,6 +392,7 @@ class TrustedExecutor:
         self._cursor_ttl_seconds = cursor_ttl_seconds
         self._cursor_capacity = cursor_capacity
         self._scope_resolver = scope_resolver
+        self.local_state_authorizer = local_state_authorizer
 
     async def execute(self, request: ExecutionRequest) -> ExecutionEnvelope:
         registration = self.registry.get(request.tool_name)
@@ -433,6 +436,13 @@ class TrustedExecutor:
                 "rejected",
                 "TOOL_AUTHORIZATION_REQUIRED",
             )
+        if contract.effect is EffectClass.LOCAL_STATE:
+            try:
+                allowed = self.local_state_authorizer is not None and self.local_state_authorizer(request)
+            except Exception:
+                allowed = False
+            if not allowed:
+                return self._envelope(request, "rejected", "TOOL_LOCAL_STATE_PERMISSION_REQUIRED")
         if contract.effect in _APPROVAL_EFFECTS or contract.approval_required:
             try:
                 approval_matches = self._approval_matches(

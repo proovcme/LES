@@ -1,0 +1,22 @@
+[package]
+name = "les-core"
+version = "0.1.0"
+edition = "2021"
+license-file = "../LICENSE"
+description = "Bounded native document operations for LES"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+serde_json = { version = "=1.0.150", features = ["float_roundtrip"] }
+sha2 = "=0.10.9"
+regex = "=1.12.3"
+rusqlite = { version = "=0.41.1", features = ["bundled"] }
+chrono = { version = "=0.4.45", default-features = false, features = ["clock", "std"] }
+getrandom = "=0.3.4"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

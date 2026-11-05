@@ -417,6 +417,37 @@ async def test_document_viewer_by_id_uses_metadata_identity(monkeypatch, tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_text_viewer_original_keeps_canonical_identity_after_alias_resolution(monkeypatch, tmp_path):
+    import json
+    import re
+
+    source = tmp_path / "Регламент #1 日本語.md"
+    original = "Документация: 14 дней. 🌲".encode("utf-8")
+    source.write_bytes(original)
+
+    class StubExplorer:
+        def get_document(self, doc_id):
+            assert doc_id == "old-chunk-id"
+            return None
+
+        def get_document_by_source(self, dataset_id, doc_name):
+            assert (dataset_id, doc_name) == ("project-7", source.name)
+            return {"id": "canonical-document", "dataset_id": dataset_id,
+                    "file_name": source.name, "source_path": str(source)}
+
+    monkeypatch.setattr(documents_router, "explorer", lambda: StubExplorer())
+    response = await documents_router.document_viewer_by_id(
+        "old-chunk-id", dataset_id="project-7", doc_name=source.name,
+        locator="", sheet="", _user=object())
+    html = response.body.decode("utf-8")
+    config = json.loads(re.search(r'<script id="viewer-config" type="application/json">(.*?)</script>', html).group(1))
+    assert config["documentId"] == "canonical-document"
+    assert "Документация: 14 дней. 🌲" in html
+    assert "Л.И.С.Т." not in html
+    assert source.read_bytes() == original
+
+
+@pytest.mark.asyncio
 async def test_pdf_citation_viewer_resolves_chunk_identity_and_renders_exact_page(monkeypatch, tmp_path):
     import json
     import re

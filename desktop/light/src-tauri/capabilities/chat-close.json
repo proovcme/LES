@@ -1,0 +1,8 @@
+{
+  "identifier": "chat-close",
+  "description": "Only the loopback chat can register and acknowledge a requested close. Rust also validates the exact owned port and page.",
+  "windows": ["main"],
+  "local": false,
+  "remote": { "urls": ["http://127.0.0.1:*"] },
+  "permissions": ["allow-editor-ready", "allow-editor-close-result"]
+}

@@ -43,7 +43,8 @@ def test_failed_scan_never_becomes_searchable_warning(tmp_path, monkeypatch):
     assert converter._parse_pdf_fast_text_layer(path) is None
     def fail(): raise RuntimeError('OCR unavailable')
     monkeypatch.setattr(ocr_parser, 'make_ocr_parser', fail)
-    assert converter.convert_to_markdown(path) is None
+    with pytest.raises(converter.DocumentExtractionError, match='распознать'):
+        converter.convert_to_markdown(path)
 
 
 def test_scan_after_three_text_pages_requires_ocr(tmp_path, monkeypatch):

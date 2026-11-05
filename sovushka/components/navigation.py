@@ -2,16 +2,32 @@
 from __future__ import annotations
 
 import json
+import os
+from urllib.parse import urlsplit
 from nicegui import ui
 from sovushka.uikit.components import tab_name
 
 HOME = "/qdrant-visualizer/index.html"
 
 
+def svelte_chat_url():
+    value = os.getenv('LES_LIGHT_SVELTE_URL', '')
+    try:
+        url = urlsplit(value)
+        if (url.scheme == 'http' and url.hostname == '127.0.0.1' and url.port
+                and url.path == '/app/' and not (url.username or url.password or url.query or url.fragment)):
+            return value
+    except ValueError:
+        pass
+    return None
+
+
 def return_controls():
     with ui.element("nav").classes("les-return-controls").props('aria-label="Возврат"'):
         ui.button("Назад", icon="o_arrow_back").props('flat no-caps data-les-back aria-label="На шаг назад"')
         ui.link("Главная", target=HOME).classes("les-home-link")
+        if target := svelte_chat_url():
+            ui.link('Новый чат', target=target).classes('les-home-link les-chat-return-link')
 
 
 def bind_route_tabs(tabs, refs, path):

@@ -58,7 +58,7 @@ FULL_LES_ONLY_SERVICES = frozenset({
 def _full_les_only(relative: str) -> bool:
     return (relative in FULL_LES_ONLY_CODE or relative in FULL_LES_ONLY_SERVICES
             or relative.startswith(FULL_LES_ONLY_PREFIXES))
-CODE_FILES = {"sovushka_ng.py", "pyproject.toml", "uv.lock", "tools/__init__.py", "tools/light_launcher.py", "tools/light_mcp_server.py", "tools/light_child.py",
+CODE_FILES = {"sovushka_ng.py", "pyproject.toml", "uv.lock", "tools/__init__.py", "tools/light_launcher.py", "tools/light_mcp_server.py", "tools/light_child.py", "tools/light_document_worker.py",
               "tools/light_windows_ocr.ps1", "tools/light_cli.py", "tools/les-light.cmd",
               "tools/backup_suharik.py", "tools/les_doctor.py", "tools/les_runtime_control.py", "tools/lesctl.py",
               "proxy/services/mcp_connection_service.py", "proxy/routers/mcp_connections.py",
@@ -169,6 +169,8 @@ def stage_code(payload):
     shutil.copy2(ROOT / "docs/public/les-light/assets/les-light.svg", payload / "assets/les-light.svg")
     shutil.copy2(payload / "README.md", runtime / "README.md")
     shutil.copy2(ROOT / 'tools/les-light.cmd', payload / 'les.cmd')
+    from tools.build_light_frontend import stage as stage_frontend
+    stage_frontend(ROOT, runtime)
     return runtime
 
 
@@ -239,8 +241,10 @@ def stage_mail_collector(payload):
     return target
 
 
-def build(destination, executable, qdrant=None):
+def build(destination, executable, qdrant=None, native_core=None, native_runtime=None, native_api=None):
     destination = destination.resolve()
+    if native_api is not None and native_runtime is None:
+        raise ValueError('A native API asset requires its native service owner')
     if destination.exists():
         raise FileExistsError("Use a new empty output directory; existing artifacts are never removed by this builder")
     if not executable.is_file():
@@ -261,6 +265,17 @@ def build(destination, executable, qdrant=None):
         shutil.copy2(receipt, native / "asset-receipt.json")
     else:
         stage_qdrant(native)
+    from tools.build_native_core import build as build_core, stage_asset
+    if native_core is None:
+        build_core(destination/'native/core')
+    else:
+        stage_asset(destination/'native/core', native_core)
+    if native_runtime is not None:
+        from tools.build_native_runtime import stage_asset as stage_runtime
+        stage_runtime(destination/'native/runtime', native_runtime)
+    if native_api is not None:
+        from tools.build_native_api import stage_asset as stage_api
+        stage_api(destination/'native/api', native_api)
     stage_mail_collector(destination)
     from tools.light_license_audit import stage_notices
     stage_notices(ROOT, destination)
@@ -272,6 +287,12 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--desktop-exe", type=Path, required=True)
     parser.add_argument("--qdrant", type=Path)
+    parser.add_argument("--native-core", type=Path)
+    parser.add_argument("--native-runtime", type=Path)
+    parser.add_argument("--native-api", type=Path)
     args = parser.parse_args()
-    result = build(args.output, args.desktop_exe.resolve(), args.qdrant.resolve() if args.qdrant else None)
+    result = build(args.output, args.desktop_exe.resolve(), args.qdrant.resolve() if args.qdrant else None,
+                   args.native_core.resolve() if args.native_core else None,
+                   args.native_runtime.resolve() if args.native_runtime else None,
+                   args.native_api.resolve() if args.native_api else None)
     print(json.dumps({"files": len(result["files"]), "version": result["version"], "output": str(args.output)}))

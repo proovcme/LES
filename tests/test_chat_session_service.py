@@ -7,7 +7,7 @@ from proxy.services import project_service
 
 
 @pytest.fixture
-def db(tmp_path, monkeypatch):
+def db(tmp_path, monkeypatch, workspace_engine):
     path = tmp_path / 'meta.sqlite'
     monkeypatch.setattr(service, 'rag_meta_db_path', lambda: str(path))
     monkeypatch.setattr(project_service, 'rag_meta_db_path', lambda: str(path))

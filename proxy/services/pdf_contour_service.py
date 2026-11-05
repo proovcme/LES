@@ -355,16 +355,27 @@ def rag_page_metadata(
 
     path = _source_path(source_path)
     requested = sorted({int(value) for value in page_numbers if int(value) > 0})
+    from backend.pdf_reader import complex_geometry_pages
+    deferred = complex_geometry_pages(path, pages=requested)
     result: dict[int, dict[str, Any]] = {}
+    if deferred:
+        # Pages can share form/font resources; a simple-looking page in a
+        # complex file may expand enormous Type-3/vector layouts in pdfminer.
+        # RAG needs its original page locator, not an unbounded geometric audit.
+        import logging
+        logging.getLogger(__name__).warning('PDF_RAG_GEOMETRY_DEFERRED document; original page locators retained')
+        return result
     with pdfplumber.open(path) as document:
         for page_number in requested:
             if page_number > len(document.pages):
                 continue
-            result[page_number] = _page_passport(
-                document.pages[page_number - 1],
-                page_number=page_number,
-                file_name=file_name or path.name,
-            )
+            page = document.pages[page_number - 1]
+            try:
+                result[page_number] = _page_passport(
+                    page, page_number=page_number, file_name=file_name or path.name,
+                )
+            finally:
+                page.close()
     return result
 
 

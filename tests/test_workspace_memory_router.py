@@ -7,7 +7,7 @@ from proxy.services import memory_service, project_service
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
+def client(tmp_path, monkeypatch, catalog_engine):
     from proxy.routers import workspace_memory
     path = str(tmp_path / 'meta.db')
     for service in (memory_service, project_service):

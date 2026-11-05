@@ -4,6 +4,7 @@ from backend import qdrant_support as support
 from backend.qdrant_nodes import QdrantNodes
 from backend.index_replacement import retire_previous, discard_staged, ReplacementJournal, recover_adapter
 from backend.embedding_client import EmbedClient
+from backend.extraction_errors import DocumentExtractionError
 
 
 class SourceRegistrationChanged(RuntimeError):
@@ -23,11 +24,32 @@ class QdrantIngestion:
         await self._ensure_collection()
         self._assert_dense_index_contract()
         self.db.update_dataset_status(dataset_id, "PARSING")
+        from backend import embedding_residency
+        residency_token, owned_embeddings = embedding_residency.begin()
+        parse_cancelled = False
         try:
             res = await support.asyncio.to_thread(self._sync_parse, dataset_id, limit)
-        except BaseException:
+        except BaseException as error:
+            parse_cancelled = isinstance(error, support.asyncio.CancelledError)
             self.db.update_dataset_status(dataset_id, "ERROR")
             raise
+        finally:
+            try:
+                # Cancelling to_thread does not stop its running function. Do not
+                # unload its embedding model while that thread may still use it.
+                embedding_cleanup = ({'released': 0, 'busy': True} if parse_cancelled
+                                     else await embedding_residency.release(owned_embeddings))
+                if 'res' in locals():res['embedding_cleanup'] = embedding_cleanup
+            except Exception:
+                support.logger.warning('Embedding cleanup failed; original outcome preserved', exc_info=True)
+            finally:
+                embedding_residency.end(residency_token)
+            from backend.runtime_memory import collect_transient
+            try:
+                cleanup = await support.asyncio.to_thread(collect_transient, 'batch_end')
+                if 'res' in locals():res['memory_cleanup'] = cleanup
+            except Exception:
+                support.logger.warning('Parse cleanup failed; original outcome preserved', exc_info=True)
         status = "COMPLETED" if res.get("status") == "completed" else "ERROR"
         if res.get("errors", 0) > 0:
             status = "ERROR"
@@ -57,6 +79,7 @@ class QdrantIngestion:
         Батч-эмбеддинги: 32 чанка за запрос вместо по одному.
         """
         import time as _t
+        sync_qdrant = None
         t0 = _t.time()
         timings = {
             "delete_sec": 0.0,
@@ -284,7 +307,7 @@ class QdrantIngestion:
                     _add_timing("cache_sec", phase_start)
 
                     if not file_nodes:
-                        raise RuntimeError("Document produced no searchable fragments; previous index preserved")
+                        raise DocumentExtractionError('NO_SEARCHABLE_TEXT')
 
                     _stage(db_file_key, "EMBED")
                     # Батч-эмбеддинги по EMBED_BATCH чанков. Upsert начинаем только
@@ -510,8 +533,29 @@ class QdrantIngestion:
         except Exception as e:
             support.logger.error(f"[PARSE] FATAL: {e}", exc_info=True)
             return {"status": "failed", "error": str(e)}
+        finally:
+            if sync_qdrant is not None:
+                close = getattr(sync_qdrant, "close", None)
+                if close is not None:
+                    try: close()
+                    except Exception: support.logger.warning("Qdrant pool close failed", exc_info=True)
+
 
     def _convert_file(
+        self,file_path,data_dir,file_key,dataset_id,md_parser,splitter,timings,allow_ocr=True,
+    ):
+        from backend import format_process
+        if format_process.enabled():
+            try:
+                return format_process.prepare(file_path,data_dir,file_key,dataset_id,splitter,timings,allow_ocr)
+            except format_process.FormatProcessError as error:
+                if error.code=='FORMAT_UNSUPPORTED_SOURCE':
+                    raise support.UnsupportedIndexingSourceError(support._raw_cad_bim_error(file_path)) from error
+                raise
+        return QdrantIngestion._convert_file_inline(
+            self,file_path,data_dir,file_key,dataset_id,md_parser,splitter,timings,allow_ocr)
+
+    def _convert_file_inline(
         self,
         file_path: support.Path,
         data_dir: support.Path,

@@ -1,0 +1,6 @@
+{
+  "identifier": "startup",
+  "description": "Bundled startup screen can retry its owned launcher and open its browser.",
+  "windows": ["main"],
+  "permissions": ["allow-startup-status", "allow-retry-start", "allow-open-browser"]
+}

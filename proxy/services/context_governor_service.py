@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, Sequence
 
+from backend import native_core
 from proxy.services.model_execution_preset_service import ModelExecutionPreset
 
 
@@ -23,10 +23,6 @@ class ContextKind(str, Enum):
     WORKING_MEMORY = "working_memory"
     DIALOGUE = "dialogue"
     NATIVE_TOOL_EXCHANGE = "native_tool_exchange"
-
-
-_PACKING_ORDER = tuple(ContextKind)
-_PACKING_RANK = {kind: rank for rank, kind in enumerate(_PACKING_ORDER)}
 
 
 @dataclass(frozen=True)
@@ -87,42 +83,19 @@ class ContextPacket:
     omissions: tuple[ContextOmission, ...]
 
     def as_messages(self, *, request_last: bool = False) -> list[dict[str, Any]]:
-        system = "\n\n".join(
-            section.render()
-            for section in self.sections
-            if section.kind == ContextKind.PROFILE_PREFIX
-        )
-        ordered_sections = sorted(self.sections, key=lambda section: section.kind == ContextKind.REQUEST) if request_last else self.sections
-        user_sections = [
-            section.render()
-            for section in ordered_sections
-            if section.kind not in {ContextKind.PROFILE_PREFIX, ContextKind.NATIVE_TOOL_EXCHANGE}
-        ]
-        messages: list[dict[str, Any]] = []
-        native = [message for section in self.sections if section.kind == ContextKind.NATIVE_TOOL_EXCHANGE
-                  for item in section.objects for message in item.payload]
-        if system:
-            messages.append({"role": "system", "content": system})
-        if request_last:
-            for section in self.sections:
-                if section.kind == ContextKind.DIALOGUE:
-                    for item in section.objects:
-                        if isinstance(item.payload, dict) and item.payload.get("role") in {"user", "assistant"}:
-                            messages.append({"role": item.payload["role"], "content": str(item.payload.get("content") or "")})
-                        else:
-                            messages.append({"role": "user", "content": item.render()})
-            context = [section.render() for section in self.sections
-                       if section.kind not in {ContextKind.PROFILE_PREFIX, ContextKind.DIALOGUE, ContextKind.REQUEST,
-                                               ContextKind.NATIVE_TOOL_EXCHANGE}]
-            if context:
-                messages.append({"role": "user", "content": "\n".join(context)})
-            for section in self.sections:
-                if section.kind == ContextKind.REQUEST:
-                    messages.append({"role": "user", "content": section.render()})
-            return [*messages, *native]
-        if user_sections:
-            messages.append({"role": "user", "content": "\n".join(user_sections)})
-        return [*messages, *native]
+        sections = []
+        for section in self.sections:
+            row = dict(kind=section.kind.value, render=section.render())
+            if section.kind == ContextKind.NATIVE_TOOL_EXCHANGE:
+                row['native'] = [message for item in section.objects for message in item.payload]
+            if section.kind == ContextKind.DIALOGUE:
+                row['dialogue'] = [
+                    dict(role=item.payload['role'], content=str(item.payload.get('content') or ''))
+                    if isinstance(item.payload, dict) and item.payload.get('role') in {'user', 'assistant'}
+                    else dict(role='user', content=item.render()) for item in section.objects]
+            sections.append(row)
+        return native_core.required('context', request=dict(
+            action='messages', sections=sections, request_last=request_last))['messages']
 
 
 class ContextRequiredSectionOverflow(ValueError):
@@ -142,15 +115,6 @@ def conservative_token_estimate(text: str) -> int:
     return max(1, math.ceil(len(str(text or "")) / 2))
 
 
-def _cursor(kind: ContextKind, objects: Sequence[ContextObject]) -> str:
-    digest = hashlib.sha256()
-    for item in objects:
-        digest.update(item.object_id.encode("utf-8"))
-        digest.update(b"\x00")
-        digest.update(item.render().encode("utf-8"))
-        digest.update(b"\x00")
-    return f"ctx:{kind.value}:{digest.hexdigest()[:20]}"
-
 
 class ContextGovernor:
     def __init__(
@@ -166,97 +130,30 @@ class ContextGovernor:
         return max(0, int(self.estimate_tokens(item.render())))
 
     def pack(self, candidates: Sequence[ContextCandidate]) -> ContextPacket:
-        """Pack complete objects in canonical order after fixed reserves."""
-        budget = max(
-            0,
-            int(self.preset.input_token_limit)
-            - int(self.preset.generation_reserve_tokens)
-            - int(self.preset.safety_reserve_tokens),
-        )
-        ordered = sorted(candidates, key=lambda candidate: _PACKING_RANK[candidate.kind])
-
-        required_ids: list[str] = []
-        required_tokens = 0
-        required_by_kind: dict[ContextKind, list[ContextObject]] = {}
-        required_section_tokens: dict[ContextKind, int] = {}
-        required_object_count = 0
-        for candidate in ordered:
-            if not candidate.required:
-                continue
+        """Rust selects whole objects; the bridge preserves public Python dataclasses."""
+        objects = []
+        rows = []
+        for candidate in candidates:
+            items = []
             for item in candidate.objects:
-                required_ids.append(item.object_id)
-                separator = 1 if required_object_count else 0
-                section_separator = 1 if required_by_kind.get(candidate.kind) else 0
-                item_tokens = self._object_tokens(item)
-                required_by_kind.setdefault(candidate.kind, []).append(item)
-                required_section_tokens[candidate.kind] = (
-                    required_section_tokens.get(candidate.kind, 0)
-                    + section_separator
-                    + item_tokens
-                )
-                required_tokens += separator + item_tokens
-                required_object_count += 1
-        if required_tokens > budget:
-            raise ContextRequiredSectionOverflow(
-                object_ids=tuple(required_ids),
-                budget=budget,
-                required_tokens=required_tokens,
-            )
-
-        selected: dict[ContextKind, list[ContextObject]] = {
-            kind: list(items) for kind, items in required_by_kind.items()
-        }
-        section_tokens: dict[ContextKind, int] = dict(required_section_tokens)
-        omissions: list[ContextOmission] = []
-        used = required_tokens
-
-        for candidate in ordered:
-            if candidate.required:
-                continue
-            included: list[ContextObject] = []
-            omitted: list[ContextObject] = []
-            for item in candidate.objects:
-                item_tokens = self._object_tokens(item)
-                separator = 1 if used else 0
-                section_separator = 1 if selected.get(candidate.kind) else 0
-                if used + separator + item_tokens <= budget:
-                    selected.setdefault(candidate.kind, []).append(item)
-                    included.append(item)
-                    used += separator + item_tokens
-                    section_tokens[candidate.kind] = (
-                        section_tokens.get(candidate.kind, 0)
-                        + section_separator
-                        + item_tokens
-                    )
-                else:
-                    omitted.append(item)
-            if omitted:
-                omissions.append(
-                    ContextOmission(
-                        kind=candidate.kind,
-                        total=len(candidate.objects),
-                        omitted=len(omitted),
-                        object_ids=tuple(item.object_id for item in omitted),
-                        cursor=_cursor(candidate.kind, omitted),
-                        reason="budget_exhausted",
-                    )
-                )
-
-        sections = tuple(
-            ContextSection(
-                kind=kind,
-                objects=tuple(selected[kind]),
-                token_count=section_tokens[kind],
-            )
-            for kind in _PACKING_ORDER
-            if selected.get(kind)
-        )
+                items.append(dict(id=item.object_id, render=item.render(),
+                                  tokens=self._object_tokens(item), index=len(objects)))
+                objects.append(item)
+            rows.append(dict(kind=candidate.kind.value, required=candidate.required, objects=items))
+        result = native_core.required('context', request=dict(
+            action='pack', input_limit=int(self.preset.input_token_limit),
+            generation_reserve=int(self.preset.generation_reserve_tokens),
+            safety_reserve=int(self.preset.safety_reserve_tokens), candidates=rows))
+        if result.get('overflow'):
+            raise ContextRequiredSectionOverflow(object_ids=tuple(result['object_ids']),
+                budget=result['budget'], required_tokens=result['required_tokens'])
         return ContextPacket(
-            preset_id=self.preset.preset_id,
-            input_budget_tokens=budget,
+            preset_id=self.preset.preset_id, input_budget_tokens=result['budget'],
             generation_reserve_tokens=self.preset.generation_reserve_tokens,
-            safety_reserve_tokens=self.preset.safety_reserve_tokens,
-            included_tokens=used,
-            sections=sections,
-            omissions=tuple(omissions),
-        )
+            safety_reserve_tokens=self.preset.safety_reserve_tokens, included_tokens=result['used'],
+            sections=tuple(ContextSection(kind=ContextKind(row['kind']),
+                objects=tuple(objects[index] for index in row['indexes']), token_count=row['tokens'])
+                for row in result['sections']),
+            omissions=tuple(ContextOmission(kind=ContextKind(row['kind']), total=row['total'],
+                omitted=row['omitted'], object_ids=tuple(row['object_ids']),
+                cursor=row['cursor'], reason=row['reason']) for row in result['omissions']))

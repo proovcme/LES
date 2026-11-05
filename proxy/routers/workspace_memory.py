@@ -1,7 +1,7 @@
 """Local-user controls for advisory notes and inspectable conversation context."""
 from __future__ import annotations
 
-import asyncio
+from proxy.services.native_storage_http import storage_call
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
@@ -25,7 +25,7 @@ class ContextAction(BaseModel):
 
 async def _context_session(session_id):
     from proxy.services.chat_session_service import get_session
-    if await asyncio.to_thread(get_session, session_id) is None:
+    if await storage_call(get_session, session_id) is None:
         raise HTTPException(404, 'Чат не найден')
 
 
@@ -33,7 +33,7 @@ async def _context_session(session_id):
 async def get_conversation_context(session_id: str, _user=Depends(require_user)):
     from proxy.services.conversation_context_service import context_status
     await _context_session(session_id)
-    return await asyncio.to_thread(context_status, session_id)
+    return await storage_call(context_status, session_id)
 
 
 @router.patch('/context/{session_id}')
@@ -46,7 +46,7 @@ async def edit_conversation_context(session_id: str, req: ContextUpdate, _user=D
         changes['last_error'] = ''
         changes['model_revision'] = 'user_edit'
     try:
-        return await asyncio.to_thread(update_context, session_id, **changes)
+        return await storage_call(update_context, session_id, **changes)
     except ContextConflict as error:
         raise HTTPException(409, str(error)) from error
 
@@ -56,7 +56,7 @@ async def forget_conversation_context(session_id: str, req: ContextAction, _user
     from proxy.services.conversation_context_service import forget_context, ContextConflict
     await _context_session(session_id)
     try:
-        return await asyncio.to_thread(forget_context, session_id, expected_revision=req.expected_revision)
+        return await storage_call(forget_context, session_id, expected_revision=req.expected_revision)
     except ContextConflict as error:
         raise HTTPException(409, str(error)) from error
 
@@ -101,13 +101,13 @@ class NoteUpdate(BaseModel):
 
 
 async def _check_project(project_id: int) -> None:
-    if project_id and await asyncio.to_thread(project_service.get_project, project_id) is None:
+    if project_id and await storage_call(project_service.get_project, project_id) is None:
         raise HTTPException(404, 'Объект не найден')
 
 
 @router.get('')
 async def list_memory(project_id: int = Query(default=0, ge=0), _user=Depends(require_user)):
-    return {'notes': await asyncio.to_thread(memory_service.list_notes, limit=500, project_id=project_id)}
+    return {'notes': await storage_call(memory_service.list_notes, limit=500, project_id=project_id)}
 
 
 @router.post('')
@@ -115,17 +115,17 @@ async def create_memory(req: NoteCreate, _user=Depends(require_user)):
     await _check_project(req.project_id)
     if req.source_session_id is not None:
         from proxy.services import chat_session_service
-        session = await asyncio.to_thread(chat_session_service.get_session, req.source_session_id)
+        session = await storage_call(chat_session_service.get_session, req.source_session_id)
         if session is None or int(session.get('project_id') or 0) != req.project_id:
             raise HTTPException(422, 'Исходный чат должен принадлежать выбранной области памяти')
-    return await asyncio.to_thread(memory_service.create_note, req.text,
+    return await storage_call(memory_service.create_note, req.text,
                                    project_id=req.project_id, source_session_id=req.source_session_id)
 
 
 @router.patch('/{note_id}')
 async def update_memory(note_id: int, req: NoteUpdate, _user=Depends(require_user)):
     await _check_project(req.project_id)
-    note = await asyncio.to_thread(memory_service.update_note, note_id, project_id=req.project_id,
+    note = await storage_call(memory_service.update_note, note_id, project_id=req.project_id,
                                    text=req.text, enabled=req.enabled)
     if note is None:
         raise HTTPException(404, 'Заметка не найдена в выбранной области')
@@ -134,7 +134,7 @@ async def update_memory(note_id: int, req: NoteUpdate, _user=Depends(require_use
 
 @router.delete('/{note_id}')
 async def delete_memory(note_id: int, project_id: int = Query(ge=0), _user=Depends(require_user)):
-    deleted = await asyncio.to_thread(memory_service.delete_note, note_id, project_id=project_id)
+    deleted = await storage_call(memory_service.delete_note, note_id, project_id=project_id)
     if not deleted:
         raise HTTPException(404, 'Заметка не найдена в выбранной области')
     return {'deleted': True}

@@ -1,12 +1,13 @@
 # LES RAG: macOS preview
 
-Локальная браузерная редакция Light для macOS. Это кандидат исходников build 759,
+Локальная браузерная редакция Light для macOS. Это исходники developer preview,
 а не опубликованный, подписанный DMG или нативная оболочка Windows/Tauri.
 
 ## Установка
 
-Нужны macOS, Python 3.12/3.13, `uv` и Xcode Command Line Tools для сборки
-небольшого OCR-helper. Установка требует интернета и использует `uv.lock`.
+Нужны macOS, Python 3.12/3.13, `uv`, Rust с Cargo и Xcode Command Line Tools.
+Установщик собирает обязательное ядро Rust и OCR-helper в отдельном кандидате.
+Установка требует интернета и использует `uv.lock` и `core/Cargo.lock`.
 
 ```sh
 uv sync --locked --extra mcp

@@ -4,6 +4,8 @@ Windows x64, Python 3.13, uv, Rust and NSIS.
 
 ```powershell
 uv sync --frozen --extra mcp
+uv run python tools/build_native_core.py --output native/core
+$env:LES_CORE_LIBRARY = (Resolve-Path native/core/les_core.dll).Path
 make verify
 make test
 make test-mail

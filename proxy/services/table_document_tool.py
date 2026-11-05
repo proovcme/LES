@@ -23,6 +23,7 @@ class TableDocumentTool:
     question: str = ''
     current: dict = field(default_factory=dict)
     last_exchange: list = field(default_factory=list)
+    work_requested: bool = False
 
     def model_context(self):
         return ({'native_tool_exchange': [self.last_exchange]} if self.last_exchange
@@ -67,12 +68,20 @@ class TableDocumentTool:
                 'save with record, then next until pending is zero. Continue a prior task only '
                 'when the user asks to continue it; for a different objective call start once.'}
 
+    def completion_receipt(self):
+        if not self.work_requested:
+            return None  # Reading a cell does not request a review of the whole table.
+        from proxy.services.execution_receipt_service import ledger_receipt
+        return ledger_receipt(TOOL_NAME, self.state())
+
     def execute(self, arguments):
         task_id = arguments.get('task_id') or self.task_id
         self.store.status(self.owner, task_id)  # Check binding before switching or disclosing data.
         self.store.activate(self.owner, task_id)
         self.task_id = task_id
         operation = arguments['operation']
+        if operation in {'start', 'next', 'record'}:
+            self.work_requested = True
         if operation == 'start':
             if self.store.matches_question(self.owner, task_id, self.question):
                 action = 'record' if self.current.get('packet_id') and self.current.get('rows') else 'next'
@@ -91,9 +100,19 @@ class TableDocumentTool:
         elif operation == 'results':
             payload = self.store.results(self.owner, task_id, offset=arguments.get('offset', 0),
                                          max_bytes=self.packet_bytes)
+        elif operation in {'read_window', 'read_cell'}:
+            from proxy.services.table_window_service import read_window, read_cell
+            # Use the selected task's immutable snapshot, never a model-supplied path.
+            document = self.store.snapshot(self.owner, task_id)
+            keys = ('sheet', 'row_start', 'column_start', 'row_count', 'column_count') if operation == 'read_window' else (
+                'sheet', 'coordinate', 'field', 'offset')
+            options = {key: arguments[key] for key in keys if key in arguments}
+            payload = (read_window(document, **options, max_bytes=self.packet_bytes) if operation == 'read_window' else
+                       read_cell(document, **options, max_chars=max(128, self.packet_bytes // 4)))
         else:
             raise ValueError('Неизвестное действие с таблицей')
-        self.current = payload
+        self.current = ({**self.current, 'addressed_read': payload}
+                        if operation in {'read_window', 'read_cell'} else payload)
         return {**self.state(), **payload}
 
     def register(self, harness):
@@ -102,7 +121,7 @@ class TableDocumentTool:
         from proxy.services.tool_registry_service import ToolRegistration
         from proxy.services.tool_harness_service import _result
         contract = ToolContract(
-            name=TOOL_NAME, version='1.0.0', title='Чтение и проверка таблицы', category='attachment',
+            name=TOOL_NAME, version='1.1.0', title='Чтение и проверка таблицы', category='attachment',
             summary='Read the attached table in bounded whole-row packets. start creates or resumes '
                 'a separate task for the CURRENT user question, with no inherited decisions. '
                 'Use start for a new objective; do not use it for continuation. status lists tasks in '
@@ -113,10 +132,20 @@ class TableDocumentTool:
                 'Use reviewed, needs_review or excluded with a note and exact cell coordinates. '
                 'A row with missing formula cache or error needs_review. Results survive restart. '
                 'results reads saved sources/decisions by offset. Numbers are decimal strings. '
+                'read_window reads an exact sheet by row_start/column_start (1-based), up to 4 rows/8 columns; '
+                'follow next_cursor with the SAME row_count/column_count. Deferred long cells use read_cell with '
+                'sheet, coordinate, field=value/formula/cached and character offset; follow next_offset. '
+                'These addressed reads do not advance row decisions. '
                 'A blocked oversized row remains pending; never claim the whole task is finished.',
             input_schema={'type': 'object', 'properties': {
-                'operation': {'type': 'string', 'enum': ['start', 'status', 'next', 'record', 'results']},
+                'operation': {'type': 'string', 'enum': ['start', 'status', 'next', 'record', 'results', 'read_window', 'read_cell']},
                 'task_id': {'type': 'string'}, 'packet_id': {'type': 'string'},
+                'sheet': {'type': 'string'}, 'coordinate': {'type': 'string', 'pattern': '^[A-Z]{1,3}[1-9][0-9]*$'},
+                'field': {'type': 'string', 'enum': ['value', 'formula', 'cached']},
+                'row_start': {'type': 'integer', 'minimum': 1, 'maximum': 20000},
+                'column_start': {'type': 'integer', 'minimum': 1, 'maximum': 512},
+                'row_count': {'type': 'integer', 'minimum': 1, 'maximum': 4},
+                'column_count': {'type': 'integer', 'minimum': 1, 'maximum': 8},
                 'offset': {'type': 'integer', 'minimum': 0},
                 'decisions': {'type': 'array', 'maxItems': 12, 'items': {
                     'type': 'object', 'properties': {
@@ -201,4 +230,4 @@ def manifest(tool):
 
 def without_table_replays(results):
     """A growing tool log is trace data; table state has its own bounded context."""
-    return [item for item in results if item.get('tool') != TOOL_NAME or item.get('status') != 'ok']
+    return [item for item in results if item.get('tool') not in {TOOL_NAME, 'document_review'} or item.get('status') != 'ok']

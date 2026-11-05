@@ -177,6 +177,66 @@
       "description": "Permission identifier",
       "oneOf": [
         {
+          "description": "Enables the editor_close_result command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-editor-close-result",
+          "markdownDescription": "Enables the editor_close_result command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the editor_ready command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-editor-ready",
+          "markdownDescription": "Enables the editor_ready command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_browser command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-browser",
+          "markdownDescription": "Enables the open_browser command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the retry_start command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-retry-start",
+          "markdownDescription": "Enables the retry_start command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the startup_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-startup-status",
+          "markdownDescription": "Enables the startup_status command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the editor_close_result command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-editor-close-result",
+          "markdownDescription": "Denies the editor_close_result command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the editor_ready command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-editor-ready",
+          "markdownDescription": "Denies the editor_ready command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_browser command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-browser",
+          "markdownDescription": "Denies the open_browser command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the retry_start command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-retry-start",
+          "markdownDescription": "Denies the retry_start command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the startup_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-startup-status",
+          "markdownDescription": "Denies the startup_status command without any pre-configured scope."
+        },
+        {
           "description": "Default core plugins set.\n#### This default permission set includes:\n\n- `core:path:default`\n- `core:event:default`\n- `core:window:default`\n- `core:webview:default`\n- `core:app:default`\n- `core:image:default`\n- `core:resources:default`\n- `core:menu:default`\n- `core:tray:default`",
           "type": "string",
           "const": "core:default",

@@ -139,6 +139,26 @@ def _dataset_filter(dataset_ids: list[str]) -> dict[str, Any]:
     return {"must": [{"key": "dataset_id", "match": match}]}
 
 
+def _dataset_storage_dirs(storage_root: str | Path, dataset_ids: list[str]) -> list[Path]:
+    """Validate before any mutation, including Windows redirected directory aliases."""
+    base = Path(storage_root).resolve()
+    paths = []
+    for dataset_id in dataset_ids:
+        if dataset_id in {'.', '..'} or any(char in dataset_id for char in '/\\:'):
+            raise DatasetDeletionError('unsafe dataset storage identifier')
+        path = (base / dataset_id).resolve()
+        same_parent = path.parent == base
+        if not same_parent:
+            try:
+                same_parent = path.parent.samefile(base)
+            except OSError:
+                same_parent = False
+        if not same_parent:
+            raise DatasetDeletionError(f'unsafe dataset storage path: {path}')
+        paths.append(path)
+    return paths
+
+
 async def _qdrant_count(
     client: httpx.AsyncClient,
     *,
@@ -201,7 +221,9 @@ async def delete_datasets_safely(
             "recovery-free deletion is limited to the exact release acceptance fixture"
         )
 
+    _dataset_storage_dirs(storage_root, unique_ids)
     async with _DELETE_LOCK, _mutation_guard(storage_root, collection, unique_ids):
+        storage_dirs = _dataset_storage_dirs(storage_root, unique_ids)
         recovery_dir = None if ephemeral else _new_recovery_dir(db_path, "datasets")
         db_backup = None if recovery_dir is None else recovery_dir / db_path.name
         if db_backup is not None:
@@ -266,12 +288,10 @@ async def delete_datasets_safely(
                 f"lexical deletion failed after {recovery_note}; MetaDB was preserved: {exc}"
             ) from exc
 
-        _delete_catalog_rows(db_path, unique_ids)
-        storage_base = Path(storage_root).resolve()
-        storage_dirs = [(storage_base / dataset_id).resolve() for dataset_id in unique_ids]
-        for path in storage_dirs:
-            if storage_base not in path.parents:
-                raise DatasetDeletionError(f"unsafe dataset storage path: {path}")
+        # Recheck the boundary before touching files; a failed quarantine must
+        # retain catalog identity and project links for recovery/retry.
+        if _dataset_storage_dirs(storage_root, unique_ids) != storage_dirs:
+            raise DatasetDeletionError('dataset storage changed during deletion')
         if ephemeral:
             for path in storage_dirs:
                 if path.exists():
@@ -280,6 +300,8 @@ async def delete_datasets_safely(
         else:
             assert recovery_dir is not None
             quarantined = _quarantine_storage(storage_dirs, recovery_dir)
+
+        _delete_catalog_rows(db_path, unique_ids)
 
         return {
             "status": "deleted",

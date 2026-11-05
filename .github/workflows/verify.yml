@@ -18,17 +18,55 @@ jobs:
       UV_FROZEN: '1'
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.14.0'
+          cache: npm
+          cache-dependency-path: desktop/light/frontend/package-lock.json
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: '3.13.12'
           enable-cache: true
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: desktop/light/src-tauri
+          workspaces: |
+            desktop/light/src-tauri
+            core
+            runtime
+            api
       - name: Prepare build tools
         run: choco install make --yes --no-progress
       - name: Install frozen Python environment
         run: uv sync --frozen --extra mcp
+      - name: Build and test native document core
+        run: |
+          make test-core
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          uv run python tools/build_native_core.py --output native/core
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          "LES_CORE_LIBRARY=$((Resolve-Path native/core/les_core.dll).Path)" >> $env:GITHUB_ENV
+          "LES_CORE_MODE=native" >> $env:GITHUB_ENV
+      - name: Test and build native service owner and API
+        run: |
+          make test-runtime
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          make test-api
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          uv run python tools/build_native_runtime.py --output native/runtime
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          uv run python tools/build_native_api.py --output native/api
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          uv run python tools/light_runtime_assets.py --destination native/qdrant
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          "LES_TEST_NATIVE_RUNTIME=$((Resolve-Path native/runtime/les-runtime.exe).Path)" >> $env:GITHUB_ENV
+          "LES_TEST_NATIVE_API=$((Resolve-Path native/api/les-api.exe).Path)" >> $env:GITHUB_ENV
+          "LES_TEST_NATIVE_QDRANT=$((Resolve-Path native/qdrant/qdrant.exe).Path)" >> $env:GITHUB_ENV
+      - name: Check static frontend
+        run: |
+          uv run python tools/build_light_frontend.py
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          npm.cmd test --prefix desktop/light/frontend
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Verify code and offline behavior
         run: |
           make verify

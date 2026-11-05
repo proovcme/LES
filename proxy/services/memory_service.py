@@ -11,12 +11,10 @@ import logging
 import json
 import os
 import re
-import sqlite3
-import time
-from pathlib import Path
 from typing import Any
 
 from backend.rag_config import rag_meta_db_path
+from backend.workspace_native import catalog_call
 
 logger = logging.getLogger(__name__)
 
@@ -46,105 +44,28 @@ _STOPWORDS = frozenset(
 _WORD_RE = re.compile(r"[а-яёa-z0-9]{4,}", re.IGNORECASE)
 
 
-def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(rag_meta_db_path())
-    conn.row_factory = sqlite3.Row
-    conn.execute("BEGIN IMMEDIATE")
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS les_notes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            text TEXT NOT NULL,
-            dataset_filter TEXT NOT NULL DEFAULT '',
-            created_at REAL NOT NULL
-        )
-        """
-    )
-    columns = {row[1] for row in conn.execute("PRAGMA table_info(les_notes)")}
-    for col, ddl in (
-        ("project_id", "ALTER TABLE les_notes ADD COLUMN project_id INTEGER NOT NULL DEFAULT 0"),
-        ("auto", "ALTER TABLE les_notes ADD COLUMN auto INTEGER NOT NULL DEFAULT 0"),
-        ("enabled", "ALTER TABLE les_notes ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1"),
-        ("source_session_id", "ALTER TABLE les_notes ADD COLUMN source_session_id TEXT"),
-    ):
-        if col not in columns:
-            conn.execute(ddl)
-    conn.commit()
-    return conn
-
-
-def _connect_read_only() -> sqlite3.Connection:
-    path = Path(rag_meta_db_path()).resolve()
-    conn = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
 def create_note(text: str, dataset_filter: str = "", project_id: int = 0, auto: bool = False,
                 *, source_session_id: str | None = None) -> dict[str, Any]:
-    now = time.time()
-    with _connect() as conn:
-        cur = conn.execute(
-            "INSERT INTO les_notes(text, dataset_filter, project_id, auto, created_at, source_session_id) VALUES (?,?,?,?,?,?)",
-            (text.strip(), dataset_filter, int(project_id), 1 if auto else 0, now, source_session_id),
-        )
-        conn.commit()
-        note_id = cur.lastrowid
-    logger.info("[MEMORY] %sзаметка #%s: %s", "авто-" if auto else "", note_id, text[:80])
+    note = catalog_call(rag_meta_db_path(), 'note_create', text=text, dataset_filter=dataset_filter,
+                        project_id=int(project_id), auto=bool(auto), source_session_id=source_session_id)
+    note_id = note['id']
+    logger.info('[MEMORY] note #%s saved', note_id)
     try:  # W17.2: детерминированные рёбра из текста заметки (НТД/[[вики]]/элемент), 0 LLM
         from proxy.services.edge_service import derive_edges_from_text
         derive_edges_from_text("note", str(note_id), text, provenance=f"note#{note_id}")
     except Exception as edge_err:
         logger.warning("[EDGES] derive note#%s skipped: %s", note_id, edge_err)
-    return {"id": note_id, "text": text.strip(), "dataset_filter": dataset_filter,
-            "project_id": int(project_id), "created_at": now, "enabled": True,
-            "source_session_id": source_session_id}
+    return note
 
 
 def list_notes(limit: int = 50, project_id: int | None = None) -> list[dict[str, Any]]:
-    with _connect() as conn:
-        if project_id is not None:  # Q3: фильтр по объекту (None → все)
-            rows = conn.execute(
-                "SELECT * FROM les_notes WHERE project_id=? ORDER BY id DESC LIMIT ?",
-                (int(project_id), limit),
-            ).fetchall()
-        else:
-            rows = conn.execute("SELECT * FROM les_notes ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
-    return [dict(row) for row in rows]
+    return catalog_call(rag_meta_db_path(), 'note_list', limit=limit, project_id=project_id)
 
 
 def project_note_items(*, limit: int = 5, project_id: int | None = None,
                        explicit_only: bool = False) -> list[dict[str, Any]]:
-    """Read notes for typed projection without schema creation or other writes."""
-    if not Path(rag_meta_db_path()).is_file():
-        return []
-    try:
-        with _connect_read_only() as conn:
-            table = conn.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='les_notes'"
-            ).fetchone()
-            if not table:
-                return []
-            columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(les_notes)")}
-            clauses = []
-            params: list[Any] = []
-            if "project_id" in columns:
-                clauses.append("project_id IN (0, ?)")
-                params.append(int(project_id or 0))
-            if "enabled" in columns:
-                clauses.append("enabled=1")
-            if explicit_only and "auto" in columns:
-                clauses.append("auto=0")
-            where = " WHERE " + " AND ".join(clauses) if clauses else ""
-            rows = conn.execute(
-                "SELECT * FROM les_notes" + where + " ORDER BY id DESC LIMIT ?",
-                (*params, max(0, int(limit))),
-            ).fetchall()
-    except sqlite3.OperationalError:
-        if not Path(rag_meta_db_path()).exists():
-            return []
-        raise
-    return [dict(row) for row in rows]
+    return catalog_call(rag_meta_db_path(), 'note_projection', limit=max(0, int(limit)),
+                        project_id=int(project_id or 0), explicit_only=explicit_only)
 
 
 def validate_note_text(text: str) -> str:
@@ -156,30 +77,12 @@ def validate_note_text(text: str) -> str:
 
 def update_note(note_id: int, *, project_id: int, text: str | None = None,
                 enabled: bool | None = None) -> dict[str, Any] | None:
-    """Edit only an explicitly addressed scope; never move a note between projects."""
-    if text is not None:
-        text = validate_note_text(text)
-    with _connect() as conn:
-        conn.execute(
-            "UPDATE les_notes SET text=COALESCE(?, text), enabled=COALESCE(?, enabled), "
-            "auto=CASE WHEN ? THEN 0 ELSE auto END "
-            "WHERE id=? AND project_id=?",
-            (text, int(enabled) if enabled is not None else None,
-             text is not None or enabled is not None, note_id, project_id),
-        )
-        row = conn.execute("SELECT * FROM les_notes WHERE id=? AND project_id=?",
-                           (note_id, project_id)).fetchone()
-    return dict(row) if row else None
+    return catalog_call(rag_meta_db_path(), 'note_update', note_id=note_id, project_id=project_id,
+                        text=validate_note_text(text) if text is not None else None, enabled=enabled)
 
 
 def delete_note(note_id: int, *, project_id: int | None = None) -> bool:
-    with _connect() as conn:
-        if project_id is None:  # Compatibility for the explicit legacy delete command.
-            cur = conn.execute("DELETE FROM les_notes WHERE id=?", (note_id,))
-        else:
-            cur = conn.execute("DELETE FROM les_notes WHERE id=? AND project_id=?", (note_id, project_id))
-        conn.commit()
-    return cur.rowcount > 0
+    return catalog_call(rag_meta_db_path(), 'note_delete', note_id=note_id, project_id=project_id)
 
 
 def _keywords(text: str) -> set[str]:
@@ -224,22 +127,12 @@ def recall_context(
     scored_notes.sort(key=lambda pair: -pair[0])
 
     scored_history: list[tuple[float, dict[str, Any]]] = []
-    try:
-        with _connect() as conn:
-            rows = conn.execute(
-                "SELECT id, question, answer, feedback_status FROM chat_history "
-                "WHERE success=1 AND crag_status IN ('VERIFIED','DETERMINISTIC') "
-                f"AND feedback_status NOT IN ({','.join('?' * len(_BAD_FEEDBACK))}) "
-                "AND question != ? ORDER BY id DESC LIMIT ?",
-                (*_BAD_FEEDBACK, question.strip(), history_rows),
-            ).fetchall()
-        for row in rows:
-            score = _overlap_score(query_words, row["question"])
-            if score >= max(min_score, 0.5):  # к истории строже: совпадение по смыслу вопроса
-                scored_history.append((score, dict(row)))
-        scored_history.sort(key=lambda pair: -pair[0])
-    except sqlite3.OperationalError:  # chat_history ещё не создана (свежая база)
-        pass
+    rows = catalog_call(rag_meta_db_path(), 'history_recall', question=question.strip(), limit=history_rows)
+    for row in rows:
+        score = _overlap_score(query_words, row['question'])
+        if score >= max(min_score, 0.5):
+            scored_history.append((score, row))
+    scored_history.sort(key=lambda pair: -pair[0])
 
     parts: list[str] = []
     for _, note in scored_notes[:max_notes]:
@@ -267,21 +160,7 @@ def session_memory_items(session_id: str, *, max_turns: int = 6, max_content_cha
     context = get_context(session_id)
     if not context['enabled']: return []
     cutoff = max(context['cutoff_id'], context['through_id'] if context['summary'] else 0)
-    try:
-        with _connect_read_only() as conn:
-            columns = {row[1] for row in conn.execute("PRAGMA table_info(chat_history)")}
-            attachment = "attachment_context" if "attachment_context" in columns else "''"
-            trace = "retrieval_trace_json" if "retrieval_trace_json" in columns else "'{}'"
-            completed = " AND COALESCE(crag_status,'') NOT IN ('IN_PROGRESS','INTERRUPTED')" if 'crag_status' in columns else ''
-            rows = conn.execute(
-                f"SELECT id, question, answer, {attachment} AS attachment_context, "
-                f"{trace} AS retrieval_trace_json FROM chat_history WHERE session_id=? AND id>? "
-                + completed + " ORDER BY id DESC LIMIT ?",
-                (session_id.strip(), cutoff, max_turns),
-            ).fetchall()
-    except sqlite3.OperationalError:
-        return []
-    rows = list(reversed(rows))
+    rows = catalog_call(rag_meta_db_path(), 'history_session', session_id=session_id.strip(), after_id=cutoff, limit=max_turns)
     return [
         {
             "turn_id": f"chat:{row['id']}",
@@ -376,17 +255,9 @@ def session_user_questions(session_id: str, *, max_turns: int = 6) -> list[str]:
     from proxy.services.conversation_context_service import prompt_cutoff
     cutoff = prompt_cutoff(session_id)
     if cutoff is None: return []
-    try:
-        with _connect_read_only() as conn:
-            rows = conn.execute(
-                "SELECT question FROM chat_history WHERE session_id=? AND id>? "
-                "ORDER BY id DESC LIMIT ?",
-                (session_id.strip(), cutoff, max_turns),
-            ).fetchall()
-    except sqlite3.OperationalError:
-        return []
+    rows = catalog_call(rag_meta_db_path(), 'history_questions', session_id=session_id.strip(), after_id=cutoff, limit=max_turns)
     out: list[str] = []
-    for row in reversed(rows):
+    for row in rows:
         q = " ".join(str(row["question"] or "").split())
         if q:
             out.append(q)
@@ -405,17 +276,9 @@ def session_recent_retrieval_traces(session_id: str, *, max_turns: int = 6) -> l
     from proxy.services.conversation_context_service import prompt_cutoff
     cutoff = prompt_cutoff(session_id)
     if cutoff is None: return []
-    try:
-        with _connect_read_only() as conn:
-            rows = conn.execute(
-                "SELECT retrieval_trace_json FROM chat_history WHERE session_id=? AND id>? "
-                "ORDER BY id DESC LIMIT ?",
-                (session_id.strip(), cutoff, max_turns),
-            ).fetchall()
-    except sqlite3.OperationalError:
-        return []
+    rows = catalog_call(rag_meta_db_path(), 'history_traces', session_id=session_id.strip(), after_id=cutoff, limit=max_turns)
     traces: list[dict[str, Any]] = []
-    for row in reversed(rows):
+    for row in rows:
         raw = str(row["retrieval_trace_json"] or "").strip()
         if not raw:
             continue

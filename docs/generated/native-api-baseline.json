@@ -1,0 +1,1609 @@
+{
+  "schema": "les.native-api-baseline.v1",
+  "product_edition": "light",
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/api/artifacts/{artifact_id}/revisions",
+      "operation_id": "artifact_revisions_api_artifacts__artifact_id__revisions_get",
+      "request_response_sha256": "90375cbe44e86f2a4351e679cc5e3357b8786ca262fbb5878104f1ab4aeedc51"
+    },
+    {
+      "method": "GET",
+      "path": "/api/artifacts/{revision_id}",
+      "operation_id": "artifact_metadata_api_artifacts__revision_id__get",
+      "request_response_sha256": "f1965bc1063948510dcbdaeec26f73070873e71026adc3901b89604b3982fb72"
+    },
+    {
+      "method": "GET",
+      "path": "/api/artifacts/{revision_id}/download",
+      "operation_id": "artifact_download_api_artifacts__revision_id__download_get",
+      "request_response_sha256": "f1965bc1063948510dcbdaeec26f73070873e71026adc3901b89604b3982fb72"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/keys",
+      "operation_id": "auth_list_keys_api_auth_keys_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/keys",
+      "operation_id": "auth_create_key_api_auth_keys_post",
+      "request_response_sha256": "6959748b258dd778be5e97fb11c391fe4194e126e6d50c4066e03b3baf7e38d1"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/keys/delete",
+      "operation_id": "auth_delete_key_body_api_auth_keys_delete_post",
+      "request_response_sha256": "6aa0aab38219696bd521bf302793d0aabdcdfa9858849cdc73732efb263c2ee0"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/keys/reset-device",
+      "operation_id": "auth_reset_device_api_auth_keys_reset_device_post",
+      "request_response_sha256": "ffeb6abcd161691f4c6c3cce0473df771ffbc105973cae2d19b37ba3d1e700e8"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/keys/toggle",
+      "operation_id": "auth_toggle_key_api_auth_keys_toggle_post",
+      "request_response_sha256": "ffeb6abcd161691f4c6c3cce0473df771ffbc105973cae2d19b37ba3d1e700e8"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/auth/keys/{key_value}",
+      "operation_id": "auth_delete_key_api_auth_keys__key_value__delete",
+      "request_response_sha256": "d6cdea89e5e6979d23d9a09afee795257d4860041f275ced03026de82098e9c4"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/trust",
+      "operation_id": "auth_trust_api_auth_trust_get",
+      "request_response_sha256": "4bd53c9eba51192518a9ef0b187d63518c6ec477011bf5f3e2ab239c0d8ee6f6"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/verify",
+      "operation_id": "auth_verify_api_auth_verify_post",
+      "request_response_sha256": "c210b5ae6898ea5af4dc3ea05602f0234f12509d8e89ce3e0615efaf99ceed6f"
+    },
+    {
+      "method": "GET",
+      "path": "/api/backup/archives",
+      "operation_id": "list_backup_archives_api_backup_archives_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "POST",
+      "path": "/api/backup/create",
+      "operation_id": "create_backup_api_backup_create_post",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "POST",
+      "path": "/api/backup/delete",
+      "operation_id": "delete_backup_api_backup_delete_post",
+      "request_response_sha256": "c43f9cc22031852acd731e24a924e5a8040cee6df8aaaaac55ad49e4ed3c3403"
+    },
+    {
+      "method": "POST",
+      "path": "/api/backup/restore",
+      "operation_id": "restore_backup_api_backup_restore_post",
+      "request_response_sha256": "9079fce4ec4f19efc1c7a02b124e4b469319d5f145070c3c95ec23c1f3e6a2bb"
+    },
+    {
+      "method": "GET",
+      "path": "/api/backup/status",
+      "operation_id": "get_backup_status_api_backup_status_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "POST",
+      "path": "/api/chat",
+      "operation_id": "chat_api_chat_post",
+      "request_response_sha256": "f0d196a8a5a357509092ee1f0283c095c04196e785ce72adec04b880497622f1"
+    },
+    {
+      "method": "POST",
+      "path": "/api/chat/attachments",
+      "operation_id": "create_chat_attachment_api_chat_attachments_post",
+      "request_response_sha256": "fef99c05d40687509e5f36ce2e4ff8a6f0ac9f6710ac2ac68251212b469b87ef"
+    },
+    {
+      "method": "GET",
+      "path": "/api/chat/history",
+      "operation_id": "get_chat_history_api_chat_history_get",
+      "request_response_sha256": "437fc160ca4ca886f15f3125ac63e80edbafe05c036ac8ced36f9c8a9eeac6fa"
+    },
+    {
+      "method": "POST",
+      "path": "/api/chat/history/{history_id}/feedback",
+      "operation_id": "save_chat_feedback_api_chat_history__history_id__feedback_post",
+      "request_response_sha256": "8038fb9bc300320b080dd93bba887268bca270f57a654e5a41fa4f4f7cdbd1a1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/chat/learning",
+      "operation_id": "get_learning_history_api_chat_learning_get",
+      "request_response_sha256": "29dd8cb879bbaefaff2536ded9c9a4b8d52084f06cb6bc7b177272cb52ec59f4"
+    },
+    {
+      "method": "GET",
+      "path": "/api/chat/memory/{session_id}",
+      "operation_id": "get_chat_memory_api_chat_memory__session_id__get",
+      "request_response_sha256": "a6cb4b7a6cc02cfbd24b25c68ee16cb782ece1c449aae6e96048bd0abd602540"
+    },
+    {
+      "method": "GET",
+      "path": "/api/chat/sessions",
+      "operation_id": "get_chat_sessions_api_chat_sessions_get",
+      "request_response_sha256": "2c48d1a2385fc87ec1b843151090006f295edcf2532d52ce867771014e91be1e"
+    },
+    {
+      "method": "POST",
+      "path": "/api/chat/stream",
+      "operation_id": "chat_stream_api_chat_stream_post",
+      "request_response_sha256": "bb60fc6ef4e4337024762b740c3679e42a2eea71d50fa3b2460206494c19f650"
+    },
+    {
+      "method": "GET",
+      "path": "/api/checklist-review/templates",
+      "operation_id": "checklist_review_templates_api_checklist_review_templates_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "POST",
+      "path": "/api/checklist-review/{dataset_id}/run",
+      "operation_id": "checklist_review_run_api_checklist_review__dataset_id__run_post",
+      "request_response_sha256": "f151c96c5b4b4e8d3d5816d34caab448fc0e28627993b55cede55054827619f6"
+    },
+    {
+      "method": "GET",
+      "path": "/api/checklist-review/{dataset_id}/runs/{run_id}",
+      "operation_id": "checklist_review_get_run_api_checklist_review__dataset_id__runs__run_id__get",
+      "request_response_sha256": "34f2960ec3890a023e67ce8dca5dd306b800f49e9a4b82ce49a062853331f385"
+    },
+    {
+      "method": "GET",
+      "path": "/api/checklist-review/{dataset_id}/runs/{run_id}/download",
+      "operation_id": "checklist_review_download_api_checklist_review__dataset_id__runs__run_id__download_get",
+      "request_response_sha256": "744a8ee1f12eab54124c9b6274f4eafc95c027720f66d684e13c817bc84d614c"
+    },
+    {
+      "method": "POST",
+      "path": "/api/checklist-review/{dataset_id}/runs/{run_id}/items/{item_id}/decision",
+      "operation_id": "checklist_review_set_decision_api_checklist_review__dataset_id__runs__run_id__items__item_id__decision_post",
+      "request_response_sha256": "f8603e3db6fd1a8f05f99dc890e7cb52b4d038818b13833cd7c0886d66ac5bdf"
+    },
+    {
+      "method": "GET",
+      "path": "/api/commands",
+      "operation_id": "list_chat_commands_api_commands_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "GET",
+      "path": "/api/diag",
+      "operation_id": "run_diagnostics_api_diag_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/by-id/{doc_id}",
+      "operation_id": "document_by_id_api_documents_by_id__doc_id__get",
+      "request_response_sha256": "c6774907c43588546498e471379850a5657dcda33fe7f7f4147b2c7f1a9d1e40"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/by-id/{doc_id}/chunks",
+      "operation_id": "document_chunks_by_id_api_documents_by_id__doc_id__chunks_get",
+      "request_response_sha256": "30ea5e4849b2f63a2f88a1de1ab137bb79cfb3db28a1b944553d765c7d3492cc"
+    },
+    {
+      "method": "POST",
+      "path": "/api/documents/by-id/{doc_id}/open-native",
+      "operation_id": "open_document_native_api_documents_by_id__doc_id__open_native_post",
+      "request_response_sha256": "c6774907c43588546498e471379850a5657dcda33fe7f7f4147b2c7f1a9d1e40"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/by-id/{doc_id}/pdf-contour",
+      "operation_id": "document_pdf_contour_api_documents_by_id__doc_id__pdf_contour_get",
+      "request_response_sha256": "be4ca4dd186c2c3eb9bc6d21d0725889d14639dea7f49e2e08ece61752a0ffbb"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/by-id/{doc_id}/pdf-contour/pages/{page_number}/preview",
+      "operation_id": "document_pdf_contour_preview_api_documents_by_id__doc_id__pdf_contour_pages__page_number__preview_get",
+      "request_response_sha256": "52e7e21a2ebcb3d548ebc0574421221470c71f1346e0b447e9e3af7d9c7b5391"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/by-id/{doc_id}/raw",
+      "operation_id": "document_raw_by_id_api_documents_by_id__doc_id__raw_get",
+      "request_response_sha256": "c6774907c43588546498e471379850a5657dcda33fe7f7f4147b2c7f1a9d1e40"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/by-id/{doc_id}/viewer",
+      "operation_id": "document_viewer_by_id_api_documents_by_id__doc_id__viewer_get",
+      "request_response_sha256": "4a14dec64fbdb20c12d25f1f5d30ef05a8d0960fb42b80fdda57bee77af277f8"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/datasets",
+      "operation_id": "document_datasets_api_documents_datasets_get",
+      "request_response_sha256": "a6aedfda4c348cae080fd8c58677d9d0fab0eadb5be6eb0d9f5f80a12a54aaf2"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/datasets/{dataset_id}/chunks/{doc_name}",
+      "operation_id": "document_chunks_api_documents_datasets__dataset_id__chunks__doc_name__get",
+      "request_response_sha256": "a5fda7926ba2bc8f1d9d98e34ae0f7bc3aea69441c0467d6177ffc383d561033"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/datasets/{dataset_id}/documents",
+      "operation_id": "dataset_documents_api_documents_datasets__dataset_id__documents_get",
+      "request_response_sha256": "fd16f192db6823bb1495db9f2ace5784441792f99e90e9aa09ab108def8072cf"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/datasets/{dataset_id}/quality",
+      "operation_id": "dataset_index_quality_api_documents_datasets__dataset_id__quality_get",
+      "request_response_sha256": "8a241bdd3f4df157f7453ba252cb7e4ac050c53c29e1e990c69de4080665a98e"
+    },
+    {
+      "method": "POST",
+      "path": "/api/documents/open-native-by-ref",
+      "operation_id": "open_document_native_by_ref_api_documents_open_native_by_ref_post",
+      "request_response_sha256": "dfba756494dad137cdeda29bf5ce2c83a31ec92b312be5c57c310435561dee84"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/search",
+      "operation_id": "document_search_api_documents_search_get",
+      "request_response_sha256": "c8f132ddfedff2f40b3629c41b1d3233fbdbdabb9148f273788867b2f5355e6c"
+    },
+    {
+      "method": "GET",
+      "path": "/api/external-radar/summary",
+      "operation_id": "external_radar_summary_api_external_radar_summary_get",
+      "request_response_sha256": "a826207433d11dcf8c165e1e580cb9de1f0347474bc0c711b3c7aeecfa0bdd06"
+    },
+    {
+      "method": "GET",
+      "path": "/api/filemap/candidates",
+      "operation_id": "filemap_candidates_api_filemap_candidates_get",
+      "request_response_sha256": "d1f72f7055621b91dcd7848f4c14449c38293dbfa32bf3770d88488e017d029b"
+    },
+    {
+      "method": "POST",
+      "path": "/api/filemap/index",
+      "operation_id": "filemap_index_api_filemap_index_post",
+      "request_response_sha256": "0216e7e01f9135b60adda419e33afafcd0904a6e62b4caccdb2680183363d790"
+    },
+    {
+      "method": "POST",
+      "path": "/api/filemap/scan",
+      "operation_id": "filemap_scan_api_filemap_scan_post",
+      "request_response_sha256": "e132f5b9110e613e792a339efe058b94932183072c46e943b8b17b51277d07fc"
+    },
+    {
+      "method": "GET",
+      "path": "/api/filemap/search",
+      "operation_id": "filemap_search_api_filemap_search_get",
+      "request_response_sha256": "1544bb34974310f878af3bb4261f62fd62b42067dd62ef01e9183c36bc14e985"
+    },
+    {
+      "method": "GET",
+      "path": "/api/filemap/stats",
+      "operation_id": "filemap_stats_api_filemap_stats_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "GET",
+      "path": "/api/forms",
+      "operation_id": "forms_list_api_forms_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "POST",
+      "path": "/api/forms/agent-draft",
+      "operation_id": "office_agent_draft_api_forms_agent_draft_post",
+      "request_response_sha256": "7f7998e3d2f0d9b6e331ad72fbd24ec22b9fcb8fa56398ae7045f7b75f1ec009"
+    },
+    {
+      "method": "GET",
+      "path": "/api/forms/artifacts",
+      "operation_id": "office_artifacts_api_forms_artifacts_get",
+      "request_response_sha256": "1e9e642b680db54f603c1d4c6bf893a98c3179fe333124508bad901d9b2b95e5"
+    },
+    {
+      "method": "POST",
+      "path": "/api/forms/artifacts",
+      "operation_id": "office_artifact_create_api_forms_artifacts_post",
+      "request_response_sha256": "168acce42ba83132f72b972cb27ed7058dee5162f4c3794c4d83c4bb31ec481a"
+    },
+    {
+      "method": "GET",
+      "path": "/api/forms/artifacts/{revision_id}/download",
+      "operation_id": "office_artifact_download_api_forms_artifacts__revision_id__download_get",
+      "request_response_sha256": "f1965bc1063948510dcbdaeec26f73070873e71026adc3901b89604b3982fb72"
+    },
+    {
+      "method": "GET",
+      "path": "/api/forms/{form_id}/download",
+      "operation_id": "forms_download_api_forms__form_id__download_get",
+      "request_response_sha256": "9f753c39d3f7901b9d5ea1d5fa38feba85cfb61fe87ac95eeac7bdc889b000ae"
+    },
+    {
+      "method": "GET",
+      "path": "/api/forms/{form_id}/fields",
+      "operation_id": "forms_fields_api_forms__form_id__fields_get",
+      "request_response_sha256": "0d5c3f6ab7cfc463abb0a6bb20e4597c66904f6858e477cdba971352c22c6b44"
+    },
+    {
+      "method": "POST",
+      "path": "/api/forms/{form_id}/generate",
+      "operation_id": "forms_generate_api_forms__form_id__generate_post",
+      "request_response_sha256": "44a97371c887519b84e0c14e8102f97c08483aec3fbca522bbd5db11669df285"
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "operation_id": "health_api_health_get",
+      "request_response_sha256": "4bd53c9eba51192518a9ef0b187d63518c6ec477011bf5f3e2ab239c0d8ee6f6"
+    },
+    {
+      "method": "GET",
+      "path": "/api/indexing-mode",
+      "operation_id": "get_indexing_mode_api_indexing_mode_get",
+      "request_response_sha256": "4bd53c9eba51192518a9ef0b187d63518c6ec477011bf5f3e2ab239c0d8ee6f6"
+    },
+    {
+      "method": "POST",
+      "path": "/api/indexing-mode",
+      "operation_id": "set_indexing_mode_api_indexing_mode_post",
+      "request_response_sha256": "ca9c2aab9a3b29a2e3889ee23bd3634a381ed2f297a702b04c8b555205096c40"
+    },
+    {
+      "method": "GET",
+      "path": "/api/jobs",
+      "operation_id": "get_jobs_api_jobs_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "GET",
+      "path": "/api/jobs/summary",
+      "operation_id": "get_jobs_summary_api_jobs_summary_get",
+      "request_response_sha256": "f9ef58023a4b3a42f356cb4a90c93ea5736bbd9938dfdfeef5fbef5f8c70fb89"
+    },
+    {
+      "method": "GET",
+      "path": "/api/live",
+      "operation_id": "live_stream_api_live_get",
+      "request_response_sha256": "4bd53c9eba51192518a9ef0b187d63518c6ec477011bf5f3e2ab239c0d8ee6f6"
+    },
+    {
+      "method": "GET",
+      "path": "/api/logs/recent",
+      "operation_id": "recent_logs_api_logs_recent_get",
+      "request_response_sha256": "3dfcccfcc3d2371635e6a1a67ea11799f365fb4167ea4d9f0d13cfac615e08e7"
+    },
+    {
+      "method": "GET",
+      "path": "/api/logs/stream",
+      "operation_id": "log_stream_api_logs_stream_get",
+      "request_response_sha256": "4bd53c9eba51192518a9ef0b187d63518c6ec477011bf5f3e2ab239c0d8ee6f6"
+    },
+    {
+      "method": "GET",
+      "path": "/api/mail/accounts",
+      "operation_id": "list_mail_accounts_api_mail_accounts_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mail/accounts",
+      "operation_id": "create_mail_account_api_mail_accounts_post",
+      "request_response_sha256": "2696d9de3e3b6fb187977113306241028cb4e19dc32330295a65f159d0b231c3"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/mail/accounts/{account_id}",
+      "operation_id": "update_mail_account_api_mail_accounts__account_id__patch",
+      "request_response_sha256": "c7895885af366a347a0a0ddaaa99b16d9889c89b531bd2ada7061cfa018a9b6e"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mail/accounts/{account_id}/migrate-legacy",
+      "operation_id": "migrate_legacy_mail_to_account_api_mail_accounts__account_id__migrate_legacy_post",
+      "request_response_sha256": "5ddaaefadcdfc32d4e17784ecca04ff42dc499ce5d85e14fc005df54c29dd4db"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mail/accounts/{account_id}/sync",
+      "operation_id": "sync_mail_account_api_mail_accounts__account_id__sync_post",
+      "request_response_sha256": "1f51a284b726e563d80167b45f8af46602e8c534e5da7dff188b46e223826946"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mail/accounts/{account_id}/test",
+      "operation_id": "test_mail_account_api_mail_accounts__account_id__test_post",
+      "request_response_sha256": "d761742977cdaddead9127405f604ac90acce3be2e5423e413b68265251c38bd"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mail/collector/import",
+      "operation_id": "import_outlook_message_api_mail_collector_import_post",
+      "request_response_sha256": "2f0865127178cfe68826e62f8df2bda99987de1d888362bdca1d063b8aa2b0ed"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mail/collector/register-store",
+      "operation_id": "register_outlook_store_api_mail_collector_register_store_post",
+      "request_response_sha256": "de15bfe3a02b743dd214df9ba2d0e01cfe09ab04459775be3622a8d3ef545f08"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mail/collector/run",
+      "operation_id": "run_outlook_collector_api_mail_collector_run_post",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mail/import-apple-mail",
+      "operation_id": "import_apple_mail_api_mail_import_apple_mail_post",
+      "request_response_sha256": "75c4a9e8ec41567b4739530719ccfd31be747ec373d75bc28337be78cb30c20c"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mail/import-archive",
+      "operation_id": "import_mail_archive_api_mail_import_archive_post",
+      "request_response_sha256": "05902af10cdc1b98a364e1241aaa0b398df6bf936a00ac9b6b12448a571c3d30"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mail/import-imap",
+      "operation_id": "import_imap_mail_api_mail_import_imap_post",
+      "request_response_sha256": "79509393e1e9733658d11c2ae7ad1138a0e7272e245883b52de0107e20f78c3b"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mail/import-local",
+      "operation_id": "import_local_mail_api_mail_import_local_post",
+      "request_response_sha256": "9cdf7c25db3e09a7808c939777e9afaed17383eb7ef2333414a59711fd67bf85"
+    },
+    {
+      "method": "GET",
+      "path": "/api/mail/messages",
+      "operation_id": "list_mail_messages_api_mail_messages_get",
+      "request_response_sha256": "46c95a2cc7fd50110208fbfc285d48ceace8a3ffd5aae862f6412547babfc0a3"
+    },
+    {
+      "method": "GET",
+      "path": "/api/mail/messages/{message_id}",
+      "operation_id": "get_registered_mail_message_api_mail_messages__message_id__get",
+      "request_response_sha256": "b47f1d241592f19d4adbf21f8605c388c28f8b1d90be53a7a432f06cc3535f87"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mail/messages/{message_id}/open",
+      "operation_id": "open_mail_message_api_mail_messages__message_id__open_post",
+      "request_response_sha256": "b47f1d241592f19d4adbf21f8605c388c28f8b1d90be53a7a432f06cc3535f87"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mail/push",
+      "operation_id": "push_mail_api_mail_push_post",
+      "request_response_sha256": "515135e74b9fac51cb65228b2df0215a93ae5745ca5df75f20e2f4917b24ebd2"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mail/rebuild-threads",
+      "operation_id": "rebuild_mail_threads_api_mail_rebuild_threads_post",
+      "request_response_sha256": "27a281a3c31861f73a42af6003f9bd60a2b4cc8ce1cef3197ac9036907e49b9e"
+    },
+    {
+      "method": "GET",
+      "path": "/api/mail/status",
+      "operation_id": "mail_status_api_mail_status_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "GET",
+      "path": "/api/mail/threads",
+      "operation_id": "list_mail_threads_api_mail_threads_get",
+      "request_response_sha256": "10fac5a3c61bba487ab64a062a02c6143f9b8199f7ce584ba433ce810fe45b7e"
+    },
+    {
+      "method": "GET",
+      "path": "/api/mail/threads/{thread_key}",
+      "operation_id": "get_mail_thread_api_mail_threads__thread_key__get",
+      "request_response_sha256": "e10b46788ecae3c0e5c635d2e9a95fd7eacf971d7ad1296161b7ce4193000bf6"
+    },
+    {
+      "method": "GET",
+      "path": "/api/mcp",
+      "operation_id": "list_connections_api_mcp_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mcp",
+      "operation_id": "add_connection_api_mcp_post",
+      "request_response_sha256": "894a80c2ee6825c6f040d0f4ee04a5269fae49311ef649c893f8d4a39438d82e"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/mcp/{connection_id}",
+      "operation_id": "delete_connection_api_mcp__connection_id__delete",
+      "request_response_sha256": "49e82090a44f3d3b68520c7dd944f4dff3641d31535e07b8cdf915deb5987355"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mcp/{connection_id}/probe",
+      "operation_id": "probe_api_mcp__connection_id__probe_post",
+      "request_response_sha256": "49e82090a44f3d3b68520c7dd944f4dff3641d31535e07b8cdf915deb5987355"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/mcp/{connection_id}/tools",
+      "operation_id": "select_tools_api_mcp__connection_id__tools_put",
+      "request_response_sha256": "34c007e85ac3271681faf57f3b597ce853361ef8ef0c12ded34d3b193e493063"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/memory/config",
+      "operation_id": "put_light_memory_config_api_memory_config_put",
+      "request_response_sha256": "ce1f9f684a9800769204336c6f999351422ef30b6934f7853542d7c2ae05bfac"
+    },
+    {
+      "method": "GET",
+      "path": "/api/memory/entries",
+      "operation_id": "get_memory_entries_api_memory_entries_get",
+      "request_response_sha256": "5ef7a9553e41e97fecea7dd28141b8badc3f768382303a07900653684c7fd317"
+    },
+    {
+      "method": "POST",
+      "path": "/api/memory/entries/{entry_id}/promote",
+      "operation_id": "promote_memory_entry_api_memory_entries__entry_id__promote_post",
+      "request_response_sha256": "d2468cd65b1b79c718b1d778ada5833d16f5394c7ce41755610ee91db72fb531"
+    },
+    {
+      "method": "POST",
+      "path": "/api/memory/entries/{entry_id}/review",
+      "operation_id": "review_memory_entry_api_memory_entries__entry_id__review_post",
+      "request_response_sha256": "239cd8f951c13735eb461f2eb927bb19f2bd357a5f395789d0ef4a2603a8c3de"
+    },
+    {
+      "method": "GET",
+      "path": "/api/memory/status",
+      "operation_id": "get_light_memory_status_api_memory_status_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "GET",
+      "path": "/api/metrics",
+      "operation_id": "get_metrics_api_metrics_get",
+      "request_response_sha256": "4bd53c9eba51192518a9ef0b187d63518c6ec477011bf5f3e2ab239c0d8ee6f6"
+    },
+    {
+      "method": "GET",
+      "path": "/api/mode",
+      "operation_id": "get_mode_api_mode_get",
+      "request_response_sha256": "4bd53c9eba51192518a9ef0b187d63518c6ec477011bf5f3e2ab239c0d8ee6f6"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mode",
+      "operation_id": "set_mode_api_mode_post",
+      "request_response_sha256": "0d73773df1289786e0a222b6cd588d4e830f4a7ef2d5b4616ce8c9f5b9d4d82d"
+    },
+    {
+      "method": "GET",
+      "path": "/api/model-connections",
+      "operation_id": "list_connections_api_model_connections_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "POST",
+      "path": "/api/model-connections",
+      "operation_id": "create_connection_api_model_connections_post",
+      "request_response_sha256": "9b6a2906c18c4024e727e427785be31e96c368a32af1ba6f13b022a51a36ac5c"
+    },
+    {
+      "method": "POST",
+      "path": "/api/model-connections/discover-local",
+      "operation_id": "discover_local_engines_api_model_connections_discover_local_post",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "POST",
+      "path": "/api/model-connections/discover-models",
+      "operation_id": "discover_models_api_model_connections_discover_models_post",
+      "request_response_sha256": "ca01669d886732f758e899c5f5e06c5d5691c2a5b4a7ffd4b9eedcf50db3bb62"
+    },
+    {
+      "method": "GET",
+      "path": "/api/model-connections/effective",
+      "operation_id": "effective_connections_api_model_connections_effective_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "POST",
+      "path": "/api/model-connections/promotion/accept",
+      "operation_id": "accept_promotion_api_model_connections_promotion_accept_post",
+      "request_response_sha256": "7c2d4095b3709fb301cef8b68e6feeab1e35d17e863fbbe280600354f949fe19"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/model-connections/roles/{role}",
+      "operation_id": "bind_role_api_model_connections_roles__role__put",
+      "request_response_sha256": "78f6a5188dd23bc2a6108eb7568dc171204501f80ce11bfc2b6670136a7654e9"
+    },
+    {
+      "method": "GET",
+      "path": "/api/model-connections/templates",
+      "operation_id": "connection_templates_api_model_connections_templates_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "POST",
+      "path": "/api/model-connections/{connection_id}/disable",
+      "operation_id": "disable_connection_api_model_connections__connection_id__disable_post",
+      "request_response_sha256": "400efcd21052cd0327b7449a885793bccec2d1af27ebfa9b1440dfcbd53e9424"
+    },
+    {
+      "method": "GET",
+      "path": "/api/model-connections/{connection_id}/extension/status",
+      "operation_id": "extension_status_api_model_connections__connection_id__extension_status_get",
+      "request_response_sha256": "49e82090a44f3d3b68520c7dd944f4dff3641d31535e07b8cdf915deb5987355"
+    },
+    {
+      "method": "POST",
+      "path": "/api/model-connections/{connection_id}/revisions",
+      "operation_id": "revise_connection_api_model_connections__connection_id__revisions_post",
+      "request_response_sha256": "7e66209fc0f4f0e8796d08bc097e0af23499c1316faf2de76b5b0f93e264e01d"
+    },
+    {
+      "method": "POST",
+      "path": "/api/model-connections/{connection_id}/secret",
+      "operation_id": "replace_secret_api_model_connections__connection_id__secret_post",
+      "request_response_sha256": "e437fce864b3486b86010df28eda9cba8c44afd589369c94ede371f5e4d4be7e"
+    },
+    {
+      "method": "POST",
+      "path": "/api/model-connections/{connection_id}/test",
+      "operation_id": "test_connection_api_model_connections__connection_id__test_post",
+      "request_response_sha256": "bc9744687e4abae61353868b8720e4382ccbafde3ac29ec34b52283c37166917"
+    },
+    {
+      "method": "POST",
+      "path": "/api/notebooks/warmup",
+      "operation_id": "warmup_notebooks_api_notebooks_warmup_post",
+      "request_response_sha256": "f01a92571b22f0f6a3c14d0fdac38240adcb1ea9406022329120cb4eaacc21a5"
+    },
+    {
+      "method": "GET",
+      "path": "/api/notebooks/{dataset_id}",
+      "operation_id": "dataset_notebook_api_notebooks__dataset_id__get",
+      "request_response_sha256": "dff6724be602a1b65b63a4fbed3f7afc2866d710d5c4db2ab65bbddc91af9639"
+    },
+    {
+      "method": "GET",
+      "path": "/api/notebooks/{dataset_id}/memory",
+      "operation_id": "dataset_typed_memory_api_notebooks__dataset_id__memory_get",
+      "request_response_sha256": "fe66af6084127558696572152466ac8fd782d87c39749f2e6d251dcbab3b3da9"
+    },
+    {
+      "method": "POST",
+      "path": "/api/notebooks/{dataset_id}/memory/read",
+      "operation_id": "read_dataset_memory_api_notebooks__dataset_id__memory_read_post",
+      "request_response_sha256": "4c9483f229d960e3a3d92b6b8416692fbd9cac96c5f41d409bf9d03f497b7f02"
+    },
+    {
+      "method": "POST",
+      "path": "/api/notebooks/{dataset_id}/memory/refresh",
+      "operation_id": "refresh_dataset_typed_memory_api_notebooks__dataset_id__memory_refresh_post",
+      "request_response_sha256": "fe66af6084127558696572152466ac8fd782d87c39749f2e6d251dcbab3b3da9"
+    },
+    {
+      "method": "GET",
+      "path": "/api/notes",
+      "operation_id": "notes_list_api_notes_get",
+      "request_response_sha256": "2c48d1a2385fc87ec1b843151090006f295edcf2532d52ce867771014e91be1e"
+    },
+    {
+      "method": "POST",
+      "path": "/api/notes",
+      "operation_id": "notes_create_api_notes_post",
+      "request_response_sha256": "2136764711e0e9a33ad7e6a0b8f7e37938ee2e0c22c889241b9f904bf6b4f922"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/notes/{note_id}",
+      "operation_id": "notes_delete_api_notes__note_id__delete",
+      "request_response_sha256": "55b0fe2d8da20c68b54eb840cbc3c75fc5d3b6de7dde7e09bcb419d92f269b1e"
+    },
+    {
+      "method": "GET",
+      "path": "/api/profiles",
+      "operation_id": "list_profiles_api_profiles_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/profiles/chats/{session_id}/binding",
+      "operation_id": "replace_chat_binding_api_profiles_chats__session_id__binding_put",
+      "request_response_sha256": "f10875510dd569d15ba5c3a58de15e3d26227e6b8bc4ca6da004c7a82d022225"
+    },
+    {
+      "method": "POST",
+      "path": "/api/profiles/revisions",
+      "operation_id": "create_profile_revision_api_profiles_revisions_post",
+      "request_response_sha256": "88728d1a115587440d4839c3941ce38a9701354b9ab1b05d6058ceccf6d0c02b"
+    },
+    {
+      "method": "GET",
+      "path": "/api/profiles/revisions/{revision_id}/instructions",
+      "operation_id": "read_profile_instructions_api_profiles_revisions__revision_id__instructions_get",
+      "request_response_sha256": "f1965bc1063948510dcbdaeec26f73070873e71026adc3901b89604b3982fb72"
+    },
+    {
+      "method": "POST",
+      "path": "/api/profiles/text-revisions",
+      "operation_id": "create_text_revision_api_profiles_text_revisions_post",
+      "request_response_sha256": "73a1ece67fb56707eb5c9c4f04324bfc5b3beefb117c59155a0eb77407e3bc94"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/profiles/{kind}/{revision_id}",
+      "operation_id": "remove_revision_api_profiles__kind___revision_id__delete",
+      "request_response_sha256": "8b8beb39cc20e2983689f1eb76b1ea3f2daa18285910b16b39338579e59becf8"
+    },
+    {
+      "method": "POST",
+      "path": "/api/profiles/{mode}/activate/{revision_id}",
+      "operation_id": "activate_profile_api_profiles__mode__activate__revision_id__post",
+      "request_response_sha256": "dbec8077b91c209c177a5250259ebe69b710868147bc588d13d258b901b3c8be"
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects",
+      "operation_id": "projects_list_api_projects_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects",
+      "operation_id": "projects_create_api_projects_post",
+      "request_response_sha256": "6775f42eda9e0b1dc6313e084daec97a5b7e0307ab4ccf0468e32ae9bd0a6936"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/projects/{project_id}",
+      "operation_id": "projects_delete_api_projects__project_id__delete",
+      "request_response_sha256": "cd559cb7341511ba2462b99b93392a290b4f95b784f4079e1b0af85a17269737"
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/{project_id}",
+      "operation_id": "projects_get_api_projects__project_id__get",
+      "request_response_sha256": "cd559cb7341511ba2462b99b93392a290b4f95b784f4079e1b0af85a17269737"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/projects/{project_id}",
+      "operation_id": "projects_status_api_projects__project_id__patch",
+      "request_response_sha256": "3ab91acef4ca835256fce1f98b45554a27ba2a7b339396017b85dddb00b28baa"
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/{project_id}/dossier",
+      "operation_id": "projects_dossier_api_projects__project_id__dossier_get",
+      "request_response_sha256": "cd559cb7341511ba2462b99b93392a290b4f95b784f4079e1b0af85a17269737"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/projects/{project_id}/links",
+      "operation_id": "projects_unlink_api_projects__project_id__links_delete",
+      "request_response_sha256": "0701717e8b02023ff4b367a495a37b6e89e03a6d9c7ff4664c8dbf05088a905c"
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/{project_id}/links",
+      "operation_id": "projects_links_api_projects__project_id__links_get",
+      "request_response_sha256": "ee10d555772b35312389cba13572a081be581770f1e754ad9713b7c22f3bcaab"
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/{project_id}/links",
+      "operation_id": "projects_link_api_projects__project_id__links_post",
+      "request_response_sha256": "0701717e8b02023ff4b367a495a37b6e89e03a6d9c7ff4664c8dbf05088a905c"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rag/advanced",
+      "operation_id": "get_advanced_policy_api_rag_advanced_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/rag/advanced",
+      "operation_id": "put_advanced_policy_api_rag_advanced_put",
+      "request_response_sha256": "4779279037cfb7db689ca3e510040ac6e1b0de9c7cb904c7f74c4c22b9e9b7df"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rag/advanced/colbert/build",
+      "operation_id": "start_colbert_build_api_rag_advanced_colbert_build_post",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rag/advanced/colbert/status",
+      "operation_id": "get_colbert_status_api_rag_advanced_colbert_status_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rag/advanced/preflight",
+      "operation_id": "get_advanced_preflight_api_rag_advanced_preflight_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rag/advanced/raptor/build",
+      "operation_id": "start_raptor_build_api_rag_advanced_raptor_build_post",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rag/advanced/raptor/status",
+      "operation_id": "get_raptor_status_api_rag_advanced_raptor_status_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rag/attach",
+      "operation_id": "attach_chat_file_api_rag_attach_post",
+      "request_response_sha256": "1cbec32505ba9debba4a93868787d4956383c89925e8ad8c6840c105cf8517ca"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rag/attach-folder",
+      "operation_id": "attach_chat_folder_api_rag_attach_folder_post",
+      "request_response_sha256": "9b8adc17db96d5eb0b955bbe23b1552eb4b0228cb79002acd695fcc9c11b2bf3"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rag/browse-external",
+      "operation_id": "browse_external_api_rag_browse_external_get",
+      "request_response_sha256": "3d5e432b3783760eb407f9e99fdfb04601d7397aee1ec652179954f72d375cae"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rag/catalog-consistency",
+      "operation_id": "get_catalog_consistency_api_rag_catalog_consistency_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rag/catalog-consistency/navigation-counts",
+      "operation_id": "audit_navigation_count_consistency_api_rag_catalog_consistency_navigation_counts_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rag/catalog-consistency/navigation-counts/repair",
+      "operation_id": "repair_navigation_count_consistency_api_rag_catalog_consistency_navigation_counts_repair_post",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rag/catalog-consistency/repair",
+      "operation_id": "repair_catalog_consistency_api_rag_catalog_consistency_repair_post",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rag/cloud-drives",
+      "operation_id": "cloud_drives_api_rag_cloud_drives_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rag/cloud-drives/list",
+      "operation_id": "cloud_drive_list_api_rag_cloud_drives_list_post",
+      "request_response_sha256": "3fca9fe2529916e239803a1ddceae5a07ff1b53de61f54f04ae7749c39779489"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rag/cloud-drives/sync",
+      "operation_id": "cloud_drive_sync_api_rag_cloud_drives_sync_post",
+      "request_response_sha256": "b6bb9b90ed940940d4c3ac26052773474593f1178b1c0059c154ac0d20cb5de0"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rag/datasets",
+      "operation_id": "delete_all_datasets_api_rag_datasets_delete",
+      "request_response_sha256": "9b0ece81e1baf64022bcf89bd4c44dc33be99779703e607910197725e6a1890f"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rag/datasets",
+      "operation_id": "list_datasets_api_rag_datasets_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rag/datasets",
+      "operation_id": "create_dataset_api_rag_datasets_post",
+      "request_response_sha256": "e307b82aea3f3478a4adfe4a004b1f976d84ae5a7460be988a466b185250a56a"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rag/datasets/profiles/benchmark",
+      "operation_id": "benchmark_dataset_context_profiles_api_rag_datasets_profiles_benchmark_post",
+      "request_response_sha256": "dbe6359d35a6123a7fc0fde8a0d0b65820713c47d60556bee6cb4ec705f67363"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rag/datasets/profiles/warmup",
+      "operation_id": "warmup_dataset_context_profiles_api_rag_datasets_profiles_warmup_post",
+      "request_response_sha256": "dbe6359d35a6123a7fc0fde8a0d0b65820713c47d60556bee6cb4ec705f67363"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rag/datasets/{dataset_id}",
+      "operation_id": "delete_dataset_api_rag_datasets__dataset_id__delete",
+      "request_response_sha256": "0ad838bdaade5c94b1c939928eb2bdd85456fdb90887b3e50feb7ba52a03092c"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rag/datasets/{dataset_id}/document-registry",
+      "operation_id": "document_registry_endpoint_api_rag_datasets__dataset_id__document_registry_get",
+      "request_response_sha256": "fe66af6084127558696572152466ac8fd782d87c39749f2e6d251dcbab3b3da9"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rag/datasets/{dataset_id}/document-registry/build",
+      "operation_id": "document_registry_build_endpoint_api_rag_datasets__dataset_id__document_registry_build_post",
+      "request_response_sha256": "fe66af6084127558696572152466ac8fd782d87c39749f2e6d251dcbab3b3da9"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rag/datasets/{dataset_id}/extract-body/dry-run",
+      "operation_id": "extract_body_dry_run_api_rag_datasets__dataset_id__extract_body_dry_run_post",
+      "request_response_sha256": "fe66af6084127558696572152466ac8fd782d87c39749f2e6d251dcbab3b3da9"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rag/datasets/{dataset_id}/extract-body/write",
+      "operation_id": "extract_body_write_api_rag_datasets__dataset_id__extract_body_write_post",
+      "request_response_sha256": "35ddfa300ec6d20fa76e0e6ae6e3dcff88454b685404aeea52b83fb1419f1545"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rag/datasets/{dataset_id}/extraction-status",
+      "operation_id": "extraction_status_endpoint_api_rag_datasets__dataset_id__extraction_status_get",
+      "request_response_sha256": "fe66af6084127558696572152466ac8fd782d87c39749f2e6d251dcbab3b3da9"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/rag/datasets/{dataset_id}/group",
+      "operation_id": "set_dataset_group_api_rag_datasets__dataset_id__group_patch",
+      "request_response_sha256": "102d146653db50499c8f6a8b1e6b043a50424fd14c3abae7e30530d2eb0409a1"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rag/datasets/{dataset_id}/integrity",
+      "operation_id": "dataset_integrity_api_rag_datasets__dataset_id__integrity_get",
+      "request_response_sha256": "fe66af6084127558696572152466ac8fd782d87c39749f2e6d251dcbab3b3da9"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rag/datasets/{dataset_id}/integrity/repair",
+      "operation_id": "repair_dataset_integrity_api_rag_datasets__dataset_id__integrity_repair_post",
+      "request_response_sha256": "fe66af6084127558696572152466ac8fd782d87c39749f2e6d251dcbab3b3da9"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/rag/datasets/{dataset_id}/name",
+      "operation_id": "set_dataset_name_api_rag_datasets__dataset_id__name_patch",
+      "request_response_sha256": "c1d72bb8ff6a32e550ba235854284681923c257db811278ee4520773b3a93246"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rag/datasets/{dataset_id}/pdf-extract/run",
+      "operation_id": "pdf_extract_run_endpoint_api_rag_datasets__dataset_id__pdf_extract_run_post",
+      "request_response_sha256": "5e01b04f40142ba52dcc46c9438409ae1de768a5d06d52c88c049f0aa74312f0"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rag/datasets/{dataset_id}/pdf-extract/status",
+      "operation_id": "pdf_extract_status_endpoint_api_rag_datasets__dataset_id__pdf_extract_status_get",
+      "request_response_sha256": "fe66af6084127558696572152466ac8fd782d87c39749f2e6d251dcbab3b3da9"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rag/datasets/{dataset_id}/pdf-extract/summary",
+      "operation_id": "pdf_extract_summary_endpoint_api_rag_datasets__dataset_id__pdf_extract_summary_get",
+      "request_response_sha256": "fe66af6084127558696572152466ac8fd782d87c39749f2e6d251dcbab3b3da9"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rag/datasets/{dataset_id}/profile",
+      "operation_id": "dataset_context_profile_api_rag_datasets__dataset_id__profile_get",
+      "request_response_sha256": "dff6724be602a1b65b63a4fbed3f7afc2866d710d5c4db2ab65bbddc91af9639"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/rag/datasets/{dataset_id}/profile/guidance",
+      "operation_id": "update_dataset_operator_guidance_api_rag_datasets__dataset_id__profile_guidance_patch",
+      "request_response_sha256": "3ef914f2d7fb87074a5c93451a6919e85124e190e003bcc27ce5dcbeda367976"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/rag/datasets/{dataset_id}/profile/kind",
+      "operation_id": "update_dataset_kind_api_rag_datasets__dataset_id__profile_kind_patch",
+      "request_response_sha256": "be1d0d0bbfcca76159bf1fc8d3f31a9543f4f20dc98c6694b26ea9ae74b37bfe"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rag/datasets/{dataset_id}/profile/refresh",
+      "operation_id": "refresh_dataset_context_profile_api_rag_datasets__dataset_id__profile_refresh_post",
+      "request_response_sha256": "dff6724be602a1b65b63a4fbed3f7afc2866d710d5c4db2ab65bbddc91af9639"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rag/datasets/{dataset_id}/reconcile",
+      "operation_id": "reconcile_dataset_endpoint_api_rag_datasets__dataset_id__reconcile_post",
+      "request_response_sha256": "fe66af6084127558696572152466ac8fd782d87c39749f2e6d251dcbab3b3da9"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rag/datasets/{dataset_id}/repair",
+      "operation_id": "repair_dataset_api_rag_datasets__dataset_id__repair_post",
+      "request_response_sha256": "fe66af6084127558696572152466ac8fd782d87c39749f2e6d251dcbab3b3da9"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/rag/datasets/{dataset_id}/sensitivity",
+      "operation_id": "set_dataset_sensitivity_api_rag_datasets__dataset_id__sensitivity_patch",
+      "request_response_sha256": "9aa46a201899f422408e7eaf292b2495e64a3211e553caef0492a950559f3261"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rag/datasets/{dataset_id}/table-registry/build",
+      "operation_id": "table_registry_build_endpoint_api_rag_datasets__dataset_id__table_registry_build_post",
+      "request_response_sha256": "fe66af6084127558696572152466ac8fd782d87c39749f2e6d251dcbab3b3da9"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rag/datasets/{dataset_id}/table-registry/summary",
+      "operation_id": "table_registry_summary_endpoint_api_rag_datasets__dataset_id__table_registry_summary_get",
+      "request_response_sha256": "fe66af6084127558696572152466ac8fd782d87c39749f2e6d251dcbab3b3da9"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rag/datasets/{dataset_id}/tables/search",
+      "operation_id": "table_registry_search_endpoint_api_rag_datasets__dataset_id__tables_search_get",
+      "request_response_sha256": "b0318b241a73497a7af5753a5815440c612772939e356aac603b47307128e2b5"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rag/datasets/{dataset_id}/tables/{table_id}",
+      "operation_id": "table_registry_read_endpoint_api_rag_datasets__dataset_id__tables__table_id__get",
+      "request_response_sha256": "67eaa86d5e75cb4ccccac493ed6e8ec03fef0ad2281a38edd529a6aa9ac89c73"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rag/datasets/{dataset_id}/virtual-volume",
+      "operation_id": "virtual_volume_endpoint_api_rag_datasets__dataset_id__virtual_volume_get",
+      "request_response_sha256": "dd59371cb0a9e78bf53e9e8d91a3c99fc540cb1db9421fb5f02d079f1b0cca8e"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rag/datasets/{dataset_id}/watch",
+      "operation_id": "dataset_watch_status_api_rag_datasets__dataset_id__watch_get",
+      "request_response_sha256": "fe66af6084127558696572152466ac8fd782d87c39749f2e6d251dcbab3b3da9"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/rag/datasets/{dataset_id}/watch",
+      "operation_id": "configure_dataset_watch_api_rag_datasets__dataset_id__watch_put",
+      "request_response_sha256": "ea5c9aea0993406460c76ab9fb7b1434fce7b3370bfc3eacb76c64d4c2d5602b"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rag/documents",
+      "operation_id": "list_documents_api_rag_documents_get",
+      "request_response_sha256": "63822522db563162962d78ec67162684fe8edd7e047872f948d55fa95b126a0c"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rag/external/check",
+      "operation_id": "check_external_dataset_api_rag_external_check_post",
+      "request_response_sha256": "cd0a4beb44296b0cbe3c9228f54f1f00442a39248abb044d2964b43d618969de"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rag/external/intake-plan",
+      "operation_id": "external_intake_plan_api_rag_external_intake_plan_post",
+      "request_response_sha256": "e11b83c65cd83e6d716d1783e694ca9c3a95f1c4c793516b869054c1956c518d"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rag/external/sync",
+      "operation_id": "sync_external_dataset_api_rag_external_sync_post",
+      "request_response_sha256": "cd0a4beb44296b0cbe3c9228f54f1f00442a39248abb044d2964b43d618969de"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rag/file/pdf-info",
+      "operation_id": "rag_file_pdf_info_api_rag_file_pdf_info_get",
+      "request_response_sha256": "d2cef536f634fe54ca2aa1bbeb042b3af0aa690a3df6b7ba4f4c3a8fdfff3ca8"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rag/file/pdf-preview",
+      "operation_id": "rag_file_pdf_preview_api_rag_file_pdf_preview_get",
+      "request_response_sha256": "1e97632facb1e9595696f5a186d01b04847185264698409815632d85f55d5782"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rag/file/pdf-viewer",
+      "operation_id": "rag_file_pdf_viewer_api_rag_file_pdf_viewer_get",
+      "request_response_sha256": "a79e1a8b5f857de76749f219a8d8b1bd923f4ad5adb90c5565ddfe2ca8ff0611"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rag/file/raw",
+      "operation_id": "rag_file_raw_api_rag_file_raw_get",
+      "request_response_sha256": "d2cef536f634fe54ca2aa1bbeb042b3af0aa690a3df6b7ba4f4c3a8fdfff3ca8"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rag/file/text",
+      "operation_id": "rag_file_text_api_rag_file_text_get",
+      "request_response_sha256": "d2cef536f634fe54ca2aa1bbeb042b3af0aa690a3df6b7ba4f4c3a8fdfff3ca8"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rag/file/viewer",
+      "operation_id": "rag_file_viewer_api_rag_file_viewer_get",
+      "request_response_sha256": "8c8639ac13a649c74ad02bc196652f02ae42befd29fbeac519c196001d5e41e0"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rag/graph/edges",
+      "operation_id": "graph_reference_edges_api_rag_graph_edges_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rag/graph/full",
+      "operation_id": "graph_full_api_rag_graph_full_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rag/index-external",
+      "operation_id": "index_external_api_rag_index_external_post",
+      "request_response_sha256": "46a9f1cf31ae18addfe8a25f50e7c1a3a82c595a65de0ab869e397183bd12d81"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rag/parse-batch/{dataset_id}",
+      "operation_id": "parse_dataset_batch_api_rag_parse_batch__dataset_id__post",
+      "request_response_sha256": "08fbd17e980244339aab8d0a8fc2dcef8782796cd822dcb964efac90eee05286"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rag/parse-scheduler",
+      "operation_id": "parse_scheduler_api_rag_parse_scheduler_post",
+      "request_response_sha256": "b8ff95faef34eabb7380b4321fab3a6c6fc34c358422bf2334c1381010db8e5a"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rag/readiness",
+      "operation_id": "get_rag_readiness_api_rag_readiness_get",
+      "request_response_sha256": "cf7970563b8855df196193d19b9a079637e68fe5e6339210de459bbc44f57bfc"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rag/smart-plan",
+      "operation_id": "smart_plan_api_rag_smart_plan_get",
+      "request_response_sha256": "6fc419dcaf196081105675d186374e2fe88e108a4cb7b5a6cdfda2e7279d1d90"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rag/sources",
+      "operation_id": "list_sources_api_rag_sources_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rag/sync-smart",
+      "operation_id": "sync_smart_api_rag_sync_smart_post",
+      "request_response_sha256": "0a1d985ff944ed3820768d0501f0c5255614d87ddaf6f8e9155d398db77ffd53"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rag/sync/{folder}",
+      "operation_id": "sync_folder_api_rag_sync__folder__post",
+      "request_response_sha256": "e732c8d5ad8986334166ace8af1832f98720b7cc81c23b156fe8ace5c080626e"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rag/tree",
+      "operation_id": "rag_tree_api_rag_tree_get",
+      "request_response_sha256": "ef892683b5d912a3410734ccf827f113c7956edc8c5f3f28e406f28da5c4d80e"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rag/upload-smart",
+      "operation_id": "upload_file_smart_api_rag_upload_smart_post",
+      "request_response_sha256": "2d78e5db57af644a36b901502f49b0ca3bdd4cf306af1233893d66cba08d28d7"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rag/upload/{dataset_id}",
+      "operation_id": "upload_file_api_rag_upload__dataset_id__post",
+      "request_response_sha256": "b47e67e310d64a9932e36d86cdc0b934a8b33a2b5c5d01853231fd74c38a14fc"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rag/watch/reindex-plan",
+      "operation_id": "folder_reindex_plan_api_rag_watch_reindex_plan_get",
+      "request_response_sha256": "4cf2efd8a86f8491ff6584f9edb965761c422378cc116b8b464cc10163fcf0c9"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rag/watch/scan",
+      "operation_id": "folder_watch_scan_api_rag_watch_scan_post",
+      "request_response_sha256": "3e3097911bada4f33f86a503a281acafb7145d315978331fd2a09421b900b672"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rag/watch/status",
+      "operation_id": "folder_watch_status_api_rag_watch_status_get",
+      "request_response_sha256": "a39c8b446f4403652a63baf3e5053b926b1cd8f1ccd943638b2118ac5683be57"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rerank",
+      "operation_id": "rerank_direct_api_rerank_post",
+      "request_response_sha256": "35a987b418255585910fca7c15e639d0389844a8de8c83bf5e5e312ceade5f22"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rerank/status",
+      "operation_id": "rerank_status_api_rerank_status_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "POST",
+      "path": "/api/runtime/dispatcher/reindex/pause",
+      "operation_id": "runtime_dispatcher_reindex_pause_api_runtime_dispatcher_reindex_pause_post",
+      "request_response_sha256": "080f0adca594b4f8b305b22e54b53ebe507b9c67dda7d1e91db7ff13fb4bb5fb"
+    },
+    {
+      "method": "POST",
+      "path": "/api/runtime/dispatcher/reindex/resume",
+      "operation_id": "runtime_dispatcher_reindex_resume_api_runtime_dispatcher_reindex_resume_post",
+      "request_response_sha256": "99c1ffd58e189304820952964730a34c2be75b5de945cc7032b2a69465212ca5"
+    },
+    {
+      "method": "POST",
+      "path": "/api/runtime/dispatcher/reindex/start",
+      "operation_id": "runtime_dispatcher_reindex_start_api_runtime_dispatcher_reindex_start_post",
+      "request_response_sha256": "99c1ffd58e189304820952964730a34c2be75b5de945cc7032b2a69465212ca5"
+    },
+    {
+      "method": "GET",
+      "path": "/api/runtime/dispatcher/reindex/status",
+      "operation_id": "runtime_dispatcher_reindex_status_api_runtime_dispatcher_reindex_status_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "POST",
+      "path": "/api/runtime/dispatcher/route-changes/pause",
+      "operation_id": "runtime_dispatcher_route_changes_pause_api_runtime_dispatcher_route_changes_pause_post",
+      "request_response_sha256": "080f0adca594b4f8b305b22e54b53ebe507b9c67dda7d1e91db7ff13fb4bb5fb"
+    },
+    {
+      "method": "POST",
+      "path": "/api/runtime/dispatcher/route-changes/start",
+      "operation_id": "runtime_dispatcher_route_changes_start_api_runtime_dispatcher_route_changes_start_post",
+      "request_response_sha256": "e06551337d6d5eb25b1ed5bd58b1f8e4dfad3d6bd0834e565d12514da1d9ea6b"
+    },
+    {
+      "method": "GET",
+      "path": "/api/runtime/dispatcher/route-changes/status",
+      "operation_id": "runtime_dispatcher_route_changes_status_api_runtime_dispatcher_route_changes_status_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "GET",
+      "path": "/api/runtime/dispatcher/status",
+      "operation_id": "runtime_dispatcher_status_api_runtime_dispatcher_status_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "GET",
+      "path": "/api/scope/options",
+      "operation_id": "scope_options_endpoint_api_scope_options_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "POST",
+      "path": "/api/scope/resolve",
+      "operation_id": "scope_resolve_endpoint_api_scope_resolve_post",
+      "request_response_sha256": "515135e74b9fac51cb65228b2df0215a93ae5745ca5df75f20e2f4917b24ebd2"
+    },
+    {
+      "method": "POST",
+      "path": "/api/search",
+      "operation_id": "search_api_search_post",
+      "request_response_sha256": "0c2ec68b740380ac893839803117653539d5071278f02c3e40e445e1edfad9d8"
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings",
+      "operation_id": "get_settings_api_settings_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings",
+      "operation_id": "save_settings_api_settings_post",
+      "request_response_sha256": "b4261d2edbf923e2f676d4ac3f372111941b42eebed2c9fdf51ec79ed263daae"
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/preset",
+      "operation_id": "set_preset_api_settings_preset_post",
+      "request_response_sha256": "da92f419f428dd6a47d69ce7c7b80f2664383816e2bf4a0d5017d7e219d1379f"
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/presets",
+      "operation_id": "list_presets_api_settings_presets_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/runtime-registry",
+      "operation_id": "get_runtime_registry_api_settings_runtime_registry_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/settings/runtime-registry",
+      "operation_id": "put_runtime_registry_api_settings_runtime_registry_put",
+      "request_response_sha256": "3c87e52721d93545b01c66928b692453af059764a7a1d70db26d8239ebe196c0"
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/web-research",
+      "operation_id": "get_web_research_settings_api_settings_web_research_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/web-research/probe",
+      "operation_id": "probe_web_research_settings_api_settings_web_research_probe_post",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "GET",
+      "path": "/api/status",
+      "operation_id": "get_status_api_status_get",
+      "request_response_sha256": "4bd53c9eba51192518a9ef0b187d63518c6ec477011bf5f3e2ab239c0d8ee6f6"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks",
+      "operation_id": "tasks_list_api_tasks_get",
+      "request_response_sha256": "931f2cdb97b9564d7cbcd2f1d699a7f48f4b0c4e30d2b5e0b6ec0cc27074ad88"
+    },
+    {
+      "method": "POST",
+      "path": "/api/tasks",
+      "operation_id": "tasks_create_api_tasks_post",
+      "request_response_sha256": "b0733031f0ade8b4222fa9e93b5fe243d397c3e007233c54b8f2e4a755752c47"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/tasks/{task_id}",
+      "operation_id": "tasks_patch_api_tasks__task_id__patch",
+      "request_response_sha256": "7857a0b47cc89984801927144775256edbe07a50266c1151308b80e4351ef302"
+    },
+    {
+      "method": "POST",
+      "path": "/api/tools/call",
+      "operation_id": "tool_call_api_tools_call_post",
+      "request_response_sha256": "a209dd01108a3d77ea6b8b088932745b3b49c42e74f52f57cf5e86fef509a177"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tools/filesystem/list",
+      "operation_id": "filesystem_list_api_tools_filesystem_list_get",
+      "request_response_sha256": "0bf6d8aa782f88f303905f88523b24ee3af61dba7e8d45bdddac4d6b43b4d0af"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tools/filesystem/roots",
+      "operation_id": "filesystem_roots_api_tools_filesystem_roots_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tools/registry",
+      "operation_id": "tool_registry_api_tools_registry_get",
+      "request_response_sha256": "258554d0aafa80509d29c41aa5916ce9fc0d9d1d99fc139cb9f3c149fb3011f7"
+    },
+    {
+      "method": "POST",
+      "path": "/api/tools/shortlist",
+      "operation_id": "tool_shortlist_api_tools_shortlist_post",
+      "request_response_sha256": "33f553ed063f3d7d596b18be4d7f39699b4b26a0c5136b5b73ae5dc298d725a8"
+    },
+    {
+      "method": "GET",
+      "path": "/api/update/check",
+      "operation_id": "check_api_update_check_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "POST",
+      "path": "/api/update/install",
+      "operation_id": "install_api_update_install_post",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "GET",
+      "path": "/api/update/status",
+      "operation_id": "status_api_update_status_get",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "POST",
+      "path": "/api/verify/extract",
+      "operation_id": "verify_extract_api_verify_extract_post",
+      "request_response_sha256": "a2dc7279a1dfc0d30e79b144c754db90826fe6ce3af8476e292c65e2ac639950"
+    },
+    {
+      "method": "GET",
+      "path": "/api/verify/image",
+      "operation_id": "verify_image_api_verify_image_get",
+      "request_response_sha256": "96e2787883818e59b5f2b42ea280e5e690db5e01f6791d5cd29709c77b587e90"
+    },
+    {
+      "method": "GET",
+      "path": "/api/verify/list",
+      "operation_id": "verify_list_api_verify_list_get",
+      "request_response_sha256": "e366e1008804c01072aba27e014e02fc971b21f1d5e62319c883ba48657de290"
+    },
+    {
+      "method": "POST",
+      "path": "/api/verify/save",
+      "operation_id": "verify_save_api_verify_save_post",
+      "request_response_sha256": "9beb37c3475e30110930c8f8461cf0a60bed53c940b6045b5e0b0d207a7a1da9"
+    },
+    {
+      "method": "GET",
+      "path": "/api/version",
+      "operation_id": "version_api_version_get",
+      "request_response_sha256": "4bd53c9eba51192518a9ef0b187d63518c6ec477011bf5f3e2ab239c0d8ee6f6"
+    },
+    {
+      "method": "POST",
+      "path": "/api/warmup",
+      "operation_id": "warmup_models_api_warmup_post",
+      "request_response_sha256": "ff6c925984072cce48d300595a553b26cae7db3f97bd4db1a2e5f840efc0f13a"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace/agent-state",
+      "operation_id": "get_state_api_workspace_agent_state_get",
+      "request_response_sha256": "d57372bb976bd17330b06177aeee0e483957444101726acbf3f81ae7d1b20511"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspace/agent-state",
+      "operation_id": "write_state_api_workspace_agent_state_post",
+      "request_response_sha256": "c92c78909fac39b7b25620192be012c2b4ff8cfb1e14ca26f747b3aa8dcc70c7"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace/memory",
+      "operation_id": "list_memory_api_workspace_memory_get",
+      "request_response_sha256": "45a9b225c531eaa95d63f5954be1ed31f6667143a66c0b1e6616b9f8282fd89c"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspace/memory",
+      "operation_id": "create_memory_api_workspace_memory_post",
+      "request_response_sha256": "cf7867dda28011bb678e5cbd382bf8eaa03646f40978569c979adb1ac519c2cd"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace/memory/context/{session_id}",
+      "operation_id": "get_conversation_context_api_workspace_memory_context__session_id__get",
+      "request_response_sha256": "a6cb4b7a6cc02cfbd24b25c68ee16cb782ece1c449aae6e96048bd0abd602540"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/workspace/memory/context/{session_id}",
+      "operation_id": "edit_conversation_context_api_workspace_memory_context__session_id__patch",
+      "request_response_sha256": "c72572413043546b46de7010d7ab7f8c8c12fb6ad999a380cdc9007f93ae1a2a"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspace/memory/context/{session_id}/forget",
+      "operation_id": "forget_conversation_context_api_workspace_memory_context__session_id__forget_post",
+      "request_response_sha256": "fc21c4f3752dc87dd5fdfa55baa0fbd96a9ac1edb6ab1f91cf625480edb66271"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspace/memory/context/{session_id}/summarize",
+      "operation_id": "summarize_conversation_context_api_workspace_memory_context__session_id__summarize_post",
+      "request_response_sha256": "fc21c4f3752dc87dd5fdfa55baa0fbd96a9ac1edb6ab1f91cf625480edb66271"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/workspace/memory/{note_id}",
+      "operation_id": "delete_memory_api_workspace_memory__note_id__delete",
+      "request_response_sha256": "f4499cd6c42e7ca1cccfae0046863961a1456f83197db86a1bd598dfe7c9066c"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/workspace/memory/{note_id}",
+      "operation_id": "update_memory_api_workspace_memory__note_id__patch",
+      "request_response_sha256": "7ba90a279723bb8c554d3fc25ebbb7f26f24f4394fd2ee6138cd0de392932ecf"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace/sessions",
+      "operation_id": "sessions_list_api_workspace_sessions_get",
+      "request_response_sha256": "2d1da28a501981dd8f07482393bcc3a11e4b52c30f172b667e7ce99810ff85bc"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspace/sessions",
+      "operation_id": "sessions_create_api_workspace_sessions_post",
+      "request_response_sha256": "bbe7990b9a5dcf4c35d4f6bfc6a786336d075b7e355716cd995b06588da9f84a"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace/sessions/{session_id}",
+      "operation_id": "sessions_get_api_workspace_sessions__session_id__get",
+      "request_response_sha256": "a6cb4b7a6cc02cfbd24b25c68ee16cb782ece1c449aae6e96048bd0abd602540"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/workspace/sessions/{session_id}",
+      "operation_id": "sessions_update_api_workspace_sessions__session_id__patch",
+      "request_response_sha256": "2658b9af1f058d3af73331ced907101771dac8f71092d57c8fe3aa387ee21f9c"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace/sessions/{session_id}/draft",
+      "operation_id": "draft_get_api_workspace_sessions__session_id__draft_get",
+      "request_response_sha256": "a6cb4b7a6cc02cfbd24b25c68ee16cb782ece1c449aae6e96048bd0abd602540"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/workspace/sessions/{session_id}/draft",
+      "operation_id": "draft_put_api_workspace_sessions__session_id__draft_put",
+      "request_response_sha256": "1ea357f54a253ce421f78f1718029bbb75394f546067052214d8256ad125911b"
+    }
+  ],
+  "components_sha256": "3e2afb96f1767d61c201e5ef3c46ab9298998edce2c8a0e709702af6fa21eac6"
+}

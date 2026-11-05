@@ -58,6 +58,7 @@ class MetaDB:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_docs_dataset ON documents(dataset_id)"
             )
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_docs_source ON documents(dataset_id,file_name)')
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS structured_rules (
                     id          TEXT PRIMARY KEY,
@@ -134,6 +135,13 @@ class MetaDB:
             conn.execute(
                 "INSERT OR IGNORE INTO indexing_repair_state(singleton) VALUES (1)"
             )
+            from backend.smart_index import register_document_visibility
+            register_document_visibility(conn, exclude_temporary=True)
+            conn.execute("""UPDATE documents SET status='SKIPPED', stage='SOURCE_EXCLUDED',
+                error_code='TEMPORARY_SOURCE', retryable=0, retry_after=0,
+                last_error='Служебный файл Office или метаданные: не является документом.'
+                WHERE les_visible_document(file_name)=0 AND COALESCE(chunk_count,0)=0
+                AND status IN ('PENDING','ERROR','INDEXED')""")
 
     def ensure_system_datasets(self) -> list[str]:
         """Provision module-owned datasets only from the real runtime bootstrap.
@@ -674,7 +682,7 @@ class MetaDB:
 
     def get_pending_files(self, dataset_id: str, limit: int | None = None) -> List[str]:
         sql = (
-            "SELECT file_name FROM documents WHERE dataset_id=? AND status='PENDING' "
+            "SELECT file_name FROM documents WHERE dataset_id=? AND status='PENDING' AND les_visible_document(file_name)=1 "
             "ORDER BY "
             "CASE WHEN complexity='needs_ocr' OR pipeline='markdown_needs_ocr' THEN 1 ELSE 0 END, "
             "COALESCE(NULLIF(file_size, 0), 9223372036854775807), file_name"
@@ -684,6 +692,8 @@ class MetaDB:
             sql += " LIMIT ?"
             params.append(max(0, int(limit)))
         with self._get_conn() as conn:
+            from backend.smart_index import register_document_visibility
+            register_document_visibility(conn, exclude_temporary=True)
             rows = conn.execute(sql, params).fetchall()
         return [r["file_name"] for r in rows]
 
@@ -699,13 +709,24 @@ class MetaDB:
 
     def dataset_integrity_rows(self, dataset_id: str) -> list[dict[str, Any]]:
         """Source and index metadata used by the explicit dataset integrity audit."""
+        return self._integrity_rows(dataset_id)
+
+    def document_integrity_row(self, dataset_id: str, file_name: str) -> dict[str, Any] | None:
+        """Exact source version lookup without loading the complete dataset catalog."""
+        rows = self._integrity_rows(dataset_id, file_name)
+        if len(rows) > 1:
+            raise ValueError('В каталоге несколько версий одного пути; восстановите однозначность источника')
+        return rows[0] if rows else None
+
+    def _integrity_rows(self, dataset_id: str, file_name: str | None = None) -> list[dict[str, Any]]:
         with self._get_conn() as conn:
             rows = conn.execute(
                 "SELECT id, file_name, status, COALESCE(file_hash, '') AS file_hash, "
                 "COALESCE(file_mtime, 0) AS file_mtime, COALESCE(file_size, 0) AS file_size, "
                 "COALESCE(chunk_count, 0) AS chunk_count, COALESCE(source_path, '') AS source_path "
-                "FROM documents WHERE dataset_id=? ORDER BY file_name",
-                (dataset_id,),
+                "FROM documents WHERE dataset_id=? " + ("AND file_name=? " if file_name is not None else '') +
+                "ORDER BY file_name",
+                (dataset_id, file_name) if file_name is not None else (dataset_id,),
             ).fetchall()
         return [dict(row) for row in rows]
 

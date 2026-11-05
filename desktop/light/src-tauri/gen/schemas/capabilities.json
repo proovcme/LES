@@ -1,1 +1,1 @@
-{}
+{"chat-close":{"identifier":"chat-close","description":"Only the loopback chat can register and acknowledge a requested close. Rust also validates the exact owned port and page.","remote":{"urls":["http://127.0.0.1:*"]},"local":false,"windows":["main"],"permissions":["allow-editor-ready","allow-editor-close-result"]},"startup":{"identifier":"startup","description":"Bundled startup screen can retry its owned launcher and open its browser.","local":true,"windows":["main"],"permissions":["allow-startup-status","allow-retry-start","allow-open-browser"]}}

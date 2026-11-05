@@ -230,13 +230,19 @@ def test_external_plan_distinguishes_empty_and_unsupported(tmp_path, content, ex
     assert plan['accepted_count'] == (1 if expected == 'documents' else 0)
 
 
-def test_external_plan_access_failure_is_not_empty(tmp_path, monkeypatch):
-    from backend import external_scan
+@pytest.mark.parametrize('engine', ['python', 'native'])
+def test_external_plan_access_failure_is_not_empty(tmp_path, monkeypatch, engine):
+    from backend import external_scan, native_core
+    monkeypatch.setattr(native_core, 'supports', lambda operation: engine == 'native')
     def inaccessible(*args, **kwargs):
         kwargs['onerror'](PermissionError('Access denied'))
         return iter(())
     monkeypatch.setattr(external_scan.os, 'walk', inaccessible)
-    with pytest.raises(PermissionError):
+    def native_inaccessible(*args, **kwargs):
+        raise native_core.NativeCoreError('CORE_SCAN_UNAVAILABLE')
+    monkeypatch.setattr(native_core, 'call', native_inaccessible)
+    expected = OSError if engine == 'native' else PermissionError
+    with pytest.raises(expected):
         ds_dataset_external._external_intake_plan(tmp_path, dataset_name='Test')
 
 

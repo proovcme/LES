@@ -27,6 +27,8 @@ class RetrievalQuality:
             "source_diversity": self.source_diversity,
             "top_score": round(self.top_score, 4),
             "score_kind": self.score_kind,
+            "assessment_scope": "retrieval_signals_only",
+            "answerability": "not_evaluated",
         }
 
 

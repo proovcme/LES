@@ -11,7 +11,7 @@ from proxy.services.tool_registry_service import ToolRegistry
 
 
 _PHASE_EFFECTS: dict[str, frozenset[EffectClass]] = {
-    "research": frozenset({EffectClass.READ, EffectClass.COMPUTE}),
+    "research": frozenset({EffectClass.READ, EffectClass.COMPUTE, EffectClass.LOCAL_STATE}),
     "draft": frozenset({EffectClass.READ, EffectClass.COMPUTE, EffectClass.DRAFT}),
     "commit": frozenset(
         {EffectClass.READ, EffectClass.COMPUTE, EffectClass.DRAFT, EffectClass.COMMIT}

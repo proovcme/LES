@@ -36,6 +36,17 @@ class FakeBackend:
         self.calls = []
         self.doc_filters = []
         self.collection_name = "test_collection"
+        self.aclient = SimpleNamespace(retrieve=self._retrieve_lexical_fixture)
+
+    async def _retrieve_lexical_fixture(self, collection_name, ids, **kwargs):
+        # The production boundary resolves FTS IDs back to current Qdrant payloads.
+        # This fake uses its explicit test FTS fixture as the canonical record.
+        with LexicalIndex().connect() as conn:
+            rows = conn.execute('SELECT * FROM lexical_chunks WHERE collection=?', (collection_name,)).fetchall()
+        return [SimpleNamespace(id=row['point_id'], payload={
+            'text': row['text'], 'dataset_id': row['dataset_id'], 'file_name': row['doc_name'],
+            'doc_id': row['doc_id'], 'parent_id': row['parent_id'], 'chunk_ord': row['chunk_ord'],
+        }) for row in rows if row['point_id'] in ids]
 
     async def list_datasets(self):
         return [
@@ -1230,3 +1241,35 @@ async def test_retrieve_chat_chunks_uses_lexical_with_minor_stale_drift(monkeypa
     assert result.trace.mode.startswith("qdrant_native_hybrid")
     assert result.trace.lexical_count >= 1
     assert any(chunk.doc_name == "СП 4.13130.docx" for chunk in result.chunks)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('hierarchy', [True, False])
+async def test_weak_retry_preserves_evidence_route_and_document_scope(hierarchy):
+    from dataclasses import replace
+    from proxy.services.retrieval_service import CURRENT
+    class ScopedBackend(FakeBackend):
+        def __init__(self):
+            super().__init__()
+            self.routes = []
+        async def retrieve_native_hierarchical(self, question, **kwargs):
+            self.routes.append(('hierarchy', kwargs))
+            return [Chunk('unrelated text', 'doc.md', .9, {'node_role': 'evidence'})]
+        async def retrieve_native_hybrid(self, question, **kwargs):
+            self.routes.append(('flat', kwargs))
+            if kwargs.get('node_roles') != ['evidence']:
+                return [Chunk('navigation', 'doc.md', .9, {'node_role': 'navigation'})]
+            return [Chunk('unrelated text', 'doc.md', .9, {'node_role': 'evidence'})]
+    backend = ScopedBackend()
+    result = await retrieve_chat_chunks(question='q', dataset_ids=['ds-1'], rag_backend=backend,
+        reranker_enabled=False, reranker_available=False, reranker_cls=None, mlx_url='http://unused',
+        logger=SimpleNamespace(info=lambda *a: None, warning=lambda *a: None), return_trace=True,
+        doc_filter=['doc.md'], trial_policy=replace(CURRENT, hierarchy=hierarchy))
+    assert result.trace.retry_count == 1
+    assert len(backend.routes) == 2
+    for route, args in backend.routes:
+        assert route == ('hierarchy' if hierarchy else 'flat')
+        assert args['dataset_ids'] == ['ds-1'] and args['doc_filter'] == ['doc.md']
+        if not hierarchy:
+            assert args['node_roles'] == ['evidence']
+    assert all(c.meta.get('node_role') == 'evidence' for c in result.chunks)
