@@ -429,6 +429,10 @@ class DocumentExplorer:
         offset: int = 0,
         max_chars: int = 4000,
     ) -> dict[str, Any]:
+        document = self.get_document_by_source(dataset_id, doc_name)
+        if document and document["status"] == "MISSING":
+            return {"dataset_id": dataset_id, "doc_name": doc_name, "total": 0,
+                    "chunks": [], "warning": "Оригинал недоступен. Индекс сохранён до явной очистки."}
         with self.connect() as conn:
             _ensure_tables(conn)
             if q.strip():
@@ -475,6 +479,30 @@ class DocumentExplorer:
             "chunks": [_chunk_payload(row, max_chars=max_chars) for row in rows],
         }
 
+    def numbered_clause(self, dataset_id: str, doc_name: str, number: str) -> list[dict[str, Any]]:
+        """Find indexed headings for a single document. Full text is verified by the caller."""
+        prefix = re.compile(rf"^\s*#*\s*(?:пункт\s+)?{re.escape(number)}(?:\.?(?:\s|$))", re.I)
+        with self.connect() as conn:
+            _ensure_tables(conn)
+            rows = conn.execute(
+                """SELECT point_id, dataset_id, doc_id, doc_name, text, chunk_ord,
+                          COALESCE(section_heading, '') AS section_heading,
+                          COALESCE(parent_heading, '') AS parent_heading,
+                          COALESCE(context_kind, '') AS context_kind
+                   FROM lexical_chunks
+                   WHERE collection=? AND dataset_id=? AND doc_name=?
+                     AND (section_heading LIKE ? OR parent_heading LIKE ?)
+                   ORDER BY COALESCE(chunk_ord, 0), id
+                   LIMIT 257""",
+                (self.collection_name, dataset_id, doc_name, f"%{number}%", f"%{number}%"),
+            ).fetchall()
+        if len(rows) > 256:
+            raise ValueError("Пункт слишком велик или неоднозначен в индексе.")
+        return [
+            dict(row) for row in rows
+            if prefix.match(row["section_heading"] or row["parent_heading"])
+        ]
+
     def document_chunks_by_id(
         self,
         doc_id: str,
@@ -487,6 +515,9 @@ class DocumentExplorer:
         document = self.get_document(doc_id)
         if not document:
             return None
+        if document["status"] == "MISSING":
+            return {"document": document, "total": 0, "chunks": [],
+                    "warning": "Оригинал недоступен. Индекс сохранён до явной очистки."}
         dataset_id = str(document["dataset_id"])
         doc_name = str(document["file_name"])
         with self.connect() as conn:
@@ -656,6 +687,8 @@ class DocumentExplorer:
                 JOIN lexical_chunks c ON c.id = lexical_chunks_fts.rowid
                 WHERE lexical_chunks_fts MATCH ?
                   AND c.collection = ?
+                  AND NOT EXISTS (SELECT 1 FROM documents d
+                                  WHERE d.dataset_id=c.dataset_id AND d.file_name=c.doc_name AND d.status='MISSING')
                   {dataset_clause}
                   {doc_clause}
                   {doc_id_clause}
@@ -718,7 +751,12 @@ class DocumentExplorer:
         tokens = _plain_search_tokens(q)
         if not tokens:
             return {"query": q, "count": 0, "hits": [], "warning": warning}
-        clauses = ["collection = ?"]
+        clauses = [
+            "collection = ?",
+            """NOT EXISTS (SELECT 1 FROM documents d
+                           WHERE d.dataset_id=lexical_chunks.dataset_id AND d.file_name=lexical_chunks.doc_name
+                             AND d.status='MISSING')""",
+        ]
         params: list[Any] = [self.collection_name]
         if dataset_ids:
             clauses.append("dataset_id IN (" + ",".join("?" for _ in dataset_ids) + ")")

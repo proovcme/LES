@@ -108,7 +108,7 @@ class DatasetWatcher:
                     if has_changes and not stable:
                         with self.connect() as conn:
                             self._events(conn, dataset_id, (
-                                (kind, row['file_name'], {'new': 'Добавлен', 'changed': 'Изменён', 'deleted': 'Удалён'}[kind])
+                                (kind, row['file_name'], {'new': 'Добавлен', 'changed': 'Изменён', 'deleted': 'Исходник отсутствует'}[kind])
                                 for kind, rows in changes.items() for row in rows
                             ))
                     if has_changes and stable and not already_submitted and watch["auto_index"] and stamp - watch["stable_since"] >= settle_seconds:
@@ -118,6 +118,8 @@ class DatasetWatcher:
                         result = await synchronize(watch)
                         status = "indexing" if result.get("parse_started") else "synced"
                         message = "Изменения переданы на индексацию" if result.get("parse_started") else "Изменения синхронизированы"
+                        if result.get("missing_marked"):
+                            message += f" · Недоступных оригиналов: {result['missing_marked']}. Индекс сохранён."
                         with self.connect() as conn:
                             self._event(conn, dataset_id, status, "", message)
                     with self.connect() as conn:

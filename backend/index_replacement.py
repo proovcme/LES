@@ -1,17 +1,18 @@
 """Durable recovery for the Qdrant/FTS/catalog file replacement boundary."""
 from contextlib import contextmanager, closing
 import hashlib
-import json
 import os
 from pathlib import Path
-import sqlite3
-import uuid
 
 from qdrant_client import models
+from backend import native_core
 from backend.interface import EmbeddingContractError
+from backend.native_index_store import mutate
 
 
 def retire_previous(client, collection: str, dataset: str, file_name: str, keep_ids: list[str]):
+    if mutate("retire", collection, dataset_id=dataset, file_name=file_name, ids=keep_ids):
+        return
     client.delete(collection_name=collection, wait=True, points_selector=models.FilterSelector(
         filter=models.Filter(must=[
             models.FieldCondition(key="dataset_id", match=models.MatchValue(value=dataset)),
@@ -20,7 +21,7 @@ def retire_previous(client, collection: str, dataset: str, file_name: str, keep_
 
 
 def discard_staged(client, collection: str, ids: list[str]):
-    if ids:
+    if ids and not mutate("discard", collection, ids=ids):
         client.delete(collection_name=collection, wait=True, points_selector=models.PointIdsList(points=ids))
 
 
@@ -42,22 +43,23 @@ class ReplacementJournal:
     def for_adapter(cls, adapter):
         return cls(adapter.content_dir, adapter.collection_name)
 
-    def _read(self):
-        if not self.path.exists():
-            return None
+    def _journal(self, action, **arguments):
         try:
-            with sqlite3.connect(self.path) as conn:
-                row = conn.execute("SELECT body FROM replacement WHERE id=1").fetchone()
-        except sqlite3.OperationalError as error:
-            raise EmbeddingContractError("INDEX_UPDATE_BUSY") from error
-        return json.loads(row[0]) if row else None
+            return native_core.required('index_journal', request={
+                'database': str(self.path.resolve()), 'action': action, 'arguments': arguments,
+            })['value']
+        except native_core.NativeCoreError as error:
+            code = str(error)
+            if code == 'INDEX_JOURNAL_INVALID':
+                raise ValueError('Invalid replacement journal operation') from error
+            raise EmbeddingContractError(code) from error
 
     def pending(self):
-        value = self._read()
+        value = self._journal('read')
         return value if value and value["phase"] != "idle" else None
 
     def read_stamp(self):
-        value = self._read()
+        value = self._journal('read')
         if value and value["phase"] != "idle":
             raise EmbeddingContractError("INDEX_RECOVERY_REQUIRED")
         return value.get("revision") if value else None
@@ -98,57 +100,22 @@ class ReplacementJournal:
                     fcntl.flock(handle, fcntl.LOCK_UN)
 
     def _save(self, value):
-        self.directory.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(self.path) as conn:
-            conn.execute("PRAGMA synchronous=FULL")
-            conn.execute("CREATE TABLE IF NOT EXISTS replacement (id INTEGER PRIMARY KEY, body TEXT NOT NULL)")
-            conn.execute("INSERT OR REPLACE INTO replacement VALUES (1, ?)",
-                         (json.dumps(value, ensure_ascii=False),))
+        self._journal('store_sparse', value=value)
 
     def begin(self, dataset, file_name, db_file_name, ids):
-        self.assert_clean()
-        if not ids or len(set(ids)) != len(ids):
-            raise ValueError("Replacement requires unique, nonempty staged IDs")
-        self._save(dict(phase="staging", dataset=dataset, file_name=file_name,
-                        db_file_name=db_file_name, ids=list(ids), revision=uuid.uuid4().hex))
+        self._journal('begin', dataset=dataset, file_name=file_name, db_file_name=db_file_name, ids=list(ids))
 
     def commit(self):
-        value = self.pending()
-        if value is None or value["phase"] != "staging":
-            raise RuntimeError("No staged replacement")
-        value["phase"] = "committing"
-        self._save(value)
+        self._journal('commit')
 
     def finish(self):
-        if self.path.exists():
-            value = self.pending() or {}
-            scope = value.get("scope")
-            if value.get("phase") in {"staging", "committing"}:
-                scope = {"dataset": value["dataset"], "file": value["file_name"]}
-            # The invalidation and idle revision are one durable transaction.
-            # Unknown writers invalidate the whole projection, never silently skip it.
-            with sqlite3.connect(self.path) as conn:
-                conn.execute("PRAGMA synchronous=FULL")
-                conn.execute("CREATE TABLE IF NOT EXISTS sparse_changes (scope TEXT PRIMARY KEY)")
-                conn.execute("INSERT OR IGNORE INTO sparse_changes VALUES (?)", (json.dumps(scope),))
-                conn.execute("UPDATE replacement SET body=? WHERE id=1", (
-                    json.dumps(dict(phase="idle", revision=uuid.uuid4().hex)),))
+        self._journal('finish')
 
     def sparse_changes(self):
-        if not self.path.exists():
-            return []
-        with sqlite3.connect(self.path) as conn:
-            if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='sparse_changes'").fetchone():
-                return []
-            return [json.loads(row[0]) for row in conn.execute("SELECT scope FROM sparse_changes")]
+        return self._journal('sparse_changes')
 
     def publish_sparse(self, revision):
-        with sqlite3.connect(self.path) as conn:
-            conn.execute("PRAGMA synchronous=FULL")
-            conn.execute("CREATE TABLE IF NOT EXISTS sparse_changes (scope TEXT PRIMARY KEY)")
-            conn.execute("DELETE FROM sparse_changes")
-            conn.execute("UPDATE replacement SET body=? WHERE id=1", (
-                json.dumps(dict(phase="idle", revision=revision)),))
+        self._journal('publish_sparse', revision=revision)
 
     def recover(self, client, adapter):
         """Caller holds the lease; repeat safely after any interrupted recovery."""

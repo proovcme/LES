@@ -73,22 +73,25 @@ def test_explicit_failure_survives_every_history_schema_read(tmp_path, monkeypat
     trace = {'execution': summarize([receipt])}
     history_id = history.save_chat_history(question='Проверь', answer='Модель заявляет: всё сохранено.',
         sources=[], crag_status='VERIFIED', latency_sec=1, tokens=1, session_id='demo', retrieval_trace=trace, success=1)
+    for _ in range(3):
+        history.ensure_chat_history_schema(path)
     with sqlite3.connect(path) as db:
-        for _ in range(3):
-            history.ensure_chat_history_schema(db)
         row = db.execute('SELECT success, retrieval_trace_json FROM chat_history WHERE id=?', (history_id,)).fetchone()
     assert row[0] == 0
     assert json.loads(row[1])['execution']['tasks'][0]['counts']['pending'] == 1
 
 
-def test_legacy_backfill_runs_only_when_adding_the_success_column():
-    with sqlite3.connect(':memory:') as db:
+def test_legacy_backfill_runs_only_when_adding_the_success_column(tmp_path):
+    path = tmp_path / 'legacy.sqlite'
+    with sqlite3.connect(path) as db:
         db.execute('CREATE TABLE chat_history (id INTEGER PRIMARY KEY, question TEXT, answer TEXT, crag_status TEXT)')
         db.execute("INSERT INTO chat_history VALUES (1, 'q', 'a', 'VERIFIED')")
-        history.ensure_chat_history_schema(db)
+    history.ensure_chat_history_schema(path)
+    with sqlite3.connect(path) as db:
         assert db.execute('SELECT success FROM chat_history').fetchone()[0] == 1
         db.execute('UPDATE chat_history SET success=0')
-        history.ensure_chat_history_schema(db)
+    history.ensure_chat_history_schema(path)
+    with sqlite3.connect(path) as db:
         assert db.execute('SELECT success FROM chat_history').fetchone()[0] == 0
 
 

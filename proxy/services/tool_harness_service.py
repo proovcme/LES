@@ -445,8 +445,8 @@ class ToolHarness:
                 name="read_source",
                 title="Read indexed source",
                 category="source",
-                summary="Read ordered indexed chunks from one document by doc_id or dataset_id+doc_name.",
-                args_schema={"doc_id": "str", "dataset_id": "str", "doc_name": "str", "q": "str", "limit": "int"},
+                summary="Read ordered indexed chunks from one document by doc_id or dataset_id+doc_name. Set clause to read an exact numbered heading.",
+                args_schema={"doc_id": "str", "dataset_id": "str", "doc_name": "str", "q": "str", "clause": "str", "limit": "int"},
                 returns="ordered chunks or in-document search hits",
                 tags=("read", "document", "chunks", "source"),
             ),
@@ -710,8 +710,25 @@ def _tool_search_sources(args: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def _tool_read_source(args: dict[str, Any]) -> dict[str, Any]:
-    return _read_source_payload("read_source", args)
+async def _tool_read_source(args: dict[str, Any]) -> dict[str, Any]:
+    number = str(args.get("clause") or "").strip()
+    if not number:
+        return await asyncio.to_thread(_read_source_payload, "read_source", args)
+    from fastapi import HTTPException
+    from proxy.services.document_clause_service import read_clause
+
+    try:
+        result = await read_clause(str(args.get("doc_id") or ""), number,
+                                   str(args.get("dataset_id") or ""), str(args.get("doc_name") or ""),
+                                   max_chars=3200)
+    except HTTPException as error:
+        return _result(tool="read_source", operation="read_clause", inputs=[args], status="missing",
+                       result={}, missing=[str(error.detail)], trace="indexed clause could not be read")
+    sources = result.pop("sources")
+    return _result(tool="read_source", operation="read_clause", inputs=[args],
+                   status="ok" if sources else "missing", result=result, sources=sources,
+                   missing=[] if sources else [result["status"]],
+                   trace="exact indexed headings with current point provenance")
 
 
 def _tool_read_pdf_source(args: dict[str, Any]) -> dict[str, Any]:

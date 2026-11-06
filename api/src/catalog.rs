@@ -1,5 +1,5 @@
 //! Native project/note/context routes. Dossier, note creation side effects and model summary stay explicit upstream.
-use crate::{error, json_response, transport, Context};
+use crate::{error, json_response, Context};
 use axum::{
     body::to_bytes,
     extract::Request,
@@ -239,7 +239,7 @@ async fn arguments(request: Request, route: &Route) -> Result<Map<String, Value>
 }
 
 pub async fn handle(context: Arc<Context>, request: Request, route: Route) -> Response {
-    let cors = match transport::authorize_role(&context, request.headers(), route.admin).await {
+    let cors = match crate::auth::authorize(&context, request.headers(), route.admin).await {
         Ok(v) => v,
         Err(mut r) => {
             r.headers_mut()

@@ -5,7 +5,6 @@ use axum::{
     http::{header, HeaderMap, StatusCode},
     response::Response,
 };
-use serde_json::json;
 use std::{sync::Arc, time::Duration};
 
 pub fn local_browser(headers: &HeaderMap) -> bool {
@@ -158,11 +157,7 @@ pub async fn forward(context: Arc<Context>, request: Request) -> Response {
     response
 }
 
-pub async fn authorize(context: &Context, headers: &HeaderMap) -> Result<HeaderMap, Response> {
-    authorize_role(context, headers, false).await
-}
-
-pub async fn authorize_role(
+pub async fn authorize_legacy(
     context: &Context,
     headers: &HeaderMap,
     admin: bool,
@@ -211,11 +206,7 @@ pub async fn authorize_role(
             response.headers_mut().extend(cors);
             Err(response)
         }
-        _ => Err(json_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            json!({"detail":"Не удалось проверить доступ к диалогу. Дождитесь восстановления Леса и повторите действие."}),
-            "rust.workspace",
-        )),
+        _ => Err(crate::auth::unavailable()),
     }
 }
 

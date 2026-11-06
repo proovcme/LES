@@ -10,6 +10,9 @@ import sys
 
 
 def main():
+    # Numerical libraries may otherwise reserve a thread pool larger than the job's memory cap.
+    for variable in ('OPENBLAS_NUM_THREADS', 'OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'NUMEXPR_NUM_THREADS'):
+        os.environ[variable] = '1'
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from backend.light_processes import attach_lifetime_job
     job = attach_lifetime_job(memory_bytes=512 * 1024 * 1024, process_limit=1, cpu_seconds=15)

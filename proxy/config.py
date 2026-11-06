@@ -91,10 +91,8 @@ CORS_ALLOWED_ORIGINS = tuple(
 
 # W5.7: origin-ы доверенного контура (loopback + ZeroTier) с ЛЮБЫМ портом —
 # визуализатор :8066 и шеллы ходят в proxy кросс-доменно с любого ZT-адреса.
-CORS_ALLOWED_ORIGIN_REGEX = os.getenv(
-    "CORS_ALLOWED_ORIGIN_REGEX",
-    r"^https?://(localhost|127\.0\.0\.1|10\.195\.146\.\d{1,3})(:\d+)?$",
-)
+DEFAULT_CORS_ALLOWED_ORIGIN_REGEX = r"^https?://(localhost|127\.0\.0\.1|10\.195\.146\.\d{1,3})(:\d+)?$"
+CORS_ALLOWED_ORIGIN_REGEX = os.getenv("CORS_ALLOWED_ORIGIN_REGEX", DEFAULT_CORS_ALLOWED_ORIGIN_REGEX)
 
 
 def docker_control_enabled() -> bool:

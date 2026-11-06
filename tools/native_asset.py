@@ -17,6 +17,11 @@ SPECS={
 def source_digest(component,root=ROOT):
     SPECS[component]
     paths=[root/'config/version.json']
+    if component == 'api':
+        paths.extend(root/'qdrant_visualizer'/name for name in (
+            'index.html', 'forest.css', 'forest.js', 'forest-model.js', 'forest-scene.js',
+            'navigation.js', 'forest-mist.svg', 'search.html', 'search.js',
+        ) if (root/'qdrant_visualizer'/name).is_file())
     for folder in ('core',component):
         paths.extend(root.joinpath(folder,'src').rglob('*.rs'))
         paths.extend(root.joinpath(folder,'src').rglob('*.sql'))

@@ -7,15 +7,15 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
-from pathlib import Path
 from typing import Annotated
-from backend.runtime_paths import mutable_path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, HTMLResponse, Response
 
 from proxy.security import require_admin, require_user
+from proxy.services.document_clause_service import CLAUSE_NUMBER, read_clause
 from proxy.services.document_explorer_service import explorer
+from proxy.services.document_original_service import resolve_original as _resolved_document_source
 from proxy.services.file_viewer_service import file_viewer_html, is_viewable_file
 from proxy.services.native_open_service import open_native_file
 from proxy.services.pdf_contour_service import audit_pdf, render_page_preview
@@ -25,6 +25,25 @@ router = APIRouter(prefix="/api/documents", tags=["documents"])
 
 SourceDataset = Annotated[str, Query(max_length=240)]
 SourceDocument = Annotated[str, Query(max_length=2000)]
+SourceRevision = Annotated[str, Query(pattern=r"^(?:[a-f0-9]{64})?$")]
+
+
+async def _checked_original(document: dict, source_sha256: str):
+    if document.get("status") == "MISSING":
+        raise HTTPException(404, "Оригинал этой редакции сейчас недоступен. Сохранённая цитата остаётся в ответе.")
+    path = _resolved_document_source(document)
+    if path is None:
+        raise HTTPException(404, "Оригинал документа сейчас недоступен.")
+    if source_sha256:
+        from backend.qdrant_support import _sha256_file
+
+        try:
+            actual = await asyncio.to_thread(_sha256_file, path)
+        except (OSError, RuntimeError, ValueError) as error:
+            raise HTTPException(409, "Не удалось проверить редакцию оригинала.") from error
+        if actual != source_sha256:
+            raise HTTPException(409, "Файл изменился после индексации. В ответе сохранена цитата из прежней редакции.")
+    return path
 
 
 def _document_by_identity(doc_id: str, dataset_id: str = "", doc_name: str = "") -> dict | None:
@@ -79,6 +98,7 @@ async def document_by_id(
     doc_id: str,
     dataset_id: SourceDataset = "",
     doc_name: SourceDocument = "",
+    source_sha256: SourceRevision = "",
     _user=Depends(require_user),
 ):
     try:
@@ -87,6 +107,8 @@ async def document_by_id(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if document is None:
         raise HTTPException(status_code=404, detail="document not found")
+    if source_sha256:
+        await _checked_original(document, source_sha256)
     return {"document": document}
 
 
@@ -95,6 +117,7 @@ async def document_raw_by_id(
     doc_id: str,
     dataset_id: SourceDataset = "",
     doc_name: SourceDocument = "",
+    source_sha256: SourceRevision = "",
     _user=Depends(require_user),
 ):
     """Return the indexed original through stable metadata identity.
@@ -108,14 +131,23 @@ async def document_raw_by_id(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if document is None:
         raise HTTPException(status_code=404, detail="document not found")
-    source_path = _resolved_document_source(document)
-    if source_path is None:
-        raise HTTPException(status_code=404, detail="document has no source_path")
+    source_path = await _checked_original(document, source_sha256)
     return FileResponse(
         source_path,
         filename=str(document.get("file_name") or source_path.name),
         content_disposition_type="inline",
     )
+
+
+@router.get("/by-id/{doc_id}/clause")
+async def document_clause(
+    doc_id: str,
+    number: Annotated[str, Query(pattern=CLAUSE_NUMBER)],
+    dataset_id: SourceDataset = "",
+    _user=Depends(require_user),
+):
+    """Read one explicitly numbered section from a known indexed document."""
+    return await read_clause(doc_id, number, dataset_id)
 
 
 @router.get("/by-id/{doc_id}/viewer", response_class=HTMLResponse)
@@ -125,6 +157,7 @@ async def document_viewer_by_id(
     sheet: str = Query(default="", max_length=180),
     dataset_id: SourceDataset = "",
     doc_name: SourceDocument = "",
+    source_sha256: SourceRevision = "",
     page: int = Query(default=1, ge=1),
     _user=Depends(require_user),
 ):
@@ -135,9 +168,7 @@ async def document_viewer_by_id(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if document is None:
         raise HTTPException(status_code=404, detail="document not found")
-    source_path = _resolved_document_source(document)
-    if source_path is None:
-        raise HTTPException(status_code=404, detail="document has no source_path")
+    source_path = await _checked_original(document, source_sha256)
     if not is_viewable_file(source_path):
         raise HTTPException(status_code=415, detail="embedded viewer is unavailable for this format")
     try:
@@ -146,6 +177,7 @@ async def document_viewer_by_id(
             content = viewer_html(
                 path_id="", document_id=str(document["id"]),
                 file_name=str(info["name"]), page_count=int(info["page_count"]), initial_page=page,
+                source_sha256=source_sha256,
             )
             return HTMLResponse(content, headers={"Cache-Control": "private, no-store"})
         content = await asyncio.to_thread(
@@ -155,6 +187,7 @@ async def document_viewer_by_id(
             locator=locator,
             sheet=sheet,
             document_id=str(document['id']),
+            source_sha256=source_sha256,
         )
     except (FileNotFoundError, ValueError, OSError) as exc:
         raise HTTPException(status_code=400, detail=f"Не удалось открыть предпросмотр: {str(exc)[:240]}") from exc
@@ -172,32 +205,6 @@ def _pdf_document_source(doc_id: str) -> tuple[dict, str]:
     if source_path is None:
         raise HTTPException(status_code=404, detail="document has no source_path")
     return document, source_path.as_posix()
-
-
-def _resolved_document_source(document: dict) -> Path | None:
-    """Resolve an original without letting metadata escape dataset storage.
-
-    External sources keep their recorded absolute path. Uploaded files do not
-    store one, so fall back to the canonical read-only storage location.
-    """
-    recorded = str(document.get("source_path") or "").strip()
-    if recorded:
-        candidate = Path(recorded).expanduser()
-        if candidate.exists() and candidate.is_file():
-            return candidate.resolve()
-
-    dataset_id = str(document.get("dataset_id") or "").strip()
-    file_name = str(document.get("file_name") or "").strip()
-    if not dataset_id or Path(dataset_id).name != dataset_id or dataset_id in {".", ".."}:
-        return None
-    relative = Path(file_name)
-    if not file_name or relative.is_absolute() or ".." in relative.parts:
-        return None
-    dataset_root = (mutable_path("storage/datasets") / dataset_id).resolve()
-    candidate = (dataset_root / relative).resolve()
-    if not candidate.is_relative_to(dataset_root):
-        return None
-    return candidate if candidate.exists() and candidate.is_file() else None
 
 
 @router.get("/by-id/{doc_id}/pdf-contour")
@@ -228,10 +235,13 @@ async def document_pdf_contour_preview(
     page_number: int,
     width: int = Query(default=1200, ge=320, le=1800),
     bbox: str = Query(default="", max_length=160),
+    source_sha256: SourceRevision = "",
     _user=Depends(require_user),
 ):
     """Render the page or an exact evidence bbox as PNG; source stays untouched."""
-    _document, source_path = _pdf_document_source(doc_id)
+    document, source_path = _pdf_document_source(doc_id)
+    if source_sha256:
+        source_path = (await _checked_original(document, source_sha256)).as_posix()
     parsed_bbox = None
     if bbox.strip():
         try:
@@ -265,6 +275,7 @@ async def open_document_native(
     doc_id: str,
     dataset_id: SourceDataset = "",
     doc_name: SourceDocument = "",
+    source_sha256: SourceRevision = "",
     _admin=Depends(require_admin),
 ):
     try:
@@ -273,9 +284,7 @@ async def open_document_native(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if document is None:
         raise HTTPException(status_code=404, detail="document not found")
-    source_path = _resolved_document_source(document)
-    if source_path is None:
-        raise HTTPException(status_code=404, detail="document has no source_path")
+    source_path = await _checked_original(document, source_sha256)
     
     result = open_native_file(source_path)
     result["doc_id"] = doc_id

@@ -9,12 +9,14 @@ import threading
 from datetime import datetime
 from pathlib import Path
 from backend.light_qdrant_connection import qdrant_http_headers
-from typing import Any
+from backend.native_index_store import accepts
+from typing import Any, Literal
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from pydantic import BaseModel, Field
 from backend.rag_config import rag_collection_name, rag_meta_db_path
 from backend.smart_index import is_temporary_source_name
-from proxy.config import rag_upload_suffixes
+from proxy.config import external_allow_any, external_source_roots, rag_upload_suffixes
 from proxy.security import require_admin
 from proxy.storage.file_storage import is_within_external_root, validate_external_source
 
@@ -27,6 +29,58 @@ import proxy.services.dataset_runtime as dataset_runtime
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/rag", tags=["rag"])
+native_router = APIRouter(prefix="/api/light", include_in_schema=False)
+_external_sync_lock = asyncio.Lock()
+
+
+def _require_native_intake(request: Request) -> None:
+    supplied = request.headers.get("x-les-intake-token", "")
+    if request.headers.get("origin") is not None or not accepts(supplied):
+        raise HTTPException(404, "Not Found")
+
+
+@native_router.get("/internal-intake-policy", dependencies=[Depends(_require_native_intake)])
+async def native_intake_policy():
+    roots = [] if external_allow_any() else await asyncio.to_thread(external_source_roots)
+    return {"roots": [str(path) for path in roots],
+            "allow_any": external_allow_any(), "suffixes": sorted(rag_upload_suffixes())}
+
+
+class NativeIntakeBatch(BaseModel):
+    dataset_id: str
+    intake_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    batch_limit: int = Field(ge=1, le=500)
+
+
+@native_router.post("/internal-intake-parse", dependencies=[Depends(_require_native_intake)])
+async def native_intake_parse(batch: NativeIntakeBatch):
+    """Compatibility adapter for one batch. Rust owns scheduling and progress."""
+    from backend.workspace_native import catalog_call
+
+    state = dataset_runtime.get_dataset_state()
+    async with state.parse_semaphore:
+        job = await asyncio.to_thread(catalog_call, rag_meta_db_path(), "intake_get", id=batch.intake_id)
+        if not job or job["dataset_id"] != batch.dataset_id or job["phase"] != "index" or job["status"] != "running":
+            raise HTTPException(404, "Задание индексации не найдено.")
+        progress = state.backend.db.dataset_parse_progress
+        pending = (await asyncio.to_thread(progress, batch.dataset_id))["pending"]
+        if not pending:
+            return Response(status_code=204)
+        try:
+            await dataset_scheduler.assert_parse_admission(state)
+        except HTTPException as error:
+            logger.info("[NATIVE-INDEX] job=%s admission_status=%s", batch.intake_id, error.status_code)
+            if error.status_code == 409:
+                raise HTTPException(412, "Проверьте модель поиска.") from error
+            raise
+        result = await state.backend.parse_dataset(batch.dataset_id, limit=batch.batch_limit)
+        dataset_scheduler._schedule_reader_after_parse(
+            batch.dataset_id, reason="native_intake", parse_result=result,
+        )
+        after = (await asyncio.to_thread(progress, batch.dataset_id))["pending"]
+        if after >= pending:
+            raise HTTPException(409, "Партия не продвинулась.")
+        return {"status": "processed"}
 
 
 
@@ -336,7 +390,7 @@ def _external_supported_files(root: Path, *, max_files: int = 50000) -> dict[str
                     "mtime": float(stat.st_mtime),
                 }
     except OSError as error:
-        raise HTTPException(409, "Не удалось полностью прочитать папку датасета. Проверьте доступ к файлам и повторите синхронизацию; удаление по неполному списку отменено.") from error
+        raise HTTPException(409, "Не удалось полностью прочитать папку датасета. Статусы источников сохранены. Проверьте доступ к папке и повторите проверку.") from error
     return files
 
 
@@ -384,7 +438,7 @@ def _external_dataset_diff(dataset_id: str, root: Path, *, limit: int = 50) -> d
             try:
                 digest = _sha256_file(Path(item["source_path"]))
             except OSError as error:
-                raise HTTPException(409, "Не удалось проверить содержимое файла. Проверьте доступ и повторите синхронизацию; удаление по неполной проверке отменено.") from error
+                raise HTTPException(409, "Не удалось проверить содержимое файла. Статусы источников сохранены. Проверьте доступ к файлу и повторите проверку.") from error
             item["file_hash"] = digest
             content_changed = digest != row["file_hash"]
         if size_changed or mtime_changed or missing_before or content_changed:
@@ -397,8 +451,13 @@ def _external_dataset_diff(dataset_id: str, root: Path, *, limit: int = 50) -> d
         source_path = str(row.get("source_path") or "")
         if str(row.get("status") or "").upper() == "MISSING":
             continue
-        if file_name not in current and (not source_path or not Path(source_path).exists()):
-            deleted.append(row)
+        if file_name not in current:
+            try:
+                Path(source_path).stat()
+            except FileNotFoundError:
+                deleted.append(row)
+            except OSError as error:
+                raise HTTPException(409, "Не удалось проверить доступность источников. Их статусы сохранены.") from error
     return {
         "status": "ok",
         "source_root": root.as_posix(),
@@ -421,21 +480,43 @@ def _external_dataset_diff(dataset_id: str, root: Path, *, limit: int = 50) -> d
     }
 
 
-def _mark_external_missing(dataset_id: str, rows: list[dict[str, Any]]) -> int:
+def _mark_external_missing(dataset_id: str, root: Path, rows: list[dict[str, Any]]) -> int:
     if not rows:
         return 0
+    confirmed = []
+    try:
+        root.stat()
+        for row in rows:
+            try:
+                Path(row["source_path"]).stat()
+            except FileNotFoundError:
+                confirmed.append(row)
+        root.stat()
+    except OSError as error:
+        raise HTTPException(409, "Не удалось подтвердить доступность папки. Статусы источников сохранены.") from error
     count = 0
     with sqlite3.connect(rag_meta_db_path()) as conn:
-        for row in rows:
+        for row in confirmed:
             cur = conn.execute(
                 """
                 UPDATE documents
-                SET status='MISSING', chunk_count=0, last_error='source file missing', stage=''
-                WHERE dataset_id=? AND file_name=?
+                SET status='MISSING', last_error='Исходный файл не найден', stage=''
+                WHERE dataset_id=? AND file_name=? AND source_path=?
+                  AND COALESCE(file_hash, '')=? AND COALESCE(file_mtime, 0)=?
+                  AND COALESCE(file_size, 0)=? AND status NOT IN ('MISSING', 'PARSING')
                 """,
-                (dataset_id, str(row.get("file_name") or "")),
+                (dataset_id, row["file_name"], row["source_path"], row.get("file_hash") or "",
+                 row.get("file_mtime") or 0, row.get("file_size") or 0),
             )
             count += int(cur.rowcount or 0)
+        if count:
+            conn.execute(
+                """UPDATE datasets SET chunk_count=(
+                       SELECT COALESCE(SUM(chunk_count), 0) FROM documents
+                       WHERE dataset_id=? AND status='INDEXED'
+                   ) WHERE id=?""",
+                (dataset_id, dataset_id),
+            )
     return count
 
 
@@ -446,12 +527,9 @@ async def _delete_index_for_files(state: DatasetRouterState, dataset_id: str, fi
     errors: list[str] = []
     qdrant_deleted = 0
     lexical_deleted = 0
-    try:
-        from proxy.services.lexical_index_service import LexicalIndex
+    from proxy.services.lexical_index_service import LexicalIndex
 
-        lexical = LexicalIndex()
-    except Exception:
-        lexical = None
+    lexical = LexicalIndex()
     async with httpx.AsyncClient(timeout=20.0, headers=qdrant_http_headers(qdrant_url), trust_env=False) as client:
         for file_name in file_names:
             file_filter = {
@@ -470,15 +548,14 @@ async def _delete_index_for_files(state: DatasetRouterState, dataset_id: str, fi
             except Exception as error:
                 errors.append(f"Qdrant {file_name}: {error}")
             try:
-                if lexical is not None:
-                    lexical_deleted += int(
-                        await asyncio.to_thread(
-                            lexical.delete_file,
-                            rag_collection_name(),
-                            dataset_id=dataset_id,
-                            doc_name=file_name,
-                        )
+                lexical_deleted += int(
+                    await asyncio.to_thread(
+                        lexical.delete_file,
+                        rag_collection_name(),
+                        dataset_id=dataset_id,
+                        doc_name=file_name,
                     )
+                )
             except Exception as error:
                 errors.append(f"Lexical {file_name}: {error}")
     try:
@@ -520,19 +597,13 @@ async def sync_external_dataset(req: ExternalDatasetSyncRequest, _admin=Depends(
     diff = await asyncio.to_thread(_external_dataset_diff, req.dataset_id, root, limit=req.limit)
     files = diff.pop("_files")
     registered = 0
-    for item in [*files["new"], *files["changed"]]:
-        await state.backend.register_external_file(req.dataset_id, Path(item["source_path"]), item["file_name"],
-            **({"force_reindex": True} if item.get("content_changed") else {}))
-        registered += 1
-    deleted_rows = files["deleted"] if req.include_deleted else []
-    cleanup = await _delete_index_for_files(
-        state,
-        req.dataset_id,
-        [str(row.get("file_name") or "") for row in deleted_rows if row.get("file_name")],
-    )
-    if cleanup["errors"]:
-        raise HTTPException(503, "Не удалось убрать устаревшие записи из индекса. Проверьте хранилище и повторите синхронизацию; удаление не отмечено как завершённое.")
-    missing_marked = await asyncio.to_thread(_mark_external_missing, req.dataset_id, deleted_rows)
+    async with _external_sync_lock:
+        for item in [*files["new"], *files["changed"]]:
+            await state.backend.register_external_file(req.dataset_id, Path(item["source_path"]), item["file_name"],
+                **({"force_reindex": True} if item.get("content_changed") else {}))
+            registered += 1
+        deleted_rows = files["deleted"] if req.include_deleted else []
+        missing_marked = await asyncio.to_thread(_mark_external_missing, req.dataset_id, root, deleted_rows)
     parse_started = False
     parse_job = None
     if req.parse and registered:
@@ -605,11 +676,58 @@ async def sync_external_dataset(req: ExternalDatasetSyncRequest, _admin=Depends(
         "diff": diff,
         "registered": registered,
         "missing_marked": missing_marked,
-        "cleanup": cleanup,
+        "cleanup": {"files": 0, "qdrant_deleted": 0, "lexical_deleted": 0, "errors": []},
         "parse_started": parse_started,
         "parse_limit": req.parse_limit,
         "parse_job": parse_job,
     }
+
+
+class PurgeMissingSources(BaseModel):
+    path: str
+    dataset_id: str
+    file_names: list[str] = Field(min_length=1, max_length=100)
+    confirm: Literal["purge_missing_index"]
+
+
+def _validate_missing_purge(root: Path, dataset_id: str, names: list[str]) -> None:
+    known = _external_dataset_docs(dataset_id)
+    try:
+        root.stat()
+        for name in names:
+            row = known.get(name)
+            if not row or row["status"] != "MISSING":
+                raise HTTPException(409, "Очистить можно только записи отсутствующих источников.")
+            path = Path(row["source_path"])
+            if not path.resolve().is_relative_to(root):
+                raise HTTPException(409, "Источники должны принадлежать выбранной папке.")
+            try:
+                path.stat()
+            except FileNotFoundError:
+                continue
+            raise HTTPException(409, "Исходный файл снова доступен. Обновите папку.")
+        root.stat()
+    except OSError as error:
+        raise HTTPException(409, "Папка недоступна. Очистка отменена.") from error
+
+
+@router.post("/external/purge-missing")
+async def purge_missing_external_sources(req: PurgeMissingSources, _admin=Depends(require_admin)):
+    root = validate_external_source(req.path)
+    state = dataset_runtime.get_dataset_state()
+    names = list(dict.fromkeys(req.file_names))
+    async with state.parse_semaphore, _external_sync_lock:
+        await asyncio.to_thread(_validate_missing_purge, root, req.dataset_id, names)
+        cleanup = await _delete_index_for_files(state, req.dataset_id, names)
+        if cleanup["errors"]:
+            logger.error("Index purge for missing sources failed: %s", cleanup["errors"])
+            raise HTTPException(503, "Очистка индекса завершилась частично. Повторите операцию после проверки хранилища.")
+        with sqlite3.connect(rag_meta_db_path()) as conn:
+            conn.executemany(
+                "UPDATE documents SET chunk_count=0 WHERE dataset_id=? AND file_name=? AND status='MISSING'",
+                [(req.dataset_id, name) for name in names],
+            )
+    return {"status": "purged", "cleanup": cleanup}
 
 
 def _count_dir_files(d: Path) -> int:

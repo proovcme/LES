@@ -61,6 +61,10 @@ class ChatMessages:
         )
         if not srcs and not crag and not meta:
             return
+        trace = (meta or {}).get("retrieval_trace") or {}
+        citation_status = (trace.get("citation_check") or {}).get("status")
+        if citation_status in {"missing_labels", "no_sources"}:
+            ui.label("У вывода нет ссылки на фрагмент документа.").classes("sov-ui-section-detail")
 
         if effective_sources:
             source_anchor_prefix = self._source_anchor_prefix(meta)
@@ -86,13 +90,17 @@ class ChatMessages:
                         ).props(f"flat dense no-caps id={source_anchor_prefix}-{i}").classes(
                             "sov-source-primary sov-ui-source-chip"
                         ).tooltip("Показать цитату и оригинал")
-            with ui.expansion(
-                f"Источники · {len(effective_sources)}",
+            cited_positions = {position for position, _ in cited_sources}
+            found_sources = [(i, source) for i, source in enumerate(effective_sources, 1) if i not in cited_positions]
+            materials = ui.expansion(
+                f"Найденные материалы · {len(found_sources)}",
                 icon="o_library_books",
                 value=False,
-            ).props("dense").classes("sov-source-expansion"):
+            ).props("dense").classes("sov-source-expansion")
+            materials.set_visibility(bool(found_sources))
+            with materials:
                 with ui.column().classes("sov-source-list"):
-                    for i, source in enumerate(effective_sources, 1):
+                    for i, source in found_sources:
                         c = source_chip(source, i)
                         item = citation_drawer_item(source, i)
                         lbl = f"{i}. {c['file'] or _source_label(source)}"

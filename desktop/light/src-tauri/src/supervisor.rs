@@ -102,7 +102,7 @@ pub fn run(executable:&Path, state:&Path, args:&[String]) -> Result<(),String> {
             Err(error) => { let _=child.kill(); let _=child.wait(); return Err(error); }
         };
         lifecycle::event(state,"supervisor","desktop_started",json!({"desktop_pid":child.id(),"launch_id":launch_id}));
-        lifecycle::status(state,"supervisor-status.json",json!({"phase":"running","pid":std::process::id(),"desktop_pid":child.id(),"launch_id":launch_id,"updated_at":lifecycle::stamp()}));
+        lifecycle::status(state,"supervisor-status.json",json!({"phase":"running","pid":std::process::id(),"desktop_pid":child.id(),"launch_id":launch_id,"control":crate::desktop_control::PROTOCOL,"updated_at":lifecycle::stamp()}));
         if child.stdin.take().ok_or("Нет канала запуска")?.write_all(b"G").is_err() {
             let _=child.kill(); let _=child.wait(); return Err("Окно не подтвердило запуск".into());
         }
@@ -114,7 +114,7 @@ pub fn run(executable:&Path, state:&Path, args:&[String]) -> Result<(),String> {
         drop(job);
         if normal {
             lifecycle::status(state,"launcher-status.json",json!({"schema":"les.light-launcher.v1","phase":"stopped","message":"LES RAG остановлен","reason":"normal_exit","updated_at":lifecycle::stamp()}));
-            lifecycle::status(state,"supervisor-status.json",json!({"phase":"stopped","pid":std::process::id(),"reason":"normal_exit","updated_at":lifecycle::stamp()}));
+            lifecycle::status(state,"supervisor-status.json",json!({"phase":"stopped","pid":std::process::id(),"launch_id":launch_id,"reason":"normal_exit","updated_at":lifecycle::stamp()}));
             return Ok(());
         }
         let Some(delay) = recovery.next(Instant::now()) else {

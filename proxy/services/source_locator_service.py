@@ -84,8 +84,9 @@ def source_locator(
         }
         return {key: value for key, value in locator.items() if value not in (None, "")}
 
+    anchor = _text(_value(source_data.get("anchor"), meta.get("anchor")))
     relative_path = _relative_path(
-        source_ref or _text(_value(meta.get("file_path"), meta.get("source_path"))),
+        "" if anchor else source_ref or _text(_value(meta.get("file_path"), meta.get("source_path"))),
         doc_name,
     )
     if source_ref or doc_id or relative_path:
@@ -95,6 +96,7 @@ def source_locator(
             "doc_id": doc_id,
             "source_ref": source_ref,
             "relative_path": relative_path,
+            "source_sha256": _text(_value(source_data.get("source_sha256"), meta.get("source_sha256"))),
             "page": _value(
                 source_data.get("page"),
                 source_data.get("source_page"),
@@ -133,6 +135,7 @@ def source_locator(
                 meta.get("row_number"),
             ),
             "cell": _text(_value(source_data.get("cell"), meta.get("cell"))),
+            "anchor": anchor,
             "excerpt": content,
         }
         return {key: value for key, value in locator.items() if value not in (None, "")}

@@ -696,7 +696,8 @@ async def get_metrics():
     crag_hallucination = state.crag_stats.get("hallucination", 0)
     crag_unvalidated = state.crag_stats.get("unvalidated", 0)
     cache_total = max(1, state.chat_metrics.get("cache_hit", 0) + state.chat_metrics.get("cache_miss", 0))
-    retrieval_total = max(1, state.chat_metrics.get("retrieval_good", 0) + state.chat_metrics.get("retrieval_weak", 0))
+    retrieval_candidates = state.chat_metrics.get("retrieval_candidates", 0)
+    retrieval_total = max(1, retrieval_candidates + state.chat_metrics.get("retrieval_weak", 0))
     ram_used = rows[0]["ram_used"] if rows else 0
     ram_total = state.metrics_cache.get("ram_total", rows[0]["ram_total"] if rows else 0)
     ram_free = state.metrics_cache.get("ram_free_gb")
@@ -731,7 +732,7 @@ async def get_metrics():
             "crag_halluc_rate": crag_hallucination / crag_total,
             "crag_unvalidated_rate": crag_unvalidated / crag_total,
             "cache_hit_rate": state.chat_metrics.get("cache_hit", 0) / cache_total,
-            "retrieval_good_rate": state.chat_metrics.get("retrieval_good", 0) / retrieval_total,
+            "retrieval_candidate_rate": retrieval_candidates / retrieval_total,
             "total_requests": sum(state.crag_stats.values()),
         },
         "queue": {"llm_waiting": max(0, state.llm_concurrency - state.llm_semaphore._value)},

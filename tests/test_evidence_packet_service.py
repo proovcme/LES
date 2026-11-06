@@ -104,6 +104,8 @@ def test_answer_citation_check_rejects_invented_and_missing_labels():
     assert verify_answer_source_labels("Факт [Источник 3 | fake.pdf]", source_map)["status"] == "invalid_labels"
     assert verify_answer_source_labels("Факт без ссылки", source_map)["status"] == "missing_labels"
     assert verify_answer_source_labels("Факты [Источник 1–2]", source_map)["cited"] == [1, 2]
+    assert verify_answer_source_labels("Факт [Источник 1] [Источник 8]", source_map)["linked"] == [1]
+    assert verify_answer_source_labels("Факт", [], expected=True)["status"] == "no_sources"
 
 
 def test_light_skipped_search_does_not_claim_empty_results(monkeypatch):

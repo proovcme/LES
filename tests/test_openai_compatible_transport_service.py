@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+import asyncio
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import inspect
 import json
+import struct
+from threading import Event, Thread
 
 import httpx
 import pytest
+from test_light_native_api import MODEL_BRIDGE_TOKEN, gateway
+
+from proxy.services import local_model_http
 
 from proxy.services.model_connection_contracts import (
     CapabilityName,
@@ -15,7 +23,7 @@ from proxy.services.model_connection_contracts import (
     ConnectionLocality,
 )
 from proxy.services.model_connection_resolver_service import ResolvedModelConnection
-from proxy.services.model_connection_security_service import ValidatedEndpoint
+from proxy.services.model_connection_security_service import ValidatedEndpoint, validate_endpoint
 from proxy.services.model_execution_preset_service import (
     BackendCapacity,
     resolve_execution_preset,
@@ -30,6 +38,224 @@ from proxy.services.openai_compatible_transport_service import (
 
 
 NOW = datetime(2026, 8, 28, tzinfo=timezone.utc)
+
+
+@pytest.mark.asyncio
+async def test_local_generation_and_embeddings_use_rust_http(gateway, monkeypatch):
+    browser, _, tmp_path = gateway
+    bridge = str(browser.base_url.join('/api/light/internal-model-http'))
+    monkeypatch.setattr(local_model_http, '_bridge', None)
+    monkeypatch.setenv('LES_INTERNAL_MODEL_URL', bridge)
+    monkeypatch.setenv('LES_INTERNAL_MODEL_TOKEN', MODEL_BRIDGE_TOKEN)
+    local_model_http.initialize()
+    assert 'LES_INTERNAL_MODEL_TOKEN' not in local_model_http.os.environ
+
+    finish = Event()
+    cancelled = Event()
+    oversized = Event()
+    calls = []
+    big_argument = 123456789012345678901234567890
+    precise_vector = (1.5, -0.0, float.fromhex('0x0.0000000000001p-1022'), 1.0000000000000002, 0.1, 1e30)
+
+    class Model(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def write_frames(self, *frames):
+            for frame in frames:
+                self.wfile.write(json.dumps(frame, ensure_ascii=False).encode() + b'\r\n')
+
+        def do_POST(self):
+            request = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+            calls.append((self.path, request, dict(self.headers)))
+            if self.path == '/api/embed':
+                scenario = request['input'][0]
+                payload = {'model': request['model'], 'embeddings': [precise_vector], 'usage': {'total_tokens': 7}}
+                if scenario == 'wrong dimension':
+                    payload['embeddings'] = [[0.1], [0.1, 0.2]]
+                if scenario == 'empty vector':
+                    payload['embeddings'] = [[]]
+                if scenario == 'invalid type':
+                    payload['embeddings'] = [[True]]
+                raw = json.dumps(payload).encode()
+                if scenario == 'nonfinite':
+                    raw = b'{"model":"model-1","embeddings":[[1e309]]}'
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                if scenario != 'oversized embedding':
+                    self.send_header('Content-Length', str(len(raw)))
+                self.end_headers()
+                if scenario == 'oversized embedding':
+                    self.wfile.write(raw + b' ' * 2048)
+                    return
+                self.wfile.write(raw)
+                return
+
+            text = request['messages'][0]['content']
+            if text == 'redirect':
+                self.send_response(307)
+                self.send_header('Location', '/api/embed')
+                self.end_headers()
+                return
+            if text == 'missing':
+                self.send_response(404)
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/x-ndjson')
+            self.end_headers()
+            if text == 'reasoning':
+                self.write_frames(
+                    {'message': {'content': '<thi'}},
+                    {'message': {'content': 'nk>Скрытое размышление</th'}},
+                    {'message': {'content': 'ink>Точный ответ',
+                                 'tool_calls': [{'function': {'name': 'read',
+                                                              'arguments': {'ref': big_argument}}}]}},
+                    {'message': {}, 'done': True, 'done_reason': 'tool_calls',
+                     'prompt_eval_count': '11', 'eval_count': 4},
+                )
+                return
+            if text == 'exhausted':
+                self.write_frames({'message': {'thinking': 'internal'}, 'done': True, 'done_reason': 'length'})
+                return
+            if text == 'bad frame':
+                self.write_frames([])
+                return
+            if text == 'oversized':
+                self.wfile.write(b'{"message":{"content":"' + b'x' * 2048)
+                oversized.wait(6)
+                return
+            first = '{"message":{"content":"Лес 🌲"},"done":false}\n'.encode()
+            midpoint = first.index('🌲'.encode()) + 1
+            self.wfile.write(first[:midpoint])
+            self.wfile.write(first[midpoint:])
+            if text == 'cut':
+                return
+            if text == 'cancel':
+                try:
+                    while not cancelled.wait(.02):
+                        self.wfile.write(b'{"message":{"content":""},"done":false}\n')
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                    cancelled.set()
+                return
+            if finish.wait(6):
+                self.wfile.write(
+                    b'{"message":{"content":"!"},"model":"model-1","done":true,'
+                    b'"done_reason":"stop","prompt_eval_count":7,"eval_count":3}\n'
+                )
+
+    def direct_call(_request):
+        pytest.fail('An eligible request bypassed the Rust bridge')
+
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Model)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base = f'http://127.0.0.1:{server.server_port}/v1'
+        endpoint = validate_endpoint(base, ConnectionLocality.LOOPBACK)
+        connection = _resolved(chat_protocol='native_chat_v1')
+        snapshot = replace(connection.capability_snapshot, transport_options={
+            'chat_protocol': 'native_chat_v1', 'embedding_protocol': 'native_embedding_v1',
+        })
+        connection = replace(connection, endpoint=endpoint, base_url=base, capability_snapshot=snapshot)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(direct_call)) as client:
+            transport = OpenAICompatibleTransport(
+                client=client, secret_store=EnvironmentSecretStore(tmp_path / '.env'), timeout=4,
+            )
+
+            def infer(text, sink=None, reasoning=False):
+                return transport.complete(connection, InferenceRequest(
+                    messages=[{'role': 'user', 'content': text}], max_output_tokens=64,
+                    reasoning_enabled=reasoning,
+                ), token_sink=sink)
+
+            tokens = []
+
+            async def sink(event):
+                if event['event'] == 'token':
+                    tokens.append(event['data'])
+                    finish.set()
+
+            reply = await infer('Прочитай 日本語', sink)
+            assert reply.text == 'Лес 🌲!' and tokens == ['Лес 🌲', '!']
+            assert reply.model_id == 'model-1' and reply.usage['total_tokens'] == 10
+            assert calls[0][1]['messages'][0]['content'] == 'Прочитай 日本語'
+            assert calls[0][1]['model'] == 'model-1'
+            assert all(key.lower() not in {'authorization', 'x-les-model-token', 'x-les-model-target', 'x-les-chat-limits'}
+                       for key in calls[0][2])
+            assert {key.lower(): value for key, value in calls[0][2].items()}['accept-encoding'] == 'identity'
+
+            embedding = await transport.embed(connection, ['Пункт 3.2'], release_after=True)
+            assert embedding.model_id == 'model-1' and embedding.usage['total_tokens'] == 7
+            assert struct.pack('<6d', *embedding.vectors[0]) == struct.pack('<6d', *precise_vector)
+            assert calls[1][1]['keep_alive'] == 0 and calls[1][1]['input'] == ['Пункт 3.2']
+            embed_headers = {key.lower(): value for key, value in calls[1][2].items()}
+            assert embed_headers['accept-encoding'] == 'identity' and 'x-les-embed-limits' not in embed_headers
+            for inputs, code in (
+                (['wrong count', 'extra input'], 'UPSTREAM_EMBEDDING_COUNT_MISMATCH'),
+                (['wrong dimension', 'extra input'], 'UPSTREAM_EMBEDDING_RESPONSE_INVALID'),
+                (['empty vector'], 'UPSTREAM_EMBEDDING_RESPONSE_INVALID'),
+                (['invalid type'], 'UPSTREAM_EMBEDDING_RESPONSE_INVALID'),
+                (['nonfinite'], 'UPSTREAM_EMBEDDING_RESPONSE_INVALID'),
+                (['oversized embedding'], 'UPSTREAM_RESPONSE_TOO_LARGE'),
+            ):
+                transport.response_body_limit = 512
+                with pytest.raises(ModelTransportError, match=code):
+                    await transport.embed(connection, inputs)
+            transport.response_body_limit = 32768
+            for text, error in (
+                ('redirect', 'UPSTREAM_REDIRECT_REJECTED'),
+                ('missing', 'UPSTREAM_HTTP_ERROR: 404'),
+                ('cut', 'UPSTREAM_STREAM_INTERRUPTED'),
+                ('bad frame', 'UPSTREAM_RESPONSE_INVALID'),
+                ('exhausted', 'REASONING_BUDGET_EXHAUSTED'),
+            ):
+                with pytest.raises(ModelTransportError, match=error):
+                    await infer(text)
+
+            events = []
+
+            async def collect(event):
+                events.append(event)
+
+            answer = await infer('reasoning', collect, reasoning=True)
+            assert [event['event'] for event in events] == ['progress', 'token']
+            assert events[-1]['data'] == answer.text == 'Точный ответ'
+            assert answer.finish_reason == 'tool_calls'
+            assert answer.usage['total_tokens'] == 15
+            assert answer.model_id == 'model-1'
+            assert answer.tool_calls[0]['function']['arguments']['ref'] == big_argument
+
+            transport.response_body_limit = 64
+            try:
+                with pytest.raises(ModelTransportError, match='UPSTREAM_RESPONSE_TOO_LARGE'):
+                    await infer('oversized')
+            finally:
+                oversized.set()
+            transport.response_body_limit = 32768
+
+            first_token = asyncio.Event()
+
+            async def observe(event):
+                if event['event'] == 'token':
+                    first_token.set()
+
+            task = asyncio.create_task(infer('cancel', observe))
+            try:
+                await asyncio.wait_for(first_token.wait(), timeout=3)
+            finally:
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+            assert await asyncio.to_thread(cancelled.wait, 3)
+            assert [path for path, _, _ in calls] == ['/api/chat'] + ['/api/embed'] * 7 + ['/api/chat'] * 8
+    finally:
+        finish.set()
+        cancelled.set()
+        oversized.set()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
 
 
 def test_native_image_transport_preserves_pixels_and_text():

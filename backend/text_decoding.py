@@ -34,4 +34,17 @@ def decode_document_text(data: bytes) -> str:
 
 
 def read_document_text(path: Path) -> str:
+    from backend import native_core
+
+    if native_core.supports("document"):
+        try:
+            result = native_core.required("document", request={"action": "plain_text", "path": str(path)})
+        except native_core.NativeCoreError as error:
+            if str(error) not in {"DOCUMENT_ACTION_INVALID", "DOCUMENT_READ_FAILED"}:
+                raise
+        else:
+            if result["status"] == "completed":
+                return result["text"]
+            if result["status"] == "binary":
+                raise ValueError('Файл содержит двоичные данные вместо текста.')
     return decode_document_text(path.read_bytes())

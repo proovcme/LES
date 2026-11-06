@@ -6,6 +6,7 @@ import sqlite3
 import json
 from typing import Any, Iterable
 from backend.rag_config import rag_meta_db_path
+from backend import native_core
 from proxy.services.llm_transport_profile_service import provider_prompt_max_chars, provider_is_local
 from proxy.services import chat_inference_service
 
@@ -67,30 +68,10 @@ def _extract_json_object(text: str) -> dict[str, Any] | None:
 
 
 def _parse_model_tool_calls(text: str, *, allowed_tools: set[str], max_calls: int = 3) -> list[dict[str, Any]]:
-    parsed = _extract_json_object(text)
-    if not parsed:
-        return []
-    calls_raw = parsed.get("calls")
-    if isinstance(calls_raw, dict):
-        calls_raw = [calls_raw]
-    if not isinstance(calls_raw, list):
-        return []
-    calls: list[dict[str, Any]] = []
-    for item in calls_raw:
-        if not isinstance(item, dict):
-            continue
-        tool = str(item.get("tool") or item.get("name") or "").strip()
-        if tool not in allowed_tools:
-            continue
-        args = item.get("args") if isinstance(item.get("args"), dict) else {}
-        parsed_call = {"tool": tool, "args": dict(args)}
-        call_id = str(item.get("call_id") or item.get("id") or "")
-        if call_id:
-            parsed_call["call_id"] = call_id
-        calls.append(parsed_call)
-        if len(calls) >= max(1, max_calls):
-            break
-    return calls
+    return native_core.required("harness_evidence", request={
+        "action": "parse_tool_calls", "text": str(text or ""),
+        "allowed": sorted(allowed_tools), "max_calls": max(1, max_calls),
+    })["calls"]
 
 
 def _augment_model_tool_args(

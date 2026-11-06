@@ -17,6 +17,7 @@ use std::{
 const REQUEST_LIMIT: usize = 8 * 1024 * 1024;
 const OUTPUT_LIMIT: usize = 32 * 1024 * 1024 - 65536;
 static POOL: OnceLock<Mutex<Option<Session>>> = OnceLock::new();
+static PDF_POOL: OnceLock<Mutex<Option<Session>>> = OnceLock::new();
 static SEQUENCE: AtomicU64 = AtomicU64::new(1);
 static GENERATION: AtomicU64 = AtomicU64::new(0);
 
@@ -227,6 +228,17 @@ impl Session {
 }
 
 pub fn run(request: &Value) -> Result<Value, &'static str> {
+    run_in(request, &POOL)
+}
+
+pub fn run_pdf(request: &Value) -> Result<Value, &'static str> {
+    run_in(request, &PDF_POOL)
+}
+
+fn run_in(
+    request: &Value,
+    pool: &'static OnceLock<Mutex<Option<Session>>>,
+) -> Result<Value, &'static str> {
     if request["schema"] != "les.worker-host.v1" {
         return Err("WORKER_HOST_SCHEMA_INVALID");
     }
@@ -263,12 +275,12 @@ pub fn run(request: &Value) -> Result<Value, &'static str> {
         .map_err(|_| "WORKER_INPUT_INVALID")?;
     let deadline = Instant::now() + Duration::from_millis(timeout);
     let generation = GENERATION.load(Ordering::SeqCst);
-    let pool = POOL.get_or_init(|| {
+    let pool = pool.get_or_init(|| {
         // One idle reaper per host, not a timer/thread per document. Never cancel
         // another dataset's active conversion merely because one batch finished.
-        thread::spawn(|| loop {
+        thread::spawn(move || loop {
             thread::sleep(Duration::from_secs(5));
-            if let Some(pool) = POOL.get() {
+            if let Some(pool) = pool.get() {
                 if let Ok(mut slot) = pool.try_lock() {
                     if slot.as_ref().is_some_and(|session| {
                         session.last_used.elapsed() >= Duration::from_secs(60)
@@ -342,19 +354,25 @@ pub fn run(request: &Value) -> Result<Value, &'static str> {
 }
 
 pub fn release_idle() -> Result<Value, &'static str> {
-    let Some(pool) = POOL.get() else {
-        return Ok(json!({"released":false}));
-    };
-    match pool.try_lock() {
-        Ok(mut slot) => Ok(json!({"released":slot.take().is_some()})),
-        Err(TryLockError::WouldBlock) => Ok(json!({"released":false,"busy":true})),
-        Err(_) => Err("WORKER_HOST_BUSY"),
+    let mut released = false;
+    let mut busy = false;
+    for pool in [POOL.get(), PDF_POOL.get()].into_iter().flatten() {
+        match pool.try_lock() {
+            Ok(mut slot) => released |= slot.take().is_some(),
+            Err(TryLockError::WouldBlock) => busy = true,
+            Err(_) => return Err("WORKER_HOST_BUSY"),
+        }
     }
+    Ok(if busy {
+        json!({"released":released,"busy":true})
+    } else {
+        json!({"released":released})
+    })
 }
 
 pub fn shutdown() -> Result<Value, &'static str> {
     GENERATION.fetch_add(1, Ordering::SeqCst);
-    if let Some(pool) = POOL.get() {
+    for pool in [POOL.get(), PDF_POOL.get()].into_iter().flatten() {
         pool.lock().map_err(|_| "WORKER_HOST_BUSY")?.take();
     }
     Ok(json!({"stopped":true}))

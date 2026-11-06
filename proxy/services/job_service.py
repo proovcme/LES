@@ -52,7 +52,12 @@ class JobService:
         return {key: _decode(row) for key, row in self._call('list', limit=limit).items()}
 
     def list_active_ids(self, limit=500):
-        return self._call('active', limit=limit)
+        active = self._call('active', limit=limit)
+        from backend.native_index_store import enabled
+        if enabled():
+            from backend.rag_config import rag_meta_db_path
+            active.extend(catalog_call(rag_meta_db_path(), 'intake_active_index'))
+        return active
 
     def mark_interrupted_active_jobs(self, reason):
         return self._call('recover', reason=reason, now=datetime.now().isoformat())

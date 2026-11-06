@@ -45,11 +45,11 @@
     catch (error) { workspace.error = errorMessage(error); }
     finally { actionBusy = false; }
   }
-  async function legacy(path: string) {
-    if (!workspace.legacyURL || disabled) return;
+  async function navigate(path: string, base = workspace.legacyURL) {
+    if (!base || disabled) return;
     await action(async () => {
       await workspace.persist();
-      const url = new URL(path, workspace.legacyURL!);
+      const url = new URL(path, base);
       location.assign(url);
     });
   }
@@ -83,12 +83,12 @@
       <button class="nav-item" disabled={disabled} onclick={() => { modal = 'sessions'; mobileNav = false; }}><Icon name="history" />Диалоги</button>
       <button class="nav-item" disabled={disabled} onclick={() => { memoryOpen = true; mobileNav = false; }}><Icon name="file" />Память</button>
       {#if workspace.legacyURL}
-        <button class="nav-item" disabled={disabled} onclick={() => legacy('/classic?tab=data')}><Icon name="folder" />Данные</button>
-        <button class="nav-item" disabled={disabled} onclick={() => legacy('/qdrant-visualizer/index.html')}><Icon name="tree" />Лес знаний</button>
+        <button class="nav-item" disabled={disabled} onclick={() => navigate('/classic?tab=data')}><Icon name="folder" />Данные</button>
       {/if}
+      <button class="nav-item" disabled={disabled} onclick={() => navigate('/qdrant-visualizer/index.html', location.origin)}><Icon name="tree" />Лес знаний</button>
     </div>
     <div class="nav-footer">
-      {#if workspace.legacyURL}<button class="nav-item" disabled={disabled} title="Модели, память и инструменты" onclick={() => legacy('/les/classic?tab=models')}><Icon name="settings" />Настройки</button>{/if}
+      {#if workspace.legacyURL}<button class="nav-item" disabled={disabled} title="Модели, память и инструменты" onclick={() => navigate('/les/classic?tab=models')}><Icon name="settings" />Настройки</button>{/if}
       <p>В лесу нельзя заблудиться.</p>
     </div>
   </nav>
@@ -109,7 +109,7 @@
               <div class="empty-state"><Icon name="chat" size={28} />
                 {#if workspace.session && !workspace.model && workspace.legacyURL}
                   <h2>Подключите модель</h2><p>Выберите локальную модель или API.<br />Затем добавьте документы и задайте вопрос.</p>
-                  <button disabled={disabled} onclick={() => legacy('/les/classic?tab=models')}>Подключить модель</button>
+                  <button disabled={disabled} onclick={() => navigate('/les/classic?tab=models')}>Подключить модель</button>
                 {:else}
                   <h2>Что найдём в ваших документах?</h2><p>Выберите набор или прикрепите файл.<br />Лес ответит и покажет источники.</p>
                   <button class="quiet" disabled={disabled || !workspace.session} onclick={() => modal = 'scope'}><Icon name="folder" />Выбрать документы</button>

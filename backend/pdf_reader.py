@@ -2,12 +2,39 @@
 from __future__ import annotations
 
 import math
+import logging
+import os
 from pathlib import Path
 from threading import RLock
 
 # PDFium is not thread safe, including calls on separate documents. Keep all
 # native object lifetimes inside this lock; return an independent PIL image.
 _PDFIUM_LOCK = RLock()
+logger = logging.getLogger(__name__)
+
+
+def _native_markdown(path: Path) -> tuple[str, bool] | None:
+    from backend import native_core
+
+    worker = os.getenv("LES_NATIVE_PDF_WORKER")
+    library = os.getenv("LES_NATIVE_PDFIUM")
+    if not worker or not library or not native_core.supports("worker_pdf"):
+        return None
+    try:
+        response = native_core.required("worker_pdf", request={
+            "schema": "les.worker-host.v1", "program": worker, "directory": str(Path(worker).parent),
+            "args": ["--serve-pdf-text", library], "context": "les.pdf-text.v1", "timeout_ms": 30_000,
+            "input": {"path": str(path.resolve())},
+        })
+        result = response.get("result") if response["status"] == "completed" else response
+        value = result.get("value")
+        if (result.get("status") == "completed" and isinstance(value, dict)
+                and isinstance(value.get("text"), str) and isinstance(value.get("needs_ocr"), bool)):
+            return value["text"], value["needs_ocr"]
+        logger.info("PDF_NATIVE_COMPAT code=%s", result.get("code", "PDF_RESPONSE_INVALID"))
+    except (OSError, native_core.NativeCoreError) as error:
+        logger.warning("PDF_NATIVE_COMPAT type=%s", type(error).__name__)
+    return None
 
 
 def render_page(path: str | Path, number: int, *, width: int = 1200, dpi: int | None = None,
@@ -52,6 +79,10 @@ def clipped_box(box, width, height):
 
 def extract_markdown(path: Path, *, tables: bool = True) -> tuple[str, bool]:
     """Keep page provenance and table rows; report scans instead of inventing text."""
+    if not tables:
+        result = _native_markdown(path)
+        if result is not None:
+            return result
     parts = []
     needs_ocr = False
     for number, text, scan in text_pages(path):
@@ -112,11 +143,11 @@ def text_pages(path: Path, *, limit: int | None = None):
             yield index + 1, text, scan
 
 
-def complex_geometry_pages(path: Path, *, pages=None, limit: int = 2000) -> set[int]:
+def complex_geometry_pages(path: Path | bytes, *, pages=None, limit: int = 2000) -> set[int]:
     """Check native object/segment counts before allocating pdfminer layouts."""
     import pypdfium2 as pdfium
     deferred = set()
-    with _PDFIUM_LOCK, pdfium.PdfDocument(str(path)) as document:
+    with _PDFIUM_LOCK, pdfium.PdfDocument(path if isinstance(path, bytes) else str(path)) as document:
         selected = range(1, len(document)+1) if pages is None else sorted(set(pages))
         for number in selected:
             if not 1 <= number <= len(document):

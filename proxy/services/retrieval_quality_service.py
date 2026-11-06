@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Any
 
+from backend import native_core
+from backend.inference.lexical_tokens import _STOP_WORDS, normalized_text
 from proxy.services.kot_service import KotDecision
 from proxy.services.lexical_index_service import RetrievalTrace
-from backend.inference.lexical_tokens import tokenize_current
+
+_NATIVE_STOP_WORDS = sorted(_STOP_WORDS)
 
 
 @dataclass(frozen=True)
@@ -18,6 +22,7 @@ class RetrievalQuality:
     source_diversity: int
     top_score: float
     score_kind: str = "unknown"
+    retry_wider: bool = False
 
     def payload(self) -> dict[str, Any]:
         return {
@@ -28,7 +33,7 @@ class RetrievalQuality:
             "top_score": round(self.top_score, 4),
             "score_kind": self.score_kind,
             "assessment_scope": "retrieval_signals_only",
-            "answerability": "not_evaluated",
+            "answerability": "no_evidence_found" if self.detail == "no_chunks" else "unverified",
         }
 
 
@@ -40,47 +45,26 @@ def evaluate_retrieval_quality(
     kot: KotDecision,
 ) -> RetrievalQuality:
     if not chunks:
-        return RetrievalQuality("weak", "no_chunks", 0.0, 0, 0.0, trace.score_kind)
+        return RetrievalQuality("weak", "no_chunks", 0.0, 0, 0.0, trace.score_kind, retry_wider=True)
 
-    # Use the same normalized token boundary as BM25. Raw substring checks
-    # lose Russian inflections and let short codes match unrelated longer codes.
-    terms = set(tokenize_current(question))
-    haystack = set(tokenize_current("\n".join(
-        f"{getattr(chunk, 'doc_name', '')}\n{getattr(chunk, 'content', '')}" for chunk in chunks)))
-    matched = terms & haystack
-    term_coverage = len(matched) / len(terms) if terms else 1.0
-    source_diversity = len({getattr(chunk, "doc_name", "") for chunk in chunks})
+    names = {str(getattr(chunk, "doc_name", "") or "") for chunk in chunks}
     top_score = float(getattr(chunks[0], "score", 0.0) or 0.0)
-
-    if trace.fallback_reason == "embedding_contract_mismatch":
-        return RetrievalQuality(
-            "degraded",
-            "lexical_only_embedding_contract_mismatch",
-            term_coverage,
-            source_diversity,
-            top_score,
-            trace.score_kind,
-        )
-    if kot.ambiguous and source_diversity > 2:
-        return RetrievalQuality("needs_clarification", "ambiguous_kot_multi_source", term_coverage, source_diversity, top_score, trace.score_kind)
-    # Absolute score thresholds are valid only for a declared dense-similarity
-    # channel. Qdrant RRF, local RRF, FTS and cross-encoder logits are not cosine.
-    if trace.score_kind == "dense_similarity" and top_score < 0.42 and term_coverage < 0.34:
-        return RetrievalQuality("weak", "low_dense_score_and_term_coverage", term_coverage, source_diversity, top_score, trace.score_kind)
-    # A broad scatter of individually weak candidates is not positive evidence just
-    # because several query words occur somewhere in the pool.  Keep the model
-    # path open, but make the trace/evidence packet honest: it must be able to
-    # ask for a target file or a narrower follow-up instead of presenting this
-    # as a good retrieval result.
-    if term_coverage < 0.25 and source_diversity > 3:
-        return RetrievalQuality("weak", "broad_low_coverage", term_coverage, source_diversity, top_score, trace.score_kind)
-    if term_coverage == 0.0:
-        return RetrievalQuality("weak", "no_lexical_support", term_coverage, source_diversity, top_score, trace.score_kind)
-    if "hybrid" in trace.mode:
-        detail = "hybrid_evidence" if term_coverage >= 0.25 or trace.exact_refs else "hybrid_partial_support"
-        status = "good" if detail == "hybrid_evidence" else "weak"
-        return RetrievalQuality(status, detail, term_coverage, source_diversity, top_score, trace.score_kind)
-    return RetrievalQuality("good", "retrieval_evidence", term_coverage, source_diversity, top_score, trace.score_kind)
+    top_score = top_score if math.isfinite(top_score) else 0.0
+    result = native_core.required("retrieval_quality", request={
+        "question": normalized_text(question),
+        "content": normalized_text("\n".join(str(getattr(chunk, "content", "") or "") for chunk in chunks)),
+        "names": normalized_text("\n".join(sorted(names))),
+        "stop_words": _NATIVE_STOP_WORDS,
+        "source_diversity": len(names),
+        "top_score": top_score,
+        "dense_similarity": trace.score_kind == "dense_similarity",
+        "hybrid": "hybrid" in trace.mode,
+        "exact_refs": bool(trace.exact_refs),
+        "embedding_mismatch": trace.fallback_reason == "embedding_contract_mismatch",
+        "ambiguous": bool(kot.ambiguous),
+    })
+    return RetrievalQuality(result["status"], result["detail"], result["term_coverage"],
+                            len(names), top_score, trace.score_kind, result["retry_wider"])
 
 
 def expanded_quality_query(question: str, kot: KotDecision) -> str:

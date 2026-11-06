@@ -8,7 +8,6 @@ from proxy.services.operation_progress_service import chat_progress
 from proxy.services.chat_inference_service import resolve_required_answer, run_bound_inference
 
 import asyncio
-import hashlib
 import json
 import logging
 import os
@@ -42,7 +41,7 @@ from proxy.services.context_governor_service import (
     ContextPacket,
     ContextRequiredSectionOverflow,
 )
-from proxy.services.harness_loop_service import HarnessLoop
+from proxy.services.harness_loop_service import HarnessLoop, admitted_tool_evidence
 from proxy.services.chat_section_context_service import ChatSectionReader, SectionReadError, visible_chunks
 from proxy.services.document_review_tool import bind_review_tool, TOOL_NAME as REVIEW_TOOL
 from proxy.services.bound_document_tools import document_tool_context, bound_contract_shortlist
@@ -72,6 +71,9 @@ from proxy.services.model_research_tool_service import (
     ModelResearchToolService,
 )
 from proxy.services.source_locator_service import evidence_counts, source_map_item
+from proxy.services.table_retrieval_service import retrieve_table_rows, table_source_key
+from proxy.services.word_evidence_service import retrieve_word_evidence
+from proxy.services.workbook_total_service import TOOL_NAME as WORKBOOK_TOTAL_TOOL, register_workbook_totals, total_evidence
 from proxy.services.chat_evidence_manifest_service import build_evidence_manifest
 from proxy.services.chat_capability_scope_service import filter_profile_tools
 from proxy.services.typed_memory_projection_service import (
@@ -354,6 +356,45 @@ async def _execute_chat_evidence_application(
             "validation": {"enabled": False, "reason": error_code},
             "history_id": history_id,
         }
+    table_coverage = {}
+    word_coverage = []
+    exact_table_docs = set()
+    exact_word_docs = set()
+    if document_grounding_enabled:
+        try:
+            table_rows, table_coverage = await asyncio.to_thread(
+                retrieve_table_rows, rag_backend, question=req.question, dataset_ids=_dataset_ids,
+                file_names=target_doc_filter, index_hits=chunks,
+            )
+        except Exception as error:
+            logger.warning("[TABLE_RAG] table lookup failed: %s", type(error).__name__)
+            table_coverage = {"issues": ["Не удалось проверить оригиналы таблиц"]}
+        else:
+            exact_table_docs = {table_source_key(row) for row in table_rows}
+            chunks = [*table_rows, *(chunk for chunk in chunks if table_source_key(chunk) not in exact_table_docs)]
+        if table_coverage:
+            retrieval_trace["table_originals"] = {
+                key: value for key, value in table_coverage.items() if key != "xlsx_sources"
+            }
+            t_search = time.time() - t_search_start
+        try:
+            word_blocks, word_coverage = await asyncio.to_thread(
+                retrieve_word_evidence, rag_backend, question=req.question, dataset_ids=_dataset_ids,
+                file_names=target_doc_filter, index_hits=chunks,
+            )
+        except Exception as error:
+            logger.warning("[WORD_RAG] original lookup failed: %s", type(error).__name__)
+            word_coverage = [{"status": "unavailable"}]
+        else:
+            exact_word_docs = {(item["dataset_id"], item["file_name"]) for item in word_coverage
+                               if item.get("all_body_blocks_included") and not item.get("unaddressed_content")}
+            chunks = [*word_blocks, *(chunk for chunk in chunks if table_source_key(chunk) not in exact_word_docs)]
+        if word_coverage:
+            retrieval_trace["word_originals"] = word_coverage
+            t_search = time.time() - t_search_start
+    exact_original_docs = exact_table_docs | exact_word_docs
+    workbook_sources = table_coverage.get("xlsx_sources", ())
+
     if topic_retrieval_plan:
         found_topic_docs = {str(getattr(chunk, "doc_name", "") or "") for chunk in topic_chunks}
         retrieval_trace["topic_guided_retrieval"] = {
@@ -381,8 +422,8 @@ async def _execute_chat_evidence_application(
         }
     if target_file_ref:
         retrieval_trace["target_file"] = target_file_ref
-    if retrieval.quality.status == "good":
-        state.chat_metrics["retrieval_good"] = state.chat_metrics.get("retrieval_good", 0) + 1
+    if retrieval.quality.status == "candidates":
+        state.chat_metrics["retrieval_candidates"] = state.chat_metrics.get("retrieval_candidates", 0) + 1
     else:
         state.chat_metrics["retrieval_weak"] = state.chat_metrics.get("retrieval_weak", 0) + 1
 
@@ -769,6 +810,43 @@ async def _execute_chat_evidence_application(
     # that is specific to the evidence packet rendered below.
     sys_normal = profile_system_prompt(profile_snapshot, strict=False)
     sys_strict = profile_system_prompt(profile_snapshot, strict=True)
+    if _dataset_ids or target_doc_filter or getattr(req, "selected_sources_only", False):
+        grounding = (
+            "\n\nСовпадения поиска — только кандидаты. Подтверждай вывод ссылкой на фрагмент, "
+            "который прямо его поддерживает. Ставь [Источник N] рядом с подтверждённым фактом. "
+            "При сравнении редакций укажи, из какого файла взят каждый факт, и поставь ссылку "
+            "на соответствующий фрагмент каждой редакции. Для каждого неподтверждённого пункта укажи: "
+            "«В прочитанных источниках ответа не найдено». Не подменяй условие похожим фактом."
+        )
+        sys_normal += grounding
+        sys_strict += grounding
+    if table_coverage:
+        table_instruction = (
+            "\n\nДля значений Excel и CSV используй строки оригинала и ссылайся на их источники. "
+            "Единицы измерения указывай только при наличии в источнике. "
+            "Выдача строк по вопросу выборочная. Для итога по книге или вывода об отсутствии записи "
+            "нужны подтверждения по всему нужному диапазону. Если их нет, укажи, что итог не подтверждён. "
+            "Сохранённое значение формулы взято из файла. Если значения нет, сообщи об этом."
+        )
+        if workbook_sources:
+            table_instruction += (
+                " Если доступен sum_excel_ranges, считай им суммы Excel по точным адресам, "
+                "ссылайся на каждый включённый диапазон и называй результат суммой выбранных ячеек. "
+                "При ошибке расчёта сообщи причину и уточни диапазон."
+            )
+        if table_coverage.get("issues") or table_coverage.get("file_limit_reached") or table_coverage.get("time_limit_reached"):
+            table_instruction += " Не все оригиналы таблиц удалось проверить в этом запросе."
+        sys_normal += table_instruction
+        sys_strict += table_instruction
+    if word_coverage:
+        word_instruction = (
+            "\n\nВ DOCX отдавай приоритет адресным цитатам с номером абзаца или строки. "
+            "Ставь ссылку [Источник N] сразу после значения или условия. "
+            "В таблицах сохраняй соответствие столбцов. При неполном наборе строк или абзацев "
+            "отделяй подтверждённые выводы от выводов по всему разделу."
+        )
+        sys_normal += word_instruction
+        sys_strict += word_instruction
 
     # ADR-12 слой 2: форму ответа диктует интент вопроса (детерминированно, до генерации).
     answer_form = apply_response_length(classify_answer_form(req.question), req.response_length)
@@ -1076,6 +1154,12 @@ async def _execute_chat_evidence_application(
                         bind_agent_workspace(tool_harness, str(req.session_id))
                     table_contract = table_tool.register(tool_harness) if table_tool is not None else None
                     review_contract = review_tool.register(tool_harness) if review_tool is not None else None
+                    shortlist_limit = min(execution_preset.max_tools,
+                                          max(1, _env_int("LES_CHAT_TOOL_SHORTLIST_LIMIT", 64)))
+                    workbook_contract = None
+                    if (workbook_sources and "read_excel_source" in profile_tools
+                            and shortlist_limit > sum(item is not None for item in (table_contract, review_contract))):
+                        workbook_contract = register_workbook_totals(tool_harness, rag_backend, workbook_sources)
 
                     async def _fallback_model_tool(tool_name: str, args: dict[str, Any]):
                         nonlocal local_file_epoch
@@ -1091,6 +1175,9 @@ async def _execute_chat_evidence_application(
                         if review_tool is not None and tool_name == REVIEW_TOOL:
                             from proxy.services.model_research_tool_service import ModelResearchToolResult
                             return ModelResearchToolResult(payload, review_tool.last_chunks if payload.get('status') == 'ok' else ())
+                        if workbook_contract is not None and tool_name == WORKBOOK_TOTAL_TOOL:
+                            from proxy.services.model_research_tool_service import ModelResearchToolResult
+                            return ModelResearchToolResult(payload, total_evidence(payload, workbook_sources))
                         return payload
 
                     model_research_tools = ModelResearchToolService(
@@ -1105,7 +1192,7 @@ async def _execute_chat_evidence_application(
                             "logger": logger,
                             "llm_semaphore": state.llm_semaphore,
                             "return_trace": True,
-                            "doc_filter": None,
+                            "doc_filter": target_doc_filter or None,
                             "scope_source": str(
                                 (scope_resolution or {}).get("scope_source") or "unspecified"
                             ),
@@ -1115,12 +1202,6 @@ async def _execute_chat_evidence_application(
                         },
                         fallback=_fallback_model_tool,
                         **retrieval_limits,
-                    )
-                    shortlist_limit = (
-                        min(
-                            execution_preset.max_tools,
-                            max(1, _env_int("LES_CHAT_TOOL_SHORTLIST_LIMIT", 64)),
-                        )
                     )
                     configured_call_limit = max(
                         1, _env_int("LES_CHAT_TOOL_MAX_CALLS", 48)
@@ -1153,7 +1234,8 @@ async def _execute_chat_evidence_application(
                         for tool in shortlist.get("tools", [])
                         if isinstance(tool, dict) and tool.get("name")
                     }
-                    allowed_tools = bound_contract_shortlist(shortlist, [table_contract, review_contract], shortlist_limit)
+                    allowed_tools = bound_contract_shortlist(
+                        shortlist, [table_contract, review_contract, workbook_contract], shortlist_limit)
                     native_tools = native_model_tool_schemas(
                         shortlist.get("tools") or []
                     )
@@ -1277,30 +1359,14 @@ async def _execute_chat_evidence_application(
                             if review_tool is not None and tool_name == REVIEW_TOOL and payload.get('status') == 'error':
                                 review_tool.remember_validation_failure(call.get('args') or {}, payload)
                             if research_result.chunks:
-                                known_chunk_ids = {
-                                    str((getattr(item, "meta", {}) or {}).get("chunk_id") or "")
-                                    or hashlib.sha256(
-                                        (
-                                            str(getattr(item, "doc_name", "") or "")
-                                            + "\x00"
-                                            + str(getattr(item, "content", "") or "")
-                                        ).encode("utf-8")
-                                    ).hexdigest()
-                                    for item in chunks
-                                }
-                                for found_chunk in research_result.chunks:
-                                    found_id = str(
-                                        (getattr(found_chunk, "meta", {}) or {}).get("chunk_id") or ""
-                                    ) or hashlib.sha256(
-                                        (
-                                            str(getattr(found_chunk, "doc_name", "") or "")
-                                            + "\x00"
-                                            + str(getattr(found_chunk, "content", "") or "")
-                                        ).encode("utf-8")
-                                    ).hexdigest()
-                                    if found_id not in known_chunk_ids:
-                                        chunks.append(found_chunk)
-                                        known_chunk_ids.add(found_id)
+                                added_evidence = admitted_tool_evidence(
+                                    chunks, research_result.chunks,
+                                    exact_original_docs if tool_name == "search_sources" else (),
+                                )
+                                if tool_name == WORKBOOK_TOTAL_TOOL:
+                                    chunks[:0] = added_evidence
+                                else:
+                                    chunks.extend(added_evidence)
                                 research_windows = await expand_chat_context(
                                     chunks,
                                     collection=getattr(rag_backend, "collection_name", ""),
@@ -1730,7 +1796,15 @@ async def _execute_chat_evidence_application(
                 formatted = normalize_answer_citations(answer, answer_source_map)
                 answer = formatted.pop('answer')
                 retrieval_trace['citation_formatting'] = formatted
-                citation_check = verify_answer_source_labels(answer, answer_source_map)
+                citation_check = verify_answer_source_labels(
+                    answer, answer_source_map,
+                    expected=document_grounding_enabled or bool(target_doc_filter),
+                )
+                linked = set(citation_check["linked"])
+                answer_source_map = [
+                    {**source, "cited_in_answer": int(source.get("index") or index) in linked}
+                    for index, source in enumerate(answer_source_map, 1)
+                ]
                 retrieval_trace["citation_check"] = citation_check
             except Exception as citation_error:  # noqa: BLE001
                 retrieval_trace["citation_check"] = {

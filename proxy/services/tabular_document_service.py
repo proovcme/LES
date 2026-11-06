@@ -6,15 +6,32 @@ from datetime import date, datetime, time
 import hashlib
 import io
 import json
+import logging
 import math
 from pathlib import Path
 import zipfile
+
+from backend import native_core
 
 TABLE_SUFFIXES = {'.xlsx', '.xlsm', '.csv'}
 MAX_ROWS = 20_000
 MAX_CELLS = 300_000
 MAX_COLUMNS = 512
 MAX_EXPANDED_BYTES = 64 * 1024 * 1024
+_logger = logging.getLogger(__name__)
+_WORKBOOK_ERRORS = {
+    'WORKBOOK_UNAVAILABLE': 'Не удалось открыть книгу для чтения',
+    'WORKBOOK_INVALID': 'Книга повреждена или недоступна для чтения',
+    'WORKBOOK_FILE_LIMIT': 'Таблица превышает предел чтения 64 МиБ',
+    'WORKBOOK_ARCHIVE_LIMIT': 'Распакованная таблица превышает 64 МиБ',
+    'WORKBOOK_SHEET_LIMIT': 'Лист превышает предел строк или столбцов',
+    'WORKBOOK_CELL_LIMIT': 'Таблица превышает предел: 20000 строк или 300000 ячеек',
+    'WORKBOOK_NONFINITE': 'Таблица содержит нечисловое значение NaN/Infinity',
+    'WORKBOOK_CHANGED': 'Файл изменился во время чтения. Прикрепите его заново',
+}
+_CELL_POLICY = ('Coordinates are literal. Absent coordinates are blank. '
+                'Numbers are decimal strings; formula caches may be absent. '
+                'All nonempty rows, including headings, are included.')
 
 
 def encode(value):
@@ -35,6 +52,25 @@ def cell_value(value):
     return {'kind': 'text', 'value': str(value)}
 
 
+def _snapshot(name, digest, sheets, rows):
+    return {'schema': 'les.table.v1', 'name': name, 'sha256': digest, 'sheets': sheets,
+            'rows': rows, 'row_count': len(rows), 'cell_policy': _CELL_POLICY}
+
+
+def _native_workbook(path, name):
+    try:
+        if not native_core.supports('table_snapshot'):
+            return None
+        snapshot = native_core.required('table_snapshot', request={'path': str(path)})
+    except native_core.NativeCoreError as error:
+        code = str(error)
+        if code in {'WORKBOOK_COMPATIBILITY', 'CORE_OUTPUT_LIMIT'}:
+            _logger.info('[TABLE] Workbook uses compatibility reader: %s', code)
+            return None
+        raise ValueError(_WORKBOOK_ERRORS.get(code, 'Не удалось прочитать книгу в Лесе')) from error
+    return _snapshot(name, snapshot['sha256'], snapshot['sheets'], snapshot['rows'])
+
+
 def read_table(path: Path, name: str | None = None) -> dict:
     """Capture every nonempty row, preserving coordinates, zeros and formulas.
 
@@ -42,8 +78,13 @@ def read_table(path: Path, name: str | None = None) -> dict:
     Bounds reject the whole source; a partial extraction cannot look complete.
     """
     path = Path(path)
+    name = name or path.name
     if path.suffix.lower() not in TABLE_SUFFIXES:
         raise ValueError('Поддерживаются XLSX, XLSM и CSV')
+    if path.suffix.lower() != '.csv':
+        snapshot = _native_workbook(path, name)
+        if snapshot is not None:
+            return snapshot
     if path.stat().st_size > MAX_EXPANDED_BYTES:
         raise ValueError('Таблица превышает предел чтения 64 МиБ')
     raw = path.read_bytes()
@@ -121,11 +162,7 @@ def read_table(path: Path, name: str | None = None) -> dict:
     # CSV decoding reads by path; reject replacement during extraction as well.
     if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
         raise ValueError('Файл изменился во время чтения. Прикрепите его заново')
-    return {'schema': 'les.table.v1', 'name': name or path.name, 'sha256': digest,
-            'sheets': sheets, 'rows': rows, 'row_count': len(rows),
-            'cell_policy': 'Coordinates are literal. Absent coordinates are blank. '
-                           'Numbers are decimal strings; formula caches may be absent. '
-                           'All nonempty rows, including headings, are included.'}
+    return _snapshot(name, digest, sheets, rows)
 
 
 def preview(document: dict, max_chars: int) -> tuple[str, bool]:

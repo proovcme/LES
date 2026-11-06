@@ -5,7 +5,16 @@ use std::collections::{BTreeSet, HashMap};
 use std::sync::LazyLock;
 
 static MARKER: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\[(?:Источники?\s+)?([0-9][0-9,;\s–—\-]*)(?:\|([^\]\n]*))?\]").unwrap()
+    Regex::new(r"(?i)\[(?:Источники?\s+([0-9][0-9,;\s–—\-]*)(?:,[ \t]*(?:страница|стр\.?|page)[ \t]+[0-9]+)?|([0-9][0-9,;\s–—\-]*))(?:\|([^\]\n]*))?\]").unwrap()
+});
+static NAMED_PARENTHETICAL: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\(Источники?[ \t]+([0-9][0-9,; \t–—\-]*)(?:,[ \t]*(?:страница|стр\.?|page)[ \t]+[0-9]+)?\)").unwrap()
+});
+static BARE_LINK_LABEL: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?i)(\bссылка(?:[ \t]+на[ \t]+[^\n:*]{1,80})?[ \t]*:[ \t*]*)Источник[ \t]+([0-9]+)\b",
+    )
+    .unwrap()
 });
 static NUMBER: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(\d+)\s*[-–—]\s*(\d+)|(\d+)").unwrap());
@@ -83,10 +92,23 @@ pub fn execute(request: &Value) -> Result<Value, &'static str> {
                 }
             })
             .into_owned();
+        let text = NAMED_PARENTHETICAL.replace_all(&text, "[Источник $1]");
+        let text = BARE_LINK_LABEL.replace_all(&text, |cap: &regex::Captures| {
+            let whole = cap.get(0).unwrap();
+            let follows_file_name = text[whole.end()..]
+                .strip_prefix('.')
+                .is_some_and(|rest| rest.starts_with(char::is_alphanumeric));
+            match cap[2].parse::<u32>() {
+                Ok(index) if valid.contains(&index) && !follows_file_name => {
+                    format!("{}[Источник {index}]", &cap[1])
+                }
+                _ => whole.as_str().to_owned(),
+            }
+        });
         MARKER
             .replace_all(&text, |cap: &regex::Captures| {
-                let mut indexes = numbers(&cap[1]);
-                if let Some(extra) = cap.get(2) {
+                let mut indexes = numbers(cap.get(1).or_else(|| cap.get(2)).unwrap().as_str());
+                if let Some(extra) = cap.get(3) {
                     for part in extra.as_str().split('|') {
                         if part.chars().all(|ch| {
                             ch.is_ascii_digit() || ch.is_whitespace() || ",;–—-".contains(ch)
@@ -135,5 +157,47 @@ mod tests {
         assert_eq!(r["header_repairs"], 1);
         assert!(r["answer"].as_str().unwrap().contains("`код [Источник 2]`"));
         assert!(!r["answer"].as_str().unwrap().contains("файл 87"));
+    }
+
+    #[test]
+    fn named_parentheses_become_links_without_treating_other_numbers_as_citations() {
+        let result = execute(&json!({
+            "answer": "32 (Источник 1), 7654321 (источник 2), номер (17), `(Источник 3)`",
+            "sources": [{"index": 1}, {"index": 2}]
+        }))
+        .unwrap();
+        assert_eq!(result["indexes"], json!([1, 2]));
+        assert_eq!(
+            result["answer"],
+            "32 [Источник 1], 7654321 [Источник 2], номер (17), `(Источник 3)`"
+        );
+    }
+
+    #[test]
+    fn a_page_qualifier_is_not_a_second_source_index() {
+        let result = execute(&json!({
+            "answer": "32 (Источник 1, страница 24). 90 [Источник 2, стр. 36]. [5, страница 9]",
+            "sources": [{"index": 1}, {"index": 2}, {"index": 24}, {"index": 36}]
+        }))
+        .unwrap();
+        assert_eq!(result["indexes"], json!([1, 2]));
+        assert_eq!(
+            result["answer"],
+            "32 [Источник 1]. 90 [Источник 2]. [5, страница 9]"
+        );
+    }
+
+    #[test]
+    fn bare_known_label_links_without_rewriting_document_names_or_code() {
+        let result = execute(&json!({
+            "answer": "**Ссылка:** Источник 4 (Таблица 1). Источник 4.docx, Источник 9, `Источник 4`",
+            "sources": [{"index": 4}]
+        }))
+        .unwrap();
+        assert_eq!(result["indexes"], json!([4]));
+        assert_eq!(
+            result["answer"],
+            "**Ссылка:** [Источник 4] (Таблица 1). Источник 4.docx, Источник 9, `Источник 4`"
+        );
     }
 }

@@ -1,10 +1,16 @@
 <script lang="ts">
   import type { Message, Source } from '../lib/contracts';
-  import { answerHTML, citations } from '../lib/markdown';
+  import { renderAnswer, citations } from '../lib/markdown';
   import SourceButton from './SourceButton.svelte';
   let { message, openSource, streaming = false }: { message: Message; openSource: (source: Source) => void; streaming?: boolean } = $props();
   const sources = $derived(message.meta?.source_map || []);
-  const html = $derived(answerHTML(message.text, sources));
+  const rendered = $derived(renderAnswer(message.text, sources));
+  const quoted = $derived(sources.filter((source) => rendered.linked.has(source.index)));
+  const found = $derived(sources.filter((source) => !rendered.linked.has(source.index)));
+  const citationStatus = $derived(message.meta?.retrieval_trace?.citation_check?.status);
+  const missingAttribution = $derived(!streaming && message.text
+    && (citationStatus === 'missing_labels' || citationStatus === 'no_sources'
+      || (sources.length > 0 && quoted.length === 0)));
   const execution = $derived(message.meta?.execution ?? message.meta?.retrieval_trace?.execution);
 </script>
 <article class:question={message.role === 'user'} class="message" aria-label={message.role === 'user' ? 'Ваш вопрос' : 'Ответ Леса'}>
@@ -21,19 +27,30 @@
     {:else if message.meta?.retrieval_trace?.status === 'degraded'}
       <p class="notice" role="status">Поиск работает с ограничениями: часть поискового контура недоступна. Проверьте источники перед использованием ответа.</p>
     {/if}
-    <div class="answer-text" use:citations={(index) => { const source = sources.find((item) => item.index === index); if (source) openSource(source); }}>{@html html}</div>
-    {#if ['missing_labels', 'invalid_labels', 'error'].includes(message.meta?.retrieval_trace?.citation_check?.status || '')}
-      <p class="notice" role="status">Часть ссылок в ответе не подтверждена. Сверьте утверждения с фрагментами источников ниже.</p>
+    {#if missingAttribution}
+      <p class="notice" role="status">У вывода нет ссылки на фрагмент документа.</p>
+    {/if}
+    <div class="answer-text" use:citations={(index) => { const source = sources.find((item) => item.index === index); if (source) openSource(source); }}>{@html rendered.html}</div>
+    {#if !missingAttribution && ['invalid_labels', 'error'].includes(citationStatus || '')}
+      <p class="notice" role="status">Часть ссылок в ответе не подтверждена.</p>
     {/if}
     {#if !message.text && !streaming}<p class="muted">Текст ответа не получен. Вопрос можно повторить.</p>{/if}
     {#if message.meta?.partial}<p class="partial">Ответ прерван. Полученный текст сохранён; проверьте его перед использованием.</p>{/if}
-    {#if sources.length}
-      <section class="sources" aria-label="Источники ответа">
-        <p class="sources-title">Источники ответа</p>
-        <ul>{#each sources.slice(0, 3) as source (source.index)}<li><SourceButton {source} open={openSource} /></li>{/each}</ul>
-        {#if sources.length > 3}<details><summary>Ещё источники · {sources.length - 3}</summary><ul>{#each sources.slice(3) as source (source.index)}<li><SourceButton {source} open={openSource} /></li>{/each}</ul></details>{/if}
+    {#if quoted.length}
+      <section class="sources" aria-label="Цитаты в ответе">
+        <p class="sources-title">Цитаты в ответе</p>
+        <ul>{#each quoted.slice(0, 3) as source (source.index)}<li><SourceButton {source} open={openSource} /></li>{/each}</ul>
+        {#if quoted.length > 3}<details><summary>Ещё цитаты · {quoted.length - 3}</summary><ul>{#each quoted.slice(3) as source (source.index)}<li><SourceButton {source} open={openSource} /></li>{/each}</ul></details>{/if}
       </section>
-    {:else if message.srcs?.length}
+    {/if}
+    {#if found.length}
+      <section class="sources" aria-label="Найденные материалы">
+        <details open={!quoted.length && !streaming}>
+          <summary>Найденные материалы · {found.length}</summary>
+          <ul>{#each found as source (source.index)}<li><SourceButton {source} open={openSource} /></li>{/each}</ul>
+        </details>
+      </section>
+    {:else if !sources.length && message.srcs?.length}
       <p class="muted">У ответа нет привязки к фрагментам. Упоминания документов: {message.srcs.join(', ')}.</p>
     {/if}
   {/if}

@@ -79,13 +79,18 @@ def build_header(
     tab_refs = {}
     show_admin_tabs = is_admin if admin_tabs is None else admin_tabs
     is_windows = sys.platform.startswith("win")
+    compact_settings = is_light() and active_primary == "config"
 
-    with ui.element("header").classes("w-full sov-ui-header").style(
-        "position:sticky;top:0;z-index:999;"
-        "background:var(--bg-panel);border-bottom:1px solid var(--border);"
-        "display:flex;align-items:center;padding:0 16px;height:56px;gap:0;"
-    ) as header_container:
-        if is_light():
+    header_container = ui.element("header").classes(
+        "w-full sov-ui-header" + (" les-settings-nav" if compact_settings else "")
+    )
+    if not compact_settings:
+        header_container.style(
+            "position:sticky;top:0;z-index:999;background:var(--bg-panel);border-bottom:1px solid var(--border);"
+            "display:flex;align-items:center;padding:0 16px;height:56px;gap:0;"
+        )
+    with header_container:
+        if is_light() and not compact_settings:
             from sovushka.components.navigation import return_controls
             return_controls()
         # ── Лого ──────────────────────────────────────────────────────────────
@@ -183,7 +188,7 @@ def build_header(
         ui.timer(0.4, _load_version, once=True)
 
         # ── Первичные поверхности: одинаковы в чате, Студии и конфигурации ───
-        if include_chat or (is_admin and (chat_link or admin_link)):
+        if not compact_settings and (include_chat or (is_admin and (chat_link or admin_link))):
             nav_buttons: dict[str, object] = {}
 
             def _open_primary(key: str, target: str) -> None:
@@ -247,7 +252,10 @@ def build_header(
                     )
             tab_refs["_primary_nav"] = nav_buttons
 
-        ui.label("Рабочие разделы").classes("sov-sidebar-caption")
+        if compact_settings:
+            ui.label("Настройки").classes("les-settings-title").props('role="heading" aria-level="1"')
+        else:
+            ui.label("Рабочие разделы").classes("sov-sidebar-caption")
 
         # ── Вторичные рабочие разделы ─────────────────────────────────────────
         with ui.tabs().classes("les-top-tabs").props("dense no-caps").style(
@@ -258,10 +266,13 @@ def build_header(
             if show_admin_tabs:
                 # v0.24: админка с чистыми именами; рабочие инструменты оставляем видимыми,
                 # иначе оператор не видит служебные источники, ВОР и нормоконтроль.
+                if compact_settings:
+                    tab_refs["model_connections"] = ui.tab("Модели", icon="o_hub")
                 tab_refs["diag"]       = ui.tab("Состояние", icon="o_health_and_safety")
                 if not is_light():
                     tab_refs["instrumenty"] = ui.tab("Инструменты", icon="o_build")
-                tab_refs["model_connections"] = ui.tab("Модели", icon="o_hub")
+                if not compact_settings:
+                    tab_refs["model_connections"] = ui.tab("Модели", icon="o_hub")
                 tab_refs["profiles"] = ui.tab("Профили", icon="o_manage_accounts")
                 if is_light():
                     tab_refs["mail_settings"] = ui.tab("Почта", icon="o_mail_outline")
@@ -303,16 +314,17 @@ def build_header(
             ("qdrant_viz", "Визуал"),
             ("volk", "Доступ"),
         )
-        with ui.button("Разделы", icon="o_apps").props(
-            'flat dense no-caps aria-label="Рабочие разделы"'
-        ).classes("sov-mobile-sections-button"):
-            with ui.menu().classes("sov-mobile-sections-menu"):
-                for key, label in mobile_sections:
-                    if key in tab_refs:
-                        ui.menu_item(
-                            label,
-                            on_click=lambda tab=tab_refs[key]: tabs.set_value(tab),
-                        )
+        if not compact_settings:
+            with ui.button("Разделы", icon="o_apps").props(
+                'flat dense no-caps aria-label="Рабочие разделы"'
+            ).classes("sov-mobile-sections-button"):
+                with ui.menu().classes("sov-mobile-sections-menu"):
+                    for key, label in mobile_sections:
+                        if key in tab_refs:
+                            ui.menu_item(
+                                label,
+                                on_click=lambda tab=tab_refs[key]: tabs.set_value(tab),
+                            )
 
         # ── Служебная зона: статус и действия собраны в один ровный блок ─────
         with ui.column().classes("sov-ui-header-controls").style(
@@ -376,7 +388,7 @@ def build_header(
                 ui.run_javascript("if(window.Quasar){Quasar.Dark.set(false);}")
 
             if is_admin:
-                if visualizer_url:
+                if visualizer_url and not compact_settings:
                     with ui.link(
                         target=visualizer_url,
                         new_tab=not is_light(),
@@ -931,9 +943,10 @@ def build_header(
 
                 ui.timer(5.0, _check_update_in_background, once=True)
                 ui.timer(86400.0, _check_update_in_background)
-                ui.button("Настройки", icon="o_settings", on_click=lambda: ui.navigate.to("/les/classic?tab=models")).props(
-                    'flat dense no-caps aria-label="Настройки"'
-                ).classes("sov-ui-header-action").style("color:var(--dim);font-size:.62rem;")
+                if not compact_settings:
+                    ui.button("Настройки", icon="o_settings", on_click=lambda: ui.navigate.to("/les/classic?tab=models")).props(
+                        'flat dense no-caps aria-label="Настройки"'
+                    ).classes("sov-ui-header-action").style("color:var(--dim);font-size:.62rem;")
 
             if is_light():
                 from sovushka.components.light_guide import open_user_guide
@@ -942,14 +955,24 @@ def build_header(
             # Пользователь / выход
             account_detail = auth_holder or auth_role
             ui.button(
-                "Профиль",
+                "Выйти" if compact_settings else "Профиль",
                 icon=("o_shield" if is_admin else "o_person"),
                 on_click=lambda: (logout(), ui.navigate.to("/login")),
             ).props("flat no-caps dense").classes(
                 "sov-ui-header-action sov-ui-header-account"
             ).tooltip(f"Сеанс: {account_detail}. Нажмите, чтобы выйти")
 
-    if active_primary == "chat":
+    if compact_settings:
+        from sovushka.components.navigation import navigation_link, svelte_chat_url
+        with header_container, ui.column().classes("les-settings-nav-footer"):
+            action_button("Назад", icon="o_arrow_back", variant="quiet", classes="les-nav-action").props("data-les-back")
+            navigation_link("Чат", svelte_chat_url() or "/classic?tab=chat", "o_forum")
+            navigation_link("Лес знаний", "/qdrant-visualizer/index.html", "o_forest")
+            with action_button("Приложение", icon="o_more_horiz", variant="quiet", classes="les-nav-action"):
+                with ui.menu().classes("sov-chat-utility-menu les-settings-utility") as utility_menu:
+                    ver_badge.move(utility_menu)
+                    utility_controls.move(utility_menu)
+    elif active_primary == "chat":
         with header_container:
             with action_button("Приложение", icon="o_more_horiz", variant="quiet",
                                classes="sov-chat-application-menu-button"):

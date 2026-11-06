@@ -6,6 +6,8 @@ import logging
 import re
 from typing import Iterable, Protocol
 
+from proxy.services.source_locator_service import source_locator
+
 logger = logging.getLogger(__name__)
 
 
@@ -323,6 +325,8 @@ def source_map_for_context(
                 for key in ("qdrant_point_id", "parent_id", "section_fragment_count", "context_origin"):
                     if meta.get(key) is not None:
                         item[key] = meta[key]
+            if meta.get("support_scope") in {"original_table_row", "original_table_total", "original_word_block"}:
+                item["locator"] = source_locator(chunk, excerpt=clean[:snippet_chars])
         out.append(item)
     return out
 

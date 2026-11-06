@@ -10,6 +10,7 @@ from __future__ import annotations
 import csv
 import html
 import io
+from itertools import islice
 import json
 import re
 import zipfile
@@ -70,13 +71,15 @@ def _safe_json(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c")
 
 
-def _document_shell(*, path_id: str, file_name: str, kind: str, body: str, note: str = "", document_id: str = "") -> str:
+def _document_shell(*, path_id: str, file_name: str, kind: str, body: str, note: str = "",
+                    document_id: str = "", source_sha256: str = "") -> str:
     config = _safe_json({
         "schema": FILE_VIEWER_SCHEMA,
         "path": str(path_id),
         "name": str(file_name),
         "kind": kind,
         "documentId": document_id,
+        "sourceSha256": source_sha256,
     })
     note_html = f'<div class="notice">{_e(note)}</div>' if note else ""
     template = """<!doctype html>
@@ -111,7 +114,7 @@ table{border-collapse:separate;border-spacing:0;width:100%;font-size:12px;font-v
 <script id="viewer-config" type="application/json">__CONFIG__</script>
 <script>
 const cfg=JSON.parse(document.getElementById('viewer-config').textContent);const api=location.pathname.startsWith('/lite-api/')?'/lite-api':'/api';
-document.getElementById('name').textContent=cfg.name;const raw=new URLSearchParams({path:cfg.path});const rawUrl=cfg.documentId?`${api}/documents/by-id/${encodeURIComponent(cfg.documentId)}/raw`:`${api}/rag/file/raw?${raw.toString()}`;document.getElementById('open').href=rawUrl;
+document.getElementById('name').textContent=cfg.name;const raw=new URLSearchParams({path:cfg.path});const revision=cfg.sourceSha256?'?'+new URLSearchParams({source_sha256:cfg.sourceSha256}):'';const rawUrl=cfg.documentId?`${api}/documents/by-id/${encodeURIComponent(cfg.documentId)}/raw${revision}`:`${api}/rag/file/raw?${raw.toString()}`;document.getElementById('open').href=rawUrl;
 const rawImage=document.querySelector('[data-raw-image]');if(rawImage)rawImage.src=rawUrl;
 document.querySelectorAll('[data-sheet]').forEach(button=>button.addEventListener('click',()=>{const url=new URL(location.href);url.searchParams.set('sheet',button.dataset.sheet);url.searchParams.delete('locator');location.href=url.toString()}));
 const hit=document.querySelector('.evidence-hit');if(hit)setTimeout(()=>hit.scrollIntoView({block:'center'}),40);
@@ -128,7 +131,11 @@ def _docx_view(path: Path, locator: str) -> tuple[str, str]:
 
     document = Document(str(path))
     parts: list[str] = []
-    paragraphs = document.paragraphs[:2000]
+    paragraph_match = re.fullmatch(r"para(\d+)", locator, re.I)
+    row_match = re.fullmatch(r"t(\d+)r(\d+)", locator, re.I)
+    paragraph_target = int(paragraph_match[1]) if paragraph_match else None
+    table_target = int(row_match[1]) if row_match else None
+    row_target = int(row_match[2]) if row_match else None
 
     def render_paragraph(paragraph, index: int) -> str:
         value = paragraph.text or ""
@@ -141,14 +148,17 @@ def _docx_view(path: Path, locator: str) -> tuple[str, str]:
         elif "heading" in style or "заголовок" in style or "title" in style:
             tag = "h3"
         anchor = f"para{index}"
-        hit = " evidence-hit" if locator.lower().startswith(anchor.lower()) else ""
+        hit = " evidence-hit" if index == paragraph_target else ""
         return f'<{tag} id="{anchor}" class="anchor{hit}">{_e(value) or "&nbsp;"}</{tag}>'
 
     def render_table(table, table_index: int) -> str:
         rows: list[str] = []
-        for row_index, row in enumerate(table.rows[:MAX_TABLE_ROWS]):
+        start = max(0, row_target - 40) if table_index == table_target else 0
+        window = islice(table.rows, start, start + MAX_TABLE_ROWS)
+        for row_index, row in enumerate(window, start):
             cells = "".join(f"<td>{_e(cell.text)}</td>" for cell in row.cells[:MAX_TABLE_COLUMNS])
-            rows.append(f'<tr id="t{table_index}r{row_index}">{cells}</tr>')
+            hit = ' class="anchor evidence-hit"' if table_index == table_target and row_index == row_target else ""
+            rows.append(f'<tr id="t{table_index}r{row_index}"{hit}>{cells}</tr>')
         return f'<div class="table-wrap anchor" id="t{table_index}"><table>{"".join(rows)}</table></div>'
 
     # python-docx 1.2 exposes body items in document order.  Keeping that order
@@ -158,16 +168,20 @@ def _docx_view(path: Path, locator: str) -> tuple[str, str]:
     table_index = 0
     for block in document.iter_inner_content():
         if getattr(block, "_p", None) is not None:
-            if paragraph_index < len(paragraphs):
+            if table_target is None and (abs(paragraph_index - paragraph_target) <= 25
+                                         if paragraph_target is not None else paragraph_index < 2000):
                 parts.append(render_paragraph(block, paragraph_index))
             paragraph_index += 1
             continue
-        if getattr(block, "_tbl", None) is not None and table_index < 150:
-            parts.append(render_table(block, table_index))
+        if getattr(block, "_tbl", None) is not None:
+            if paragraph_target is None and (table_index == table_target if table_target is not None else table_index < 150):
+                parts.append(render_table(block, table_index))
             table_index += 1
     note = ""
-    if len(document.paragraphs) > len(paragraphs):
-        note = f"Показаны первые {len(paragraphs)} абзацев. Для полной проверки откройте оригинал."
+    if paragraph_target is not None or table_target is not None:
+        note = "Показан фрагмент вокруг цитаты."
+    elif paragraph_index > 2000:
+        note = "Показаны первые 2000 абзацев. Для полной проверки откройте оригинал."
     body = f'<article class="document">{"".join(parts) or "<div class=\"empty\">Документ не содержит отображаемого текста.</div>"}</article>'
     return body, note
 
@@ -189,21 +203,36 @@ def _xlsx_view(path: Path, *, sheet: str, locator: str) -> tuple[str, str]:
         end_row = start_row + MAX_TABLE_ROWS - 1
         rows_data: list[list[Any]] = []
         max_columns = 1
-        for row in worksheet.iter_rows(min_row=start_row, max_row=end_row, values_only=True):
+        for row in worksheet.iter_rows(min_row=start_row, max_row=end_row, max_col=min(MAX_TABLE_COLUMNS, worksheet.max_column or 1), values_only=True):
             values = list(row[:MAX_TABLE_COLUMNS])
             while values and values[-1] is None:
                 values.pop()
             rows_data.append(values)
             max_columns = max(max_columns, len(values))
+        cached_values = ()
+        if selected == locator_sheet and start_row <= target_row < start_row + len(rows_data):
+            target_values = rows_data[target_row - start_row]
+            if any(isinstance(value, str) and value.startswith("=") for value in target_values):
+                cached = openpyxl.load_workbook(path, read_only=True, data_only=True)
+                try:
+                    cached_values = next(cached[selected].iter_rows(
+                        min_row=target_row, max_row=target_row, max_col=len(target_values), values_only=True,
+                    ), ())
+                finally:
+                    cached.close()
         header = "".join(f"<th>{get_column_letter(index)}</th>" for index in range(1, max_columns + 1))
         rendered_rows: list[str] = []
         for offset, values in enumerate(rows_data):
             row_number = start_row + offset
             classes = " evidence-hit" if row_number == target_row and selected == locator_sheet else ""
             cells: list[str] = []
-            for value in values:
-                cell_class = ' class="formula"' if isinstance(value, str) and value.startswith("=") else ""
-                cells.append(f"<td{cell_class}>{_e(value)}</td>")
+            for column, value in enumerate(values):
+                is_formula = isinstance(value, str) and value.startswith("=")
+                if is_formula and classes and column < len(cached_values) and cached_values[column] is not None:
+                    cells.append(f'<td>{_e(cached_values[column])}<br><small class="formula">{_e(value)}</small></td>')
+                else:
+                    cell_class = ' class="formula"' if is_formula else ""
+                    cells.append(f"<td{cell_class}>{_e(value)}</td>")
             cells.extend("<td></td>" for _ in range(max_columns - len(values)))
             rendered_rows.append(
                 f'<tr id="row-{row_number}" class="anchor{classes}"><th class="row-number">{row_number}</th>{"".join(cells)}</tr>'
@@ -221,21 +250,34 @@ def _xlsx_view(path: Path, *, sheet: str, locator: str) -> tuple[str, str]:
         workbook.close()
 
 
-def _delimited_view(path: Path) -> tuple[str, str]:
-    text = path.read_text(encoding="utf-8", errors="replace")[:MAX_TEXT_CHARS]
+def _delimited_view(path: Path, *, locator: str = "") -> tuple[str, str]:
+    from backend.text_decoding import read_document_text
+    from proxy.services.tabular_document_service import MAX_EXPANDED_BYTES, MAX_ROWS
+
+    match = re.fullmatch(r"CSV!R(\d+)", locator)
+    target_row = int(match.group(1)) if match and path.suffix.lower() == ".csv" else 0
+    if target_row:
+        if target_row > MAX_ROWS or path.stat().st_size > MAX_EXPANDED_BYTES:
+            raise ValueError("Таблица превышает предел предпросмотра")
+        text = read_document_text(path)
+    else:
+        text = path.read_text(encoding="utf-8", errors="replace")[:MAX_TEXT_CHARS]
     sample = text[:8192]
     try:
-        dialect = csv.Sniffer().sniff(sample, delimiters=",;\t|")
+        delimiters = ",;\t" if target_row else ",;\t|"
+        dialect = csv.Sniffer().sniff(sample, delimiters=delimiters)
     except csv.Error:
         dialect = csv.excel_tab if path.suffix.lower() == ".tsv" else csv.excel
-    rows = list(csv.reader(io.StringIO(text), dialect=dialect))[:MAX_TABLE_ROWS]
+    start = max(0, target_row - 41)
+    rows = list(islice(csv.reader(io.StringIO(text, newline=""), dialect=dialect), start, start + MAX_TABLE_ROWS))
     width = min(MAX_TABLE_COLUMNS, max((len(row) for row in rows), default=1))
     rendered = []
-    for index, row in enumerate(rows, 1):
+    for index, row in enumerate(rows, start + 1):
         cells = "".join(f"<td>{_e(value)}</td>" for value in row[:width])
-        rendered.append(f'<tr><th class="row-number">{index}</th>{cells}</tr>')
+        classes = ' class="anchor evidence-hit"' if index == target_row else ""
+        rendered.append(f'<tr{classes}><th class="row-number">{index}</th>{cells}</tr>')
     return f'<div class="table-wrap"><table><tbody>{"".join(rendered)}</tbody></table></div>', (
-        f"Показаны первые {len(rows)} строк." if len(rows) >= MAX_TABLE_ROWS else ""
+        f"Показаны строки {start + 1}–{start + len(rows)}." if rows else ""
     )
 
 
@@ -282,6 +324,7 @@ def file_viewer_html(
     locator: str = "",
     sheet: str = "",
     document_id: str = "",
+    source_sha256: str = "",
 ) -> str:
     path = Path(source_path).expanduser().resolve()
     if not path.is_file():
@@ -307,7 +350,7 @@ def file_viewer_html(
         elif kind == "mail":
             body, note = _mail_view(path)
         elif kind == "table":
-            body, note = _delimited_view(path)
+            body, note = _delimited_view(path, locator=locator)
         elif kind == "image":
             body, note = '<div class="image-stage"><img data-raw-image alt="Изображение документа"></div>', ""
         elif kind == "text":
@@ -319,4 +362,5 @@ def file_viewer_html(
             raise ValueError("PDF использует отдельный постраничный просмотрщик")
     except (zipfile.BadZipFile, ElementTree.ParseError, KeyError) as exc:
         raise ValueError("Файл повреждён или имеет несовместимую структуру") from exc
-    return _document_shell(path_id=path_id, file_name=path.name, kind=kind, body=body, note=note, document_id=document_id)
+    return _document_shell(path_id=path_id, file_name=path.name, kind=kind, body=body, note=note,
+                           document_id=document_id, source_sha256=source_sha256)

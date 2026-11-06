@@ -293,6 +293,9 @@ def source_usage(source: Any, index: int, answer: str = "") -> dict[str, str]:
     marker_used = int(index) in source_marker_numbers(answer)
     if chip["weak"] or explicit in {"weak", "rejected"}:
         return {"code": "weak", "label": "Слабый", "tone": "warn"}
+    if isinstance(source, dict) and type(source.get("cited_in_answer")) is bool:
+        marker_used = source["cited_in_answer"]
+        explicit = ""
     if marker_used or explicit in {"used", "cited", "accepted"}:
         return {"code": "used", "label": "Использован", "tone": "ok"}
     return {"code": "found", "label": "Найден", "tone": "muted"}

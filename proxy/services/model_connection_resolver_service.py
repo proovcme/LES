@@ -262,8 +262,8 @@ class ModelConnectionResolver:
         required_capabilities: frozenset[CapabilityName] = frozenset(),
     ) -> ResolvedModelConnection:
         canonical_role = ConnectionRole(role)
-        binding = self.registry.get_role_binding(canonical_role)
-        if binding is None:
+        execution = self.registry.execution_snapshot(role=canonical_role.value)
+        if execution is None:
             raise ModelConnectionResolutionError(
                 f"ROLE_BINDING_MISSING: {canonical_role.value}"
             )
@@ -272,10 +272,7 @@ class ModelConnectionResolver:
             required.add(CapabilityName.CHAT_COMPLETIONS)
         elif canonical_role is ConnectionRole.EMBEDDINGS:
             required.add(CapabilityName.EMBEDDINGS)
-        return self.resolve_revision(
-            binding.connection_revision_id,
-            required_capabilities=frozenset(required),
-        )
+        return self._resolve_snapshot(execution, required)
 
     def resolve_revision(
         self,
@@ -284,15 +281,18 @@ class ModelConnectionResolver:
         required_capabilities: frozenset[CapabilityName] = frozenset(),
     ) -> ResolvedModelConnection:
         """Resolve one immutable revision without changing or requiring a role binding."""
-        revision = self.registry.get_revision(str(revision_id))
-        if not self.registry.get_connection(revision.connection_id).enabled:
+        execution = self.registry.execution_snapshot(revision_id=str(revision_id))
+        return self._resolve_snapshot(execution, set(required_capabilities))
+
+    def _resolve_snapshot(self, execution, required_capabilities) -> ResolvedModelConnection:
+        revision, enabled, snapshot = execution
+        if not enabled:
             raise ModelConnectionResolutionError("CONNECTION_DISABLED")
         try:
             if self.secret_store.status(revision.secret_ref) == "missing":
                 raise ModelConnectionResolutionError("CONNECTION_SECRET_MISSING")
         except ModelSecretError as exc:
             raise ModelConnectionResolutionError(str(exc)) from exc
-        snapshot = self.registry.latest_capability_snapshot(revision.revision_id)
         if snapshot is None:
             raise ModelConnectionResolutionError("CAPABILITY_SNAPSHOT_MISSING")
         try:

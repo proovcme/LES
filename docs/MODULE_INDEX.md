@@ -1,5 +1,41 @@
 # Модули LES RAG
 
+Кандидат 804: Rust заменяет лексическую копию файла, читает родительские
+разделы Qdrant и обрабатывает вход и результаты инструментов в харнессе.
+[Лексический индекс](modules/bm25-index.md), [чтение разделов](modules/chat-section-context.md),
+[цикл инструментов](modules/native-harness-loop.md).
+
+Кандидат 803: `api/src/intake.rs` и `core/src/catalog/intake.rs` ведут фоновый
+импорт и сохраняют прогресс после остановки. `api/src/index_store.rs` публикует
+и удаляет точки в локальном Qdrant. `api/src/pdf_text.rs` обслуживает текстовый
+слой PDF в отдельном процессе.
+[Импорт](modules/auto-parse-resume.md), [извлечение](modules/document-extraction.md).
+
+Кандидат 795: `api/src/frontend.rs` проверяет и раздаёт собранные файлы
+чата, а запускатель передаёт адрес прежних экранов.
+[Контракт](modules/svelte-desktop.md).
+
+Кандидат 794: `api/src/auth_keys.rs` и `core/src/auth_keys.rs`
+обслуживают семь маршрутов реестра ключей и привязки устройств.
+[Контракт](modules/native-api.md).
+
+Кандидат 793: `api/src/auth.rs` авторизует прямой локальный вызов нативных
+маршрутов. `core/src/auth.rs` читает прежний реестр ключей без записи.
+[Контракт](modules/native-api.md).
+
+Кандидат 792: `runtime/src/cli` владеет CLI и внешним MCP stdio.
+`tools/build_light_package.py` выбирает Rust-команду и совместимые точки входа.
+[Контракт](modules/native-runtime.md).
+
+Кандидат 791: `core/src/document/workbook_index.rs` определяет размеры
+и готовит значения строк XLSX для существующей структурной индексации.
+`backend/workbook_index.py` связывает классификатор и Parquet с ядром.
+[Контракт](modules/document-tasks.md).
+
+Кандидат 790: `core/src/document/workbook.rs` читает снимки XLSX/XLSM для
+вложений, дочитывания и расчётов в чате. Граница с совместимым адаптером
+описана в [контракте таблиц](modules/document-tasks.md).
+
 Установленный 785: `core/src/catalog/job_store.rs` владеет нативным подсчётом
 PENDING и исключительным захватом очереди; порции выполняет существующий адаптер.
 [Контракт](modules/auto-parse-resume.md), [проверка](acceptance/parse-queue-785.md).
@@ -78,6 +114,8 @@ Rust-ядро документов: `core/src/lexical.rs`, `files.rs`, `jobs.rs`
 — переходы заданий. [Контракт и откат](modules/native-core.md).
 
 Порядок RRF/реранкера, контекст, worker и ошибки: [контракт RAG](modules/rag-ranking.md).
+
+[Лаборатория поиска, синхронизация папок и сравнение с Msty](acceptance/retrieval-lab-805.md).
 `backend/bm25_store.py` — postings и точная оценка при запросе;
 `backend/sparse_index.py` — миграция и журнал областей изменений;
 `backend/bm25_hybrid.py` — объединение с dense, `sparse_legacy.py` — TF-откат.
@@ -87,6 +125,9 @@ Rust-ядро документов: `core/src/lexical.rs`, `files.rs`, `jobs.rs`
 Нагрузочный стенд без моделей: `tools/benchmark_sparse_index.py`.
 Отдельный кандидат BM25 и чтения разделов: [контракт испытаний](modules/retrieval-candidate.md).
 Чтение родителей в основном чате и бюджет доказательств: [контракт](modules/chat-section-context.md).
+`pdf_page_context_service.py` читает соседние страницы из индекса.
+`pdf_table_continuation_service.py` проверяет продолжение таблицы по оригиналу.
+`word_evidence_service.py` возвращает адресные абзацы и строки таблиц DOCX.
 Сравнение полного и минимального поиска, модельного пакета и локальных судей:
 [стенд 764](modules/rag-pipeline-trial.md). `lexical_evidence_service.py` сверяет
 FTS ID с Qdrant; `section_coverage_service.py` формирует модельную метаинформацию
@@ -125,11 +166,15 @@ PDF из цитаты: `proxy/routers/documents.py` и `proxy/services/pdf_viewe
 снимок источника). Задания по строкам: `document_task_store.py` (атомарные пакеты,
 область, возобновление), `table_document_tool.py` (инструмент текущего диалога).
 Контракт: [Работа с таблицами](modules/document-tasks.md).
+`workbook_total_service.py` считает по указанным диапазонам оригинала Excel
+и возвращает отдельные доказательства по листам.
 Общая очередь выбранных документов/разделов: `document_review_tool.py`,
 `review_task_store.py`, `review_source_reader.py`; [контракт](modules/document-review.md).
 `document_task_database.py` — общий транспорт SQLite; `table_window_service.py`
 — адресные окна и чтение длинных ячеек; `bound_document_tools.py` — обязательный
 контекст привязанных инструментов и их место в shortlist.
+`table_retrieval_service.py` читает строки оригиналов при обычном запросе по базе.
+[Покрытие и ссылки](modules/chat-section-context.md).
 `native_tool_message_service.py` — адаптер канонических assistant/tool к native
 chat: объект arguments и имя tool_name без изменения сохранённого диалога.
 

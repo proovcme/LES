@@ -1,6 +1,10 @@
 //! Existing project/note/context tables, shared transaction owner; no model decisions.
 mod conversation;
+mod history;
+mod intake;
 mod job_store;
+mod library;
+mod model_connection;
 mod notes;
 mod projects;
 
@@ -127,11 +131,46 @@ fn dispatch(request: &Value) -> Result<Value> {
         .as_object()
         .ok_or_else(|| Failure::invalid("Invalid catalog arguments"))?;
     let write = match action {
-        "project_create" | "project_status" | "project_delete" | "project_link"
-        | "project_unlink" | "note_create" | "note_update" | "note_delete" | "note_list"
-        | "context_update" | "context_forget" | "job_init" | "job_create" | "job_update"
-        | "job_recover" => true,
-        "project_list"
+        "dataset_create"
+        | "intake_enqueue"
+        | "intake_claim"
+        | "intake_manifest"
+        | "intake_register"
+        | "intake_index_checkpoint"
+        | "intake_wait"
+        | "intake_fail"
+        | "project_create"
+        | "project_status"
+        | "project_delete"
+        | "project_link"
+        | "project_unlink"
+        | "note_create"
+        | "note_update"
+        | "note_delete"
+        | "note_list"
+        | "context_update"
+        | "context_forget"
+        | "job_init"
+        | "job_create"
+        | "job_update"
+        | "job_recover"
+        | "chat_history_init"
+        | "chat_history_begin"
+        | "chat_history_save"
+        | "chat_history_feedback"
+        | "chat_history_checkpoint"
+        | "chat_history_interrupt" => true,
+        "library_datasets"
+        | "intake_get"
+        | "intake_list"
+        | "intake_batch"
+        | "intake_owned_datasets"
+        | "intake_active_index"
+        | "intake_has_work"
+        | "library_dataset"
+        | "library_documents"
+        | "library_forest"
+        | "project_list"
         | "project_get"
         | "project_links"
         | "project_for_dataset"
@@ -145,6 +184,7 @@ fn dispatch(request: &Value) -> Result<Value> {
         | "history_session"
         | "history_questions"
         | "history_traces"
+        | "model_execution_snapshot"
         | "job_get"
         | "job_list"
         | "job_active"
@@ -174,6 +214,7 @@ fn dispatch(request: &Value) -> Result<Value> {
             "project_metadata" => json!({}),
             "project_datasets" => projects::datasets(None, args)?,
             "job_pending_documents" => json!(0),
+            "model_execution_snapshot" => Value::Null,
             _ => json!([]),
         });
     };
@@ -196,8 +237,16 @@ fn dispatch(request: &Value) -> Result<Value> {
     }
 }
 fn operate(conn: &Connection, action: &str, args: &Args) -> Result<Value> {
-    if action.starts_with("job_") {
+    if action.starts_with("intake_") {
+        intake::execute(conn, action, args)
+    } else if action.starts_with("library_") || action == "dataset_create" {
+        library::execute(conn, action, args)
+    } else if action.starts_with("job_") {
         job_store::execute(conn, action, args)
+    } else if action.starts_with("chat_history_") {
+        history::execute(conn, action, args)
+    } else if action == "model_execution_snapshot" {
+        model_connection::snapshot(conn, args)
     } else if action.starts_with("project_") {
         projects::execute(conn, action, args)
     } else if action.starts_with("note_") {

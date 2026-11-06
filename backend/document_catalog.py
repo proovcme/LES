@@ -2,6 +2,7 @@
 
 Owns metadata only; vector storage and model requests belong to separate adapters.
 """
+import json
 import os
 import sqlite3
 import time
@@ -650,6 +651,20 @@ class MetaDB:
                 (row["total"] if row else 0, dataset_id),
             )
 
+    def missing_sources(self, identities: set[tuple[str, str]]) -> set[tuple[str, str]]:
+        if not identities:
+            return set()
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                """SELECT d.dataset_id, d.file_name
+                   FROM json_each(?) AS requested
+                   JOIN documents AS d ON d.dataset_id=json_extract(requested.value,'$[0]')
+                                      AND d.file_name=json_extract(requested.value,'$[1]')
+                   WHERE d.status='MISSING'""",
+                (json.dumps(sorted(identities)),),
+            )
+            return {(row["dataset_id"], row["file_name"]) for row in rows}
+
     def apply_document_chunk_count_repairs(
         self,
         repairs: list[tuple[str, str, int]],
@@ -717,6 +732,34 @@ class MetaDB:
         if len(rows) > 1:
             raise ValueError('В каталоге несколько версий одного пути; восстановите однозначность источника')
         return rows[0] if rows else None
+
+    def indexed_table_sources(
+        self, dataset_ids, suffixes, *, file_names=(), preferred_sources=(), limit=5,
+    ) -> list[dict[str, Any]]:
+        """Find original table candidates inside the frozen document scope."""
+        if not dataset_ids or not suffixes:
+            return []
+        scope = ",".join("?" for _ in dataset_ids)
+        extensions = " OR ".join("LOWER(doc.file_name) LIKE ?" for _ in suffixes)
+        params = [*dataset_ids, *(f"%{suffix}" for suffix in suffixes)]
+        files = ""
+        if file_names:
+            files = "AND doc.file_name IN (" + ",".join("?" for _ in file_names) + ") "
+            params.extend(file_names)
+        priority = ""
+        if preferred_sources:
+            matches = " OR ".join("(doc.dataset_id=? AND doc.file_name=?)" for _ in preferred_sources)
+            priority = f"CASE WHEN {matches} THEN 0 ELSE 1 END, "
+            params.extend(value for source in preferred_sources for value in source)
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT doc.id, doc.dataset_id, doc.file_name, doc.source_path, doc.file_hash "
+                "FROM documents doc JOIN datasets ds ON ds.id=doc.dataset_id "
+                f"WHERE doc.status='INDEXED' AND doc.dataset_id IN ({scope}) AND ({extensions}) "
+                f"{files}ORDER BY {priority}doc.dataset_id, doc.file_name, doc.id LIMIT ?",
+                (*params, limit),
+            )
+            return [dict(row) for row in rows]
 
     def _integrity_rows(self, dataset_id: str, file_name: str | None = None) -> list[dict[str, Any]]:
         with self._get_conn() as conn:

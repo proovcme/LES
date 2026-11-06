@@ -11,6 +11,7 @@ from typing import Any
 from uuid import uuid4
 
 from backend.rag_config import rag_meta_db_path
+from backend.workspace_native import catalog_call
 from proxy.services.model_connection_contracts import (
     CapabilityName,
     CapabilityObservation,
@@ -579,8 +580,25 @@ class ModelConnectionRegistry:
                    ORDER BY observed_at DESC, rowid DESC LIMIT 1""",
                 (connection_revision_id,),
             ).fetchone()
-        if row is None:
+        return self._snapshot_from_row(row) if row is not None else None
+
+    def execution_snapshot(self, **selector):
+        """Resolve the role, head and capability rows at one database revision."""
+        result = catalog_call(self.db_path, 'model_execution_snapshot', **selector)
+        if result is None:
+            if "revision_id" in selector:
+                raise ModelConnectionRegistryError("CONNECTION_REVISION_NOT_FOUND")
             return None
+        if "missing" in result:
+            raise ModelConnectionRegistryError(result["missing"])
+        return (
+            self._revision_from_row(result["revision"]),
+            result["enabled"],
+            self._snapshot_from_row(result["snapshot"]) if result["snapshot"] is not None else None,
+        )
+
+    @staticmethod
+    def _snapshot_from_row(row) -> CapabilitySnapshot:
         observations = tuple(
             CapabilityObservation(
                 capability=CapabilityName(item["capability"]),

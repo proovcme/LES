@@ -11,6 +11,8 @@ from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
+from proxy.services import local_model_http
+
 from proxy.services.llm_transport_profile_service import assistant_delta_text
 from proxy.services.model_reasoning_service import ReasoningOutput
 from proxy.services.model_connection_contracts import CapabilityName, CapabilityState
@@ -290,11 +292,15 @@ class OpenAICompatibleTransport:
             connection,
             url=self._native_chat_url(connection),
             body=self._native_chat_body(connection, request),
+            chat_limits=(request.max_output_tokens, self.response_body_limit, request.reasoning_enabled),
         )
         try:
             if not 200 <= response.status_code < 300:
                 await self._read_bounded(response)
                 raise ModelTransportError(f"UPSTREAM_HTTP_ERROR: {response.status_code}")
+
+            if response.extensions.get("les_model_protocol") == local_model_http.CHAT_PROTOCOL:
+                return await self._collect_local_chat(response, connection.model_id, token_sink)
 
             semantic_size = 0
             event_count = 0
@@ -389,8 +395,40 @@ class OpenAICompatibleTransport:
                 ),
                 model_id=model_id,
             )
+        except (httpx.HTTPError, OSError) as exc:
+            raise ModelTransportError("UPSTREAM_STREAM_INTERRUPTED") from exc
         finally:
             await response.aclose()
+
+    @staticmethod
+    async def _collect_local_chat(response: httpx.Response, model_id: str, token_sink) -> InferenceResponse:
+        parts: list[str] = []
+        async for line in response.aiter_lines():
+            try:
+                event = json.loads(line)
+            except ValueError as exc:
+                raise ModelTransportError("UPSTREAM_RESPONSE_INVALID") from exc
+            if not isinstance(event, dict):
+                raise ModelTransportError("UPSTREAM_RESPONSE_INVALID")
+            if "error" in event:
+                raise ModelTransportError(event["error"])
+            if "finish" in event:
+                result = event["finish"]
+                return InferenceResponse(
+                    text="".join(parts),
+                    tool_calls=tuple(MappingProxyType(call) for call in result["tool_calls"]),
+                    finish_reason=result["finish_reason"],
+                    usage=MappingProxyType(result["usage"]),
+                    model_id=result["model_id"] or model_id,
+                )
+            if "text" in event:
+                text = event["text"]
+                parts.append(text)
+                if token_sink is not None:
+                    await token_sink({"event": "token", "data": text})
+            elif event.get("thinking") and token_sink is not None:
+                await token_sink({"event": "progress", "data": {"stage": "thinking", "label": "Модель думает"}})
+        raise ModelTransportError("UPSTREAM_STREAM_INTERRUPTED")
 
     @staticmethod
     def _fold_system_into_user(body: Mapping[str, Any]) -> dict[str, Any]:
@@ -418,7 +456,38 @@ class OpenAICompatibleTransport:
         *,
         url: str,
         body: Mapping[str, Any],
+        chat_limits: local_model_http.ChatLimits | None = None,
+        embed_limits: local_model_http.EmbedLimits | None = None,
     ) -> httpx.Response:
+        bridge = None
+        if self.peer_verifier is validate_connected_peer:
+            bridge = local_model_http.bridge_for(
+                url, connection.endpoint, has_secret=bool(connection.secret_ref),
+            )
+        if bridge is not None:
+            try:
+                response = await local_model_http.open_stream(
+                    bridge, url, dict(body), self.timeout, chat_limits=chat_limits, embed_limits=embed_limits,
+                )
+            except (httpx.HTTPError, OSError) as exc:
+                raise ModelTransportError(f"UPSTREAM_REQUEST_FAILED: {type(exc).__name__}") from exc
+            code = response.headers.get("x-les-model-bridge-error")
+            if response.headers.get("x-les-handler") != "rust.model-http":
+                code = "UPSTREAM_UNREACHABLE"
+            if code:
+                await response.aclose()
+                raise ModelTransportError(code)
+            protocol = (
+                local_model_http.CHAT_PROTOCOL if chat_limits is not None
+                else local_model_http.EMBED_PROTOCOL if embed_limits is not None else None
+            )
+            if protocol is not None and response.is_success:
+                if response.headers.get("x-les-model-protocol") != protocol:
+                    await response.aclose()
+                    raise ModelTransportError("UPSTREAM_RESPONSE_INVALID")
+                response.extensions["les_model_protocol"] = protocol
+            return response
+
         request = self.client.build_request(
             "POST",
             url,
@@ -440,12 +509,13 @@ class OpenAICompatibleTransport:
             raise ModelTransportError(str(exc)) from exc
         return response
 
-    async def _read_bounded(self, response: httpx.Response) -> bytes:
+    async def _read_bounded(self, response: httpx.Response, *, limit: int | None = None) -> bytes:
+        limit = self.response_body_limit if limit is None else limit
         chunks: list[bytes] = []
         size = 0
         async for chunk in response.aiter_bytes():
             size += len(chunk)
-            if size > self.response_body_limit:
+            if size > limit:
                 raise ModelTransportError("UPSTREAM_RESPONSE_TOO_LARGE")
             chunks.append(chunk)
         return b"".join(chunks)
@@ -646,8 +716,16 @@ class OpenAICompatibleTransport:
             connection,
             url=self._native_chat_url(connection, "embed") if native else join_openai_path(connection.endpoint, "/embeddings"),
             body=body,
+            embed_limits=(len(normalized_inputs), self.response_body_limit) if native else None,
         )
         try:
+            if response.extensions.get("les_model_protocol") == local_model_http.EMBED_PROTOCOL:
+                raw = await self._read_bounded(response, limit=self.response_body_limit * 8 + 256)
+                try:
+                    metadata, vectors = local_model_http.decode_embeddings(raw, len(normalized_inputs))
+                    return EmbeddingResponse(vectors, metadata["model_id"], _usage(metadata.get("usage")))
+                except (KeyError, ValueError) as exc:
+                    raise ModelTransportError("UPSTREAM_EMBEDDING_RESPONSE_INVALID") from exc
             raw = await self._read_bounded(response)
             if not 200 <= response.status_code < 300:
                 raise ModelTransportError(f"UPSTREAM_HTTP_ERROR: {response.status_code}")

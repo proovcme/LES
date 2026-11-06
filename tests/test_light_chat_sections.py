@@ -13,7 +13,10 @@ from proxy.services.chat_evidence_context import govern_inference_messages, mode
 from proxy.services.evidence_packet_service import build_retrieval_evidence_packet, render_retrieval_evidence_for_model
 from proxy.services.context_governor_service import ContextKind
 from proxy.services.public_error_service import public_error_payload
+from proxy.services.pdf_table_continuation_service import continuation_number, read_continuation
+from proxy.services.pdf_page_context_service import PdfPageContext, MAX_PAGE_POINTS
 from tests.test_context_governor_service import _preset
+from tests.pdf_fixtures import write_table_pdf
 
 
 def point(text, ordinal=0, dataset="ds", name="Раздел с пробелами.pdf", parent="p"):
@@ -34,6 +37,112 @@ async def backend(tmp_path, points):
     await client.create_collection("docs", vectors_config=models.VectorParams(size=2, distance=models.Distance.COSINE))
     await client.upsert("docs", points=points)
     return SimpleNamespace(aclient=client, content_dir=tmp_path, collection_name="docs")
+
+
+def pdf_point(text, page, part=1, **scope):
+    result = point(text, ordinal=page * 10 + part, parent=f"page-{page}", **scope)
+    result.payload.update(page=page, page_part=part, type="pdf_page_text",
+                          source_ref=f"{result.payload['file_name']}#page={page}")
+    return result
+
+
+@pytest.mark.asyncio
+async def test_pdf_reads_next_and_previous_page_edges_with_separate_provenance(tmp_path, monkeypatch):
+    first = pdf_point("Основной срок — 10 дней.", 12)
+    exception = pdf_point("Для срочной заявки — 3 дня.", 13)
+    third = pdf_point("Начало другого раздела", 13, part=3)
+    second = pdf_point("Условия срочной заявки", 13, part=2)
+    previous = pdf_point("Условия из предыдущего абзаца.", 11)
+    unrelated = [
+        pdf_point("Чужой датасет", 13, dataset="other"),
+        pdf_point("Чужой файл", 13, name="Другой.pdf"),
+        pdf_point("Страница вне окна", 14),
+    ]
+    b = await backend(tmp_path, [first, exception, second, third, previous, *unrelated])
+    scroll = b.aclient.scroll
+    pdf_calls = []
+
+    async def tracked(**kwargs):
+        if kwargs["scroll_filter"].should:
+            pdf_calls.append(kwargs["limit"])
+        return await scroll(**kwargs)
+
+    monkeypatch.setattr(b.aclient, "scroll", tracked)
+    try:
+        reader = ChatSectionReader(b, ["ds", "other"])
+        result = await reader.expand([chunk(first)])
+        assert [item.content for item in result.chunks] == [
+            first.payload["text"], exception.payload["text"], second.payload["text"], previous.payload["text"],
+        ]
+        assert result.pdf_context["adjacent_pages_read"] == 2
+        assert pdf_calls == [3 * (MAX_PAGE_POINTS + 1)]
+        packet = build_retrieval_evidence_packet(question="Срок?", chunks=result.chunks, retrieval_trace={})
+        evidence = packet.source_map(max_chars=5000)
+        assert evidence[1]["page"] == 13 and evidence[1]["quote"] == exception.payload["text"]
+        assert evidence[1]["qdrant_point_id"] == str(exception.id)
+        again = await reader.expand([chunk(first), chunk(exception)])
+        assert len({item.meta["qdrant_point_id"] for item in again.chunks}) == len(again.chunks)
+    finally:
+        await b.aclient.close()
+
+
+@pytest.mark.asyncio
+async def test_pdf_overflow_keeps_other_pages_and_never_uses_partial_page(tmp_path):
+    previous = pdf_point("Предыдущая страница", 1)
+    following = pdf_point("Продолжение на следующей странице", 3)
+    oversized = [pdf_point(f"Часть {part}", 2, part=part) for part in range(3 * (MAX_PAGE_POINTS + 1) + 1)]
+    b = await backend(tmp_path, [previous, following, *oversized])
+    try:
+        pdf = PdfPageContext(b)
+        fragments, trace = await pdf.read([oversized[0].payload], set())
+        assert [part.meta["qdrant_point_id"] for part in fragments] == [str(following.id), str(previous.id)]
+        assert trace["adjacent_pages_read"] == 2
+        assert pdf.pages["ds", oversized[0].payload["file_name"], 2] is None
+    finally:
+        await b.aclient.close()
+
+
+@pytest.mark.parametrize(("before", "after", "expected"), [
+    ("Таблица 7. Ведомость", "Продолжение таблицы 7", "7"),
+    ("Таблица 7", "Продолжение таблицы 70", ""),
+    ("Table A.7", "Table A.7 (continued)", "a.7"),
+    ("Table 7\nTable 8", "Table 7 (continued)", ""),
+    ("Таблица 7", "Таблица 7", ""),
+    ("Таблица 7", "Продолжение таблицы 7\nТаблица 8", ""),
+])
+def test_table_continuation_requires_matching_explicit_label(before, after, expected):
+    assert continuation_number(before, after) == expected
+
+
+@pytest.mark.asyncio
+async def test_pdf_table_geometry_is_read_from_original_and_cited_by_page(tmp_path):
+    from hashlib import sha256
+
+    name = "Раздел с пробелами.pdf"
+    path = tmp_path / name
+    write_table_pdf(path)
+    file_hash = sha256(path.read_bytes()).hexdigest()
+    source = {"id": "catalog-doc", "file_name": name, "status": "INDEXED",
+              "source_path": str(path), "file_hash": file_hash}
+    first = pdf_point("Table 7\nCode Quantity\nRG-1 32", 1)
+    following = pdf_point("Table 7 (continued)\nRG-2 7654321", 2)
+    b = await backend(tmp_path, [first, following])
+    b.db = SimpleNamespace(document_integrity_row=lambda *_: source)
+    try:
+        result = await ChatSectionReader(b, ["ds"]).expand([chunk(first)])
+        tables = [item for item in result.chunks if item.meta["context_origin"] == "pdf_table_continuation"]
+        assert [(item.doc_id, item.meta["page"]) for item in tables] == [("catalog-doc", 1), ("catalog-doc", 2)]
+        assert "Code | Quantity" in tables[0].content and "RG-2 | 7654321" in tables[1].content
+        assert result.pdf_context["confirmed_table_pages"] == 2
+        assert sha256(path.read_bytes()).hexdigest() == file_hash
+        other = tmp_path / "other.pdf"
+        write_table_pdf(other, next_divider=205)
+        source.update(source_path=str(other), file_hash=sha256(other.read_bytes()).hexdigest())
+        assert read_continuation(b, "ds", name, 1, "7") == []
+        source.update(source_path=str(path))
+        assert read_continuation(b, "ds", name, 1, "7") == []
+    finally:
+        await b.aclient.close()
 
 
 @pytest.mark.asyncio

@@ -4,12 +4,17 @@ import type { Source } from './contracts';
 
 /** Only references present in the backend source map become evidence buttons. */
 export function answerHTML(text: string, sources: Source[]): string {
+  return renderAnswer(text, sources).html;
+}
+
+export function renderAnswer(text: string, sources: Source[]): { html: string; linked: Set<number> } {
   const clean = DOMPurify.sanitize(marked.parse(text, { async: false, breaks: true }), {
     USE_PROFILES: { html: true },
     FORBID_TAGS: ['img', 'style', 'iframe', 'form', 'input', 'button', 'select', 'textarea', 'option', 'label', 'video', 'audio', 'object', 'embed'],
     FORBID_ATTR: ['style', 'id', 'name', 'target'], ALLOW_DATA_ATTR: false,
   });
   const container = document.createElement('div');
+  const linked = new Set<number>();
   container.innerHTML = clean;
   for (const anchor of container.querySelectorAll('a')) {
     try {
@@ -45,6 +50,7 @@ export function answerHTML(text: string, sources: Source[]): string {
       const prefix = node.data.slice(cursor, match.index);
       const source = sources.find((item) => item.index === Number(match[1]));
       if (source) {
+        linked.add(source.index);
         const button = document.createElement('button');
         button.type = 'button'; button.className = 'citation'; button.dataset.citation = String(source.index);
         button.textContent = `[${source.index}]`; button.setAttribute('aria-label', `Источник ${source.index}: ${source.doc_name || 'Документ'}`);
@@ -59,7 +65,7 @@ export function answerHTML(text: string, sources: Source[]): string {
     }
     fragment.append(node.data.slice(cursor)); node.replaceWith(fragment);
   }
-  return container.innerHTML;
+  return { html: container.innerHTML, linked };
 }
 
 export function citations(node: HTMLElement, open: (index: number) => void) {

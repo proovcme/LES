@@ -3,13 +3,19 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any
 
 from fastapi import HTTPException
 from qdrant_client import models
 
 from backend.index_replacement import ReplacementJournal
+from backend import native_index_store
 from backend.interface import Chunk, EmbeddingContractError
+from proxy.services.pdf_page_context_service import PdfPageContext
+
+SCOPE_FIELDS = ("dataset_id", "file_name", "parent_id")
+ANCHOR_FIELDS = ("page", "source_page", "source_ref", "chunk_ord", "source_sha256")
 
 
 class SectionReadError(HTTPException):
@@ -46,6 +52,7 @@ class SectionContext:
     sections: list[dict]
     input_count: int
     added_count: int = 0
+    pdf_context: dict | None = None
 
     def payload(self):
         return {"schema": "les.chat-section-context.v1", "enabled": True,
@@ -53,7 +60,8 @@ class SectionContext:
                 "selected_hits": len(self.chunks) - self.added_count,
                 "omitted_hits": self.input_count - (len(self.chunks) - self.added_count),
                 "added_count": self.added_count, "sections": self.sections,
-                "citations": "one_per_fragment", "packing": "hits_before_neighbours"}
+                "citations": "one_per_fragment", "packing": "hits_before_neighbours",
+                **({"pdf_context": self.pdf_context} if self.pdf_context else {})}
 
 
 class ChatSectionReader:
@@ -66,6 +74,7 @@ class ChatSectionReader:
         self.stamp = None
         self.started = False
         self.cache = {}
+        self.pdf_context = PdfPageContext(backend)
 
     def assert_current(self):
         if self.started and self.journal is not None:
@@ -119,7 +128,33 @@ class ChatSectionReader:
 
         # Check original hits against current payloads before reading any siblings.
         ids = list(dict.fromkeys(_point_id(seed) for seed in seeds if _point_id(seed)))
-        if ids:
+        groups = {}
+        for seed in seeds:
+            if _identity(seed)[2] and _point_id(seed):
+                groups.setdefault(_identity(seed), []).append(seed)
+        groups = list(groups.items())[:8]
+        current = {}
+        if ids and native_index_store.enabled():
+            anchors = [{"id": _point_id(seed), "text": seed.content,
+                        **dict(zip(SCOPE_FIELDS, _identity(seed))),
+                        **{key: _meta(seed).get(key) for key in ANCHOR_FIELDS}}
+                       for seed in seeds if _point_id(seed)]
+            requested = {key for key, _ in groups if key not in self.cache}
+            native = await native_index_store.read_sections(self.backend.collection_name, anchors,
+                [dict(zip(SCOPE_FIELDS, key)) for key, _ in groups if key in requested])
+            if native is None:
+                raise SectionReadError(422, detail={"code": "SECTION_READ_LIMIT"})
+            current = native["current"]
+            received = {}
+            for section in native["sections"]:
+                key = tuple(section["scope"][field] for field in SCOPE_FIELDS)
+                if key not in requested or key in received:
+                    raise EmbeddingContractError("SECTION_SCOPE_MISMATCH")
+                received[key] = [SimpleNamespace(**point) for point in section["points"]]
+            if set(received) != requested:
+                raise EmbeddingContractError("INDEX_CHANGED_DURING_SEARCH")
+            self.cache.update(received)
+        elif ids:
             records = await self.backend.aclient.retrieve(
                 collection_name=self.backend.collection_name, ids=ids,
                 with_payload=True, with_vectors=False)
@@ -132,19 +167,15 @@ class ChatSectionReader:
                     (str(payload.get("dataset_id") or ""), str(payload.get("file_name") or ""),
                      str(payload.get("parent_id") or "")) != _identity(seed) or
                     any(payload.get(key) != _meta(seed).get(key)
-                        for key in ("page", "source_page", "source_ref", "chunk_ord"))):
+                        for key in ANCHOR_FIELDS)):
                     raise EmbeddingContractError("INDEX_CHANGED_DURING_SEARCH")
 
-        groups = {}
-        for seed in seeds:
-            if _identity(seed)[2] and _point_id(seed):
-                groups.setdefault(_identity(seed), []).append(seed)
         sections, pending, counts = [], [], {}
-        for key, hits in list(groups.items())[:8]:
+        for key, hits in groups:
             if key not in self.cache:
                 scope = models.Filter(
                     must=[models.FieldCondition(key=name, match=models.MatchValue(value=value))
-                          for name, value in zip(("dataset_id", "file_name", "parent_id"), key)],
+                          for name, value in zip(SCOPE_FIELDS, key)],
                     must_not=[
                         models.FieldCondition(key="node_role", match=models.MatchValue(value="navigation")),
                         models.FieldCondition(key="evidence_admissible", match=models.MatchValue(value=False)),
@@ -171,7 +202,7 @@ class ChatSectionReader:
             neighbours = []
             for point in points:
                 payload = point.payload or {}
-                actual_key = tuple(str(payload.get(name) or "") for name in ("dataset_id", "file_name", "parent_id"))
+                actual_key = tuple(str(payload.get(name) or "") for name in SCOPE_FIELDS)
                 if actual_key != key or payload.get("node_role") == "navigation" or payload.get("evidence_admissible") is False:
                     raise EmbeddingContractError("SECTION_SCOPE_MISMATCH")
                 if str(point.id) in ids:
@@ -191,11 +222,16 @@ class ChatSectionReader:
                         {**_meta(seed), "atomic_evidence": True, "context_origin": "search_hit",
                          "section_fragment_count": counts.get(_identity(seed))})
                   for seed in seeds]
-        added = 0
+        covered_ids = {*ids, *(_point_id(chunk) for neighbours in pending for chunk in neighbours)}
+        boundary, pdf_trace = await self.pdf_context.read(
+            (current[point_id] for point_id in ids), covered_ids,
+        )
+        result.extend(boundary)
+        added = len(boundary)
         for position in range(max((len(items) for items in pending), default=0)):
             for items in pending:
                 if position < len(items) and added < 512:
                     result.append(items[position])
                     added += 1
         self.assert_current()
-        return SectionContext(result, sections, len(chunks), added)
+        return SectionContext(result, sections, len(chunks), added, pdf_trace)

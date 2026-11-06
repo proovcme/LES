@@ -19,13 +19,13 @@
 
 | Метрика | Значение |
 | --- | --- |
-| Python-файлов под git | 653 |
-| Строк Python | 166873 |
-| PRODUCT_REACHABLE | 402 |
+| Python-файлов под git | 673 |
+| Строк Python | 170360 |
+| PRODUCT_REACHABLE | 412 |
 | RUNTIME_SUPPORT | 5 |
-| TEST_OR_TOOL_ONLY | 211 |
+| TEST_OR_TOOL_ONLY | 221 |
 | DORMANT_CANDIDATE | 35 |
-| Зарегистрированных API-маршрутов | 296 |
+| Зарегистрированных API-маршрутов | 300 |
 | Ошибок разбора | 0 |
 
 ## Крупнейшие продуктовые модули
@@ -36,29 +36,29 @@
 | proxy/services/dataset_memory_service.py | 2284 | 9 |
 | mlx_host.py | 2216 | 0 |
 | sovushka/pages/chat.py | 2200 | 2 |
-| proxy/services/chat_evidence_application_service.py | 2041 | 7 |
+| proxy/services/chat_evidence_application_service.py | 2115 | 7 |
 | proxy/services/project_pdf_table_service.py | 1653 | 2 |
 | sovushka/pages/diag.py | 1606 | 1 |
 | proxy/services/checklist_review_service.py | 1518 | 1 |
 | proxy/routers/mail.py | 1502 | 4 |
-| proxy/services/retrieval_service.py | 1427 | 12 |
+| proxy/services/retrieval_service.py | 1440 | 12 |
 | proxy/services/cad_bim_graph.py | 1425 | 3 |
-| proxy/services/tool_harness_service.py | 1404 | 19 |
+| proxy/services/tool_harness_service.py | 1421 | 21 |
 | proxy/services/context_memory_service.py | 1175 | 8 |
 | sovushka/pages/samovar.py | 1143 | 3 |
+| backend/document_router.py | 1118 | 9 |
 | tools/build_rag_contract_sibling.py | 1114 | 2 |
-| backend/document_router.py | 1109 | 8 |
-| backend/document_catalog.py | 1025 | 8 |
+| backend/document_catalog.py | 1068 | 11 |
 | tools/reindex_datasets_guarded.py | 1016 | 1 |
 | proxy/services/drawing_manifest_service.py | 1012 | 3 |
-| sovushka/components/header.py | 968 | 2 |
-| backend/parquet_writer.py | 965 | 3 |
-| proxy/routers/runtime.py | 921 | 3 |
+| sovushka/components/header.py | 991 | 2 |
+| backend/parquet_writer.py | 983 | 4 |
+| proxy/routers/runtime.py | 922 | 3 |
 | proxy/services/project_pdf_extract_service.py | 915 | 4 |
 | proxy/services/chat_profile_service.py | 914 | 8 |
 | tools/les_runtime_control.py | 913 | 4 |
+| proxy/services/document_explorer_service.py | 904 | 5 |
 | proxy/services/mail_registry_service.py | 903 | 6 |
-| proxy/services/document_explorer_service.py | 866 | 4 |
 | proxy/services/project_document_registry_service.py | 853 | 3 |
 | proxy/services/notebook_study_service.py | 833 | 3 |
 | backend/mail_profile.py | 825 | 5 |
@@ -67,7 +67,7 @@
 
 ### `proxy/routers/chat.py`
 
-Статус: `PRODUCT_REACHABLE`; строк: 465.
+Статус: `PRODUCT_REACHABLE`; строк: 464.
 
 | Импортируемый символ | Потребители |
 | --- | --- |
@@ -77,7 +77,7 @@
 | `_llm_runtime` | `proxy/routers/settings.py` |
 | `_local_context_budget` | `tests/test_source_excerpts.py` |
 | `clean_visible_text` | `tests/test_source_excerpts.py` |
-| `ensure_chat_history_schema` | `proxy/app.py`<br>`proxy/routers/chat_history.py` |
+| `ensure_chat_history_schema` | `proxy/app.py` |
 | `get_chat_state` | `proxy/routers/workspace_memory.py`<br>`proxy/services/source_adapters.py` |
 | `router` | `proxy/app.py`<br>`tests/test_light_router_boundary.py` |
 | `set_chat_state` | `proxy/app.py` |

@@ -25,16 +25,62 @@ def test_light_forest_excludes_system_scope_not_user_names(tmp_path, monkeypatch
     light = graph.build_graph_full("test", include_system=False)
     assert {n['id'] for n in light['nodes']} == {'ds:user', 'user:mine.txt'}
     assert light['stats']['documents'] == 1
-    assert next(n for n in light['nodes'] if n['kind'] == 'document')['document_id'] == 'doc1'
+    document = next(n for n in light['nodes'] if n['kind'] == 'document')
+    assert document['document_id'] == 'doc1'
+    assert document['file_size'] is None
+    with sqlite3.connect(db) as conn:
+        conn.execute("ALTER TABLE documents ADD COLUMN file_size INTEGER")
+        conn.execute("UPDATE documents SET file_size = 8192 WHERE id = 'doc1'")
     full = graph.build_graph_full("test", include_system=True)
     assert full['stats']['datasets'] == 2
     assert full['stats']['documents'] == 2
+    assert next(n for n in full['nodes'] if n['id'] == 'user:mine.txt')['file_size'] == 8192
 
 
 def test_forest_actual_handlers_with_in_memory_dom():
     node = shutil.which("node")
     assert node, "Node is required for the forest contract gate"
     subprocess.run([node, "tests/forest_controls.mjs"], cwd=ROOT, check=True, capture_output=True, text=True)
+
+
+def test_search_lab_links_exact_workbook_row():
+    script = r"""
+      import assert from 'node:assert/strict';
+      import {readFileSync} from 'node:fs';
+      class Element {
+        constructor(tag) { this.tag = tag; this.children = []; }
+        append(...nodes) { this.children.push(...nodes); }
+        addEventListener(type, action) { this[type] = action; }
+        setAttribute() {}
+        replaceChildren() { this.children = []; }
+      }
+      const fields = new Map();
+      globalThis.document = {
+        body: {dataset:{nativeForest:'true'}}, createElement:(tag)=>new Element(tag),
+        getElementById(id) {
+          if (!fields.has(id)) fields.set(id, new Element(id));
+          return fields.get(id);
+        },
+      };
+      const hash = 'a'.repeat(64);
+      globalThis.fetch = async (url)=>({ok:true, json:async ()=> url.endsWith('/datasets') ? [] : {
+        chunks:[{doc_id:'id',doc_name:'Таблица.xlsx',content:'Сумма 12',
+          metadata:{dataset_id:'test',source_sha256:hash,sheet_name:'Лист №1',row:12}}],
+      }});
+      const source = readFileSync('qdrant_visualizer/search.js', 'utf8');
+      await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
+      document.getElementById('lab-question').value='строка 12';
+      await fields.get('lab-form').submit({preventDefault(){}});
+      const [,list] = fields.get('lab-results').children;
+      const anchor = list.children[0].children.find(node=>node.tag==='a');
+      const original = new URL(anchor.href, 'http://localhost');
+      assert.equal(original.pathname, '/api/documents/by-id/id/viewer');
+      assert.equal(original.searchParams.get('locator'), 'Лист №1!R12');
+      assert.equal(original.searchParams.get('source_sha256'), hash);
+    """
+    run = subprocess.run([shutil.which("node"), "--input-type=module", "-e", script], cwd=ROOT,
+                         capture_output=True, encoding="utf-8")
+    assert run.returncode == 0, run.stderr[-2000:]
 
 
 def test_forest_identity_and_source_contract():
@@ -71,6 +117,16 @@ def test_forest_identity_and_source_contract():
     assert.equal(m.documentStatus({status:'PENDING',chunks:0}),'Ожидает обработки');
     assert.equal(m.documentStatus({status:'INDEXED',chunks:3}),'Готов к поиску');
     assert.deepEqual(m.treePosition(a,4,100),m.treePosition(a,4,100));
+    assert.equal(m.documentSpecies({label:'ОВ / Чертёж.PDF'}),'pdf');
+    assert.equal(m.documentSpecies({label:'Исходные данные.docx'}),'text');
+    assert.equal(m.documentSpecies({label:'Ведомость.XLSX'}),'table');
+    assert.equal(m.documentSpecies({label:'Слайды.pptx'}),'slides');
+    assert.equal(m.documentSpecies({label:'Скан.TIFF'}),'image');
+    assert.equal(m.documentSpecies({label:'папка.pdf/без формата'}),'other');
+    assert.equal(m.fileSizeLabel(1024),'1 КБ');
+    assert.equal(m.fileSizeLabel(null),'');
+    assert.ok(m.treePosition({...a,file_size:50_000},4,100).height
+      < m.treePosition({...a,file_size:50_000_000},4,100).height);
     for(let i=0;i<10000;i++){
       const p=m.treePosition({...a,id:String(i)},i,10000);
       assert.ok(Number.isFinite(p.x)&&Number.isFinite(p.z));
@@ -82,11 +138,13 @@ def test_forest_identity_and_source_contract():
 
 def test_forest_is_same_origin_and_has_keyboard_alternative():
     script = (ROOT / "qdrant_visualizer/forest.js").read_text(encoding="utf-8")
+    scene = (ROOT / "qdrant_visualizer/forest-scene.js").read_text(encoding="utf-8")
     page = (ROOT / "qdrant_visualizer/index.html").read_text(encoding="utf-8-sig")
-    assert "const api='/lite-api'" in script
+    assert "const api=native?'/api':'/lite-api'" in script
     assert ":6333" not in script and ":8050" not in script
     assert ".innerHTML" not in script
-    assert "requestAnimationFrame" in script and "setInterval" not in script
+    assert "requestAnimationFrame" in scene and "setInterval" not in scene
+    assert 'id="forest" tabindex="0"' in page and 'aria-describedby="forest-instructions"' in page
     assert "AbortSignal.timeout(30000)" in script
     assert 'id="documents"' in page and "aria-pressed" in script
     assert "token!==searchToken" in script and "token!==selectionToken" in script

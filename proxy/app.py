@@ -11,6 +11,12 @@ import sys
 import time
 from collections import defaultdict
 
+from proxy.services import local_model_http
+from backend import native_index_store
+
+local_model_http.initialize()
+native_index_store.initialize()
+
 import httpx
 import psutil
 from backend.system_memory import system_memory_snapshot
@@ -116,7 +122,7 @@ chat_metrics = {
     "crag_fail": 0,
     "cache_hit": 0,
     "cache_miss": 0,
-    "retrieval_good": 0,
+    "retrieval_candidates": 0,
     "retrieval_weak": 0,
     # W3.3: учёт расходов облака (накопительно за аптайм proxy)
     "cloud_requests": 0,
@@ -302,10 +308,7 @@ async def startup():
     if interrupted_jobs:
         logger.info("[INIT] Marked %s stale active job(s) as interrupted", interrupted_jobs)
     try:
-        conn = sqlite3.connect(rag_meta_db_path(), check_same_thread=False)
-        ensure_chat_history_schema(conn)
-        conn.commit()
-        conn.close()
+        await asyncio.to_thread(ensure_chat_history_schema, rag_meta_db_path())
         from proxy.services.chat_durability_service import interrupt
         restored = await asyncio.to_thread(interrupt)
         if restored:
@@ -412,20 +415,18 @@ async def _parse_resume_supervisor():
     await asyncio.sleep(6)
     while True:
         try:
-            recovered = await asyncio.to_thread(rag_backend.db.recover_interrupted_parsing)
-            if recovered:
-                logger.info("[PARSE_RESUME] requeued=%s", recovered)
             from proxy.routers.datasets import active_parse_scheduler_job, get_dataset_state
+            from proxy.services.dataset_parse_service import pending_document_count
 
             state = get_dataset_state()
+            # An active parser writes the same stage fields as startup repair.
+            if not state.parse_semaphore.locked() and not state.sync_parse_semaphore.locked():
+                async with state.parse_semaphore, state.sync_parse_semaphore:
+                    recovered = await asyncio.to_thread(rag_backend.db.recover_interrupted_parsing)
+                if recovered:
+                    logger.info("[PARSE_RESUME] requeued=%s", recovered)
             if active_parse_scheduler_job(state) is None:
-                with sqlite3.connect(rag_meta_db_path()) as conn:
-                    pending = int(
-                        conn.execute(
-                            "SELECT COUNT(*) FROM documents WHERE upper(status)='PENDING'"
-                        ).fetchone()[0]
-                        or 0
-                    )
+                pending = await asyncio.to_thread(pending_document_count, rag_meta_db_path())
                 if pending:
                     await _auto_resume_pending_parse()
         except Exception as exc:
@@ -686,6 +687,8 @@ def create_app():
     fastapi_app.include_router(_without_full_les_paths(runtime_router, _FULL_LES_RUNTIME_PATHS) if is_light() else runtime_router)
     fastapi_app.include_router(diagnostics_router)
     fastapi_app.include_router(jobs_router)
+    from proxy.routers.dataset_external import native_router as native_intake_router
+    fastapi_app.include_router(native_intake_router)
     fastapi_app.include_router(logs_router)
     fastapi_app.include_router(mail_router)
     fastapi_app.include_router(rerank_router)

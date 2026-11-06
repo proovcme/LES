@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
+import sqlite3
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query
 
+from backend.native_index_store import enabled as native_intake_enabled
 from proxy.security import require_user
 from proxy.services.runtime_dispatcher import compute_eta
 
@@ -63,6 +65,10 @@ def summarize_job(job_id: str, job: Any) -> dict[str, Any]:
         job.get("started_at"), job.get("processed"), job.get("total"),
         running=str(job.get("status", "")).lower() in {"running", "parsing", "queued"},
     ))
+    if job.get("source") == "native_external":
+        for field in ("phase", "reason_code", "recoveries", "indexed", "index_pending",
+                      "index_errors", "index_skipped", "current_stage", "current_file"):
+            summary[field] = job.get(field)
     if result:
         summary["result_summary"] = {
             "status": result.get("status"),
@@ -82,6 +88,15 @@ def merged_jobs(state: JobsRouterState, *, limit: int = 200) -> dict[str, Any]:
         logger.warning("[JOBS] durable list failed: %s", error)
         durable = {}
     merged = dict(durable)
+    if native_intake_enabled():
+        from backend.rag_config import rag_meta_db_path
+        from backend.workspace_native import catalog_call
+        try:
+            native = catalog_call(rag_meta_db_path(), "intake_list", limit=limit)
+            if isinstance(native, dict):
+                merged.update(native)
+        except (OSError, ValueError, LookupError, sqlite3.Error):
+            logger.warning("[JOBS] native intake list unavailable")
     for job_id, memory_job in state.job_tracker.items():
         if isinstance(memory_job, dict):
             merged[job_id] = {**merged.get(job_id, {}), **memory_job}

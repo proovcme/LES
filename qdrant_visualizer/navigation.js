@@ -1,6 +1,7 @@
 /* Shared, bounded, same-origin navigation for the forest and NiceGUI workspaces. */
 (() => {
   const home = '/qdrant-visualizer/index.html';
+  const fallback = document.body?.dataset.nativeForest === 'true' ? '/app/' : home;
   const key = 'les.navigation.v1';
   const routes = {
     '/classic': ['chat', 'data', 'mail', 'history'],
@@ -48,7 +49,7 @@
   function back() {
     const current = canonical(location.href);
     if (trail.at(-1) === current) trail.pop();
-    const target = trail.at(-1) || home;
+    const target = trail.at(-1) || fallback;
     remember(target);
     activate(target);
   }

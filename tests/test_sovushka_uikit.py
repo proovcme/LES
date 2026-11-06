@@ -40,6 +40,31 @@ async def test_light_forest_link_stays_in_desktop_window(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_light_settings_have_single_navigation_and_keep_utilities(monkeypatch):
+    import asyncio
+    from nicegui import Client, ui, core
+    from nicegui.page import page
+    from sovushka.components import header
+    monkeypatch.setattr(core, "loop", asyncio.get_running_loop())
+    monkeypatch.setattr(header, "is_light", lambda: True)
+    monkeypatch.setattr(header, "app", SimpleNamespace(storage=SimpleNamespace(user={})))
+    monkeypatch.setenv("LES_LIGHT_SVELTE_URL", "http://127.0.0.1:54321/app/")
+    with Client(page('/__light_settings_nav')) as client:
+        _, refs = header.build_header(True, "admin", "", include_chat=False,
+                                      chat_link=True, active_primary="config", visualizer_url="/graph")
+        assert set(refs) == {'model_connections', 'diag', 'profiles', 'mail_settings'}
+        elements = list(client.elements.values())
+        assert sum(getattr(el, 'text', '') == 'Настройки' for el in elements if isinstance(el, ui.button)) == 0
+        links = {el.text: el._props.get('href') for el in elements if isinstance(el, ui.link) and el.text}
+        assert links['Чат'] == 'http://127.0.0.1:54321/app/'
+        assert links['Лес знаний'] == '/qdrant-visualizer/index.html'
+        menu = next(el for el in elements if isinstance(el, ui.menu) and 'les-settings-utility' in el.classes)
+        utilities = next(el for el in elements if 'sov-ui-header-controls' in el.classes)
+        assert utilities.parent_slot.parent is menu
+    await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("admin", [False, True])
 async def test_data_return_preserves_chat_and_reveals_navigation(monkeypatch, admin):
     import asyncio

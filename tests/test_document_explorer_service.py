@@ -12,6 +12,35 @@ from proxy.services.lexical_index_service import LexicalIndex, content_hash
 
 
 @pytest.mark.asyncio
+async def test_original_is_bound_to_the_cited_bytes(tmp_path, monkeypatch):
+    from hashlib import sha256
+    from fastapi import HTTPException
+
+    path = tmp_path / "СП · редакция.txt"
+    old = b"Revision 1"
+    path.write_bytes(old)
+    monkeypatch.setattr(documents_router, "_document_by_identity",
+                        lambda *_: {"id": "doc", "file_name": path.name, "source_path": str(path)})
+    revision = sha256(old).hexdigest()
+    assert (await documents_router.document_raw_by_id("doc", source_sha256=revision)).path == path
+    path.write_bytes(b"Revision 2")
+    with pytest.raises(HTTPException) as conflict:
+        await documents_router.document_raw_by_id("doc", source_sha256=revision)
+    assert conflict.value.status_code == 409
+    assert "прежней редакции" in conflict.value.detail
+    assert (await documents_router.document_raw_by_id("doc")).path == path
+
+
+def test_numbered_clause_keeps_document_scope_and_exact_number(explorer):
+    with explorer.connect() as conn:
+        conn.executemany("UPDATE lexical_chunks SET section_heading=? WHERE point_id=?",
+                         [("## Пункт 7.2. Требования", "p1"), ("7.20 Другой пункт", "p2"),
+                          ("7.2 Другая редакция", "p3")])
+    rows = explorer.numbered_clause("fire", "NTD/СП 7.13130.docx", "7.2")
+    assert [row["point_id"] for row in rows] == ["p1"]
+
+
+@pytest.mark.asyncio
 async def test_light_document_catalogues_share_visibility_before_pagination(explorer, monkeypatch):
     from proxy.routers import datasets as rag
     monkeypatch.setenv("LES_PRODUCT_EDITION", "light")

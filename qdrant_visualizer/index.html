@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Лес знаний · LES RAG</title><link rel="stylesheet" href="forest.css?v=753"></head>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Лес знаний · LES RAG</title><link rel="stylesheet" href="forest.css?v=800.3"></head>
 <body>
 <a class="skip-link" href="#les-main">Перейти к содержимому</a>
 <nav class="app-nav" aria-label="Главное меню">
@@ -8,7 +8,7 @@
 <div class="nav-bottom"><a href="/les/classic"><span aria-hidden="true">⚙</span>Настройки</a><p>LES RAG · Ваши знания рядом</p></div>
 </nav>
 <div class="workspace">
-<header><nav class="return-controls" aria-label="Возврат"><button class="quiet" data-les-back>Назад</button><a href="/classic?tab=chat">Чат</a></nav><form id="search-form"><label class="sr-only" for="search">Найти в лесу</label><div class="search-row"><span class="search-icon" aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Найти в лесу… документы или вопрос" maxlength="4000" autocomplete="off"><button type="submit" aria-label="Искать по содержимому">→</button></div></form><button id="reload" class="quiet">↻ Обновить</button></header>
+<header><nav class="return-controls" aria-label="Возврат"><button class="quiet" data-les-back>Назад</button><a class="quiet" href="/classic?tab=chat">Чат</a></nav><form id="search-form"><label class="sr-only" for="search">Найти в лесу</label><div class="search-row"><span class="search-icon" aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Найти в лесу… документы или вопрос" maxlength="4000" autocomplete="off"><button type="submit" aria-label="Искать по содержимому">→</button></div></form><nav class="return-controls" aria-label="Действия"><a class="quiet" href="search.html">Проверить поиск</a><button id="reload" class="quiet">↻ Обновить</button></nav></header>
 <main id="les-main" tabindex="-1">
 <details class="knowledge-architecture" id="architecture">
   <summary>
@@ -46,6 +46,17 @@
     </div></details>
   </div>
 </details>
-<section class="landscape" aria-label="Карта документов"><div class="intro"><p class="eyebrow">ПРОСТРАНСТВО ЗНАНИЙ</p><h1>Здесь растут<br>ваши знания.</h1><p>Каждое дерево — документ.<br>Каждая роща — набор знаний.</p></div><canvas id="forest" aria-hidden="true"></canvas><div class="scene-footer"><span id="count">Загружаем лес…</span><span>Выберите дерево или документ справа</span></div></section>
-<aside aria-label="Навигация по лесу"><div class="aside-heading"><h2>Ваши документы</h2><a href="/classic?tab=data" aria-label="Открыть управление документами">↗</a></div><label for="dataset">Набор документов</label><select id="dataset"><option value="">Весь лес</option></select><p class="hint">Поиск сверху: ввод — по названиям, Enter — по содержимому.</p><p id="status" role="status" aria-live="polite">Загружаем каталог документов…</p><section id="detail" hidden aria-label="Выбранный документ"></section><div id="documents" aria-label="Документы"></div><button id="more" class="quiet" hidden>Показать ещё</button><a class="all-documents" href="/classic?tab=data">Открыть все документы →</a><p class="hint footnote">Деревья показывают состав ваших наборов. Расстояние между ними не отражает сходство документов.</p></aside></main>
-</div><script src="navigation.js"></script><script type="module" src="forest.js"></script></body></html>
+<section class="landscape" aria-label="Карта документов">
+  <div class="intro"><p class="eyebrow">КАРТА ДОКУМЕНТОВ</p><h1>Лес знаний</h1><p>Роща — набор документов. Дерево — документ.</p></div>
+  <p id="forest-instructions" class="sr-only">Стрелки поворачивают карту, плюс и минус меняют масштаб, Home возвращает к обзору. Наборы и документы можно выбрать в списке.</p>
+  <canvas id="forest" tabindex="0" aria-label="Трёхмерная карта наборов документов" aria-describedby="forest-instructions"></canvas>
+  <div class="scene-tools" role="group" aria-label="Вид карты">
+    <button id="forest-overview" class="quiet" type="button">Весь лес</button>
+    <button id="forest-minus" class="quiet" type="button" aria-label="Уменьшить масштаб">−</button>
+    <output id="forest-scale" aria-label="Масштаб карты">100%</output>
+    <button id="forest-plus" class="quiet" type="button" aria-label="Увеличить масштаб">+</button>
+  </div>
+  <div class="scene-footer"><span id="count">Загружаем лес…</span><span>Перетаскивание · поворот &nbsp; Колесо · масштаб</span></div>
+</section>
+<aside aria-label="Навигация по лесу"><div class="aside-heading"><h2>Ваши документы</h2><a href="/classic?tab=data" aria-label="Открыть управление документами">↗</a></div><label for="dataset">Набор документов</label><select id="dataset"><option value="">Весь лес</option></select><p class="hint">Поиск сверху: ввод — по названиям, Enter — по содержимому.</p><details class="forest-legend"><summary>Условные обозначения</summary><ul id="forest-species"></ul><p>Высота дерева зависит от размера файла.</p></details><p id="status" role="status" aria-live="polite">Загружаем каталог документов…</p><section id="detail" hidden aria-label="Выбранный документ"></section><div id="documents" aria-label="Документы"></div><button id="more" class="quiet" hidden>Показать ещё</button><a class="all-documents" href="/classic?tab=data">Открыть все документы →</a><p class="hint footnote">Деревья показывают состав ваших наборов. Расстояние между ними не отражает сходство документов.</p></aside></main>
+</div><script src="navigation.js"></script><script type="module" src="forest.js?v=800.2"></script></body></html>

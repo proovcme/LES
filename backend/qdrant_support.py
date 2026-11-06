@@ -149,6 +149,7 @@ def _classify_parse_failure(error: Exception, *, attempts: int) -> ParseFailureD
     transient_codes = (
         ("missing prevalidated sparse vector", "SPARSE_VECTOR_PREVALIDATION_MISSING"),
         ("qdrant point count mismatch", "QDRANT_POINT_COUNT_MISMATCH"),
+        ("index_storage_write_failed", "INDEX_STORAGE_WRITE_FAILED"),
         ("embedding count mismatch", "EMBEDDING_COUNT_MISMATCH"),
         ("timed out", "PARSE_TIMEOUT"),
         ("timeout", "PARSE_TIMEOUT"),

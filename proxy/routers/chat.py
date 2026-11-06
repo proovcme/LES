@@ -161,7 +161,6 @@ from proxy.services.chat_inference_service import _mlx_runtime
 from proxy.services.chat_inference_service import model_connection_timeout
 from proxy.services.chat_persistence_service import _history_success
 from proxy.services.chat_persistence_service import _persist_recovered_stream_history
-from proxy.services.chat_persistence_service import CHAT_HISTORY_EXTRA_COLUMNS
 from proxy.services.chat_persistence_service import _json_text
 from proxy.services.chat_persistence_service import ensure_chat_history_schema
 from proxy.services.chat_persistence_service import save_chat_history

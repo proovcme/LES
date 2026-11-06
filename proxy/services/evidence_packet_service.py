@@ -274,7 +274,8 @@ def render_retrieval_evidence_for_model(
     return status_note + "[ФРАГМЕНТЫ ИЗ ИСТОЧНИКОВ]\n" + context
 
 
-def verify_answer_source_labels(answer: str, source_map: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+def verify_answer_source_labels(answer: str, source_map: Iterable[Mapping[str, Any]], *,
+                                expected: bool = False) -> dict[str, Any]:
     """Cheap post-generation citation integrity check; never judges domain truth."""
     sources = list(source_map or [])
     available = {
@@ -287,7 +288,7 @@ def verify_answer_source_labels(answer: str, source_map: Iterable[Mapping[str, A
     if invalid:
         status = "invalid_labels"
     elif not available:
-        status = "not_applicable"
+        status = "no_sources" if expected else "not_applicable"
     elif not cited:
         status = "missing_labels"
     else:
@@ -297,6 +298,7 @@ def verify_answer_source_labels(answer: str, source_map: Iterable[Mapping[str, A
         "status": status,
         "available": sorted(available),
         "cited": sorted(set(cited)),
+        "linked": sorted(available.intersection(cited)),
         "invalid": invalid,
         "claim_verification": "not_performed",
     }

@@ -299,7 +299,7 @@ def build_chat(is_admin: bool, tabs=None, tab_mermaid=None, tab_documents=None):
 
         with ui.element("main").classes("sov-chat-main"):
             with ui.row().classes("sov-chat-topbar"):
-                with ui.row().classes("items-center gap-2"):
+                with ui.row().classes("items-center gap-2 sov-workspace-identity"):
                     action_button("Проекты и чаты", icon="menu", variant="quiet",
                                   classes="sov-project-toggle", on_click=project_navigation.toggle).props('aria-haspopup="dialog"')
                     project_navigation.render_heading()

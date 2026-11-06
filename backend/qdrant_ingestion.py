@@ -5,6 +5,7 @@ from backend.qdrant_nodes import QdrantNodes
 from backend.index_replacement import retire_previous, discard_staged, ReplacementJournal, recover_adapter
 from backend.embedding_client import EmbedClient
 from backend.extraction_errors import DocumentExtractionError
+from backend.native_index_store import upsert
 
 
 class SourceRegistrationChanged(RuntimeError):
@@ -352,6 +353,7 @@ class QdrantIngestion:
                                 "dataset_id": dataset_id,
                                 "doc_id":     node.get("doc_id") or str(support.uuid.uuid4()),
                                 "file_name":  file_key,
+                                "source_sha256": source_fingerprint["file_hash"],
                                 "embedding_fingerprint": embedding_fingerprint,
                                 "embedding_backend": embedding_descriptor.get("backend", ""),
                                 "embedding_model_id": embedding_descriptor.get("model_id", ""),
@@ -396,11 +398,7 @@ class QdrantIngestion:
                             batch_points = points[point_start:point_start + support.UPSERT_BATCH]
                             # Include a possibly partially accepted batch in rollback.
                             staged_ids.extend(str(point.id) for point in batch_points)
-                            sync_qdrant.upsert(
-                                collection_name=self.collection_name,
-                                points=batch_points,
-                                wait=True,
-                            )
+                            upsert(sync_qdrant, self.collection_name, batch_points)
                             _add_timing("upsert_sec", phase_start)
                         journal.commit()
                         replacement_committed = True
