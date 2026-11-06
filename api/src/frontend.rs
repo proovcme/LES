@@ -233,11 +233,7 @@ pub fn forest(request: &Request) -> Option<Response> {
             } else {
                 include_str!("../../qdrant_visualizer/index.html")
             };
-            let html = template.replacen(
-                "<body>",
-                "<body data-native-forest=\"true\">",
-                1,
-            );
+            let html = template.replacen("<body>", "<body data-native-forest=\"true\">", 1);
             return Some(forest_response(
                 request,
                 html.into_bytes().into(),

@@ -259,21 +259,33 @@ impl Stack {
             let private_tokens = if self.config.native_api {
                 let model_token = control::random_id()?;
                 let ingest_token = control::random_id()?;
-                api.env("LES_INTERNAL_MODEL_TOKEN", &model_token).env(
-                    "LES_INTERNAL_MODEL_URL",
-                    format!(
-                        "http://127.0.0.1:{}/api/light/internal-model-http",
-                        self.api
-                    ),
-                ).env("LES_INTERNAL_INGEST_TOKEN", &ingest_token).env("LES_NATIVE_INDEX_URL",
-                    format!("http://127.0.0.1:{}/api/light/internal-index-store", self.api));
+                api.env("LES_INTERNAL_MODEL_TOKEN", &model_token)
+                    .env(
+                        "LES_INTERNAL_MODEL_URL",
+                        format!(
+                            "http://127.0.0.1:{}/api/light/internal-model-http",
+                            self.api
+                        ),
+                    )
+                    .env("LES_INTERNAL_INGEST_TOKEN", &ingest_token)
+                    .env(
+                        "LES_NATIVE_INDEX_URL",
+                        format!(
+                            "http://127.0.0.1:{}/api/light/internal-index-store",
+                            self.api
+                        ),
+                    );
                 #[cfg(windows)]
                 if let Some(python_root) = self.config.python.parent() {
                     let pdfium = python_root.join("Lib/site-packages/pypdfium2_raw/pdfium.dll");
                     if pdfium.is_file() {
                         api.env("LES_NATIVE_PDFIUM", pdfium).env(
                             "LES_NATIVE_PDF_WORKER",
-                            self.config.root.parent().unwrap().join("native/api/les-api.exe"),
+                            self.config
+                                .root
+                                .parent()
+                                .unwrap()
+                                .join("native/api/les-api.exe"),
                         );
                     }
                 }

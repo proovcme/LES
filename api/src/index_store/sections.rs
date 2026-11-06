@@ -117,9 +117,16 @@ async fn read(context: &Context, store: &Store, body: &Value) -> Result<Value, &
             .ok_or(CHANGED)?;
         if !evidence(payload)
             || fields(seed) != fields(payload)
-            || ["text", "page", "source_page", "source_ref", "chunk_ord", "source_sha256"]
-                .into_iter()
-                .any(|key| seed[key] != payload[key])
+            || [
+                "text",
+                "page",
+                "source_page",
+                "source_ref",
+                "chunk_ord",
+                "source_sha256",
+            ]
+            .into_iter()
+            .any(|key| seed[key] != payload[key])
         {
             return Err(CHANGED);
         }

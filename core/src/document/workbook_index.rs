@@ -94,7 +94,9 @@ fn to_table(name: &str, rows: BTreeMap<u32, Vec<Value>>) -> Option<Value> {
     if data.is_empty() {
         return None;
     }
-    Some(json!({"sheet_name":name,"headers":headers,"rows":data,"header_row":header+1,"row_numbers":row_numbers}))
+    Some(
+        json!({"sheet_name":name,"headers":headers,"rows":data,"header_row":header+1,"row_numbers":row_numbers}),
+    )
 }
 
 fn extract(bytes: &[u8], probe: bool) -> Result<Value> {

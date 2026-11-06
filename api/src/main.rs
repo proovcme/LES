@@ -176,7 +176,9 @@ fn configuration() -> Result<(std::net::SocketAddr, Context), &'static str> {
     let token = std::env::var(local_model::TOKEN_ENV).ok();
     let local_model = token
         .as_ref()
-        .map(|token| local_model::Bridge::new(token.clone(), listen.port(), upstream.port().unwrap()))
+        .map(|token| {
+            local_model::Bridge::new(token.clone(), listen.port(), upstream.port().unwrap())
+        })
         .transpose()?;
     let ingest_token = std::env::var("LES_INTERNAL_INGEST_TOKEN").ok();
     if ingest_token.as_ref().is_some_and(|token| {
@@ -184,7 +186,11 @@ fn configuration() -> Result<(std::net::SocketAddr, Context), &'static str> {
     }) {
         return Err("Invalid internal ingestion token");
     }
-    let index_store = ingest_token.clone().map(index_store::Store::from_env).transpose()?.flatten();
+    let index_store = ingest_token
+        .clone()
+        .map(index_store::Store::from_env)
+        .transpose()?
+        .flatten();
     let intake = ingest_token
         .filter(|_| std::env::var("LES_STARTUP_BACKGROUND_MUTATIONS").as_deref() == Ok("true"))
         .map(intake::Service::new);
@@ -225,7 +231,10 @@ fn main() {
     }
     if let [action, library, document] = args.as_slice() {
         if action == "--extract-pdf-text" {
-            let result = pdf_text::extract(std::path::Path::new(library), std::path::Path::new(document));
+            let result = pdf_text::extract(
+                std::path::Path::new(library),
+                std::path::Path::new(document),
+            );
             println!("{result}");
             return;
         }
@@ -260,9 +269,7 @@ fn main() {
             }
             axum::serve(
                 listener,
-                Router::new()
-                    .fallback(dispatch)
-                    .with_state(context),
+                Router::new().fallback(dispatch).with_state(context),
             )
             .await
         })?;

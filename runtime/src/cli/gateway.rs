@@ -298,7 +298,11 @@ impl Api {
 
     pub fn read_clause(&self, dataset: &str, document: &str, number: &str) -> Result<Value> {
         self.require_user_dataset(dataset)?;
-        if document.len() > 240 || !document.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_:".contains(&b)) {
+        if document.len() > 240
+            || !document
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"-_:".contains(&b))
+        {
             return Err("Укажите ID документа из list_documents.".into());
         }
         let mut result = self.get_with_query(
@@ -307,10 +311,14 @@ impl Api {
         )?;
         if let Some(sources) = result["sources"].as_array_mut() {
             for source in sources {
-                source["original_url"] = self.document_link(
-                    document, dataset, text(&source["doc_name"]),
-                    text(&source["locator"]["source_sha256"]),
-                ).into();
+                source["original_url"] = self
+                    .document_link(
+                        document,
+                        dataset,
+                        text(&source["doc_name"]),
+                        text(&source["locator"]["source_sha256"]),
+                    )
+                    .into();
             }
         }
         Ok(result)
