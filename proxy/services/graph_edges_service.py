@@ -103,7 +103,7 @@ _full_cache: dict[str, Any] = {"ts": 0.0, "collection": "", "payload": None}
 def build_graph_full(collection: str, max_ntd_edges: int = 4000, *, include_system: bool = True) -> dict[str, Any]:
     """Полный граф знаний: узлы Проект→Датасет→Документ + рёбра принадлежности и NTD-ссылок.
     Документ-узел несёт project/dataset/doc_type/domain/chunks → фронт красит по любому срезу,
-    размер = чанки, клик → область поиска. ADR-11: без LLM, только MetaDB + лексический индекс."""
+    размер файла из каталога, клик → область поиска. ADR-11: без LLM, только MetaDB + лексический индекс."""
     import sqlite3
 
     from backend.rag_config import rag_meta_db_path
@@ -131,8 +131,10 @@ def build_graph_full(collection: str, max_ntd_edges: int = 4000, *, include_syst
                 ds_meta[str(r["id"])] = {"name": r["name"], "chunks": int(r["cc"]), "group": r["grp"]}
             doc_columns = {row[1] for row in conn.execute("PRAGMA table_info(documents)")}
             identity_sql = "id" if "id" in doc_columns else "NULL"
+            size_sql = "file_size" if "file_size" in doc_columns else "NULL"
             for r in conn.execute(
-                f"SELECT {identity_sql} document_id, dataset_id, file_name, COALESCE(doc_type,'') dt, COALESCE(domain,'') dm, "
+                f"SELECT {identity_sql} document_id, {size_sql} file_size, dataset_id, file_name, "
+                "COALESCE(doc_type,'') dt, COALESCE(domain,'') dm, "
                 "COALESCE(chunk_count,0) cc, COALESCE(status,'') st FROM documents"
             ):
                 if is_temporary_source_name(r["file_name"]):
@@ -186,7 +188,8 @@ def build_graph_full(collection: str, max_ntd_edges: int = 4000, *, include_syst
         nodes.append({"id": doc_id, "kind": "document", "label": fname, "document_id": d["document_id"],
                       "dataset_id": dsid, "dataset": ds_meta.get(dsid, {}).get("name", ""),
                       "project_id": (pr or {}).get("id"), "project": (pr or {}).get("name"),
-                      "doc_type": d["dt"], "domain": d["dm"], "chunks": int(d["cc"]), "status": d["st"]})
+                      "doc_type": d["dt"], "domain": d["dm"], "chunks": int(d["cc"]), "status": d["st"],
+                      "file_size": d["file_size"]})
         edges.append({"source": f"ds:{dsid}", "target": doc_id, "kind": "member"})
 
     # NTD-рёбра (документ→документ); только между существующими узлами-документами.

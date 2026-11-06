@@ -47,6 +47,7 @@ def viewer_html(
     initial_page: int = 1,
     highlight_bbox: Iterable[float] | None = None,
     document_id: str = "",
+    source_sha256: str = "",
 ) -> str:
     total = max(1, int(page_count))
     page = max(1, min(int(initial_page or 1), total))
@@ -63,6 +64,7 @@ def viewer_html(
         "initialPage": page,
         "highlightBbox": bbox,
         "documentId": document_id,
+        "sourceSha256": source_sha256,
     })
     return f"""<!doctype html>
 <html lang="ru">
@@ -159,12 +161,14 @@ def viewer_html(
       image.setAttribute('aria-busy', 'true');
       if (cfg.documentId) {{
         const preview = new URLSearchParams({{width:params.get('width')}});
+        if (cfg.sourceSha256) preview.set('source_sha256', cfg.sourceSha256);
         if (cfg.highlightBbox && page === cfg.initialPage) preview.set('bbox', cfg.highlightBbox.join(','));
         image.src = `${{api}}/documents/by-id/${{encodeURIComponent(cfg.documentId)}}/pdf-contour/pages/${{page}}/preview?${{preview}}`;
       }} else image.src = `${{api}}/rag/file/pdf-preview?${{params.toString()}}`;
       const raw = new URLSearchParams({{path:cfg.path}});
+      const revision = cfg.sourceSha256 ? '?' + new URLSearchParams({{source_sha256:cfg.sourceSha256}}) : '';
       document.getElementById('open').href = cfg.documentId
-        ? `${{api}}/documents/by-id/${{encodeURIComponent(cfg.documentId)}}/raw#page=${{page}}`
+        ? `${{api}}/documents/by-id/${{encodeURIComponent(cfg.documentId)}}/raw${{revision}}#page=${{page}}`
         : `${{api}}/rag/file/raw?${{raw.toString()}}#page=${{page}}`;
     }}
     image.addEventListener('load', () => {{ image.classList.remove('loading'); image.setAttribute('aria-busy', 'false'); status.classList.remove('visible'); }});

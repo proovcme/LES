@@ -47,6 +47,57 @@ it('opens evidence and its original, then returns with draft, scroll and focus p
   expect(transcript.scrollTop).toBe(123); expect(document.activeElement).toBe(citation);
 });
 
+it('opens a table citation on its exact sheet and row', async () => {
+  await settle(() => !!document.querySelector('[data-citation]'));
+  workspace.messages = [{ role: 'ai', text: 'Подтверждено [1].', meta: { source_map: [{
+    index: 1, doc_id: 'doc-one', dataset_id: 'demo', doc_name: 'Книга.xlsx',
+    quote: 'B2003 = 7654321', locator: { sheet: 'Часть 2', row: 2003, cell: 'A2003:B2003' },
+  }] } }];
+  flushSync();
+  document.querySelector<HTMLButtonElement>('[data-citation]')!.click();
+  await settle(() => !!document.querySelector('dialog .source-actions'));
+  expect(document.querySelector('dialog .eyebrow')?.textContent).toContain('Часть 2 · A2003:B2003');
+  const original = [...document.querySelectorAll<HTMLButtonElement>('dialog button')].find((button) => button.textContent?.includes('Показать оригинал'))!;
+  original.click();
+  await settle(() => !!document.querySelector('iframe'));
+  const url = new URL(document.querySelector('iframe')!.src);
+  expect(url.searchParams.get('sheet')).toBe('Часть 2');
+  expect(url.searchParams.get('locator')).toBe('Часть 2!R2003');
+});
+
+it('separates cited revisions from found material and marks a conclusion without sources', async () => {
+  await settle(() => !!document.querySelector('[data-citation]'));
+  const map = [
+    { index: 1, doc_name: 'Редакция А/Лист.pdf', page: 7 },
+    { index: 2, doc_name: 'Редакция Б/Лист.pdf', page: 9 },
+  ];
+  workspace.messages = [{ role: 'ai', text: 'В первой редакции 10 дней [Источник 1].', meta: { source_map: map } }];
+  flushSync();
+  expect(document.querySelector('[aria-label="Цитаты в ответе"]')?.textContent).toContain('Редакция А/Лист.pdf');
+  expect(document.querySelector('[aria-label="Цитаты в ответе"]')?.textContent).toContain('стр. 7');
+  expect(document.querySelector('[aria-label="Найденные материалы"]')?.textContent).toContain('Редакция Б/Лист.pdf');
+  workspace.messages = [{ role: 'ai', text: 'Срок составляет 10 дней.', meta: { source_map: map } }];
+  flushSync();
+  expect(document.querySelector('[aria-label="Цитаты в ответе"]')).toBeNull();
+  expect(document.querySelector('.message .notice')?.textContent).toContain('нет ссылки');
+});
+
+it('opens a Word citation at its table row', async () => {
+  await settle(() => !!document.querySelector('[data-citation]'));
+  workspace.messages = [{ role: 'ai', text: 'Подтверждено [1].', meta: { source_map: [{
+    index: 1, doc_id: 'doc-one', dataset_id: 'demo', doc_name: 'Ведомость.docx',
+    quote: 'Столбец 2: 32', locator: { anchor: 't0r501' },
+  }] } }];
+  flushSync();
+  document.querySelector<HTMLButtonElement>('[data-citation]')!.click();
+  await settle(() => !!document.querySelector('dialog .source-actions'));
+  expect(document.querySelector('dialog .eyebrow')?.textContent).toContain('таблица 1, строка 502');
+  const original = [...document.querySelectorAll<HTMLButtonElement>('dialog button')].find((button) => button.textContent?.includes('Показать оригинал'))!;
+  original.click();
+  await settle(() => !!document.querySelector('iframe'));
+  expect(new URL(document.querySelector('iframe')!.src).searchParams.get('locator')).toBe('t0r501');
+});
+
 it('does not submit during IME composition or Shift+Enter and submits Enter once', async () => {
   await settle(() => !!document.querySelector('#question'));
   workspace.send = vi.fn(async () => undefined);

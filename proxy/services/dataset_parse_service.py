@@ -89,10 +89,15 @@ async def pending_parse_datasets(
     if not hasattr(state.backend, "health_snapshot"):
         return []
     snapshot = await state.backend.health_snapshot()
+    database = getattr(getattr(state.backend, "db", None), "db_path", None)
+    owned = set()
+    if database:
+        from backend.workspace_native import catalog_call
+        owned = set(await asyncio.to_thread(catalog_call, database, "intake_owned_datasets"))
     items = []
     for dataset in snapshot.get("datasets", []):
         pending = int(dataset.get("pending_files") or 0)
-        if pending > 0:
+        if pending > 0 and dataset["id"] not in owned:
             items.append(
                 {
                     "dataset_id": dataset["id"],

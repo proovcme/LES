@@ -192,7 +192,7 @@
       "method": "GET",
       "path": "/api/documents/by-id/{doc_id}",
       "operation_id": "document_by_id_api_documents_by_id__doc_id__get",
-      "request_response_sha256": "c6774907c43588546498e471379850a5657dcda33fe7f7f4147b2c7f1a9d1e40"
+      "request_response_sha256": "40038f344351ef6f49460939737b9fc2dd6b13d12fe0b114f32a5a135d3e89d0"
     },
     {
       "method": "GET",
@@ -201,10 +201,16 @@
       "request_response_sha256": "30ea5e4849b2f63a2f88a1de1ab137bb79cfb3db28a1b944553d765c7d3492cc"
     },
     {
+      "method": "GET",
+      "path": "/api/documents/by-id/{doc_id}/clause",
+      "operation_id": "document_clause_api_documents_by_id__doc_id__clause_get",
+      "request_response_sha256": "e910cece3a6099679c3a3317c7fe6e8d50189a169621a55a857859bddbfdcb78"
+    },
+    {
       "method": "POST",
       "path": "/api/documents/by-id/{doc_id}/open-native",
       "operation_id": "open_document_native_api_documents_by_id__doc_id__open_native_post",
-      "request_response_sha256": "c6774907c43588546498e471379850a5657dcda33fe7f7f4147b2c7f1a9d1e40"
+      "request_response_sha256": "40038f344351ef6f49460939737b9fc2dd6b13d12fe0b114f32a5a135d3e89d0"
     },
     {
       "method": "GET",
@@ -216,19 +222,19 @@
       "method": "GET",
       "path": "/api/documents/by-id/{doc_id}/pdf-contour/pages/{page_number}/preview",
       "operation_id": "document_pdf_contour_preview_api_documents_by_id__doc_id__pdf_contour_pages__page_number__preview_get",
-      "request_response_sha256": "52e7e21a2ebcb3d548ebc0574421221470c71f1346e0b447e9e3af7d9c7b5391"
+      "request_response_sha256": "1e7aa3e34a2b7bd330d261cc4e2f40b1f9a97a80bb0e3201e0ab09f1bd4f7246"
     },
     {
       "method": "GET",
       "path": "/api/documents/by-id/{doc_id}/raw",
       "operation_id": "document_raw_by_id_api_documents_by_id__doc_id__raw_get",
-      "request_response_sha256": "c6774907c43588546498e471379850a5657dcda33fe7f7f4147b2c7f1a9d1e40"
+      "request_response_sha256": "40038f344351ef6f49460939737b9fc2dd6b13d12fe0b114f32a5a135d3e89d0"
     },
     {
       "method": "GET",
       "path": "/api/documents/by-id/{doc_id}/viewer",
       "operation_id": "document_viewer_by_id_api_documents_by_id__doc_id__viewer_get",
-      "request_response_sha256": "4a14dec64fbdb20c12d25f1f5d30ef05a8d0960fb42b80fdda57bee77af277f8"
+      "request_response_sha256": "c15ef2b6418f2a8476a7528c05f98080a2485641a891811e6425c67cf4817b6e"
     },
     {
       "method": "GET",
@@ -1138,6 +1144,12 @@
     },
     {
       "method": "POST",
+      "path": "/api/rag/external/purge-missing",
+      "operation_id": "purge_missing_external_sources_api_rag_external_purge_missing_post",
+      "request_response_sha256": "6842cbfd6f7fe9b040f2a78efed9d37667f6d63d8bdb1c2064807bd1f858e1bf"
+    },
+    {
+      "method": "POST",
       "path": "/api/rag/external/sync",
       "operation_id": "sync_external_dataset_api_rag_external_sync_post",
       "request_response_sha256": "cd0a4beb44296b0cbe3c9228f54f1f00442a39248abb044d2964b43d618969de"
@@ -1605,5 +1617,5 @@
       "request_response_sha256": "1ea357f54a253ce421f78f1718029bbb75394f546067052214d8256ad125911b"
     }
   ],
-  "components_sha256": "3e2afb96f1767d61c201e5ef3c46ab9298998edce2c8a0e709702af6fa21eac6"
+  "components_sha256": "7b4f96ac72de3cd813551f5f77dbd44f4ac5f282bf0d52114ca12c1370600383"
 }

@@ -1,21 +1,22 @@
-use crate::{error, json_response, transport, Context};
+use crate::{error, json_response, Context};
 use axum::{body::to_bytes, extract::Request, http::StatusCode, response::Response};
 use serde_json::{json, Map, Value};
 use std::sync::Arc;
 
 pub async fn handle(context: Arc<Context>, request: Request) -> Response {
-    let cors = match transport::authorize(&context, request.headers()).await {
+    let agent = request.uri().path() == "/api/light/agent-workspace";
+    let cors = match crate::auth::authorize(&context, request.headers(), false).await {
         Ok(v) => v,
         Err(r) => return r,
     };
-    let mut response = authorized(context, request).await;
+    let mut response = authorized(context, request, agent).await;
     response.headers_mut().extend(cors);
     response
         .headers_mut()
         .insert("x-les-handler", "rust.agent-state".parse().unwrap());
     response
 }
-async fn authorized(context: Arc<Context>, request: Request) -> Response {
+async fn authorized(context: Arc<Context>, request: Request, agent: bool) -> Response {
     let write = request.method() == "POST";
     let mut args = if write {
         let bytes = match to_bytes(request.into_body(), 2_097_152).await {
@@ -60,6 +61,18 @@ async fn authorized(context: Arc<Context>, request: Request) -> Response {
     {
         return error(StatusCode::UNPROCESSABLE_ENTITY, "Недоступное действие.");
     }
+    if agent
+        && (!matches!(args["area"].as_str(), Some("user" | "memory" | "files"))
+            || matches!(
+                action.as_str(),
+                "policy_save" | "policy" | "export" | "bundle"
+            ))
+    {
+        return error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Недоступное действие для агента.",
+        );
+    }
     let project = match args.get("project_id") {
         None => Some(0),
         Some(Value::String(v)) if !write => v.parse::<i64>().ok(),
@@ -96,7 +109,7 @@ async fn authorized(context: Arc<Context>, request: Request) -> Response {
             args.insert("offset".into(), offset.into());
         }
     }
-    args.insert("actor".into(), "user".into());
+    args.insert("actor".into(), if agent { "agent" } else { "user" }.into());
     args.entry("area").or_insert_with(|| "memory".into());
     let database = context.database.clone();
     let root = context.state_root.clone();

@@ -5,7 +5,7 @@ import json
 import os
 from urllib.parse import urlsplit
 from nicegui import ui
-from sovushka.uikit.components import tab_name
+from sovushka.uikit.components import action_button, tab_name
 
 HOME = "/qdrant-visualizer/index.html"
 
@@ -22,12 +22,22 @@ def svelte_chat_url():
     return None
 
 
+def navigation_link(label, target, icon, *, classes=""):
+    link = ui.link(label, target=target).classes(
+        f"sov-ui-button sov-ui-button--quiet les-nav-action {classes}".strip()
+    )
+    with link:
+        ui.icon(icon).props('aria-hidden="true"')
+    return link
+
+
 def return_controls():
     with ui.element("nav").classes("les-return-controls").props('aria-label="Возврат"'):
-        ui.button("Назад", icon="o_arrow_back").props('flat no-caps data-les-back aria-label="На шаг назад"')
-        ui.link("Главная", target=HOME).classes("les-home-link")
+        action_button("Назад", icon="o_arrow_back", variant="quiet", classes="les-nav-action",
+                      aria_label="На шаг назад").props("data-les-back")
+        navigation_link("Главная", HOME, "o_home")
         if target := svelte_chat_url():
-            ui.link('Новый чат', target=target).classes('les-home-link les-chat-return-link')
+            navigation_link("Новый чат", target, "o_add", classes="les-chat-return-link")
 
 
 def bind_route_tabs(tabs, refs, path):

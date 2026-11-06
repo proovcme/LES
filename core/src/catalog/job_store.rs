@@ -45,8 +45,11 @@ pub(super) fn execute(conn: &Connection, action: &str, args: &Args) -> Result<Va
             if !table(conn, "documents")? {
                 return Ok(json!(0));
             }
+            let owned = if table(conn, "native_intakes")? {
+                " AND NOT EXISTS (SELECT 1 FROM native_intakes j WHERE j.dataset_id=documents.dataset_id AND j.finished_at IS NULL)"
+            } else { "" };
             let count: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM documents WHERE upper(status)='PENDING'",
+                &format!("SELECT COUNT(*) FROM documents WHERE upper(status)='PENDING'{owned}"),
                 [],
                 |row| row.get(0),
             )?;

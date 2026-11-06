@@ -13,7 +13,7 @@ from __future__ import annotations
 - Произвольные таблицы (LLM-маппинг)
 
 Стратегия:
-1. Читаем XLSX/CSV через openpyxl/pandas
+1. Читаем XLSX/XLSM в Rust, совместимые старые книги и CSV через Python
 2. LLM (через /api/chat или локально) анализирует заголовки → определяет тип + маппинг колонок
 3. Нормализуем в единую схему → сохраняем Parquet
 4. Каждая строка → отдельный чанк в Qdrant с rich payload
@@ -320,6 +320,14 @@ def read_xlsx_sheets(file_path: str) -> list:
     Читает XLSX и возвращает list[dict] — один элемент на лист:
     {"sheet_name": str, "headers": list, "rows": list[dict], "raw_headers_row": int}
     """
+    from backend import workbook_index
+
+    result = workbook_index.read(Path(file_path), action="read")
+    if result is not None:
+        for sheet in result["sheets"]:
+            sheet["rows"] = [dict(zip(sheet["headers"], values, strict=True)) for values in sheet["rows"]]
+        return result["sheets"]
+
     try:
         import openpyxl
     except ImportError:
@@ -354,7 +362,8 @@ def read_xlsx_sheets(file_path: str) -> list:
 
         # Строки данных
         rows = []
-        for row_vals in ws.iter_rows(min_row=header_row_idx + 1, values_only=True):
+        row_numbers = []
+        for row_number, row_vals in enumerate(ws.iter_rows(min_row=header_row_idx + 1, values_only=True), header_row_idx + 1):
             # Пропускаем полностью пустые строки
             if all(v is None or str(v).strip() == "" for v in row_vals):
                 continue
@@ -363,6 +372,7 @@ def read_xlsx_sheets(file_path: str) -> list:
                 v = row_vals[i] if i < len(row_vals) else None
                 row_dict[h] = v
             rows.append(row_dict)
+            row_numbers.append(row_number)
 
         if rows:
             sheets.append({
@@ -370,6 +380,7 @@ def read_xlsx_sheets(file_path: str) -> list:
                 "headers": headers,
                 "rows": rows,
                 "header_row": header_row_idx,
+                "row_numbers": row_numbers,
             })
 
     wb.close()
@@ -698,7 +709,7 @@ def row_to_chunk_text(row: dict) -> str:
     if row.get("note"):
         parts.append(f"Примечание: {row['note']}")
 
-    if len(parts) <= 1 and row.get("raw_row"):
+    if (len(parts) <= 1 or row.get("sheet_name")) and row.get("raw_row"):
         try:
             raw = json.loads(row["raw_row"])
         except Exception:
@@ -737,6 +748,8 @@ def rows_to_qdrant_chunks(rows: list, dataset_id: str = "") -> list:
             "table_index": row.get("table_index"),
             "needs_ocr": row.get("needs_ocr", False),
             "extractor": row.get("extractor", ""),
+            "sheet_name": row.get("sheet_name"),
+            "row": row.get("source_row"),
             "section": row.get("section", ""),
             "name": row.get("name", "") or row.get("work_name", ""),
             "code": row.get("code", "") or row.get("designation", ""),
@@ -895,7 +908,8 @@ class TableNormalizer:
             logger.info(f"[PARQUET] {fpath.name} / {sheet_name}: тип={doc_type}, строк={len(rows)}")
 
             # Нормализация строк
-            for raw_row in rows:
+            row_numbers = sheet.get("row_numbers") or []
+            for index, raw_row in enumerate(rows):
                 raw_row = dict(raw_row)
                 for extra_key in ("source_page", "table_index", "extractor"):
                     if extra_key in sheet:
@@ -907,6 +921,10 @@ class TableNormalizer:
                     doc_title=f"{fpath.stem} / {sheet_name}",
                     source_file=fpath.name,
                 )
+                if fpath.suffix.lower() in {".xlsx", ".xlsm", ".xls"}:
+                    norm["sheet_name"] = sheet_name
+                    if index < len(row_numbers):
+                        norm["source_row"] = row_numbers[index]
                 all_normalized.append(norm)
 
         # Чанки для Qdrant

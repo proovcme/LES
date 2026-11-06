@@ -27,13 +27,10 @@ _LIGHT_SHELL_CSS = """
 .light-shell .light-nav-tabs .q-tab--active{background:#e6eedc;color:#143b2a}
 .light-shell .light-nav-tabs .q-tabs__arrow,.light-shell .light-nav-tabs .q-tab__indicator{display:none}
 .light-shell .light-nav-footer{margin-top:auto;border-top:1px solid #d7dfcf;padding-top:15px}
-.light-shell .light-nav-footer .les-return-controls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px}
-.light-shell .light-nav-footer .les-return-controls .q-btn__content{flex-wrap:nowrap;gap:4px}
-.light-shell .light-nav-footer .les-return-controls .q-icon{margin:0}
-.light-shell .light-nav-footer .les-home-link{justify-content:center}
-.light-shell .light-nav-footer .les-chat-return-link{grid-column:1/-1;justify-content:flex-start;padding:0 13px}
-.light-shell .light-settings-link{display:flex;align-items:center;gap:12px;min-height:46px;padding:0 13px;border-radius:11px;color:#143b2a;text-decoration:none;font-size:14px;font-weight:650}
-.light-shell .light-settings-link:hover,.light-shell .light-brand:hover{background:#e6eedc}
+.light-shell .light-nav-footer .les-return-controls{display:flex;flex-direction:column;align-items:stretch;gap:0}
+.light-shell .light-nav-footer .les-nav-action{display:flex;width:100%;min-height:46px;border-radius:11px;color:#143b2a!important;font-size:14px;font-weight:650}
+.light-shell .light-nav-footer .les-nav-action .q-btn__content{width:100%;flex-wrap:nowrap}
+.light-shell .light-nav-footer .les-nav-action:hover,.light-shell .light-brand:hover{background:#e6eedc!important}
 .light-shell .light-mobile-nav{display:none}
 .light-shell > .sov-app-content{grid-column:2;grid-row:1;min-height:0;min-width:0;height:100%;margin:0!important;overflow:auto}
 .light-shell .sov-chat-workspace{height:100dvh}
@@ -45,8 +42,9 @@ _LIGHT_SHELL_CSS = """
 .light-shell .sov-conversation-heading{padding:30px 38px 14px;align-items:flex-start}
 .light-shell .sov-conversation-title{font-size:clamp(29px,2.7vw,42px);font-weight:600;letter-spacing:-.05em;line-height:1.12;color:var(--light-ink)}
 .light-shell .sov-workspace-eyebrow{font-size:11px;letter-spacing:.18em;font-weight:750;color:var(--light-muted)}
-.light-shell .sov-chat-topbar{padding:8px 20px;min-height:64px;background:transparent;border-bottom:1px solid var(--light-line);flex-wrap:nowrap}
-.light-shell .sov-workspace-header-actions{flex-wrap:nowrap;min-width:0}
+.light-shell .sov-chat-topbar{padding:8px 20px;min-height:64px;background:transparent;border-bottom:1px solid var(--light-line);flex-wrap:wrap;justify-content:flex-start}
+.light-shell .sov-chat-workspace .sov-chat-topbar>.sov-workspace-identity{flex:1 1 250px;flex-wrap:nowrap}
+.light-shell .sov-workspace-header-actions{flex-wrap:nowrap;min-width:0;max-width:100%;margin-left:auto}
 .light-shell .sov-workspace-header-actions .q-btn__content{flex-direction:row;flex-wrap:nowrap}
 .light-shell .sov-scope-btn{max-width:220px;min-width:44px}
 .light-shell .sov-scope-btn .block{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -59,6 +57,8 @@ _LIGHT_SHELL_CSS = """
 .light-shell .sov-artifacts-panel{background:var(--light-paper);border-left:1px solid var(--light-line);padding:26px 20px}
 .light-shell .sov-composer{max-width:min(900px,calc(100% - 32px))!important;background:#fff;border:1px solid var(--light-line);border-radius:18px;box-shadow:0 14px 36px #143b2a0d!important;padding:10px 14px!important;margin:0 auto 12px}
 .light-shell .sov-composer-input .q-field__native{min-height:28px!important;max-height:min(160px,20dvh)}
+.light-shell .sov-composer-actions .q-btn__content{flex-wrap:nowrap}
+.light-shell .sov-composer-actions>.sov-composer-action,.light-shell .sov-composer-actions>.sov-response-settings-btn{width:auto!important;min-height:44px!important;flex:0 0 auto}
 .light-shell .sov-chat-message-text{font-size:15px;line-height:1.68}
 .light-shell .chat-msg-ai,.light-shell .chat-msg-user{border-radius:16px;border:1px solid var(--light-line);box-shadow:0 4px 18px #143b2a08}
 .light-shell .chat-msg-ai{background:#fff;border-left:3px solid var(--light-leaf)}
@@ -108,7 +108,7 @@ _LIGHT_SHELL_CSS = """
   .light-shell .sov-chat-topbar{padding:8px 12px;flex-wrap:wrap}
   .light-shell .sov-workspace-header-actions>.q-btn:not(.sov-scope-btn){width:44px;min-width:44px;padding:0!important}
   .light-shell .sov-workspace-header-actions>.q-btn:not(.sov-scope-btn) .q-btn__content>.block{display:none!important;font-size:0!important;max-width:0;overflow:hidden}
-  .light-shell .sov-composer-action,.light-shell .sov-response-settings-btn{width:44px!important;min-width:44px;padding:0!important}
+  .light-shell .sov-composer-actions>.sov-composer-action,.light-shell .sov-composer-actions>.sov-response-settings-btn{width:44px!important;min-width:44px;padding:0!important}
   .light-shell .sov-composer-action .q-btn__content>.block,.light-shell .sov-response-settings-btn .q-btn__content>.block{display:none!important;font-size:0!important;max-width:0;overflow:hidden}
   .light-shell .sov-composer-actions .q-icon{margin:0!important}
   .light-shell .sov-chat-thread{padding:16px!important}
@@ -123,7 +123,7 @@ _LIGHT_SHELL_CSS = """
 
 def build_light_shell() -> tuple[object, dict[str, object]]:
     """Render real Light destinations and return NiceGUI tabs for panel wiring."""
-    from sovushka.components.navigation import return_controls
+    from sovushka.components.navigation import navigation_link, return_controls
 
     ui.add_css(_LIGHT_SHELL_CSS)
     with ui.element("aside").classes("light-nav"):
@@ -142,12 +142,8 @@ def build_light_shell() -> tuple[object, dict[str, object]]:
                 "history": ui.tab("История", icon="o_history"),
             }
         with ui.element("div").classes("light-nav-footer"):
-            with ui.link(target="/qdrant-visualizer/index.html").classes("light-settings-link"):
-                ui.icon("o_forest")
-                ui.label("Лес знаний")
-            with ui.link(target="/les/classic?tab=models").classes("light-settings-link"):
-                ui.icon("o_tune")
-                ui.label("Настройки")
+            navigation_link("Лес знаний", "/qdrant-visualizer/index.html", "o_forest")
+            navigation_link("Настройки", "/les/classic?tab=models", "o_tune")
             return_controls()
 
     mobile_buttons = {}

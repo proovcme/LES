@@ -1,10 +1,14 @@
 """Real persistent index recovery and vector-space boundary regressions."""
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
+import json
 import os
 from pathlib import Path
+import sqlite3
 import subprocess
 import sys
 from types import SimpleNamespace
+from threading import Barrier
 import uuid
 
 import pytest
@@ -114,6 +118,37 @@ def test_writer_lease_and_search_revision(tmp_path):
         journal.finish()
     with pytest.raises(EmbeddingContractError, match="INDEX_CHANGED_DURING_SEARCH"):
         journal.assert_unchanged(stamp)
+
+
+def test_native_journal_keeps_legacy_revision_and_publishes_exactly_one_writer(tmp_path):
+    journal = ReplacementJournal(tmp_path, "docs")
+    journal.directory.mkdir(parents=True)
+    with sqlite3.connect(journal.path) as db:
+        db.execute("CREATE TABLE replacement (id INTEGER PRIMARY KEY, body TEXT NOT NULL)")
+        db.execute("INSERT INTO replacement VALUES (1,?)", (json.dumps({"phase":"idle","revision":"previous"}),))
+    assert journal.read_stamp() == "previous"
+    barrier = Barrier(2)
+
+    def start(file):
+        barrier.wait(timeout=5)
+        try:
+            journal.begin("ds", file, file, [str(uuid.uuid4())])
+        except EmbeddingContractError as error:
+            assert str(error) == "INDEX_RECOVERY_REQUIRED"
+            return None
+        return file
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        winners = [value for value in pool.map(start, ("Первый.txt", "Второй.txt")) if value]
+    assert len(winners) == 1 and journal.pending()["file_name"] == winners[0]
+    journal.commit()
+    journal.finish()
+    with sqlite3.connect(journal.path) as db:
+        row = db.execute("SELECT body FROM replacement WHERE id=1").fetchone()
+        assert json.loads(row[0])["phase"] == "idle"
+        assert json.loads(db.execute("SELECT scope FROM sparse_changes").fetchone()[0]) == {
+            "dataset":"ds", "file":winners[0],
+        }
 
 
 def test_startup_recovery_closes_qdrant_without_context_manager(tmp_path, monkeypatch):

@@ -36,8 +36,7 @@ def test_restart_preserves_every_visible_fragment_and_never_promotes_partial(his
         durable.checkpoint(key, 'token', fragment)
     assert durable.interrupt() == 1
     assert durable.interrupt() == 0
-    with sqlite3.connect(path) as conn:
-        persistence.ensure_chat_history_schema(conn)
+    persistence.ensure_chat_history_schema(path)
     assert row(path) == [(request.question, 'Позиции 1–5: сохранены. 日本語 😀', 'INTERRUPTED', 0)]
     assert memory.session_memory_items(request.session_id) == []
     assert context.history_turns(request.session_id) == []

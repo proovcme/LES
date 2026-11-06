@@ -38,6 +38,17 @@ def test_static_ui_is_local_and_has_no_inline_script_permissions(tmp_path, monke
         assert client.get('/api/light/frontend').status_code == 401
 
 
+def test_python_does_not_mount_assets_when_rust_owns_frontend(tmp_path, monkeypatch):
+    (tmp_path / 'index.html').write_text('<html>Лес</html>', encoding='utf-8')
+    monkeypatch.setattr(light_frontend, 'FRONTEND_ROOT', tmp_path)
+    monkeypatch.setenv('LES_NATIVE_FRONTEND', 'true')
+    app = FastAPI()
+    light_frontend.mount_frontend(app)
+    with TestClient(app) as client:
+        assert client.get('/app/').status_code == 404
+        assert client.get('/api/light/native-auth-policy').status_code == 200
+
+
 @pytest.fixture
 def tree(tmp_path):
     root = tmp_path / 'source'

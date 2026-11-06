@@ -59,7 +59,7 @@ def _full_les_only(relative: str) -> bool:
     return (relative in FULL_LES_ONLY_CODE or relative in FULL_LES_ONLY_SERVICES
             or relative.startswith(FULL_LES_ONLY_PREFIXES))
 CODE_FILES = {"sovushka_ng.py", "pyproject.toml", "uv.lock", "tools/__init__.py", "tools/light_launcher.py", "tools/light_mcp_server.py", "tools/light_child.py", "tools/light_document_worker.py",
-              "tools/light_windows_ocr.ps1", "tools/light_cli.py", "tools/les-light.cmd",
+              "tools/light_windows_ocr.ps1", "tools/light_cli.py", "tools/les-light.cmd", "tools/skill_compute_worker.py",
               "tools/backup_suharik.py", "tools/les_doctor.py", "tools/les_runtime_control.py", "tools/lesctl.py",
               "proxy/services/mcp_connection_service.py", "proxy/routers/mcp_connections.py",
                 "backend/local_reranker.py", "backend/index_replacement.py", "backend/sparse_index.py",
@@ -73,7 +73,8 @@ CODE_FILES = {"sovushka_ng.py", "pyproject.toml", "uv.lock", "tools/__init__.py"
 CONFIG_FILES = {"version.json", "light-runtime.json", "windows_python.json", "windows_uv.json"}
 PUBLIC_ASSETS = {"tools/light_macos_ocr.swift",
     "qdrant_visualizer/index.html", "qdrant_visualizer/forest.js",
-    "qdrant_visualizer/forest-model.js", "qdrant_visualizer/forest.css",
+    "qdrant_visualizer/search.html", "qdrant_visualizer/search.js",
+    "qdrant_visualizer/forest-model.js", "qdrant_visualizer/forest-scene.js", "qdrant_visualizer/forest.css",
     "qdrant_visualizer/navigation.js",
     "qdrant_visualizer/forest-mist.svg",
     "frontend/pwa/manifest.webmanifest", "frontend/pwa/offline.html",
@@ -128,7 +129,7 @@ def hash_file(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def stage_code(payload):
+def stage_code(payload, *, native_cli=False):
     runtime = payload / "runtime"
     tracked = set(iter_files())
     tracked.update(_local_untracked_candidate_files())
@@ -168,7 +169,11 @@ def stage_code(payload):
     (payload / "assets").mkdir(exist_ok=True)
     shutil.copy2(ROOT / "docs/public/les-light/assets/les-light.svg", payload / "assets/les-light.svg")
     shutil.copy2(payload / "README.md", runtime / "README.md")
-    shutil.copy2(ROOT / 'tools/les-light.cmd', payload / 'les.cmd')
+    command = 'les-native.cmd' if native_cli else 'les-light.cmd'
+    shutil.copy2(ROOT / 'tools' / command, payload / 'les.cmd')
+    if native_cli:
+        for entrypoint in ('light_cli.py', 'light_mcp_server.py'):
+            shutil.copy2(ROOT / 'tools/light_native_cli_compat.py', runtime / 'tools' / entrypoint)
     from tools.build_light_frontend import stage as stage_frontend
     stage_frontend(ROOT, runtime)
     return runtime
@@ -251,7 +256,7 @@ def build(destination, executable, qdrant=None, native_core=None, native_runtime
         raise FileNotFoundError("Build the dedicated desktop/light shell first")
     destination.mkdir(parents=True)
     shutil.copy2(executable, destination / "les-light.exe")
-    runtime = stage_code(destination)
+    runtime = stage_code(destination, native_cli=native_runtime is not None)
     stage_dependencies(destination, runtime)
     native = destination / "native/qdrant"
     if qdrant:

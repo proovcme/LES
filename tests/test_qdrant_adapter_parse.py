@@ -518,6 +518,12 @@ def test_sync_parse_marks_error_when_qdrant_count_mismatches(tmp_path, monkeypat
     (dataset_dir / "doc.md").write_text("content with enough text for a chunk")
     db = StatusTrackingDB()
     deleted = []
+    events = []
+
+    def count_points(*_args):
+        events.append("count")
+        return 0
+
     adapter = SimpleNamespace(
         content_dir=tmp_path,
         db=db,
@@ -525,7 +531,7 @@ def test_sync_parse_marks_error_when_qdrant_count_mismatches(tmp_path, monkeypat
         collection_name="les_rag",
         embed=SimpleNamespace(encode_sync=lambda texts: [[0.0] * 1024 for _ in texts]),
         _sync_delete_file_points=lambda _q, _ds, key: deleted.append(key),
-        _sync_count_file_points=lambda *args: 0,
+        _sync_count_file_points=count_points,
         _sync_markdown_nodes=lambda *args: [
             {"text": "content with enough text for a chunk", "doc_id": "doc-1", "payload": {}}
         ],
@@ -539,13 +545,14 @@ def test_sync_parse_marks_error_when_qdrant_count_mismatches(tmp_path, monkeypat
             self.url = url
 
         def upsert(self, collection_name, points, *, wait=False):
-            return None
+            events.append(("upsert", wait))
 
     monkeypatch.setattr("backend.qdrant_adapter.qdrant_client.QdrantClient", FakeQdrant)
 
     result = QdrantLlamaIndexAdapter._sync_parse(adapter, "ds-1", limit=1)
 
     assert result["errors"] == 1
+    assert events == [("upsert", True), "count"]
     assert deleted == []  # Neither failure cleanup nor commit may delete the whole file generation.
     assert db.updated[-1][0:4] == ("ds-1", "doc.md", "ERROR", 0)
     assert "qdrant point count mismatch" in db.updated[-1][4]
@@ -852,15 +859,6 @@ def test_hierarchy_navigation_nodes_receive_prevalidated_sparse_vectors():
     prepared = _prepare_named_sparse_nodes(nodes, "Раздел АППЗ.pdf")
     assert len(prepared) == len(nodes)
     assert all(node.get("_rrf_sparse_vector") for node in prepared)
-
-
-def test_file_upsert_waits_before_exact_count_verification():
-    from pathlib import Path
-
-    source = Path("backend/qdrant_ingestion.py").read_text(encoding="utf-8")
-    upsert = source.index("sync_qdrant.upsert(", source.index("_stage(db_file_key, \"UPSERT\")"))
-    count = source.index("_sync_count_file_points", upsert)
-    assert "wait=True" in source[upsert:count]
 
 
 def test_adapter_builds_mail_profile_nodes_with_attachment_payload(tmp_path, monkeypatch):

@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashSet};
 use std::sync::OnceLock;
 
-fn token_regex() -> &'static Regex {
+pub(crate) fn token_regex() -> &'static Regex {
     static TOKENS: OnceLock<Regex> = OnceLock::new();
     // Python IGNORECASE additionally accepts dotless i. Other special case folds
     // have already passed through the shared Python NFKC/casefold authority.

@@ -1,5 +1,7 @@
 //! Versioned C ABI. All returned buffers belong to this library until les_core_free.
 pub mod agent_files;
+pub mod auth;
+pub mod auth_keys;
 mod bm25;
 pub mod catalog;
 mod citations;
@@ -7,14 +9,19 @@ mod context;
 mod document;
 mod files;
 mod harness;
+mod harness_evidence;
+mod index_journal;
 mod jobs;
 mod lexical;
+mod lexical_write;
 mod memory;
 mod process_guard;
 mod receipts;
+mod retrieval_quality;
 mod source_scan;
 mod worker_host;
 pub mod workspace;
+pub use files::sha256_hex;
 pub use process_guard::{prepare as prepare_child, JobGuard};
 use serde_json::{json, Value};
 use std::{
@@ -32,22 +39,29 @@ fn dispatch(bytes: &[u8]) -> Result<Value, &'static str> {
     match request["operation"].as_str() {
         Some("prepare_terms") => lexical::prepare(&request),
         Some("bm25") => bm25::execute(&request["request"]),
+        Some("lexical_replace") => lexical_write::replace(&request["request"]),
         Some("context") => context::execute(&request["request"]),
         Some("memory") => memory::execute(&request["request"]),
         Some("document") => document::execute(&request["request"]),
+        Some("table_snapshot") => document::workbook::snapshot(&request["request"]),
+        Some("workbook_index") => document::workbook_index::execute(&request["request"]),
         Some("citations") => citations::execute(&request["request"]),
         Some("harness") => harness::execute(&request["request"]),
+        Some("harness_evidence") => harness_evidence::execute(&request["request"]),
+        Some("index_journal") => index_journal::execute(&request["request"]),
+        Some("retrieval_quality") => retrieval_quality::evaluate(&request["request"]),
         Some("fingerprint") => files::fingerprint(&request),
         Some("job_patch") => jobs::patch(&request),
         Some("job_recovery") => jobs::recovery(&request),
         Some("scan_sources") => source_scan::scan(&request),
         Some("worker_run") => worker_host::run(&request["request"]),
+        Some("worker_pdf") => worker_host::run_pdf(&request["request"]),
         Some("worker_stop") => worker_host::shutdown(),
         Some("workspace") => Ok(workspace::execute(&request["request"])),
         Some("catalog") => Ok(catalog::execute(&request["request"])),
         Some("agent_files") => Ok(agent_files::execute(&request["request"])),
         Some("health") => Ok(
-            json!({"abi": 1, "operations":["prepare_terms","bm25","context","memory","document","citations","harness","fingerprint","job_patch","job_recovery","scan_sources","worker_run","worker_stop","workspace","catalog","agent_files"], "tokenizer":"les.lexical.v2"}),
+            json!({"abi": 1, "operations":["prepare_terms","bm25","lexical_replace","context","memory","document","table_snapshot","workbook_index","citations","harness","harness_evidence","index_journal","retrieval_quality","fingerprint","job_patch","job_recovery","scan_sources","worker_run","worker_pdf","worker_stop","workspace","catalog","agent_files"], "tokenizer":"les.lexical.v2"}),
         ),
         _ => Err("CORE_UNKNOWN_OPERATION"),
     }

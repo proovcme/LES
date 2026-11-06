@@ -7,11 +7,14 @@ import os
 import re
 import sqlite3
 import time
+import json
+from contextlib import closing
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
 from backend.interface import Chunk
+from backend import native_core
 from backend.rag_config import rag_meta_db_path
 from proxy.services.kot_service import extract_norm_refs
 
@@ -364,10 +367,44 @@ class LexicalIndex:
                str(row.get("doc_name")) != doc_name or not row.get("point_id") or
                not str(row.get("text") or "").strip() for row in rows):
             raise ValueError("Lexical replacement scope/content mismatch")
-        with self.connect() as conn:
+        if native_core.supports("lexical_replace"):
+            return self._replace_native(collection, dataset_id, doc_name, rows)
+        with closing(self.connect()) as conn, conn:
             conn.execute("DELETE FROM lexical_chunks WHERE collection=? AND dataset_id=? AND doc_name=?",
                          (collection, dataset_id, doc_name))
             return self._upsert_chunks(conn, collection, rows)
+
+    def _replace_native(self, collection, dataset_id, doc_name, rows):
+        database = Path(self.db_path).resolve()
+        with closing(self.connect()):
+            pass  # Retain FTS schema compatibility for old profiles.
+        strings = ("doc_id", "section_heading", "parent_id", "parent_heading",
+                   "context_before", "context_after", "context_kind")
+        normalized = []
+        for row in rows:
+            text = str(row["text"])
+            normalized.append({
+                **{key: str(row.get(key) or "") for key in strings},
+                **{key: row.get(key) for key in ("chunk_ord", "parent_ord", "child_ord")},
+                "dataset_id": dataset_id, "doc_name": doc_name, "text": text,
+                "point_id": str(row["point_id"]),
+                "content_hash": str(row.get("content_hash") or content_hash(text)),
+            })
+        request = {"database": str(database), "collection": collection,
+                   "dataset_id": dataset_id, "doc_name": doc_name}
+        try:
+            return native_core.required("lexical_replace", request={**request, "rows": normalized})["replaced"]
+        except native_core.NativeCoreError as error:
+            if str(error) != "CORE_INPUT_LIMIT":
+                raise
+        # Large files still use one native transaction. Keep temporary data in LES state.
+        from tempfile import TemporaryDirectory
+        with TemporaryDirectory(prefix=".les-lexical-", dir=database.parent) as folder:
+            spool = Path(folder) / "rows.jsonl"
+            with spool.open("w", encoding="utf-8", newline="\n") as stream:
+                for row in normalized:
+                    stream.write(json.dumps(row, ensure_ascii=False, separators=(",", ":"), allow_nan=False) + "\n")
+            return native_core.required("lexical_replace", request={**request, "spool": str(spool)})["replaced"]
 
     def upsert_chunks(self, collection: str, rows: Iterable[dict[str, Any]]) -> int:
         with self.connect() as conn:

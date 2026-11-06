@@ -7,6 +7,7 @@ class Element {
   append(...items) { for(const item of items){item.parent=this;this.children.push(item)} }
   replaceChildren(...items) { this.children=[];this.append(...items) }
   setAttribute(name,value) { this[name]=value }
+  addEventListener(name, callback) { this['on'+name]=callback }
   add(item) { this.append(item) }
   remove() { if(this.parent)this.parent.children=this.parent.children.filter(item=>item!==this) }
   getContext() { return {} }
@@ -38,15 +39,26 @@ globalThis.fetch=async (route,options)=>{
   throw new Error('Unexpected route '+route);
 };
 const model='data:text/javascript;base64,'+Buffer.from(fs.readFileSync('qdrant_visualizer/forest-model.js')).toString('base64');
-const code=fs.readFileSync('qdrant_visualizer/forest.js','utf8').replace("'./forest-model.js'",JSON.stringify(model));
+const sceneCode=fs.readFileSync('qdrant_visualizer/forest-scene.js','utf8').replace(/'\.\/forest-model\.js[^']*'/,JSON.stringify(model));
+const scene='data:text/javascript;base64,'+Buffer.from(sceneCode).toString('base64');
+const code=fs.readFileSync('qdrant_visualizer/forest.js','utf8').replace(/'\.\/forest-model\.js[^']*'/,JSON.stringify(model))
+  .replace(/'\.\/forest-scene\.js[^']*'/,JSON.stringify(scene));
 await import('data:text/javascript;base64,'+Buffer.from(code).toString('base64'));
 await new Promise(resolve=>setImmediate(resolve));
 assert.equal(element('documents').children.length,40);
+assert.equal(element('forest-species').children.length,6);
+assert.equal(element('documents').children[0].children[0].dataset.species,'text');
 assert.equal(element('more').hidden,false);
 element('more').onclick();
 assert.equal(element('documents').children.length,80);
 element('dataset').value='b';element('dataset').onchange();
 assert.equal(element('documents').children.length,5);
+element('forest-plus').onclick();
+assert.equal(element('forest-scale').textContent,'125%');
+element('forest-overview').onclick();
+assert.equal(element('forest-scale').textContent,'100%');
+assert.equal(element('dataset').value,'');
+assert.equal(element('documents').children.length,40);
 element('dataset').value='a';element('dataset').onchange();
 element('search').value='file0';element('search').oninput();
 assert.equal(element('documents').children.length,1);
@@ -85,4 +97,11 @@ failure=403;await element('reload').onclick();
 assert.ok(element('status').textContent.includes('Войдите в ЛЕС'));
 failure=0;await element('reload').onclick();
 assert.equal(element('reload').disabled,false);
+const {groveLayout,projection}=await import(scene);
+const large=groveLayout({datasets:Array.from({length:120},(_,i)=>({id:'ds:'+i,label:String(i)})),documents:[]},'');
+assert.equal(large.groves.length,120,'Overview must account for all groves');
+const camera={yaw:0,pitch:.7,zoom:1}, a=projection(camera,900,700,large.extent);
+const b=projection({...camera,yaw:1,zoom:2},900,700,large.extent);
+assert.notDeepEqual(a(30,10,10),b(30,10,10));
+assert.ok(a(30,40,10).y<a(30,0,10).y,'Height must affect the perspective');
 console.log('forest handler unit scenarios passed');

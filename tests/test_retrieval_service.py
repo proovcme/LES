@@ -1203,7 +1203,8 @@ async def test_retrieve_chat_chunks_returns_hybrid_trace(monkeypatch, tmp_path):
 
     assert result.trace.mode.startswith("qdrant_native_hybrid")
     assert result.trace.lexical_count == 1
-    assert result.payload()["quality"]["status"] == "good"
+    assert result.payload()["quality"]["status"] == "candidates"
+    assert result.payload()["quality"]["answerability"] == "unverified"
     assert any(chunk.doc_name == "СП 1.13130.docx" for chunk in result.chunks)
 
 

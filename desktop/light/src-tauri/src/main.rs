@@ -9,6 +9,8 @@ mod close_guard;
 mod lifecycle;
 mod supervisor;
 mod launcher;
+#[path = "../../../../runtime/src/desktop_control.rs"]
+mod desktop_control;
 #[cfg(windows)] use std::os::windows::process::CommandExt;
 
 struct Runtime { directory: PathBuf, state: PathBuf, child: Mutex<Option<Child>>, close: Mutex<close_guard::CloseGuard>,
@@ -144,6 +146,25 @@ fn open_logs(runtime: &Runtime) {
     let _ = command.spawn();
 }
 
+fn request_exit(app: &tauri::AppHandle) {
+    let runtime = app.state::<Runtime>();
+    if let Some(webview) = app.get_webview_window("main") {
+        let nonce = runtime.close.lock().ok().and_then(|mut guard| guard.request());
+        if let Some(nonce) = nonce {
+            let _ = fs::write(runtime.state.join("editor-close-status.json"), json!({"phase":"requested","nonce":nonce}).to_string());
+            let _ = webview.set_title("Лес — сохраняю диалог…");
+            let script = format!("window.dispatchEvent(new CustomEvent('les:close-request', {{detail:{{nonce:{nonce}}}}}))");
+            if webview.eval(script).is_err() {
+                let _ = webview.set_title("Лес — не удалось подтвердить сохранение");
+                if let Ok(mut guard) = runtime.close.lock() { let _ = guard.acknowledge(nonce, false); }
+                let _ = fs::write(runtime.state.join("editor-close-status.json"), json!({"phase":"blocked"}).to_string());
+            }
+            return;
+        }
+    }
+    app.exit(0);
+}
+
 fn explicit_state(args: &[String]) -> Result<Option<PathBuf>, String> {
     let positions: Vec<usize> = args.iter().enumerate().filter_map(|(index, value)| (value == "--state").then_some(index)).collect();
     if positions.len() > 1 { return Err("Папка состояния указана несколько раз".into()); }
@@ -192,26 +213,15 @@ fn main() {
         .invoke_handler(tauri::generate_handler![startup_status, retry_start, open_browser, editor_ready, editor_close_result])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                let runtime = window.state::<Runtime>();
-                let nonce = runtime.close.lock().ok().and_then(|mut guard| guard.request());
-                if let Some(nonce) = nonce {
-                    api.prevent_close();
-                    let _ = fs::write(runtime.state.join("editor-close-status.json"), json!({"phase":"requested","nonce":nonce}).to_string());
-                    if let Some(webview) = window.app_handle().get_webview_window("main") {
-                        let _ = webview.set_title("Лес — сохраняю диалог…");
-                        let script = format!("window.dispatchEvent(new CustomEvent('les:close-request', {{detail:{{nonce:{nonce}}}}}))");
-                        if webview.eval(script).is_err() {
-                            let _ = webview.set_title("Лес — не удалось подтвердить сохранение");
-                            if let Ok(mut guard) = runtime.close.lock() { let _ = guard.acknowledge(nonce, false); }
-                        }
-                    }
-                }
+                api.prevent_close();
+                request_exit(window.app_handle());
             }
         })
         .on_page_load(|webview, payload| {
             let url = payload.url();
             if payload.event() == tauri::webview::PageLoadEvent::Started
-                && (url.host_str() == Some("tauri.localhost") || matches!(url.path(), "/app/" | "/classic" | "/les/classic")) {
+                && (url.host_str() == Some("tauri.localhost") || matches!(url.path(),
+                    "/app/" | "/classic" | "/les/classic" | "/qdrant-visualizer/index.html")) {
                 if let Ok(mut guard) = webview.state::<Runtime>().close.lock() { guard.invalidate(); }
             }
             if payload.event() == tauri::webview::PageLoadEvent::Finished && url.host_str() == Some("127.0.0.1") && matches!(url.path(), "/classic" | "/les/classic" | "/app/") {
@@ -229,7 +239,7 @@ fn main() {
                 match event.id.as_ref() {
                     "browser" => { let _ = open_browser(app.state::<Runtime>()); },
                     "logs" => open_logs(&app.state::<Runtime>()),
-                    "quit" => { if let Some(window) = app.get_webview_window("main") { let _ = window.close(); } else { app.exit(0); } },
+                    "quit" => request_exit(app),
                     _ => {}
                 }
             });
@@ -247,14 +257,19 @@ fn main() {
             // Querying WebView URL synchronously in setup can wait on the event
             // loop that has not started yet on Windows.
             let initial_url = tauri::Url::parse("http://tauri.localhost/index.html")?;
+            let stop_marker = runtime.launch_id.as_deref().and_then(|id| desktop_control::stop_marker(&runtime.state, id));
             thread::spawn(move || {
                 let mut displayed = String::new();
                 let mut recovery = lifecycle::Recovery::default();
                 loop {
                     thread::sleep(Duration::from_millis(800));
-                    let Some(window) = handle.get_webview_window("main") else { break; };
                     let runtime = handle.state::<Runtime>();
                     if runtime.stopping.load(Ordering::SeqCst) { break; }
+                    if stop_marker.as_ref().is_some_and(|path| fs::remove_file(path).is_ok()) {
+                        let closer = handle.clone();
+                        let _ = handle.run_on_main_thread(move || request_exit(&closer));
+                    }
+                    let Some(window) = handle.get_webview_window("main") else { continue; };
                     let mut status = read_status(&runtime);
                     let exit = runtime.child.lock().ok().and_then(|mut guard| {
                         let code = guard.as_mut()?.try_wait().ok().flatten()?;

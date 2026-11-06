@@ -28,6 +28,13 @@ impl Failure {
 pub type Result<T> = std::result::Result<T, Failure>;
 
 impl Config {
+    pub fn native_frontend(&self) -> Option<PathBuf> {
+        let root = self.root.join("desktop/light/frontend/dist");
+        (self.native_api
+            && (self.frontend == "svelte" || root.join("build-receipt.json").is_file()))
+        .then_some(root)
+    }
+
     pub fn parse(arguments: impl IntoIterator<Item = String>) -> Result<Self> {
         let mut args = arguments.into_iter();
         let mut values = std::collections::HashMap::new();
@@ -215,6 +222,10 @@ pub fn child_environment(
             format!("http://127.0.0.1:{ui}/classic"),
         ),
         ("LES_LIGHT_SVELTE_URL", format!("{api}/app/")),
+        (
+            "LES_NATIVE_FRONTEND",
+            config.native_frontend().is_some().to_string(),
+        ),
         ("SOVUSHKA_UI_PORT", ui.to_string()),
         ("SOVUSHKA_UI_HOST", "127.0.0.1".into()),
         (

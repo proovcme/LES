@@ -3,6 +3,10 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{fs::File, io::Read};
 
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+
 #[cfg(windows)]
 fn identity(file: &File) -> Result<(u64, u64), &'static str> {
     use std::os::windows::io::AsRawHandle;

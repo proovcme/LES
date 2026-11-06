@@ -1,5 +1,7 @@
+mod cli;
 mod config;
 mod control;
+mod desktop_control;
 mod journal;
 mod probe;
 mod services;
@@ -175,11 +177,15 @@ fn run(config: Config) -> Result<i32> {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(arguments) = args.strip_prefix(&["--cli".to_owned()]) {
+        std::process::exit(cli::run(arguments));
+    }
     if args == ["--contract"] {
         println!(
             "{}",
             json!({"schema":"les.native-runtime.v1","engine":"rust","python_core_remaining":true,
-            "services":["qdrant","api","ui"],"parent_pipe":true,"state_lock":"file-exclusive"})
+            "services":["qdrant","api","ui"],"parent_pipe":true,"state_lock":"file-exclusive",
+            "native_cli":true,"native_mcp_stdio":true})
         );
         return;
     }

@@ -185,6 +185,15 @@ def _probe_table(path: Path, size_bytes: int) -> DocumentProbe:
             probe.column_count_hint = max((len(row) for row in rows), default=0)
             probe.text_sample = "\n".join(",".join(row) for row in rows[:5])
         else:
+            from backend import workbook_index
+
+            sample = workbook_index.read(path, action="probe")
+            if sample is not None:
+                probe.sheet_count = sample["sheet_count"]
+                probe.row_count_hint = sample["row_count_hint"]
+                probe.column_count_hint = sample["column_count_hint"]
+                probe.text_sample = sample["text_sample"]
+                return probe
             import openpyxl
 
             wb = openpyxl.load_workbook(path, read_only=True, data_only=True)

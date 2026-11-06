@@ -63,7 +63,8 @@ async def _read_context(backend, chunks, dataset_ids, top_k, max_chars=2200):
             and (meta.get("parent_id") or c.meta.get("qdrant_point_id") == meta.get("qdrant_point_id"))]
         fragments, rendered, used = [], [], 0
         for neighbour in neighbours:
-            header = f"[Page {neighbour.meta.get('page') or neighbour.meta.get('source_page') or '?'}]\n"
+            page = neighbour.meta.get("page") or neighbour.meta.get("source_page")
+            header = f"[Page {page}]\n" if page else ""
             if used + len(header) + len(neighbour.content) > max_chars:
                 continue  # Whole fragments with their own provenance; no hidden clipping.
             fields = ('dataset_id', 'file_name', 'parent_id', 'page', 'source_page',

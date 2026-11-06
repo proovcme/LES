@@ -205,3 +205,45 @@ async def test_overlapping_watch_ticks_do_not_duplicate_work(tmp_path):
         release.set()
         await first
     assert calls == [1]
+
+
+@pytest.mark.asyncio
+async def test_external_sync_keeps_missing_evidence_and_requires_explicit_purge(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from backend.document_catalog import MetaDB
+    from proxy.routers import dataset_external as external
+
+    source = tmp_path / "Источники"
+    source.mkdir()
+    path = source / "Раздел 15.txt"
+    db = MetaDB(str(tmp_path / "catalog.db"))
+    dataset = SimpleNamespace(id=db.create_dataset("Роща"), name="Роща")
+    name = f"{source.name}/{path.name}"
+    with db._get_conn() as conn:
+        conn.execute("""INSERT INTO documents(id, dataset_id, file_name, source_path, status, chunk_count)
+                        VALUES(?, ?, ?, ?, 'INDEXED', 9)""", ("doc-1", dataset.id, name, str(path)))
+    backend = SimpleNamespace(list_datasets=AsyncMock(return_value=[dataset]))
+    import asyncio
+    monkeypatch.setattr(external.dataset_runtime, "get_dataset_state",
+                        lambda: SimpleNamespace(backend=backend, parse_semaphore=asyncio.Semaphore(1)))
+    monkeypatch.setattr(external, "validate_external_source", lambda _: source)
+    monkeypatch.setattr(external, "rag_meta_db_path", lambda: db.db_path)
+    delete = AsyncMock(return_value={"errors": []})
+    monkeypatch.setattr(external, "_delete_index_for_files", delete)
+    request = external.ExternalDatasetSyncRequest(path=str(source), dataset_id=dataset.id, parse=False)
+    result = await external.sync_external_dataset(request)
+    assert result["missing_marked"] == 1
+    delete.assert_not_awaited()
+    assert external._external_dataset_docs(dataset.id)[name]["chunk_count"] == 9
+    assert db.missing_sources({(dataset.id, name), ("another", name)}) == {(dataset.id, name)}
+    purge = external.PurgeMissingSources(path=str(source), dataset_id=dataset.id,
+                                         file_names=[name], confirm="purge_missing_index")
+    path.write_text("Документ вернулся.", encoding="utf-8")
+    with pytest.raises(HTTPException, match="снова доступен"):
+        await external.purge_missing_external_sources(purge)
+    delete.assert_not_awaited()
+    path.unlink()
+    await external.purge_missing_external_sources(purge)
+    delete.assert_awaited_once()
+    assert external._external_dataset_docs(dataset.id)[name]["chunk_count"] == 0

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import json
 import os
@@ -13,8 +14,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 
 from backend.rag_config import rag_meta_db_path
+from backend.workspace_native import catalog_call
 from proxy.security import require_user
-from proxy.routers.chat import ensure_chat_history_schema
+from proxy.services.chat_persistence_service import ensure_chat_history_schema
+from proxy.services.saferag_service import SAFE_FALLBACK
 from proxy.services.context_memory_service import get_chat_profile
 
 logger = logging.getLogger(__name__)
@@ -145,8 +148,8 @@ def _append_feedback_event(event: dict) -> None:
 async def get_chat_history(limit: int = 40, session_id: Optional[str] = None, _user=Depends(require_user)):
     """Return recent chat messages, optionally scoped to a session."""
     try:
+        await asyncio.to_thread(ensure_chat_history_schema, rag_meta_db_path())
         with sqlite3.connect(rag_meta_db_path()) as conn:
-            ensure_chat_history_schema(conn)
             if session_id:
                 rows = conn.execute(
                     "SELECT id, timestamp, question, answer, sources, crag_status, query_route_json, "
@@ -281,62 +284,35 @@ async def save_chat_feedback(history_id: int, req: ChatFeedbackRequest, _user=De
     """Store user confirmation/correction for a chat answer."""
     try:
         feedback_user = getattr(_user, "holder", "") or getattr(_user, "source", "")
-        with sqlite3.connect(rag_meta_db_path()) as conn:
-            ensure_chat_history_schema(conn)
-            cur = conn.execute(
-                """
-                UPDATE chat_history
-                SET feedback_status=?,
-                    feedback_comment=?,
-                    feedback_correct_answer=?,
-                    feedback_correct_dataset_filter=?,
-                    feedback_at=CURRENT_TIMESTAMP,
-                    feedback_user=?
-                WHERE id=?
-                """,
-                (
-                    req.feedback,
-                    req.comment or "",
-                    req.correct_answer or "",
-                    req.correct_dataset_filter or "",
-                    feedback_user,
-                    history_id,
-                ),
-            )
-            if cur.rowcount == 0:
-                raise HTTPException(status_code=404, detail="chat history row not found")
-            row = conn.execute(
-                """
-                SELECT
-                    id, feedback_status, feedback_comment, feedback_correct_dataset_filter, feedback_at,
-                    question, answer, sources, crag_status, requested_dataset_filter,
-                    effective_dataset_filter, source_dataset_names, source_dataset_mismatch,
-                    route_channel, route_reason, retrieval_quality, cache_type, validation_enabled
-                FROM chat_history WHERE id=?
-                """,
-                (history_id,),
-            ).fetchone()
+        row = await asyncio.to_thread(
+            catalog_call, rag_meta_db_path(), 'chat_history_feedback',
+            id=history_id, safe_fallback=SAFE_FALLBACK, feedback=req.feedback, comment=req.comment or '',
+            correct_answer=req.correct_answer or '', correct_dataset_filter=req.correct_dataset_filter or '',
+            feedback_user=feedback_user,
+        )
+        if row is None:
+            raise HTTPException(status_code=404, detail="chat history row not found")
         event = {
             "event": "chat_feedback",
-            "history_id": row[0],
-            "feedback": row[1],
-            "comment": row[2] or "",
-            "correct_dataset_filter": row[3] or "",
-            "feedback_at": row[4],
+            "history_id": row["id"],
+            "feedback": row["feedback_status"],
+            "comment": row["feedback_comment"] or "",
+            "correct_dataset_filter": row["feedback_correct_dataset_filter"] or "",
+            "feedback_at": row["feedback_at"],
             "user": feedback_user,
-            "question": _preview(row[5], 500),
-            "answer_preview": _preview(row[6], 700),
-            "sources": [source for source in (row[7] or "").split(",") if source],
-            "crag_status": row[8] or "",
-            "requested_dataset_filter": row[9] or "",
-            "effective_dataset_filter": row[10] or "",
-            "source_dataset_names": _json_list(row[11]),
-            "source_dataset_mismatch": bool(row[12]),
-            "route_channel": row[13] or "",
-            "route_reason": row[14] or "",
-            "retrieval_quality": row[15] or "",
-            "cache_type": row[16] or "",
-            "validation_enabled": bool(row[17]),
+            "question": _preview(row["question"], 500),
+            "answer_preview": _preview(row["answer"], 700),
+            "sources": [source for source in (row["sources"] or "").split(",") if source],
+            "crag_status": row["crag_status"] or "",
+            "requested_dataset_filter": row["requested_dataset_filter"] or "",
+            "effective_dataset_filter": row["effective_dataset_filter"] or "",
+            "source_dataset_names": _json_list(row["source_dataset_names"]),
+            "source_dataset_mismatch": bool(row["source_dataset_mismatch"]),
+            "route_channel": row["route_channel"] or "",
+            "route_reason": row["route_reason"] or "",
+            "retrieval_quality": row["retrieval_quality"] or "",
+            "cache_type": row["cache_type"] or "",
+            "validation_enabled": bool(row["validation_enabled"]),
         }
         _append_feedback_event(event)
         log_message = (
@@ -360,11 +336,11 @@ async def save_chat_feedback(history_id: int, req: ChatFeedbackRequest, _user=De
             logger.info(log_message, *log_args)
         return {
             "status": "saved",
-            "history_id": row[0],
-            "feedback": row[1],
-            "comment": row[2],
-            "correct_dataset_filter": row[3],
-            "feedback_at": row[4],
+            "history_id": row["id"],
+            "feedback": row["feedback_status"],
+            "comment": row["feedback_comment"],
+            "correct_dataset_filter": row["feedback_correct_dataset_filter"],
+            "feedback_at": row["feedback_at"],
             "log": str(_feedback_log_path()),
         }
     except HTTPException:
@@ -382,8 +358,8 @@ async def get_learning_history(
 ):
     """Return successful/confirmed answers for routing and dataset heuristics."""
     try:
+        await asyncio.to_thread(ensure_chat_history_schema, rag_meta_db_path())
         with sqlite3.connect(rag_meta_db_path()) as conn:
-            ensure_chat_history_schema(conn)
             conn.row_factory = sqlite3.Row
             if confirmed_only:
                 where = "feedback_status='correct'"

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Проверить поиск · LES RAG</title>
+  <link rel="stylesheet" href="forest.css?v=805">
+  <script type="module" src="search.js?v=805"></script>
+</head>
+<body>
+  <a class="skip-link" href="#les-main">Перейти к содержимому</a>
+  <nav class="app-nav" aria-label="Главное меню">
+    <a class="brand" href="index.html"><svg viewBox="0 0 32 40" aria-hidden="true"><path d="M16 2 5 17h6L3 28h10v10h6V28h10l-8-11h6Z"/></svg><span>ЛЕС <small>RAG</small><em>Ваши знания. Живой лес.</em></span></a>
+    <div class="nav-links"><a href="index.html">Лес знаний</a><a href="search.html" aria-current="page">Проверить поиск</a><a id="lab-chat" href="/classic?tab=chat">Чат</a></div>
+  </nav>
+  <div class="workspace">
+    <header><nav class="return-controls" aria-label="Возврат"><a class="quiet" href="index.html">← К лесу знаний</a></nav></header>
+    <main id="les-main" class="search-lab" tabindex="-1">
+      <p class="eyebrow">ЛЕС ЗНАНИЙ</p>
+      <h1>Проверить поиск</h1>
+      <p>Посмотрите, какие фрагменты нашёл бы чат и что Лес дочитал вокруг них.</p>
+      <form id="lab-form">
+        <label for="lab-question">Вопрос</label>
+        <input id="lab-question" name="question" type="search" maxlength="4000" required>
+        <div class="lab-controls">
+          <div><label for="lab-dataset">Набор документов</label><select id="lab-dataset"><option value="">Весь лес</option></select></div>
+          <button id="lab-submit">Найти фрагменты</button>
+        </div>
+        <details><summary>Параметры этой проверки</summary><label class="lab-check"><input type="checkbox" id="lab-rerank"> Включить реранкинг</label></details>
+      </form>
+      <p id="lab-status" role="status" aria-live="polite"></p>
+      <section id="lab-results" aria-label="Результаты поиска"></section>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,5 +1,91 @@
 /* Configuration home: one readiness passport, then readable working contours.
    Secondary and risky tools stay in disclosures instead of competing with status. */
+.les-settings-shell.sov-app-shell {
+  display: grid !important;
+  grid-template: minmax(0, 1fr) / 218px minmax(0, 1fr);
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--bg);
+}
+.les-settings-shell.sov-app-shell > .les-settings-nav {
+  grid-area: 1 / 1;
+  position: static !important;
+  display: flex !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  flex-direction: column;
+  align-items: stretch !important;
+  padding: 24px 14px 18px !important;
+  gap: 8px !important;
+  overflow-y: auto;
+  background: var(--bg-panel);
+  border: 0;
+  border-right: 1px solid var(--border);
+  box-shadow: none;
+}
+.les-settings-nav .sov-brand-block { margin: 0 0 12px !important; padding: 0 12px; }
+.les-settings-title {
+  padding: 0 12px 8px;
+  color: var(--text);
+  font-size: 20px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+.les-settings-nav .les-top-tabs {
+  display: flex !important;
+  flex: none !important;
+  height: auto !important;
+  width: 100%;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+.les-settings-nav .les-top-tabs .q-tabs__content { display: grid; gap: 3px; }
+.les-settings-nav .les-top-tabs .q-tab { min-height: 46px; border-radius: 10px; }
+.les-settings-nav .les-top-tabs .q-tab__content {
+  flex-direction: row;
+  justify-content: flex-start;
+  gap: 10px;
+}
+.les-settings-nav .les-top-tabs .q-tab__indicator { display: none; }
+.les-settings-nav-footer {
+  width: 100%;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  gap: 2px;
+}
+.les-settings-nav-footer .les-nav-action { width: 100%; align-items: stretch; justify-content: flex-start; }
+.les-settings-nav-footer a.les-nav-action { align-items: center; }
+.les-settings-nav-footer .q-btn__content { width: 100%; flex-wrap: nowrap; }
+.les-settings-shell.sov-app-shell > .sov-app-content {
+  grid-area: 1 / 2;
+  min-height: 0;
+  height: 100%;
+  margin: 0 !important;
+}
+.les-settings-utility .sov-ui-version-badge { display: inline-flex !important; min-height: 44px; width: 100%; }
+.les-settings-utility .sov-ui-header-controls > .q-btn { display: inline-flex !important; }
+
+@media (max-width: 720px) {
+  .les-settings-shell.sov-app-shell { grid-template: auto minmax(0, 1fr) / minmax(0, 1fr); }
+  .les-settings-shell.sov-app-shell > .les-settings-nav {
+    padding: 12px !important;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .les-settings-nav .sov-brand-block { display: none !important; }
+  .les-settings-title { padding: 0 4px; }
+  .les-settings-nav .les-top-tabs .q-tabs__content { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .les-settings-nav .les-top-tabs .q-tab { padding: 0 4px; }
+  .les-settings-nav .les-top-tabs .q-tab__content { justify-content: center; }
+  .les-settings-nav .les-top-tabs .q-tab .q-icon { display: none; }
+  .les-settings-nav-footer { display: flex; flex-flow: row wrap; }
+  .les-settings-nav-footer .les-nav-action { width: auto; }
+  .les-settings-shell.sov-app-shell > .sov-app-content { grid-area: 2 / 1; }
+}
+.nicegui-content:has(> .les-settings-shell) { padding: 0 !important; gap: 0 !important; }
+
 .sov-config-page {
   width: min(100%, 1120px);
   min-width: 0;

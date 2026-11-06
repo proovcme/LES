@@ -7,6 +7,7 @@ import logging
 import math
 import os
 import re
+import sqlite3
 import time
 import unicodedata
 from dataclasses import dataclass
@@ -989,7 +990,7 @@ async def retrieve_chat_chunks(
         )
     quality = evaluate_retrieval_quality(question=question, chunks=chunks, trace=trace, kot=kot)
 
-    if return_trace and quality.status == "weak" and policy.weak_retry:
+    if return_trace and quality.retry_wider and policy.weak_retry:
         retry_query = expanded_quality_query(question, kot)
         retry_top_k = (
             merged_top_k
@@ -1071,7 +1072,7 @@ async def retrieve_chat_chunks(
                     trace=retry_trace,
                     kot=kot,
                 )
-                if retry_quality.status != "weak" or len(retry_chunks) >= len(chunks):
+                if not retry_quality.retry_wider or len(retry_chunks) >= len(chunks):
                     chunks, trace, quality = retry_chunks, retry_trace, retry_quality
             except Exception as retry_error:  # noqa: BLE001
                 if isinstance(retry_error, EmbeddingContractError):
@@ -1313,6 +1314,18 @@ async def retrieve_chat_chunks(
 
     # A weak-query retry may replace the trace; record the actual query contract
     # only after every dense pass has completed.
+    missing_sources = getattr(getattr(rag_backend, "db", None), "missing_sources", None)
+    if chunks and callable(missing_sources):
+        identities = [
+            (str((chunk.meta or {}).get("dataset_id") or ""), str((chunk.meta or {}).get("file_name") or chunk.doc_name))
+            for chunk in chunks
+        ]
+        try:
+            unavailable = await asyncio.to_thread(missing_sources, set(identities))
+        except sqlite3.Error:
+            logger.exception("Failed to verify availability of retrieved sources")
+            return blocked_result("SOURCE_CATALOG_UNAVAILABLE")
+        chunks = [chunk for chunk, identity in zip(chunks, identities) if identity not in unavailable]
     collapsed_chunks = collapse_exact_duplicates(chunks)
     found_count = len(collapsed_chunks)
     if bounded_result_limit is not None:
@@ -1331,7 +1344,7 @@ async def retrieve_chat_chunks(
     trace.query_embedding = query_embedding_instruction_id()
     trace.quality_status = quality.status
     trace.quality_detail = quality.detail
-    trace.status = "ok" if quality.status == "good" else "degraded"
+    trace.status = "ok" if quality.status == "candidates" else "degraded"
     trace.resolved_dataset_ids = list(dataset_ids or [])
     trace.scope_source = scope_source
     if index_journal is not None:

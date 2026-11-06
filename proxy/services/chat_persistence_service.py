@@ -1,9 +1,9 @@
 """Chat history schema and transactional history writes."""
 from __future__ import annotations
 import logging
-import sqlite3
 import json
 from typing import Any
+from backend.workspace_native import catalog_call
 from backend.rag_config import rag_meta_db_path
 from proxy.services.context_memory_service import update_chat_profile
 from proxy.services.saferag_service import SAFE_FALLBACK
@@ -11,64 +11,8 @@ from proxy.services import chat_request_contracts
 
 logger = logging.getLogger(__name__)
 
-CHAT_HISTORY_EXTRA_COLUMNS = {
-    "attachment_context": "TEXT DEFAULT ''",
-    "route_channel": "TEXT DEFAULT ''",
-    "route_reason": "TEXT DEFAULT ''",
-    "requested_dataset_filter": "TEXT DEFAULT ''",
-    "effective_dataset_filter": "TEXT DEFAULT ''",
-    "resolved_dataset_ids": "TEXT DEFAULT '[]'",
-    "resolved_dataset_names": "TEXT DEFAULT '[]'",
-    "source_dataset_ids": "TEXT DEFAULT '[]'",
-    "source_dataset_names": "TEXT DEFAULT '[]'",
-    "source_dataset_mismatch": "INTEGER DEFAULT 0",
-    "query_route_json": "TEXT DEFAULT '{}'",
-    "retrieval_trace_json": "TEXT DEFAULT '{}'",
-    "artifact_json": "TEXT DEFAULT '{}'",
-    "retrieval_quality": "TEXT DEFAULT ''",
-    "cache_type": "TEXT DEFAULT ''",
-    "validation_enabled": "INTEGER DEFAULT 1",
-    "success": "INTEGER DEFAULT 0",
-    "feedback_status": "TEXT DEFAULT ''",
-    "feedback_comment": "TEXT DEFAULT ''",
-    "feedback_correct_answer": "TEXT DEFAULT ''",
-    "feedback_correct_dataset_filter": "TEXT DEFAULT ''",
-    "feedback_at": "TEXT DEFAULT NULL",
-    "feedback_user": "TEXT DEFAULT ''",
-}
-
-
-def ensure_chat_history_schema(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS chat_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-            question TEXT,
-            answer TEXT,
-            sources TEXT,
-            crag_status TEXT,
-            latency_sec REAL,
-            tokens INTEGER,
-            session_id TEXT DEFAULT NULL
-        )
-        """
-    )
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(chat_history)").fetchall()]
-    migrate_success = 'success' not in cols
-    if "session_id" not in cols:
-        conn.execute("ALTER TABLE chat_history ADD COLUMN session_id TEXT DEFAULT NULL")
-        cols.append("session_id")
-    for name, ddl in CHAT_HISTORY_EXTRA_COLUMNS.items():
-        if name not in cols:
-            conn.execute(f"ALTER TABLE chat_history ADD COLUMN {name} {ddl}")
-    if migrate_success:
-        conn.execute(
-            """UPDATE chat_history SET success=1
-            WHERE crag_status IN ('VERIFIED', 'UNVALIDATED')
-              AND COALESCE(answer, '') <> '' AND answer <> ?""",
-            (SAFE_FALLBACK,),
-        )
+def ensure_chat_history_schema(database) -> None:
+    catalog_call(database, 'chat_history_init', safe_fallback=SAFE_FALLBACK)
 
 
 def _json_text(value: Any) -> str:
@@ -120,38 +64,34 @@ def save_chat_history(
     from proxy.services.execution_receipt_service import execution_incomplete
     if execution_incomplete(trace):
         success_value = 0
-    with sqlite3.connect(rag_meta_db_path()) as conn:
-        ensure_chat_history_schema(conn)
-        from proxy.services.chat_durability_service import write_history_row
-        history_id = write_history_row(conn,
-            ['question', 'answer', 'sources', 'crag_status', 'latency_sec', 'tokens', 'session_id', 'route_channel', 'route_reason', 'requested_dataset_filter', 'effective_dataset_filter', 'resolved_dataset_ids', 'resolved_dataset_names', 'source_dataset_ids', 'source_dataset_names', 'source_dataset_mismatch', 'query_route_json', 'retrieval_trace_json', 'artifact_json', 'retrieval_quality', 'cache_type', 'validation_enabled', 'success', 'attachment_context'],
-            (
-                question,
-                answer,
-                ",".join(sources),
-                crag_status,
-                latency_sec,
-                tokens,
-                session_id,
-                str(route.get("channel") or ""),
-                str(route.get("reason") or ""),
-                requested_dataset_filter or "",
-                effective_dataset_filter or "",
-                _json_text(resolved_dataset_ids or []),
-                _json_text(resolved_dataset_names or []),
-                _json_text(source_dataset_ids or []),
-                _json_text(source_dataset_names or []),
-                source_dataset_mismatch,
-                _json_text(route),
-                _json_text(trace),
-                _json_text(artifact or {}),
-                quality,
-                cache_type,
-                int(bool(validation_enabled)),
-                success_value,
-                attachment_context or "",
-            ),
-        )
+    from proxy.services.chat_durability_service import current_history_id
+    history_id = catalog_call(rag_meta_db_path(), 'chat_history_save',
+        id=current_history_id(), safe_fallback=SAFE_FALLBACK, row={
+            "question": question,
+            "answer": answer,
+            "sources": ",".join(sources),
+            "crag_status": crag_status,
+            "latency_sec": latency_sec,
+            "tokens": tokens,
+            "session_id": session_id,
+            "route_channel": str(route.get("channel") or ""),
+            "route_reason": str(route.get("reason") or ""),
+            "requested_dataset_filter": requested_dataset_filter or "",
+            "effective_dataset_filter": effective_dataset_filter or "",
+            "resolved_dataset_ids": _json_text(resolved_dataset_ids or []),
+            "resolved_dataset_names": _json_text(resolved_dataset_names or []),
+            "source_dataset_ids": _json_text(source_dataset_ids or []),
+            "source_dataset_names": _json_text(source_dataset_names or []),
+            "source_dataset_mismatch": source_dataset_mismatch,
+            "query_route_json": _json_text(route),
+            "retrieval_trace_json": _json_text(trace),
+            "artifact_json": _json_text(artifact or {}),
+            "retrieval_quality": quality,
+            "cache_type": cache_type,
+            "validation_enabled": int(bool(validation_enabled)),
+            "success": success_value,
+            "attachment_context": attachment_context or "",
+        })
     try:
         update_chat_profile(
             session_id=session_id,

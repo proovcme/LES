@@ -87,6 +87,22 @@ def _resolver(registry: ModelConnectionRegistry, tmp_path, *, environ=None):
     )
 
 
+def test_execution_binding_reads_native_snapshot_and_rechecks_disabled_head(tmp_path, monkeypatch):
+    registry = ModelConnectionRegistry(tmp_path / "meta.db")
+    revision = _connection(registry, name="Native snapshot")
+    registry.bind_role(ConnectionRole.ANSWER, revision.revision_id,
+                       expected_binding_revision=None, actor="test")
+    registry.disable_connection(revision.connection_id, expected_revision_id=revision.revision_id, actor="test")
+
+    def unused(*args, **kwargs):
+        pytest.fail("Execution resolved the model with separate SQLite reads")
+
+    for name in ("get_role_binding", "get_revision", "get_connection", "latest_capability_snapshot"):
+        monkeypatch.setattr(registry, name, unused)
+    with pytest.raises(ModelConnectionResolutionError, match="CONNECTION_DISABLED"):
+        _resolver(registry, tmp_path).resolve(ConnectionRole.ANSWER)
+
+
 def test_legacy_freetoken_import_references_secret_without_copying_it(tmp_path) -> None:
     env = {
         "LES_LLM_PROVIDER": "freetoken",

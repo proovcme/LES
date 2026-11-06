@@ -1,4 +1,4 @@
-use crate::{error, json_response, transport, Context};
+use crate::{error, json_response, Context};
 use axum::{
     body::to_bytes,
     extract::Request,
@@ -41,7 +41,7 @@ pub fn route(method: &Method, path: &str) -> Option<Route> {
 }
 
 pub async fn handle(context: Arc<Context>, request: Request, route: Route) -> Response {
-    let cors = match transport::authorize(&context, request.headers()).await {
+    let cors = match crate::auth::authorize(&context, request.headers(), false).await {
         Ok(cors) => cors,
         Err(response) => return response,
     };

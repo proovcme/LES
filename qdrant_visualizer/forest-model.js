@@ -6,9 +6,37 @@ export function inventory(payload) {
 }
 export function matches(doc,query,dataset) { return (!dataset||doc.dataset_id===dataset)&&String(doc.label||'').toLocaleLowerCase('ru').includes(query.trim().toLocaleLowerCase('ru')); }
 export function sourceUrl(path) { return '/lite-api/rag/file/viewer?'+new URLSearchParams({path:String(path)}); }
-export function documentUrl(doc) { return doc?.id&&doc?.dataset_id&&doc?.file_name ? '/lite-api/documents/by-id/'+encodeURIComponent(doc.id)+'/raw?'+new URLSearchParams({dataset_id:doc.dataset_id,doc_name:doc.file_name}) : ''; }
+export function documentUrl(doc, api='/lite-api') { return doc?.id&&doc?.dataset_id&&doc?.file_name ? api+'/documents/by-id/'+encodeURIComponent(doc.id)+'/raw?'+new URLSearchParams({dataset_id:doc.dataset_id,doc_name:doc.file_name}) : ''; }
 export function chunkMatches(doc,chunk) { const m=chunk.metadata||{}; return String(m.dataset_id||'')===doc.dataset_id&&String(chunk.doc_name||'')===doc.label; }
-export function treePosition(doc,index,count) { const angle=index*2.399963229728653,radius=Math.sqrt((index+.5)/Math.max(count,1)); return {x:Math.cos(angle)*radius,z:Math.sin(angle)*radius,height:24+hash(doc.id)%20}; }
+export const treeSpecies = {
+  pdf: {name:'Ель', format:'PDF', icon:'▲', suffixes:['pdf']},
+  text: {name:'Дуб', format:'Текст и Word', icon:'●', suffixes:['doc','docx','odt','rtf','txt','md','html','htm','epub','eml','msg']},
+  table: {name:'Берёза', format:'Таблицы', icon:'⬮', suffixes:['xls','xlsx','xlsm','xlsb','ods','csv','tsv']},
+  slides: {name:'Клён', format:'Презентации', icon:'◆', suffixes:['ppt','pptx','odp']},
+  image: {name:'Кипарис', format:'Изображения', icon:'▴', suffixes:['png','jpg','jpeg','bmp','gif','tif','tiff','webp','svg','heic']},
+  other: {name:'Можжевельник', format:'Другие файлы', icon:'⬟', suffixes:[]},
+};
+
+export function documentSpecies(doc) {
+  const suffix = String(doc.file_name || doc.label || '').toLowerCase().match(/\.([^./\\]+)$/)?.[1];
+  return Object.entries(treeSpecies).find(([,tree]) => tree.suffixes.includes(suffix))?.[0] ?? 'other';
+}
+
+export function fileSizeLabel(bytes) {
+  if (!Number.isFinite(bytes) || bytes < 0) return '';
+  const units = ['Б','КБ','МБ','ГБ','ТБ'];
+  const unit = Math.min(Math.floor(Math.log2(Math.max(1, bytes)) / 10), units.length - 1);
+  return `${(bytes / 1024 ** unit).toLocaleString('ru', {maximumFractionDigits:1})} ${units[unit]}`;
+}
+
+export function treePosition(doc,index,count) {
+  const angle=index*2.399963229728653, radius=Math.sqrt((index+.5)/Math.max(count,1));
+  const bytes = doc.file_size;
+  const height = Number.isFinite(bytes) && bytes >= 0
+    ? 15 + Math.max(0, Math.min(34, (Math.log2(Math.max(1,bytes)) - 10) * 1.85))
+    : 23;
+  return {x:Math.cos(angle)*radius, z:Math.sin(angle)*radius, height};
+}
 
 export function documentStatus(doc) { return doc.status === "INDEXED" && !Number(doc.chunks) ? "Текст для поиска отсутствует" : ({INDEXED:"Готов к поиску",PENDING:"Ожидает обработки",ERROR:"Нужна проверка",MISSING:"Файл не найден",SKIPPED:"Пропущен"}[doc.status] || "Статус не указан"); }
 

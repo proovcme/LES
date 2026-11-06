@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { errorMessage, request } from '../lib/api';
+  import { ApiError, errorMessage, request } from '../lib/api';
   import type { Source } from '../lib/contracts';
-  import { sourcePage } from '../lib/contracts';
+  import { sourcePage, sourcePlace } from '../lib/contracts';
   import Modal from './Modal.svelte';
   import Icon from './Icon.svelte';
   let { source, close }: { source: Source; close: () => void } = $props();
@@ -12,7 +12,10 @@
   let page = $state(1); let imageURL = $state(''); let viewURL = $state('');
   let imageLoading = $state(false);
   let alive = true;
-  const identity = $derived(new URLSearchParams({ dataset_id: source.dataset_id || '', doc_name: source.doc_name || '' }));
+  const identity = $derived(new URLSearchParams({
+    dataset_id: source.dataset_id || '', doc_name: source.doc_name || '',
+    source_sha256: source.locator?.source_sha256 || '',
+  }));
   const base = $derived(doc ? `/api/documents/by-id/${encodeURIComponent(doc.id)}` : '');
   onMount(() => {
     page = sourcePage(source);
@@ -27,22 +30,37 @@
     preparing = true; documentError = '';
     try {
       if (doc.file_name.toLowerCase().endsWith('.pdf')) {
-        const result = await fetch(`${base}/pdf-contour/pages/${page}/preview`, { signal: AbortSignal.timeout(30000) });
-        if (!result.ok) throw new Error('preview');
+        const result = await fetch(`${base}/pdf-contour/pages/${page}/preview?${identity}`, { signal: AbortSignal.timeout(30000) });
+        if (!result.ok) {
+          const body = await result.json().catch(() => ({}));
+          throw new ApiError(typeof body.detail === 'string' ? body.detail : 'Не удалось открыть страницу.');
+        }
         const blob = await result.blob();
         if (!alive) return;
         if (imageURL) URL.revokeObjectURL(imageURL);
         imageURL = URL.createObjectURL(blob); viewURL = ''; imageLoading = true;
       } else {
-        const url = `${base}/viewer?${identity}&page=${page}`;
+        const params = new URLSearchParams(identity);
+        params.set('page', String(page));
+        const { sheet, row, anchor } = source.locator ?? {};
+        if (sheet && row) {
+          params.set('sheet', sheet);
+          params.set('locator', `${sheet}!R${row}`);
+        } else if (anchor) {
+          params.set('locator', anchor);
+        }
+        const url = `${base}/viewer?${params}`;
         const response = await fetch(url, { signal: AbortSignal.timeout(30000) });
-        if (!response.ok) throw new Error('preview');
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          throw new ApiError(typeof body.detail === 'string' ? body.detail : 'Не удалось открыть документ.');
+        }
         await response.body?.cancel();
         if (!alive) return;
         viewURL = url;
       }
       preview = true;
-    } catch { documentError = 'Не удалось показать эту страницу. Можно скачать оригинал или открыть его в приложении.'; }
+    } catch (failure) { documentError = errorMessage(failure); }
     finally { preparing = false; }
   }
   async function openNative() {
@@ -52,11 +70,13 @@
   }
 </script>
 <Modal title={source.doc_name || 'Доказательство'} {close} wide>
-  <p class="eyebrow">Источник {source.index}{source.source_page || source.page || source.page_number ? ` · страница ${sourcePage(source)}` : ''}</p>
+  <p class="eyebrow">Источник {source.index}{sourcePlace(source)}</p>
+  {#if source.locator?.section_heading}<p>{source.locator.section_heading}</p>{/if}
   {#if source.quote || source.snippet}<blockquote class="evidence">{source.quote || source.snippet}</blockquote>{:else}<p class="muted">У этого источника не сохранена цитата. Проверьте оригинал.</p>{/if}
   {#if loading}<p role="status">Проверяю оригинал…</p>{/if}
   {#if error}<p class="error" role="alert">{error}</p>{/if}
   {#if doc}
+    {#if !source.locator?.source_sha256}<p class="muted">Для этой цитаты редакция файла не сохранена. Доступен текущий оригинал.</p>{/if}
     <div class="source-actions">
       <button onclick={showOriginal} disabled={preparing}><Icon name="file" />{preparing ? 'Открываю…' : 'Показать оригинал'}</button>
       <a class="button quiet" href={`${base}/raw?${identity}`} download={doc.file_name}><Icon name="external" />Скачать</a>

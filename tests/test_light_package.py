@@ -36,6 +36,7 @@ def test_package_follows_transitive_tool_imports_without_private_state(tmp_path,
         "tools/first.py": "from tools.second import run\n",
         "tools/les-light.cmd": "@echo off\n",
         "tools/second.py": "def run(): pass\n",
+        "tools/skill_compute_worker.py": "def main(): pass\n",
         "tools/private.py": "secret = 1\n",
         "data/private.txt": "private",
         "config/version.json": "{}",
@@ -62,6 +63,7 @@ def test_package_follows_transitive_tool_imports_without_private_state(tmp_path,
     destination = tmp_path / "package"
     runtime = package.stage_code(destination)
     assert (runtime / "tools/second.py").is_file()
+    assert (runtime / "tools/skill_compute_worker.py").is_file()
     assert not (runtime / "tools/private.py").exists()
     assert not (runtime / "data").exists()
     assert (destination / "assets/les-light.svg").is_file()
