@@ -271,10 +271,14 @@ fn csv(bytes: &[u8], name: &str, request: &Value, limit: u32) -> Result<Vec<Shee
             }
             if row.len() == 1 && row[0].is_empty() {
                 row.clear();
+                count += 1;
+                if count > limit {
+                    break;
+                }
                 continue;
             }
             if let Some(width) = width {
-                if row.len() > width {
+                if row.len() > width && request["allow_ragged"] != true {
                     return Err("CSV_ROW_WIDTH_INVALID");
                 }
             } else {
@@ -297,7 +301,9 @@ fn csv(bytes: &[u8], name: &str, request: &Value, limit: u32) -> Result<Vec<Shee
     }
     if count <= limit && (!row.is_empty() || !cell.is_empty() || closed) {
         row.push(cell);
-        if row.len() > 512 || width.is_some_and(|w| row.len() > w) {
+        if row.len() > 512
+            || width.is_some_and(|w| row.len() > w && request["allow_ragged"] != true)
+        {
             return Err("CSV_ROW_WIDTH_INVALID");
         }
         rows.insert(count, row);
@@ -532,5 +538,82 @@ pub(super) fn read(bytes: &[u8], suffix: &str, path: &Path, request: &Value) -> 
     }
     Ok(
         json!({"text":parts.join("\n\n"),"sheets":metadata,"extractor":"les.spreadsheet-navigation.v1","formula_values":if suffix=="csv" {"not_applicable"} else {"saved_only"}}),
+    )
+}
+pub(super) fn snapshot_csv(bytes: &[u8]) -> Result<Value> {
+    let text = super::super::plain_text::decode(bytes).ok_or("DOCUMENT_ENCODING_REQUIRED")?;
+    // Delimiters are syntax, not document semantics. Count only outside quoted fields.
+    let mut counts = [0usize; 3];
+    let mut quoted = false;
+    let mut records = 0;
+    let mut chars = text.chars().take(8192).peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '"' {
+            if quoted && chars.peek() == Some(&'"') {
+                chars.next();
+            } else {
+                quoted = !quoted;
+            }
+        } else if !quoted {
+            match ch {
+                ',' => counts[0] += 1,
+                ';' => counts[1] += 1,
+                '\t' => counts[2] += 1,
+                '\n' => {
+                    records += 1;
+                    if records >= 20 {
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let delimiter = [",", ";", "\t"][if counts[1] > counts[0] && counts[1] >= counts[2] {
+        1
+    } else if counts[2] > counts[0] && counts[2] > counts[1] {
+        2
+    } else {
+        0
+    }];
+    let sheets = csv(
+        bytes,
+        "CSV",
+        &json!({"delimiter":delimiter,"allow_ragged":true}),
+        19999,
+    )?;
+    let sheet = &sheets[0];
+    if sheet.total > 20000 {
+        return Err(LIMIT);
+    }
+    let mut rows = Vec::new();
+    let mut cells = 0;
+    let mut width = 0;
+    for (r, values) in &sheet.rows {
+        let mut row = Vec::new();
+        width = width.max(values.len());
+        for (i, value) in values.iter().enumerate() {
+            if value.is_empty() {
+                continue;
+            }
+            let mut col = i + 1;
+            let mut label = String::new();
+            while col > 0 {
+                col -= 1;
+                label.insert(0, (b'A' + (col % 26) as u8) as char);
+                col /= 26;
+            }
+            row.push(json!({"coordinate":format!("{label}{}",r+1),"kind":"text","value":value}));
+        }
+        cells += row.len();
+        if cells > 300000 {
+            return Err(LIMIT);
+        }
+        if !row.is_empty() {
+            rows.push(json!({"id":format!("s1:r{}",r+1),"sheet":"CSV","row":r+1,"locator":format!("CSV!R{}",r+1),"cells":row}));
+        }
+    }
+    Ok(
+        json!({"schema":"les.table.v1","sha256":crate::sha256_hex(bytes),"sheets":[{"name":"CSV","columns":width,"merged_ranges":[],"hidden":false}],"row_count":rows.len(),"rows":rows}),
     )
 }

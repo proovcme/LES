@@ -10,14 +10,33 @@ pub struct Prepared {
     pub session: Value,
     pub dialogue: Vec<Value>,
     pub memory: Vec<Value>,
+    pub attachment: Value,
 }
 fn catalog(database: &Path, action: &str, args: Value) -> Result<Value> {
     unwrap(crate::library::catalog(database, action, args))
 }
 pub async fn prepare(context: Arc<Context>, input: Value) -> Result<Prepared> {
-    tokio::task::spawn_blocking(move || prepare_sync(&context, input))
+    let owner = context.clone();
+    let mut turn = tokio::task::spawn_blocking(move || prepare_sync(&owner, input))
         .await
-        .map_err(|_| "CHAT_PREPARATION_FAILED")?
+        .map_err(|_| "CHAT_PREPARATION_FAILED")??;
+    if let Some(id) = turn.request["attachment_id"].as_str() {
+        let attachment = crate::attachments::bound(context, id.to_owned())
+            .await
+            .map_err(|code| super::error::Failure::new(&code))?;
+        turn.request["attachment_context"] = if attachment["media_type"] == "image" {
+            json!(format!(
+                "Прикреплено изображение: {} ({} × {}).",
+                attachment["name"].as_str().unwrap_or("image"),
+                attachment["width"],
+                attachment["height"]
+            ))
+        } else {
+            attachment["text"].clone()
+        };
+        turn.attachment = attachment;
+    }
+    Ok(turn)
 }
 pub(crate) fn answer(context: &Context) -> Result<model_runtime::Resolved> {
     let database = &context.database;
@@ -70,9 +89,6 @@ fn prepare_sync(context: &Context, input: Value) -> Result<Prepared> {
         if request[field] == true {
             return Err(code.into());
         }
-    }
-    if !request["attachment_id"].is_null() {
-        return Err("NATIVE_ATTACHMENT_CAPABILITY_PENDING".into());
     }
     let database = &context.database;
     let connection = answer(context)?;
@@ -187,5 +203,6 @@ fn prepare_sync(context: &Context, input: Value) -> Result<Prepared> {
         session,
         dialogue,
         memory,
+        attachment: Value::Null,
     })
 }

@@ -1,4 +1,5 @@
 mod agent_state;
+mod attachments;
 mod auth;
 mod auth_keys;
 mod catalog;
@@ -52,6 +53,7 @@ pub struct Context {
     pub upstream: String,
     pub client: reqwest::Client,
     pub workspace_slots: Arc<tokio::sync::Semaphore>,
+    pub attachment_slots: Arc<tokio::sync::Semaphore>,
     pub auth_policy: tokio::sync::OnceCell<auth::Policy>,
     pub frontend: Option<frontend::Frontend>,
     pub legacy_ui_url: Option<String>,
@@ -108,6 +110,9 @@ async fn dispatch(State(context): State<Arc<Context>>, request: Request) -> Resp
     }
     if chat::http::handles(request.uri().path()) {
         return chat::http::handle(context, request).await;
+    }
+    if attachments::handles(request.uri().path()) {
+        return attachments::handle(context, request).await;
     }
     if request.uri().path() == "/api/commands" {
         return chat::commands::handle(context, request).await;
@@ -342,6 +347,7 @@ fn configuration() -> Result<(std::net::SocketAddr, Context), &'static str> {
             upstream: upstream.to_string().trim_end_matches('/').to_owned(),
             client,
             workspace_slots: Arc::new(tokio::sync::Semaphore::new(16)),
+            attachment_slots: Arc::new(tokio::sync::Semaphore::new(1)),
             auth_policy,
             frontend,
             legacy_ui_url,
@@ -356,6 +362,13 @@ fn configuration() -> Result<(std::net::SocketAddr, Context), &'static str> {
 
 fn main() {
     let args = std::env::args_os().skip(1).collect::<Vec<_>>();
+    if args == [std::ffi::OsString::from("--serve-chat-attachments")] {
+        if let Err(code) = les_core::chat_attachments::serve_with(&document_dispatch::external) {
+            eprintln!("{code}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if args == [std::ffi::OsString::from("--serve-tables")] {
         if let Err(code) = les_core::tables::serve() {
             eprintln!("{code}");

@@ -22,6 +22,7 @@ static FORMAT_POOL: OnceLock<Mutex<Option<Session>>> = OnceLock::new();
 static TABLE_POOL: OnceLock<Mutex<Option<Session>>> = OnceLock::new();
 static ML_POOL: OnceLock<Mutex<Option<Session>>> = OnceLock::new();
 static MCP_POOL: OnceLock<Mutex<Option<Session>>> = OnceLock::new();
+static ATTACHMENT_POOL: OnceLock<Mutex<Option<Session>>> = OnceLock::new();
 static SEQUENCE: AtomicU64 = AtomicU64::new(1);
 static GENERATION: AtomicU64 = AtomicU64::new(0);
 
@@ -239,6 +240,9 @@ pub fn run(request: &Value) -> Result<Value, &'static str> {
 pub fn run_pdf(request: &Value) -> Result<Value, &'static str> {
     run_in(request, &PDF_POOL, 2 * 1024 * 1024 * 1024)
 }
+pub fn run_attachments(request: &Value) -> Result<Value, &'static str> {
+    run_in(request, &ATTACHMENT_POOL, 2 * 1024 * 1024 * 1024)
+}
 pub fn run_documents(request: &Value) -> Result<Value, &'static str> {
     run_in(request, &FORMAT_POOL, 2 * 1024 * 1024 * 1024)
 }
@@ -413,6 +417,7 @@ pub fn release_idle() -> Result<Value, &'static str> {
             TABLE_POOL.get(),
             ML_POOL.get(),
             MCP_POOL.get(),
+            ATTACHMENT_POOL.get(),
         ]
         .into_iter()
         .flatten(),
@@ -422,7 +427,11 @@ pub fn release_idle() -> Result<Value, &'static str> {
 pub fn release_batch() -> Result<Value, &'static str> {
     // A completed indexing batch does not own persistent MCP/skill sessions
     // or a chat's PDF/table reader. Release only its parser and embedding pools.
-    release([FORMAT_POOL.get(), ML_POOL.get()].into_iter().flatten())
+    release(
+        [FORMAT_POOL.get(), ML_POOL.get(), ATTACHMENT_POOL.get()]
+            .into_iter()
+            .flatten(),
+    )
 }
 
 fn release<'a>(
@@ -453,6 +462,7 @@ pub fn shutdown() -> Result<Value, &'static str> {
         TABLE_POOL.get(),
         ML_POOL.get(),
         MCP_POOL.get(),
+        ATTACHMENT_POOL.get(),
     ]
     .into_iter()
     .flatten()

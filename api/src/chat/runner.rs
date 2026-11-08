@@ -118,7 +118,7 @@ impl Evidence {
 }
 pub async fn run(
     context: Arc<Context>,
-    mut request: Value,
+    request: &mut Value,
     journal: &mut Journal,
     sink: &Sink,
 ) -> Result<Value> {
@@ -137,7 +137,13 @@ pub async fn run(
             "artifact":{"completion_status":"completed","validation":"not_performed","tool_results":[]},"validation":{"enabled":false,"reason":"deterministic_command"}}),
         );
     }
-    let turn = prepare::prepare(context.clone(), request).await?;
+    let mut turn = prepare::prepare(context.clone(), request.clone()).await?;
+    request["attachment_context"] = turn.request["attachment_context"].clone();
+    if !turn.attachment.is_null() {
+        journal
+            .checkpoint("attachment_context", request["attachment_context"].clone())
+            .await?;
+    }
     let service = context.chat.get().ok_or("CHAT_SERVICE_BUSY")?;
     let slots = if turn.connection.endpoint.locality == "remote" {
         service.remote.clone()
@@ -149,7 +155,15 @@ pub async fn run(
         .await
         .map_err(|_| "MODEL_QUEUE_TIMEOUT")?
         .map_err(|_| "MODEL_QUEUE_TIMEOUT")?;
-    let tools = tools::Tools::new(&context, &turn).await?;
+    let mut tools = tools::Tools::new(&context, &turn).await?;
+    tools.bind_table(super::table_document::TableTool::bind(&context, &turn).await?);
+    if let Some(table) = &tools.table {
+        turn.request["attachment_context"] = json!(table.manifest().to_string());
+        request["attachment_context"] = turn.request["attachment_context"].clone();
+        journal
+            .checkpoint("attachment_context", request["attachment_context"].clone())
+            .await?;
+    }
     let native =
         les_core::model_capabilities::require(&turn.connection.snapshot, &["tools".into()], None)
             .is_ok();
@@ -157,6 +171,7 @@ pub async fn run(
         turn.connection.profile["normal_tool_count"]
             .as_u64()
             .unwrap_or(3) as usize,
+        turn.scope["document_grounding_enabled"] == true,
     );
     let mut evidence = Evidence::default();
     let mut exchanges = Vec::new();
@@ -184,9 +199,19 @@ pub async fn run(
             .filter_map(|t| t["name"].as_str().map(str::to_owned)),
     )?;
     let mut native_pending = Value::Null;
+    let mut table_result = Value::Null;
     loop {
         match agent.next()? {
             Step::Model { final_answer } => {
+                let mut required = evidence.blocks.clone();
+                if let Some(table) = &tools.table {
+                    let state = table.state().await?;
+                    agent
+                        .update_epochs(json!({"table_document":state["table_task"]["revision"]}))?;
+                    required.push(
+                        json!({"table_document_state":state,"last_table_result":table_result}),
+                    );
+                }
                 let advertised = if final_answer {
                     vec![]
                 } else {
@@ -209,7 +234,7 @@ pub async fn run(
                     &json!({"action":"assemble","preset":{"preset_id":profile["preset_id"],"input_limit":input,"generation_reserve":profile["generation_reserve_tokens"],"safety_reserve":profile["safety_reserve_tokens"]},
                     "profile_prefix":prompt,"request_payload":question,"shortlist":if native{json!([])}else{json!(advertised)},
                     "checkpoint":[],"working_memory":turn.memory,"dialogue":turn.dialogue,"evidence":[],"source_map":evidence.sources,
-                    "required_evidence":evidence.blocks,"tool_exchange":if native{json!([])}else{json!(exchanges)},"native_tool_exchange":if native{json!([exchanges])}else{json!([])}}),
+                    "required_evidence":required,"tool_exchange":if native{json!([])}else{json!(exchanges)},"native_tool_exchange":if native{json!([exchanges])}else{json!([])}}),
                 )?;
                 if packed["overflow"] == true {
                     return Err("CONTEXT_REQUIRED_SECTION_OVERFLOW".into());
@@ -276,7 +301,14 @@ pub async fn run(
                     .await?;
                 evidence.add(&payload);
                 let projected = evidence.projection(&payload);
-                if native {
+                if call["tool"] == "table_document" {
+                    table_result = json!({"arguments":call["args"],"result":projected});
+                    // Row packets live in the ledger. Keep no growing table transcript
+                    // in the model context, including mixed provider tool-call groups.
+                    if native {
+                        strip_table_calls(&mut exchanges);
+                    }
+                } else if native {
                     if let Some(id) = call["call_id"]
                         .as_str()
                         .filter(|_| native_pending.is_array())
@@ -314,6 +346,19 @@ pub async fn run(
                 if answer.trim().is_empty() {
                     return Err("MODEL_EMPTY_RESPONSE".into());
                 }
+                let receipt = if let Some(table) = &tools.table {
+                    table.receipt().await?
+                } else {
+                    Value::Null
+                };
+                let answer = if !receipt.is_null() {
+                    format!(
+                        "{}\n\n{answer}",
+                        receipt["notice"].as_str().ok_or("TABLE_TASK_INVALID")?
+                    )
+                } else {
+                    answer.to_owned()
+                };
                 let names = visible
                     .as_array()
                     .into_iter()
@@ -325,9 +370,66 @@ pub async fn run(
                     "history_id":journal.history,"latency_sec":started.elapsed().as_secs_f64(),"tokens":terminal["usage"]["completion_tokens"].as_u64().unwrap_or(0),"crag_status":"UNVALIDATED","success":true,
                     "source_scope":{"resolved":turn.scope["resolved_dataset_ids"],"used":evidence.sources.iter().map(|s|s["dataset_id"].clone()).collect::<Vec<_>>()},
                     "query_route":{"channel":"generic","reason":"native_chat"},"retrieval_trace":{"engine":"rust.chat","rounds":agent.rounds,"contexts":contexts,"citation_syntax":citations},
-                    "artifact":{"completion_status":"completed","validation":"not_performed","tool_results":agent.results()},"model":turn.connection.public()}),
+                    "artifact":{"completion_status":if !receipt.is_null()&&receipt["status"]!="recorded"{"incomplete"}else{"completed"},"execution_receipt":receipt,"validation":"not_performed","tool_results":agent.results(),"attachment":{
+                        "attachment_id":turn.attachment["attachment_id"],"name":turn.attachment["name"],"source_sha256":turn.attachment["source_sha256"],"media_type":turn.attachment["media_type"],"truncated":turn.attachment["truncated"]}},"model":turn.connection.public()}),
                 );
             }
         }
+    }
+}
+fn strip_table_calls(exchanges: &mut Vec<Value>) {
+    let mut ids = Vec::new();
+    let mut kept = Vec::new();
+    for mut message in exchanges.drain(..) {
+        if message["role"] == "assistant" {
+            ids = message["tool_calls"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|c| c["function"]["name"] == "table_document")
+                .map(|c| c["id"].clone())
+                .collect();
+            if let Some(calls) = message["tool_calls"].as_array_mut() {
+                calls.retain(|c| c["function"]["name"] != "table_document");
+            }
+            if message["tool_calls"]
+                .as_array()
+                .is_some_and(|c| c.is_empty())
+                && message["content"].is_null()
+            {
+                continue;
+            }
+        } else if message["role"] == "tool" && ids.contains(&message["tool_call_id"]) {
+            continue;
+        }
+        kept.push(message);
+    }
+    *exchanges = kept;
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn table_projection_preserves_other_groups_with_reused_provider_ids() {
+        let call = |name: &str| json!({"role":"assistant","content":null,"tool_calls":[{"id":"same","function":{"name":name}}]});
+        let result = |value: &str| json!({"role":"tool","tool_call_id":"same","content":value});
+        let mut messages = vec![
+            call("read_pdf_source"),
+            result("PDF before"),
+            call("table_document"),
+            result("old packet"),
+            call("read_source"),
+            result("PDF after"),
+        ];
+        strip_table_calls(&mut messages);
+        assert_eq!(
+            messages,
+            vec![
+                call("read_pdf_source"),
+                result("PDF before"),
+                call("read_source"),
+                result("PDF after")
+            ]
+        );
     }
 }

@@ -6,6 +6,7 @@ mod journal;
 mod model;
 pub(crate) mod prepare;
 mod runner;
+mod table_document;
 mod tools;
 use crate::Context;
 use error::Result;

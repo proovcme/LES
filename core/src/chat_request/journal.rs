@@ -66,8 +66,16 @@ pub fn begin(database: &Path, request: &Value, key: Option<&str>) -> Result<Valu
     getrandom::fill(&mut random).map_err(|_| "CHAT_STORAGE_UNAVAILABLE")?;
     let id = crate::sha256_hex(&random);
     // History and request receipt are committed together: there is no ownerless model turn.
+    let attachment_context = if request["attachment_id"]
+        .as_str()
+        .is_some_and(|s| !s.is_empty())
+    {
+        ""
+    } else {
+        request["attachment_context"].as_str().unwrap_or("")
+    };
     tx.execute("INSERT INTO chat_history(session_id,question,answer,crag_status,success,validation_enabled,attachment_context) VALUES(?,?,'','IN_PROGRESS',0,0,?)",
-        params![request["session_id"].as_str(),request["question"].as_str().ok_or("CHAT_QUESTION_REQUIRED")?,request["attachment_context"].as_str().unwrap_or("")]).map_err(|_|"CHAT_STORAGE_UNAVAILABLE")?;
+        params![request["session_id"].as_str(),request["question"].as_str().ok_or("CHAT_QUESTION_REQUIRED")?,attachment_context]).map_err(|_|"CHAT_STORAGE_UNAVAILABLE")?;
     let history = tx.last_insert_rowid();
     tx.execute("INSERT INTO les_chat_runs(id,session_key,request_key,request_sha,history_id,status) VALUES(?,?,?,?,?,'running')",params![id,session,key,hash,history]).map_err(|_|"CHAT_STORAGE_UNAVAILABLE")?;
     tx.commit().map_err(|_| "CHAT_STORAGE_UNAVAILABLE")?;
@@ -81,6 +89,7 @@ pub fn checkpoint(database: &Path, id: &str, history: i64, event: &str, text: &s
     let changed=match event{
         "token"=>db.execute("UPDATE chat_history SET answer=COALESCE(answer,'')||?,tokens=COALESCE(tokens,0)+1 WHERE id=? AND crag_status='IN_PROGRESS' AND EXISTS(SELECT 1 FROM les_chat_runs WHERE id=? AND history_id=chat_history.id AND status='running')",params![text,history,id]),
         "reset"=>db.execute("UPDATE chat_history SET answer='',tokens=0 WHERE id=? AND crag_status='IN_PROGRESS' AND EXISTS(SELECT 1 FROM les_chat_runs WHERE id=? AND history_id=chat_history.id AND status='running')",params![history,id]),
+        "attachment_context"=>db.execute("UPDATE chat_history SET attachment_context=? WHERE id=? AND crag_status='IN_PROGRESS' AND EXISTS(SELECT 1 FROM les_chat_runs WHERE id=? AND history_id=chat_history.id AND status='running')",params![text,history,id]),
         _=>return Err("CHAT_REQUEST_INVALID")
     }.map_err(|_|"CHAT_STORAGE_UNAVAILABLE")?;
     if changed != 1 {

@@ -7,7 +7,7 @@ use std::time::Duration;
 pub async fn complete(
     context: &Context,
     turn: &Prepared,
-    messages: Value,
+    mut messages: Value,
     tools: Vec<Value>,
     journal: &Journal,
     sink: &Sink,
@@ -23,6 +23,18 @@ pub async fn complete(
     let temperature = les_core::chat_context::execute(
         &json!({"action":"temperature","profile":turn.profile,"fallback":0.1}),
     )?;
+    if let Some(url) = turn.attachment["data_url"].as_str() {
+        let message = messages
+            .as_array_mut()
+            .and_then(|rows| rows.iter_mut().rev().find(|m| m["role"] == "user"))
+            .ok_or("INVALID_MODEL_MESSAGE")?;
+        let text = message["content"]
+            .as_str()
+            .ok_or("INVALID_MODEL_MESSAGE")?
+            .to_owned();
+        message["content"] =
+            json!([{"type":"text","text":text},{"type":"image_url","image_url":{"url":url}}]);
+    }
     let request = json!({"messages":messages,"tools":tools,"max_output_tokens":max_output,"reasoning_enabled":profile["reasoning_enabled"].as_bool().unwrap_or(false),
         "temperature":temperature,"response_format":null});
     let native = turn.connection.snapshot["transport_options"]["chat_protocol"] == "native_chat_v1";

@@ -1,5 +1,10 @@
 # Модули LES RAG
 
+837: [вложения и табличные задания](modules/native-chat-attachments.md) —
+`core/src/chat_attachments/`, `core/src/document_tasks/`, `api/src/attachments/`,
+`api/src/chat/table_document.rs`: оригиналы, multipart, изображения, точные окна,
+неизменяемые строки, журнал решений и общий нативный чат.
+
 836: [память разговора и команды](modules/native-conversation-memory.md) —
 `api/src/conversation/`, `core/src/conversation_summary/`, `core/src/chat_commands.rs`:
 генерация, durable outbox, приоритет чата, CAS и восстановление без Python callbacks.

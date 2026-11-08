@@ -223,3 +223,47 @@ def test_explicit_selected_file_binds_its_short_name_but_never_another_file(nati
     blocked=t.client.post(PATH,json={**request,'target_file':'different.pdf'},headers=HEADERS)
     assert blocked.status_code==503 and blocked.json()['code']=='TOOL_SCOPE_VIOLATION'
     assert len(t.seen)==3
+
+
+def test_rejected_extension_call_exposes_schema_and_can_repair_before_physical_read(native_turn):
+    t=native_turn;_,digest=source_pdf(t)
+    t.client.post(PATH,json={'question':'Prepare','dataset_ids':['ds']},headers=HEADERS).raise_for_status()
+    access=next(tool['function']['name'] for tool in t.seen[-1]['tools'] if tool['function']['name'].startswith('use_extensions_'))
+    arguments={'doc_id':'registered-document','page':2,'source_sha256':digest}
+    t.scripts.extend([
+        {'tool':access,'args':{'operation':'call','tool_name':'read_pdf_source','arguments':arguments}},
+        {'tool':access,'args':{'operation':'call','name':'read_pdf_source','arguments':arguments}},
+        {'text':'Прочитана страница [Источник 1]'},
+    ])
+    result=t.client.post(PATH,json={'question':'Read actual page','dataset_ids':['ds']},headers=HEADERS).raise_for_status().json()
+    rejected,read=result['artifact']['tool_results']
+    assert rejected['status']=='error' and rejected['result']['code']=='TOOL_SCHEMA_INVALID'
+    assert rejected['result']['input_schema']['properties']['name']['type']=='string'
+    assert 'input_schema' in json.dumps(t.seen[-2],ensure_ascii=False)
+    assert read['status']=='ok' and read['result']['tool']=='read_pdf_source'
+    assert read['result']['result']['complete'] is True
+    assert result['source_map'][0]['page']==2
+
+
+def test_grounded_pdf_chat_keeps_bound_workspace_reachable_and_rereads_after_save(native_turn):
+    t=native_turn;path,digest=source_pdf(t)
+    sid=t.client.post('/api/workspace/sessions',json={'title':'Sources and workspace'}).raise_for_status().json()['session_id']
+    request={'question':'Сохрани результат в рабочие файлы','dataset_ids':['ds'],'session_id':sid,'mode':'agent'}
+    t.client.post(PATH,json={**request,'question':'Prepare'},headers=HEADERS).raise_for_status()
+    schemas=t.seen[-1]['tools'];names=[tool['function']['name'] for tool in schemas]
+    assert 'read_pdf_source' in names and 'search_sources' in names
+    access=next(name for name in names if name.startswith('use_extensions_'))
+    read={'operation':'read','area':'files','path':'Result.txt'}
+    t.scripts.extend([
+        {'tool':access,'args':{'operation':'call','name':'agent_workspace','arguments':read}},
+        {'tool':access,'args':{'operation':'call','name':'agent_workspace','arguments':{
+            'operation':'save','area':'files','path':'Result.txt','expected_revision':'missing','text':'NATIVE WORKSPACE CONTENT'}}},
+        {'tool':access,'args':{'operation':'call','name':'agent_workspace','arguments':read}},
+        {'text':'Результат записан и прочитан.'},
+    ])
+    result=t.client.post(PATH,json=request,headers=HEADERS).raise_for_status().json()
+    rows=result['artifact']['tool_results']
+    assert len(rows)==3 and all(row['status']=='ok' for row in rows)
+    assert 'NATIVE WORKSPACE CONTENT' in json.dumps(rows[-1])
+    assert list(t.state.rglob('Result.txt'))[0].read_text(encoding='utf-8')=='NATIVE WORKSPACE CONTENT'
+    assert hashlib.sha256(path.read_bytes()).hexdigest()==digest

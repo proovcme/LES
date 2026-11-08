@@ -98,7 +98,8 @@ def test_projection_is_explicit_bounded_and_does_not_invent_approximate_totals(t
 
 @pytest.mark.parametrize('encoding',['utf-8-sig','utf-16','utf-32'])
 def test_csv_multiline_quotes_unicode_and_empty_rows(tmp_path,encoding):
-    path=tmp_path/'таблица.csv';path.write_text('Код,Описание\r\n"ЩР,1","две\nстроки ""東京"""\r\nB,25\r\n',encoding=encoding)
+    # Explicit CRLF must not be expanded into CRCRLF by Windows text mode.
+    path=tmp_path/'таблица.csv';path.write_text('Код,Описание\r\n"ЩР,1","две\nстроки ""東京"""\r\nB,25\r\n',encoding=encoding,newline='')
     value=read(path)
     assert 'ЩР,1' in value['text'] and 'две<br>строки "東京"' in value['text']
     assert '| 3 | B | 25 |' in value['text']

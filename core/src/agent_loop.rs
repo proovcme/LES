@@ -27,6 +27,7 @@ pub struct AgentLoop {
     terminal: Option<Value>,
     failed: Option<String>,
     workspace_epoch: u64,
+    extension_epoch: u64,
     epochs: Value,
     pub rounds: Vec<Value>,
 }
@@ -50,6 +51,7 @@ impl AgentLoop {
             terminal: None,
             failed: None,
             workspace_epoch: 0,
+            extension_epoch: 0,
             epochs: json!({}),
             rounds: Vec::new(),
         })
@@ -89,6 +91,14 @@ impl AgentLoop {
         }
         self.epochs = epochs;
         Ok(())
+    }
+    pub fn update_epochs(&mut self, epochs: Value) -> Result<(), &'static str> {
+        let mut combined = self.epochs.clone();
+        combined
+            .as_object_mut()
+            .ok_or("AGENT_CONTEXT_INVALID")?
+            .extend(epochs.as_object().ok_or("AGENT_CONTEXT_INVALID")?.clone());
+        self.set_epochs(combined)
     }
     pub fn remaining(&self) -> u64 {
         self.control["remaining"].as_u64().unwrap_or(0)
@@ -282,12 +292,40 @@ impl AgentLoop {
             Some("error" | "missing" | "blocked")
         ) || payload["ok"] == false;
         self.control("finish", json!({"failed":failed}))?;
-        if payload["tool"] == "agent_workspace"
-            && (payload["execution"]["persisted"] == true
-                || payload["result"]["changed"] == true
-                || payload["result"]["code"] == "AGENT_CONFLICT")
-        {
+        let mut effect = &payload;
+        for _ in 0..8 {
+            if effect["tool"]
+                .as_str()
+                .is_some_and(|s| s.starts_with("use_extensions_"))
+                && effect["operation"] == "call"
+                && effect["result"]["schema"] == "les_tool_result_v1"
+            {
+                effect = &effect["result"];
+            } else {
+                break;
+            }
+        }
+        let workspace_changed = effect["tool"] == "agent_workspace"
+            && (effect["execution"]["persisted"] == true
+                || effect["result"]["changed"] == true
+                || effect["result"]["code"] == "AGENT_CONFLICT");
+        let table_changed = effect["tool"] == "table_document"
+            && effect["status"] == "ok"
+            && effect["result"]["revision"].is_u64()
+            && self.epochs["table_document"] != effect["result"]["revision"];
+        if workspace_changed {
             self.workspace_epoch = self.workspace_epoch.saturating_add(1);
+        }
+        if table_changed {
+            self.epochs["table_document"] = effect["result"]["revision"].clone();
+        }
+        if workspace_changed || table_changed {
+            self.extension_epoch = self.extension_epoch.saturating_add(1);
+            for name in &self.allowed {
+                if name.starts_with("use_extensions_") {
+                    self.epochs[name] = json!(self.extension_epoch);
+                }
+            }
         }
         let outcome = crate::harness_evidence::execute(
             &json!({"action":"source_read_outcome","result":payload}),
@@ -303,6 +341,64 @@ impl AgentLoop {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn propose(agent: &mut AgentLoop, args: Value) {
+        assert!(matches!(
+            agent.next().unwrap(),
+            Step::Model {
+                final_answer: false
+            }
+        ));
+        agent.model_result(json!({"tool_calls":[{"id":"call","function":{"name":"use_extensions_fixture","arguments":args}}]})).unwrap();
+        assert!(matches!(agent.next().unwrap(), Step::Tool(_)));
+    }
+    fn extension(inner: Value) -> Value {
+        json!({"tool":"use_extensions_fixture","operation":"call","status":"ok","result":inner})
+    }
+    #[test]
+    fn wrapped_workspace_write_invalidates_prior_read_identity_and_survives_table_epoch_update() {
+        let mut agent = AgentLoop::new(
+            8,
+            30.,
+            [
+                "use_extensions_fixture".into(),
+                "agent_workspace".into(),
+                "table_document".into(),
+            ],
+        )
+        .unwrap();
+        let read =
+            json!({"operation":"call","name":"agent_workspace","arguments":{"operation":"read"}});
+        propose(&mut agent, read.clone());
+        agent.tool_result(extension(json!({"schema":"les_tool_result_v1","tool":"agent_workspace","status":"ok","result":{"changed":false}}))).unwrap();
+        propose(
+            &mut agent,
+            json!({"operation":"call","name":"agent_workspace","arguments":{"operation":"save"}}),
+        );
+        agent.tool_result(extension(json!({"schema":"les_tool_result_v1","tool":"agent_workspace","status":"ok","result":{"changed":true}}))).unwrap();
+        agent.update_epochs(json!({"table_document":7})).unwrap();
+        propose(&mut agent, read);
+    }
+    #[test]
+    fn wrapped_table_commit_allows_reading_the_next_packet() {
+        let mut agent = AgentLoop::new(
+            8,
+            30.,
+            ["use_extensions_fixture".into(), "table_document".into()],
+        )
+        .unwrap();
+        agent.update_epochs(json!({"table_document":0})).unwrap();
+        let next =
+            json!({"operation":"call","name":"table_document","arguments":{"operation":"next"}});
+        propose(&mut agent, next.clone());
+        agent.tool_result(extension(json!({"schema":"les_tool_result_v1","tool":"table_document","status":"ok","result":{"revision":0}}))).unwrap();
+        propose(
+            &mut agent,
+            json!({"operation":"call","name":"table_document","arguments":{"operation":"record"}}),
+        );
+        agent.tool_result(extension(json!({"schema":"les_tool_result_v1","tool":"table_document","status":"ok","result":{"revision":1}}))).unwrap();
+        agent.update_epochs(json!({"table_document":1})).unwrap();
+        propose(&mut agent, next);
+    }
     #[test]
     fn failed_file_read_never_requests_a_confident_followup_model_answer() {
         let mut agent = AgentLoop::new(4, 30., ["filesystem_read_text".into()]).unwrap();

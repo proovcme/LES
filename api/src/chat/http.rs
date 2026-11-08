@@ -47,7 +47,12 @@ async fn receipt(context: Arc<Context>, request: Value, key: Option<String>) -> 
     .map_err(|_| "CHAT_STORAGE_UNAVAILABLE")?
     .map_err(Into::into)
 }
-async fn execute(context: Arc<Context>, request: Value, saved: Value, sink: Sink) -> Result<Value> {
+async fn execute(
+    context: Arc<Context>,
+    mut request: Value,
+    saved: Value,
+    sink: Sink,
+) -> Result<Value> {
     if saved["created"] != true {
         if saved["status"] == "completed" {
             return Ok(saved["response"].clone());
@@ -60,7 +65,7 @@ async fn execute(context: Arc<Context>, request: Value, saved: Value, sink: Sink
     let result = {
         let run = Box::pin(tokio::time::timeout(
             Duration::from_secs(660),
-            runner::run(context, request.clone(), &mut journal, &sink),
+            runner::run(context, &mut request, &mut journal, &sink),
         ));
         match select(run, Box::pin(sender.closed())).await {
             Either::Left((Ok(value), _)) => value,

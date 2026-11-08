@@ -3,8 +3,59 @@
 from __future__ import annotations
 
 import os
+import gc
+import shutil
+import stat
+import warnings
 from pathlib import Path
 import pytest
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    result = yield
+    report = result.get_result()
+    setattr(item, '_les_report_' + call.when, report)
+    if call.when == 'teardown' and not report.failed:
+        _clean_completed_scratch(item)
+
+
+@pytest.fixture(autouse=True)
+def _local_resource_guard(request):
+    if os.getenv('LES_LOCAL_RESOURCE_GUARD') == '1':
+        if shutil.disk_usage(request.config.rootpath).free < 20 * 1024 ** 3:
+            pytest.exit('Less than 20 GiB free: local checks stopped before filling the disk.', returncode=2)
+def _clean_completed_scratch(item):
+    """After every fixture closes, remove only a successful test's owned tree."""
+    path = item.funcargs.get('tmp_path')
+    report = getattr(item, '_les_report_call', None)
+    if path is None or report is None or report.failed:
+        return  # Keep the failed case for inspection; reuse basetemp on the next run.
+    base = item.config._tmp_path_factory.getbasetemp().resolve()
+    if path.is_symlink() or path.resolve().parent != base or not path.is_dir():
+        return
+    def readonly(operation, target, error):
+        target = Path(target)
+        if not target.resolve().is_relative_to(path.resolve()):
+            raise error
+        if isinstance(error, PermissionError):
+            target.chmod(target.stat().st_mode | stat.S_IWRITE)
+            operation(target)
+        else:
+            raise error
+    try:
+        shutil.rmtree(path, onexc=readonly)
+        path.mkdir()  # Keep pytest's name reservation; cached paths must not be reused.
+    except PermissionError:
+        # sqlite3 connections in fixture/test reference cycles close on collection.
+        gc.collect()
+        try:
+            shutil.rmtree(path, onexc=readonly)
+            path.mkdir()
+        except OSError as error:
+            warnings.warn(f'Test scratch cleanup deferred: {type(error).__name__}', RuntimeWarning)
+    except OSError as error:
+        warnings.warn(f'Test scratch cleanup deferred: {type(error).__name__}', RuntimeWarning)
 
 
 def pytest_configure(config):

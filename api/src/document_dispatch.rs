@@ -82,7 +82,7 @@ pub(crate) fn freeze_ocr(options: &mut Value, state: &Path) {
     }
 }
 
-fn external(request: &Value) -> Result<Value, &'static str> {
+pub(crate) fn external(request: &Value) -> Result<Value, &'static str> {
     let path = Path::new(request["path"].as_str().ok_or("DOCUMENT_PATH_INVALID")?);
     let library = std::env::var_os("LES_NATIVE_PDFIUM").ok_or("PDFIUM_UNAVAILABLE")?;
     let mut options = request.clone();
@@ -98,7 +98,7 @@ fn external(request: &Value) -> Result<Value, &'static str> {
         } else if request["ocr_unavailable"] == true {
             return Err("OCR_UNAVAILABLE");
         } else {
-            configured_ocr(None)?
+            configured_ocr(request["owned_state"].as_str().map(Path::new))?
         };
         options["kind"] = json!("pdf_ocr");
         value = crate::pdf_text::convert(Path::new(&library), path, &options)?;

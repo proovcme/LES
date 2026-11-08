@@ -10,6 +10,9 @@ use std::{
 };
 
 type Result<T> = std::result::Result<T, &'static str>;
+pub(crate) fn csv_snapshot(path: &Path) -> Result<Value> {
+    spreadsheet::snapshot_csv(&bytes(path)?)
+}
 const MAX_FILE: u64 = 64 * 1024 * 1024;
 const MAX_TEXT: usize = 24 * 1024 * 1024;
 pub(crate) fn supports(path: &Path) -> bool {
@@ -236,6 +239,9 @@ pub fn serve() -> Result<()> {
     serve_with(&|_| Err("DOCUMENT_NATIVE_READER_REQUIRED"))
 }
 pub fn serve_with(external: &impl Fn(&Value) -> Result<Value>) -> Result<()> {
+    serve_requests(&|input| execute_with(input, external))
+}
+pub(crate) fn serve_requests(handler: &impl Fn(&Value) -> Result<Value>) -> Result<()> {
     let mut input = BufReader::new(std::io::stdin().lock());
     let mut output = std::io::stdout().lock();
     loop {
@@ -254,7 +260,7 @@ pub fn serve_with(external: &impl Fn(&Value) -> Result<Value>) -> Result<()> {
         }
         let envelope: Value =
             serde_json::from_slice(&frame).map_err(|_| "DOCUMENT_INPUT_INVALID")?;
-        let result = match execute_with(&envelope["input"], external) {
+        let result = match handler(&envelope["input"]) {
             Ok(value) => json!({"status":"completed","value":value}),
             Err(code) => {
                 eprintln!(

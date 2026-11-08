@@ -53,20 +53,7 @@ class TableDocumentTool:
         return ''
 
     def context(self):
-        """Only the current page is model-visible; saved pages stay in SQLite."""
-        state = self.state()
-        matches = self.store.matches_question(self.owner, self.task_id, self.question)
-        next_action = ('record' if self.current.get('packet_id') and self.current.get('rows')
-                       else 'next' if state['pending'] else 'finish_or_read_results')
-        return {'table_task': state, 'current_read': self.current,
-                'task_is_for_current_question': matches,
-                'next_action_for_active_task': next_action,
-                'instruction': 'Use table_document for exact cells and saved results. Never infer '
-                'completion from a summary. coverage_complete only counts row decisions; it does '
-                'not certify their correctness. If task_is_for_current_question is true, the task '
-                'is ALREADY started: do not call start again. Read with next, decide every row, '
-                'save with record, then next until pending is zero. Continue a prior task only '
-                'when the user asks to continue it; for a different objective call start once.'}
+        return self.store._call('bound_context', state=self._native_state())
 
     def completion_receipt(self):
         if not self.work_requested:
@@ -74,94 +61,31 @@ class TableDocumentTool:
         from proxy.services.execution_receipt_service import ledger_receipt
         return ledger_receipt(TOOL_NAME, self.state())
 
+    def _native_state(self):
+        return dict(owner=self.owner, task_id=self.task_id, question=self.question,
+                    current=self.current, packet_bytes=self.packet_bytes, work_requested=self.work_requested)
+
     def execute(self, arguments):
-        task_id = arguments.get('task_id') or self.task_id
-        self.store.status(self.owner, task_id)  # Check binding before switching or disclosing data.
-        self.store.activate(self.owner, task_id)
-        self.task_id = task_id
-        operation = arguments['operation']
-        if operation in {'start', 'next', 'record'}:
+        if arguments.get('operation') in {'start', 'next', 'record'}:
             self.work_requested = True
-        if operation == 'start':
-            if self.store.matches_question(self.owner, task_id, self.question):
-                action = 'record' if self.current.get('packet_id') and self.current.get('rows') else 'next'
-                raise ValueError(f'Task already started for this question. Do not call start again. '
-                                 f'Use {action}; current packet and saved results are preserved.')
-            self.task_id = self.store.new_question(self.owner, task_id, self.question)
-            payload = {'started_for_current_question': True}
-        elif operation == 'status':
-            payload = {'recent_tasks': self.store.recent(self.owner)}
-        elif operation == 'next':
-            payload = self.store.next_packet(self.owner, task_id, max_bytes=self.packet_bytes)
-        elif operation == 'record':
-            self.store.commit(self.owner, task_id, arguments.get('packet_id') or self.current.get('packet_id'),
-                              arguments.get('decisions'))
-            payload = {'saved': True}
-        elif operation == 'results':
-            payload = self.store.results(self.owner, task_id, offset=arguments.get('offset', 0),
-                                         max_bytes=self.packet_bytes)
-        elif operation in {'read_window', 'read_cell'}:
-            from proxy.services.table_window_service import read_window, read_cell
-            # Use the selected task's immutable snapshot, never a model-supplied path.
-            document = self.store.snapshot(self.owner, task_id)
-            keys = ('sheet', 'row_start', 'column_start', 'row_count', 'column_count') if operation == 'read_window' else (
-                'sheet', 'coordinate', 'field', 'offset')
-            options = {key: arguments[key] for key in keys if key in arguments}
-            payload = (read_window(document, **options, max_bytes=self.packet_bytes) if operation == 'read_window' else
-                       read_cell(document, **options, max_chars=max(128, self.packet_bytes // 4)))
-        else:
-            raise ValueError('Неизвестное действие с таблицей')
-        self.current = ({**self.current, 'addressed_read': payload}
-                        if operation in {'read_window', 'read_cell'} else payload)
-        return {**self.state(), **payload}
+        response = self.store._call('bound_execute', state=self._native_state(), arguments=arguments)
+        state = response['state']
+        self.task_id, self.current, self.work_requested = state['task_id'], state['current'], state['work_requested']
+        return response['payload']
 
     def register(self, harness):
         from proxy.services.tool_contract_service import (
             ToolContract, EffectClass, ResultBudget, RetryPolicy, IdempotencyPolicy)
         from proxy.services.tool_registry_service import ToolRegistration
         from proxy.services.tool_harness_service import _result
-        contract = ToolContract(
-            name=TOOL_NAME, version='1.1.0', title='Чтение и проверка таблицы', category='attachment',
-            summary='Read the attached table in bounded whole-row packets. start creates or resumes '
-                'a separate task for the CURRENT user question, with no inherited decisions. '
-                'Use start for a new objective; do not use it for continuation. status lists tasks in '
-                'this conversation/source/scope; optional task_id resumes one explicitly. next returns '
-                'literal cells and packet_id; record saves one decision for EVERY row in that packet '
-                '(packet_id may be omitted for the currently open packet). '
-                '(including headers: exclude with explanation). Never change source values. '
-                'Use reviewed, needs_review or excluded with a note and exact cell coordinates. '
-                'A row with missing formula cache or error needs_review. Results survive restart. '
-                'results reads saved sources/decisions by offset. Numbers are decimal strings. '
-                'read_window reads an exact sheet by row_start/column_start (1-based), up to 4 rows/8 columns; '
-                'follow next_cursor with the SAME row_count/column_count. Deferred long cells use read_cell with '
-                'sheet, coordinate, field=value/formula/cached and character offset; follow next_offset. '
-                'These addressed reads do not advance row decisions. '
-                'A blocked oversized row remains pending; never claim the whole task is finished.',
-            input_schema={'type': 'object', 'properties': {
-                'operation': {'type': 'string', 'enum': ['start', 'status', 'next', 'record', 'results', 'read_window', 'read_cell']},
-                'task_id': {'type': 'string'}, 'packet_id': {'type': 'string'},
-                'sheet': {'type': 'string'}, 'coordinate': {'type': 'string', 'pattern': '^[A-Z]{1,3}[1-9][0-9]*$'},
-                'field': {'type': 'string', 'enum': ['value', 'formula', 'cached']},
-                'row_start': {'type': 'integer', 'minimum': 1, 'maximum': 20000},
-                'column_start': {'type': 'integer', 'minimum': 1, 'maximum': 512},
-                'row_count': {'type': 'integer', 'minimum': 1, 'maximum': 4},
-                'column_count': {'type': 'integer', 'minimum': 1, 'maximum': 8},
-                'offset': {'type': 'integer', 'minimum': 0},
-                'decisions': {'type': 'array', 'maxItems': 12, 'items': {
-                    'type': 'object', 'properties': {
-                        'row_id': {'type': 'string'},
-                        'status': {'type': 'string', 'enum': ['reviewed', 'needs_review', 'excluded']},
-                        'note': {'type': 'string', 'minLength': 1, 'maxLength': 1200},
-                        'cells': {'type': 'array', 'minItems': 1,
-                                  'description': 'Exact cell COORDINATES from the row, e.g. A1, B1. Never cell values or text.',
-                                  'items': {'type': 'string', 'pattern': '^[A-Z]{1,3}[1-9][0-9]*$'}}},
-                    'required': ['row_id', 'status', 'note', 'cells'], 'additionalProperties': False}}},
-                'required': ['operation'], 'additionalProperties': False},
-            result_schema='les_tool_result_v1', effect=EffectClass.DRAFT, scopes=(),
-            timeout_seconds=20, retry=RetryPolicy.NEVER, idempotency=IdempotencyPolicy.NONE,
-            result_budget=ResultBudget(max_chars=18000, max_items=1024), model_owned_fields=('decisions',),
-            provenance='Immutable attached table hash and literal coordinates; scoped persistent row decisions',
-            tags=('attachment',))
+        from backend import native_core
+        fields = native_core.required('document_tasks', request={
+            'schema': 'les.document-tasks.v1', 'action': 'contract'})['value']
+        fields['effect'] = EffectClass(fields['effect'])
+        fields['retry'] = RetryPolicy(fields['retry'])
+        fields['idempotency'] = IdempotencyPolicy(fields['idempotency'])
+        fields['result_budget'] = ResultBudget(**fields['result_budget'])
+        contract = ToolContract(**fields)
 
         async def handler(arguments):
             call_id = 'table_' + uuid4().hex

@@ -87,6 +87,7 @@ impl Failure {
             "MODEL_OUTPUT_LIMIT_REACHED"=>"Ответ достиг лимита длины и не завершён. Полученный текст сохранён; попросите продолжить или сократите задачу.",
             value if value.starts_with("NATIVE_")&&value.ends_with("_PENDING")=>"Эта функция ещё не доступна в испытательном контуре. Запрос остановлен; действие не считается выполненным.",
             value if value.starts_with("PDF_")||value.starts_with("SOURCE_")=>"Не удалось прочитать подтверждённый источник. Проверьте доступность оригинала; ответ не подтверждён.",
+            value if value.starts_with("ATTACHMENT_")||value.starts_with("WORKBOOK_")||value.starts_with("SPREADSHEET_")||value.starts_with("DOCUMENT_")=>crate::attachments::detail(value),
             value if value.starts_with("TOOL_")=>"Инструмент не завершил действие. Откройте подробности; Лес не считает его выполненным.",
             _=>"Не удалось завершить запрос. Подробности сохранены в журнале. Проверьте подключение модели и повторите действие."
         };

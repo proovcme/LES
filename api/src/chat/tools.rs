@@ -6,6 +6,7 @@ use super::{prepare::Prepared, Context, Result};
 use serde_json::{json, Value};
 use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
 pub struct Tools {
+    pub table: Option<Arc<super::table_document::TableTool>>,
     handle: u64,
     pub contracts: Vec<Value>,
     pub mcp: HashMap<String, (String, Value)>,
@@ -62,18 +63,39 @@ impl Tools {
             }
             let access=access::contract(&contracts);let access_name=access["name"].as_str().ok_or("TOOL_REGISTRY_INVALID")?.to_owned();contracts.push(access);
             let handle=execute(json!({"schema":"les.tool-execution.v1","action":"new","database":database,"cursor_capacity":128,"cursor_ttl_seconds":300.}))?["handle"].as_u64().ok_or("TOOL_EXECUTION_STATE_ERROR")?;
-            Ok(Self{handle,contracts,mcp,access:access_name,sequence:std::sync::atomic::AtomicU64::new(0)})
+            Ok(Self{handle,contracts,mcp,access:access_name,sequence:std::sync::atomic::AtomicU64::new(0),table:None})
         }).await.map_err(|_|"TOOL_REGISTRY_INVALID")?
     }
-    pub fn schemas(&self, limit: usize) -> Vec<Value> {
+    pub fn bind_table(&mut self, table: Option<Arc<super::table_document::TableTool>>) {
+        if table.is_some() {
+            self.contracts.push(super::table_document::contract());
+        }
+        self.table = table;
+        self.contracts.retain(|c| c["name"] != self.access);
+        let access = access::contract(&self.contracts);
+        self.access = access["name"].as_str().unwrap().to_owned();
+        self.contracts.push(access);
+    }
+    pub fn schemas(&self, limit: usize, grounded: bool) -> Vec<Value> {
         // The access tool keeps every granted read/compute capability reachable without
         // sending dozens of schemas into a small model's context on every round.
-        let priority = [
-            "agent_workspace",
-            "search_sources",
-            "read_pdf_source",
-            "read_source",
-        ];
+        let priority = if grounded {
+            [
+                "table_document",
+                "search_sources",
+                "read_pdf_source",
+                "agent_workspace",
+                "read_source",
+            ]
+        } else {
+            [
+                "table_document",
+                "agent_workspace",
+                "search_sources",
+                "read_pdf_source",
+                "read_source",
+            ]
+        };
         let mut chosen = vec![self
             .contracts
             .iter()
@@ -144,7 +166,7 @@ impl Tools {
             "approval_receipt_id":null,"idempotency_key":call_id,"shadow":false,"allowed_attachment_ids":turn.request["attachment_id"].as_str().map(|id|vec![id]).unwrap_or_default()});
             let handle = self.handle;
             let admission = json!({"schema":"les.tool-execution.v1","action":"begin","handle":handle,"request":request,"contract":contract,
-            "admission":{"remaining_seconds":600.,"resolved_dataset_ids":resolved,"local_state_allowed":name=="agent_workspace"&&turn.session["registered"]==true}});
+            "admission":{"remaining_seconds":600.,"resolved_dataset_ids":resolved,"local_state_allowed":(name=="agent_workspace"&&turn.session["registered"]==true)||(name=="table_document"&&self.table.is_some())}});
             let admitted = tokio::task::spawn_blocking(move || execute(admission))
                 .await
                 .map_err(|_| "TOOL_EXECUTION_STATE_ERROR")??;
@@ -156,7 +178,13 @@ impl Tools {
                 .unwrap_or(30.)
                 .clamp(0.001, 1200.);
             let action = async {
-                if name == self.access {
+                if name == "table_document" {
+                    self.table
+                        .as_ref()
+                        .ok_or("TOOL_NOT_ALLOWED")?
+                        .run(args)
+                        .await
+                } else if name == self.access {
                     access::run(self, context, turn, name, args, run_id).await
                 } else if name.starts_with("filesystem_")
                     || [
@@ -245,8 +273,82 @@ impl Tools {
             vec![],
         );
         result["status"] = json!("error");
+        if execution["code"] == "TOOL_SCHEMA_INVALID" {
+            if let Some(contract) = self.contracts.iter().find(|c| c["name"] == name) {
+                let schema = &contract["input_schema"];
+                if schema.to_string().len() <= 8192 {
+                    result["result"]["input_schema"] = schema.clone();
+                    result["result"]["instruction"]=json!("This tool is available, but this call was rejected before execution because its arguments do not match input_schema. Correct the arguments and call again. For extensions: list, describe the exact name, then call with operation, name and arguments. No action was performed by the rejected call.");
+                }
+            }
+        }
         result["execution"] = metadata;
         result
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn schema_rejection_returns_the_granted_contract_without_argument_echo() {
+        let schema = json!({"type":"object","properties":{"operation":{"type":"string"}},"required":["operation"],"additionalProperties":false});
+        let tools = Tools {
+            handle: 0,
+            contracts: vec![json!({"name":"fixture","input_schema":schema})],
+            mcp: HashMap::new(),
+            access: "access".into(),
+            sequence: std::sync::atomic::AtomicU64::new(0),
+            table: None,
+        };
+        let result=tools.payload("fixture",&json!({"code":"TOOL_SCHEMA_INVALID","status":"rejected","result":{"arguments":"private-value"}}));
+        assert_eq!(result["result"]["input_schema"], schema);
+        assert_eq!(result["status"], "error");
+        assert!(!result.to_string().contains("private-value"));
+    }
+    #[test]
+    fn grounded_chat_advertises_search_and_pdf_without_revoking_workspace() {
+        let contract =
+            |name: &str| json!({"name":name,"summary":name,"input_schema":{"type":"object"}});
+        let tools = Tools {
+            handle: 0,
+            contracts: vec![
+                contract("access"),
+                contract("agent_workspace"),
+                contract("search_sources"),
+                contract("read_pdf_source"),
+            ],
+            mcp: HashMap::new(),
+            access: "access".into(),
+            sequence: std::sync::atomic::AtomicU64::new(0),
+            table: None,
+        };
+        let names = |grounded| {
+            tools
+                .schemas(3, grounded)
+                .into_iter()
+                .map(|t| t["function"]["name"].clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            names(true),
+            vec![
+                json!("access"),
+                json!("search_sources"),
+                json!("read_pdf_source")
+            ]
+        );
+        assert_eq!(
+            names(false),
+            vec![
+                json!("access"),
+                json!("agent_workspace"),
+                json!("search_sources")
+            ]
+        );
+        assert!(tools
+            .contracts
+            .iter()
+            .any(|c| c["name"] == "agent_workspace"));
     }
 }
 impl Drop for Tools {
