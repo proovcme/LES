@@ -2,6 +2,7 @@ mod agent_state;
 mod auth;
 mod auth_keys;
 mod catalog;
+mod dataset_reader;
 mod document_dispatch;
 #[cfg(feature = "edge")]
 mod edge;
@@ -51,6 +52,7 @@ pub struct Context {
     pub legacy_ui_url: Option<String>,
     pub local_model: Option<local_model::Bridge>,
     pub intake: Option<intake::Service>,
+    pub reader: Option<dataset_reader::Service>,
     pub index_store: Option<index_store::Store>,
 }
 
@@ -100,6 +102,11 @@ async fn dispatch(State(context): State<Arc<Context>>, request: Request) -> Resp
     }
     if request.uri().path() == index_batch::PATH {
         return index_batch::handle(context, request).await;
+    }
+    if request.uri().path() == dataset_reader::PRIVATE
+        || dataset_reader::route(request.uri().path()).is_some()
+    {
+        return dataset_reader::handle(context, request).await;
     }
     if request.uri().path() == index_store::PATH {
         return index_store::handle(context, request).await;
@@ -274,6 +281,7 @@ fn configuration() -> Result<(std::net::SocketAddr, Context), &'static str> {
     let intake = ingest_token
         .filter(|_| std::env::var("LES_STARTUP_BACKGROUND_MUTATIONS").as_deref() == Ok("true"))
         .map(|_| intake::Service::new());
+    let reader = intake.as_ref().map(|_| dataset_reader::Service::new());
     let client = reqwest::Client::builder()
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
@@ -300,6 +308,7 @@ fn configuration() -> Result<(std::net::SocketAddr, Context), &'static str> {
             legacy_ui_url,
             local_model,
             intake,
+            reader,
             index_store,
         },
     ))
@@ -382,6 +391,7 @@ fn main() {
             "embedded_edge":cfg!(feature="edge"),"skill_host":"rust.cpython-isolated","skill_runtime":"rust.verified-package","builtin_workbook":"rust.exact-decimal",
             "mcp_client":"rust.http-stdio","tool_execution_policy":"rust",
             "document_conversion":"rust.supervised","document_conversion_formats":["xlsx","xlsm","xls","csv","pptx","docx","doc","txt","md","json","jsonl","pdf"],
+            "dataset_reader":"rust.durable-revision-pinned","dataset_reader_python_callbacks":false,
             "index_batch_api":"rust.complete-or-refuse","index_batch_python_callbacks":false,
             "native_format_dispatch":true,"parquet":"rust.snappy","table_prepare":"rust"})
         );
@@ -403,6 +413,12 @@ fn main() {
             let listener = tokio::net::TcpListener::bind(listen).await?;
             let context = Arc::new(context);
             let background = context.clone();
+            if context.reader.is_some() {
+                let reader = context.clone();
+                tokio::spawn(async move {
+                    dataset_reader::run(reader).await;
+                });
+            }
             tokio::spawn(async move {
                 if index_store::start_recovery(background.clone())
                     .await

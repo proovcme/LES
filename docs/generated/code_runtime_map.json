@@ -297,6 +297,7 @@
         "tests/test_light_grounding_760.py",
         "tests/test_light_import_responsiveness.py",
         "tests/test_light_ingestion_races.py",
+        "tests/test_light_native_dataset_reader.py",
         "tests/test_light_native_document.py",
         "tests/test_light_native_edge_recovery.py",
         "tests/test_light_native_index_batch.py",
@@ -1220,11 +1221,13 @@
         "proxy/app.py",
         "proxy/routers/jobs.py",
         "proxy/services/chat_section_context_service.py",
+        "proxy/services/dataset_memory_service.py",
         "proxy/services/job_service.py",
+        "tests/test_light_native_dataset_reader.py",
         "tests/test_light_native_index_batch.py",
         "tests/test_light_native_table_publication.py"
       ],
-      "lines": 213,
+      "lines": 233,
       "module": "backend.native_index_store",
       "outbound": [
         "backend/__init__.py",
@@ -2188,6 +2191,7 @@
         "proxy/services/chat_persistence_service.py",
         "proxy/services/chat_session_service.py",
         "proxy/services/conversation_context_service.py",
+        "proxy/services/dataset_memory_service.py",
         "proxy/services/dataset_parse_service.py",
         "proxy/services/job_service.py",
         "proxy/services/memory_service.py",
@@ -2196,6 +2200,7 @@
         "proxy/services/project_service.py",
         "tests/test_light_durable_chat.py",
         "tests/test_light_native_api.py",
+        "tests/test_light_native_dataset_reader.py",
         "tests/test_light_native_intake.py",
         "tests/test_light_native_intake_execution.py"
       ],
@@ -5348,18 +5353,19 @@
         "proxy/services/dataset_parse_service.py",
         "proxy/services/notebook_service.py",
         "proxy/services/project_summary_service.py",
+        "tests/test_light_native_dataset_reader.py",
         "tests/test_light_rerank_audit.py"
       ],
-      "lines": 2284,
+      "lines": 1811,
       "module": "proxy.services.dataset_memory_service",
       "outbound": [
+        "backend/native_index_store.py",
         "backend/rag_config.py",
+        "backend/workspace_native.py",
         "proxy/__init__.py",
         "proxy/services/__init__.py",
-        "proxy/services/extract_service.py",
         "proxy/services/kot_service.py",
-        "proxy/services/project_pdf_extract_service.py",
-        "proxy/services/structured_extract.py"
+        "proxy/services/project_pdf_extract_service.py"
       ],
       "path": "proxy/services/dataset_memory_service.py",
       "status": "PRODUCT_REACHABLE",
@@ -5938,7 +5944,6 @@
     },
     {
       "inbound": [
-        "proxy/services/dataset_memory_service.py",
         "proxy/services/list_office_agent_service.py"
       ],
       "lines": 228,
@@ -6761,6 +6766,7 @@
         "tests/test_light_model_registry_native.py",
         "tests/test_light_native_api.py",
         "tests/test_light_native_batch_api.py",
+        "tests/test_light_native_dataset_reader.py",
         "tests/test_light_native_embedding_inference.py",
         "tests/test_light_native_intake_execution.py",
         "tests/test_light_native_model_runtime.py",
@@ -6804,6 +6810,7 @@
         "tests/test_light_model_registry_native.py",
         "tests/test_light_native_api.py",
         "tests/test_light_native_batch_api.py",
+        "tests/test_light_native_dataset_reader.py",
         "tests/test_light_native_embedding_inference.py",
         "tests/test_light_native_intake_execution.py",
         "tests/test_light_native_model_runtime.py",
@@ -8357,7 +8364,6 @@
     },
     {
       "inbound": [
-        "proxy/services/dataset_memory_service.py",
         "proxy/services/extract_service.py"
       ],
       "lines": 261,
@@ -11595,6 +11601,7 @@
     {
       "inbound": [
         "tests/test_light_native_batch_api.py",
+        "tests/test_light_native_dataset_reader.py",
         "tests/test_light_native_index_batch.py",
         "tests/test_light_native_intake_execution.py",
         "tests/test_light_native_publication.py",
@@ -11629,6 +11636,7 @@
     },
     {
       "inbound": [
+        "tests/test_light_native_dataset_reader.py",
         "tests/test_light_native_intake_execution.py"
       ],
       "lines": 175,
@@ -11703,6 +11711,24 @@
         "backend/native_core.py"
       ],
       "path": "tests/test_light_native_core.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
+      "lines": 267,
+      "module": "tests.test_light_native_dataset_reader",
+      "outbound": [
+        "backend/document_catalog.py",
+        "backend/native_index_store.py",
+        "backend/workspace_native.py",
+        "proxy/services/dataset_memory_service.py",
+        "proxy/services/model_connection_contracts.py",
+        "proxy/services/model_connection_registry_service.py",
+        "tests/test_light_native_api.py",
+        "tests/test_light_native_batch_api.py"
+      ],
+      "path": "tests/test_light_native_dataset_reader.py",
       "status": "TEST_OR_TOOL_ONLY",
       "windows_runtime_explicit": false
     },
@@ -11873,7 +11899,7 @@
         "tests/test_light_native_json_documents.py",
         "tests/test_light_native_table_publication.py"
       ],
-      "lines": 326,
+      "lines": 362,
       "module": "tests.test_light_native_index_batch",
       "outbound": [
         "backend/document_catalog.py",
@@ -15925,9 +15951,9 @@
     "product_reachable": 421,
     "registered_api_routes": 298,
     "runtime_support": 5,
-    "test_or_tool_only": 257,
-    "tracked_python_files": 710,
-    "tracked_python_lines": 170916
+    "test_or_tool_only": 258,
+    "tracked_python_files": 711,
+    "tracked_python_lines": 170766
   },
   "warnings": []
 }

@@ -1,5 +1,10 @@
 # Rust HTTP API
 
+831: [модельная карта набора](native-dataset-reader.md) — native POST
+`/api/notebooks/{id}/memory/read`, GET `/api/notebooks/{id}/memory/reader`
+и закрытый совместимый `/api/light/internal-dataset-reader`.
+Модельный цикл/очередь/сохранение не вызывают Python API.
+
 830: [фоновый intake](native-intake-execution.md) больше не вызывает Python
 за политикой источников или запуском партии. Старые закрытые FastAPI endpoints
 удалены; их прежние адреса на native front door по-прежнему не доступны клиенту.

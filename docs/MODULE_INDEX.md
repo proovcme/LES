@@ -1,5 +1,9 @@
 # Модули LES RAG
 
+831: [модельный навигатор набора](modules/native-dataset-reader.md) —
+`core/src/catalog/dataset_reader/`, `api/src/dataset_reader.rs`, durable outbox
+партии и совместимый локальный caller без Python processing callbacks.
+
 830: [фоновое подключение и запуск партии](modules/native-intake-execution.md) —
 `api/src/intake.rs`, `api/src/index_batch/configuration.rs`,
 `core/src/index_configuration.rs`. Прежние внутренние FastAPI-адаптеры удалены.

@@ -305,6 +305,14 @@ fn checkpoint(conn: &Connection, id: &str, args: &Args, now: &str) -> Result<Val
          WHERE id=?1 AND phase='index' AND status='running'",
         params![id, indexed, errors, pending, status, reason, message, retry_at, now, skipped],
     )?;
+    if status == "completed" && indexed > 0 {
+        let dataset: String = conn.query_row(
+            "SELECT dataset_id FROM native_intakes WHERE id=?1",
+            [id],
+            |row| row.get(0),
+        )?;
+        crate::index_events::completed(conn, &format!("intake:{id}"), &dataset, seconds())?;
+    }
     if matches!(status, "completed" | "failed") {
         conn.execute("DELETE FROM native_intake_files WHERE job_id=?1", [id])?;
     }

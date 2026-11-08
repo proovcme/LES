@@ -20,6 +20,7 @@ pub mod index_batch;
 pub mod index_cache;
 pub mod index_configuration;
 mod index_dispatch;
+mod index_events;
 pub mod index_journal;
 mod index_points;
 pub mod index_publication;

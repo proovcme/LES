@@ -171,6 +171,7 @@ pub(crate) async fn execute(context: Arc<Context>, mut input: Value) -> Response
         Err(_) => return error(StatusCode::SERVICE_UNAVAILABLE, "INDEX_BATCH_BUSY"),
     };
     let runtime = tokio::runtime::Handle::current();
+    let owner = context.clone();
     let value=tokio::task::spawn_blocking(move|| {
         let _permit=permit;
         crate::document_dispatch::freeze_ocr(&mut input["format_worker"],&context.state_root);
@@ -242,7 +243,10 @@ pub(crate) async fn execute(context: Arc<Context>, mut input: Value) -> Response
         result
     }).await;
     match value {
-        Ok(Ok(value)) => json_response(StatusCode::OK, value, "rust.index-batch"),
+        Ok(Ok(value)) => {
+            crate::dataset_reader::notify(&owner);
+            json_response(StatusCode::OK, value, "rust.index-batch")
+        }
         Ok(Err(code)) => {
             eprintln!(
                 "{}",

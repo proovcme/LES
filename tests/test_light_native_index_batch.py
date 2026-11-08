@@ -91,6 +91,7 @@ def test_native_batch_owns_order_stage_counts_and_complete_original_binding(tmp_
     with sqlite3.connect(request['database']) as conn:
         assert conn.execute("SELECT status,chunk_count FROM datasets").fetchone()==('COMPLETED',2)
         assert conn.execute("SELECT status,stop_code,spool_id FROM les_index_batches").fetchone()==('completed','','')
+        assert conn.execute("SELECT count(*) FROM les_index_events e JOIN les_index_batches b ON e.id=b.id WHERE e.kind='index_completed' AND e.dataset_id='ds' AND b.status='completed'").fetchone()==(1,)
 
 
 def test_replaced_registration_is_never_marked_failed_by_stale_attempt(tmp_path):
@@ -209,6 +210,41 @@ def crash_child(request):
             (Path(request['database']).parent/'paused').write_text('ready')
             time.sleep(60)
     native_core.run_index_batch(request,Boundary(request,convert=pause))
+
+
+def commit_last_then_pause(request):
+    io=Boundary(request)
+    def publish(value):
+        io.commit(value)
+        (Path(request['database']).parent/'last-committed').write_text('ready')
+        time.sleep(60)
+    io.publish=publish
+    native_core.run_index_batch(request,io)
+
+
+def test_last_file_commit_before_process_death_still_emits_post_index_event(tmp_path):
+    request=make_case(tmp_path)
+    request_path=tmp_path/'request.json';request_path.write_text(json.dumps(request),encoding='utf-8')
+    script=('import json,sys;sys.path[:0]=sys.argv[1:3];from tests.test_light_native_index_batch import commit_last_then_pause;'
+        'commit_last_then_pause(json.load(open(sys.argv[3],encoding="utf-8")))')
+    root=Path(__file__).resolve().parents[1];program=getattr(sys,'_base_executable',sys.executable)
+    with (tmp_path/'child.log').open('wb') as log:
+        child=subprocess.Popen([program,'-I','-S','-c',script,str(root),str(root/'.venv/Lib/site-packages'),str(request_path)],stdout=log,stderr=log,
+            creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+        try:
+            deadline=time.monotonic()+15;marker=Path(request['database']).parent/'last-committed'
+            while not marker.exists() and time.monotonic()<deadline:
+                assert child.poll() is None;time.sleep(.03)
+            assert marker.exists()
+        finally:
+            if child.poll() is None:child.kill()
+            child.wait(timeout=10)
+    assert rows(request)[0]['status']=='INDEXED'
+    io=Boundary(request);result=native_core.run_index_batch(request,io)
+    assert result['files_parsed']==0 and result['errors']==0 and result['remaining_pending']==0
+    assert not any(operation in (0,1) for operation,_ in io.events)
+    with sqlite3.connect(request['database']) as conn:
+        assert conn.execute('SELECT dataset_id,kind FROM les_index_events').fetchall()==[('ds','index_completed')]
 
 
 def test_owner_death_releases_lease_recovers_pending_and_cleans_owned_spools(tmp_path):

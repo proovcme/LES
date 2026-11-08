@@ -34,6 +34,26 @@ def enabled():
     return _bridge is not None
 
 
+def read_dataset_memory(dataset_id, *, background=False, force=False, max_attempts=2):
+    """Local JSON transport; the native reader owns scheduling and model execution."""
+    if _bridge is None:
+        raise RuntimeError('READER_NATIVE_SERVICE_REQUIRED')
+    endpoint, token = _bridge
+    endpoint = endpoint.rsplit('/', 1)[0] + '/internal-dataset-reader'
+    with httpx.Client(timeout=610 if not background else 30, trust_env=False) as client:
+        response = client.post(endpoint, headers={'x-les-index-token': token},
+            json={'dataset_id': str(dataset_id), 'background': bool(background),
+                  'force': bool(force), 'max_attempts': max_attempts})
+    if not response.is_success:
+        raise RuntimeError(response.json().get('detail', 'READER_NATIVE_SERVICE_UNAVAILABLE'))
+    if response.headers.get('x-les-handler') != 'rust.dataset-reader' or len(response.content) > 4 * 1024 * 1024:
+        raise RuntimeError('READER_NATIVE_RESPONSE_INVALID')
+    value = response.json()
+    if not isinstance(value, dict):
+        raise RuntimeError('READER_NATIVE_RESPONSE_INVALID')
+    return value
+
+
 def accepts(supplied):
     return _bridge is not None and supplied.isascii() and compare_digest(_bridge[1], supplied)
 

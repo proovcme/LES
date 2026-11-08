@@ -36,6 +36,7 @@ pub(super) struct Batch {
     dataset: String,
     _lease: File,
     finished: bool,
+    recovered: bool,
 }
 impl Batch {
     pub fn acquire(database: &Path, dataset: &str) -> Result<Self> {
@@ -89,7 +90,7 @@ impl Batch {
             return Err("INDEX_DATASET_NOT_FOUND");
         }
         // Holding this OS lease proves that no previous owner is still running.
-        tx.execute("UPDATE les_index_batches SET status='interrupted',stop_code='INDEX_BATCH_OWNER_LOST',updated_at=?2
+        let recovered=tx.execute("UPDATE les_index_batches SET status='interrupted',stop_code='INDEX_BATCH_OWNER_LOST',updated_at=?2
             WHERE dataset_id=?1 AND status='running'",params![dataset,now()]).map_err(|_|CATALOG)?;
         tx.execute(
             "INSERT INTO les_index_batches(id,dataset_id,owner_pid,status,started_at,updated_at)
@@ -109,6 +110,7 @@ impl Batch {
             dataset: dataset.into(),
             _lease: lease,
             finished: false,
+            recovered: recovered > 0,
         })
     }
     pub fn spool(&self, id: &str) -> Result<()> {
@@ -181,6 +183,14 @@ impl Batch {
         .map_err(cause)?;
         tx.execute("UPDATE les_index_batches SET status=?2,stage='',stop_code=?3,result=?4,updated_at=?5 WHERE id=?1",
             params![self.id,if stop.is_empty(){"completed"}else{"interrupted"},stop,result.to_string(),now()]).map_err(|_|CATALOG)?;
+        // Durable outbox shares the batch commit. A crash before API notification
+        // cannot lose a requested post-index task. Historical batches create no events.
+        if status == "COMPLETED"
+            && stop.is_empty()
+            && (result["files_parsed"].as_u64().unwrap_or(0) > 0 || self.recovered)
+        {
+            crate::index_events::completed(&tx, &self.id, &self.dataset, now()).map_err(cause)?;
+        }
         tx.commit().map_err(cause)?;
         self.finished = true;
         Ok(())

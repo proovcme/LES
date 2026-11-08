@@ -1,6 +1,7 @@
 //! Existing project/note/context tables, shared transaction owner; no model decisions.
 mod context_report;
 mod conversation;
+mod dataset_reader;
 mod history;
 mod history_view;
 mod intake;
@@ -141,6 +142,15 @@ fn dispatch(request: &Value) -> Result<Value> {
         | "model_registry_bind"
         | "model_registry_save_snapshot"
         | "dataset_create"
+        | "reader_enqueue"
+        | "reader_recover"
+        | "reader_reconcile"
+        | "reader_claim"
+        | "reader_bind"
+        | "reader_prepare"
+        | "reader_attempt"
+        | "reader_retry"
+        | "reader_finish"
         | "intake_enqueue"
         | "intake_claim"
         | "intake_manifest"
@@ -176,6 +186,9 @@ fn dispatch(request: &Value) -> Result<Value> {
         | "chat_history_checkpoint"
         | "chat_history_interrupt" => true,
         "model_registry_view"
+        | "reader_memory"
+        | "reader_job"
+        | "reader_validate"
         | "model_registry_get"
         | "model_registry_revision"
         | "model_registry_list"
@@ -269,6 +282,9 @@ fn dispatch(request: &Value) -> Result<Value> {
     }
 }
 fn operate(conn: &Connection, action: &str, args: &Args) -> Result<Value> {
+    if action.starts_with("reader_") {
+        return dataset_reader::execute(conn, action, args);
+    }
     if action == "index_attempt" {
         let dataset = text(args, "dataset_id")?;
         let name = text(args, "file_name")?;
