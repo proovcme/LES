@@ -1,5 +1,8 @@
 # Модули LES RAG
 
+834: [контекст чата](modules/native-chat-context.md) — `core/src/chat_context/`:
+упаковка, память/профиль, покрытие разделов, source visibility и delivery trace.
+
 833: [первый индекс](modules/native-index-setup.md) — `api/src/index_bootstrap.rs`,
 `core/src/index_bootstrap.rs`, `core/src/lexical_schema.rs`, `vector/src/initialize.rs`.
 
@@ -221,8 +224,8 @@ Rust-ядро документов: `core/src/lexical.rs`, `files.rs`, `jobs.rs`
 `word_evidence_service.py` возвращает адресные абзацы и строки таблиц DOCX.
 Сравнение полного и минимального поиска, модельного пакета и локальных судей:
 [стенд 764](modules/rag-pipeline-trial.md). `lexical_evidence_service.py` сверяет
-FTS ID с Qdrant; `section_coverage_service.py` формирует модельную метаинформацию
-о полноте реально переданных индексированных разделов.
+FTS ID с Qdrant; `core/src/chat_context/coverage.rs` формирует модельную
+метаинформацию о полноте реально переданных индексированных разделов.
 
 - backend: чтение документов, OCR, индекс Qdrant и политика ресурсов.
 - proxy: API, чат, доказательства, память и подключения.

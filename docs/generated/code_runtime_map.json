@@ -1074,6 +1074,7 @@
         "backend/workbook_index.py",
         "backend/workspace_native.py",
         "proxy/services/agent_state_service.py",
+        "proxy/services/chat_evidence_context.py",
         "proxy/services/chat_profile_service.py",
         "proxy/services/chat_prompt_support.py",
         "proxy/services/context_governor_service.py",
@@ -1107,6 +1108,7 @@
         "tests/test_light_format_worker.py",
         "tests/test_light_model_registry_native.py",
         "tests/test_light_native_builtin_calculations.py",
+        "tests/test_light_native_chat_context.py",
         "tests/test_light_native_core.py",
         "tests/test_light_native_dispatch_sources.py",
         "tests/test_light_native_document.py",
@@ -1131,6 +1133,7 @@
         "tests/test_light_native_workbook.py",
         "tests/test_light_pdf_source_tool.py",
         "tests/test_light_resource_memory.py",
+        "tests/test_light_section_coverage.py",
         "tools/build_rag_contract_sibling.py"
       ],
       "lines": 357,
@@ -2479,7 +2482,6 @@
         "proxy/services/saferag_service.py",
         "proxy/services/scope_service.py",
         "proxy/services/scoped_rag_builder.py",
-        "proxy/services/section_coverage_service.py",
         "proxy/services/section_evidence_candidate.py",
         "proxy/services/semantic_cache.py",
         "proxy/services/sidecar_ops_service.py",
@@ -4042,7 +4044,6 @@
         "proxy/services/saferag_service.py",
         "proxy/services/scope_service.py",
         "proxy/services/scoped_rag_builder.py",
-        "proxy/services/section_coverage_service.py",
         "proxy/services/section_evidence_candidate.py",
         "proxy/services/semantic_cache.py",
         "proxy/services/sidecar_ops_service.py",
@@ -4637,20 +4638,20 @@
         "tests/test_light_document_review.py",
         "tests/test_light_document_tasks.py",
         "tests/test_light_native_api.py",
+        "tests/test_light_native_chat_context.py",
         "tests/test_light_rerank_audit.py",
         "tests/test_light_section_coverage.py",
         "tests/test_workspace_context.py",
         "tools/evaluate_rag_pipeline.py"
       ],
-      "lines": 313,
+      "lines": 98,
       "module": "proxy.services.chat_evidence_context",
       "outbound": [
+        "backend/native_core.py",
         "proxy/__init__.py",
         "proxy/services/__init__.py",
         "proxy/services/context_governor_service.py",
-        "proxy/services/model_execution_preset_service.py",
-        "proxy/services/prompt_registry_service.py",
-        "proxy/services/section_coverage_service.py"
+        "proxy/services/prompt_registry_service.py"
       ],
       "path": "proxy/services/chat_evidence_context.py",
       "status": "PRODUCT_REACHABLE",
@@ -5193,7 +5194,6 @@
         "proxy/services/chat_evidence_application_service.py",
         "proxy/services/chat_evidence_context.py",
         "proxy/services/llm_transport_profile_service.py",
-        "proxy/services/section_coverage_service.py",
         "proxy/services/typed_memory_projection_service.py",
         "tests/test_context_governor_service.py",
         "tests/test_light_agent_workspace.py",
@@ -5205,7 +5205,7 @@
         "tests/test_workspace_context.py",
         "tools/evaluate_retrieval_candidate.py"
       ],
-      "lines": 159,
+      "lines": 168,
       "module": "proxy.services.context_governor_service",
       "outbound": [
         "backend/native_core.py",
@@ -6891,7 +6891,6 @@
     {
       "inbound": [
         "proxy/services/chat_evidence_application_service.py",
-        "proxy/services/chat_evidence_context.py",
         "proxy/services/context_governor_service.py",
         "proxy/services/llm_transport_profile_service.py",
         "proxy/services/model_connection_resolver_service.py",
@@ -8156,22 +8155,6 @@
       ],
       "path": "proxy/services/scoped_rag_builder.py",
       "status": "DORMANT_CANDIDATE",
-      "windows_runtime_explicit": false
-    },
-    {
-      "inbound": [
-        "proxy/services/chat_evidence_context.py",
-        "tests/test_light_section_coverage.py"
-      ],
-      "lines": 77,
-      "module": "proxy.services.section_coverage_service",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/context_governor_service.py"
-      ],
-      "path": "proxy/services/section_coverage_service.py",
-      "status": "PRODUCT_REACHABLE",
       "windows_runtime_explicit": false
     },
     {
@@ -11671,6 +11654,18 @@
     },
     {
       "inbound": [],
+      "lines": 77,
+      "module": "tests.test_light_native_chat_context",
+      "outbound": [
+        "backend/native_core.py",
+        "proxy/services/chat_evidence_context.py"
+      ],
+      "path": "tests/test_light_native_chat_context.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
       "lines": 116,
       "module": "tests.test_light_native_chat_profiles",
       "outbound": [],
@@ -12526,12 +12521,12 @@
     },
     {
       "inbound": [],
-      "lines": 65,
+      "lines": 72,
       "module": "tests.test_light_section_coverage",
       "outbound": [
+        "backend/native_core.py",
         "proxy/services/chat_evidence_context.py",
         "proxy/services/context_governor_service.py",
-        "proxy/services/section_coverage_service.py",
         "tests/test_context_governor_service.py"
       ],
       "path": "tests/test_light_section_coverage.py",
@@ -15935,12 +15930,12 @@
   "summary": {
     "dormant_candidates": 27,
     "parse_warnings": 0,
-    "product_reachable": 420,
+    "product_reachable": 419,
     "registered_api_routes": 298,
     "runtime_support": 5,
-    "test_or_tool_only": 258,
+    "test_or_tool_only": 259,
     "tracked_python_files": 710,
-    "tracked_python_lines": 170783
+    "tracked_python_lines": 170584
   },
   "warnings": []
 }

@@ -1,5 +1,5 @@
 //! Trusted executor state and policy. Dispatchers provide effects; they cannot bypass admission/results policy.
-mod canonical;
+pub(crate) mod canonical;
 mod store;
 use serde_json::{json, Value};
 use std::{
