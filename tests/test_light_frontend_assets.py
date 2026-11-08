@@ -46,7 +46,8 @@ def test_python_does_not_mount_assets_when_rust_owns_frontend(tmp_path, monkeypa
     light_frontend.mount_frontend(app)
     with TestClient(app) as client:
         assert client.get('/app/').status_code == 404
-        assert client.get('/api/light/native-auth-policy').status_code == 200
+        for path in ('native-auth-policy', 'native-authorization', 'native-admin-authorization'):
+            assert client.get('/api/light/' + path).status_code == 404
 
 
 @pytest.fixture

@@ -1,5 +1,8 @@
 # Модули LES RAG
 
+832: [холодный допуск к API](modules/native-access-bootstrap.md) —
+`core/src/access_policy.rs`, `api/src/auth.rs`; прежние Python callbacks удалены.
+
 831: [модельный навигатор набора](modules/native-dataset-reader.md) —
 `core/src/catalog/dataset_reader/`, `api/src/dataset_reader.rs`, durable outbox
 партии и совместимый локальный caller без Python processing callbacks.

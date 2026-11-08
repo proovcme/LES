@@ -1,5 +1,18 @@
 # LES RAG — выпуски
 
+## build 832 · кандидат холодной авторизации без Python
+
+Политика доступа загружается самим Rust API из настроек экземпляра. Сети,
+proxy, ключи и CORS/preflight проверяются без старого backend. Удалены три
+Python callback endpoints и нативный HTTP fallback к ним. Ошибка конфигурации
+даёт понятную причину и закрывает доступ. Первый индекс, общий bootstrap и
+оставшиеся обработчики чата/API/classic ещё требуют переноса.
+[Контракт](modules/native-access-bootstrap.md), [приёмка](acceptance/native-access-bootstrap-832.md).
+Rust core/API/runtime: 69/10/7; целевые регрессии: 45 passed;
+`make verify`: 1975 collected; `make test`: 1973 passed, 2 skipped, 18 subtests.
+Холодный тест quoted-настроек воспроизвёл и закрыл возврат доверия по умолчанию.
+Кандидат не установлен; рабочие роли/индекс и автономные внешние навыки не менялись.
+
 ## build 831 · кандидат навигатора набора в Rust
 
 Ручной и автоматический reader перенесены в один native исполнитель. Удалены

@@ -7,7 +7,7 @@ from threading import Thread
 from types import SimpleNamespace
 from threading import Barrier
 import pytest
-from test_light_native_api import gateway,wait_for,MODEL_BRIDGE_TOKEN
+from test_light_native_api import gateway,wait_for,MODEL_BRIDGE_TOKEN,native_trust
 from proxy.services.model_secret_service import EnvironmentSecretStore,ModelSecretError
 from proxy.services.model_connection_registry_service import ModelConnectionRegistry
 from proxy.services.model_connection_contracts import (
@@ -52,10 +52,7 @@ def test_parallel_secret_updates_never_lose_another_key(tmp_path):
 
 def test_effective_roles_are_native_and_remain_exact_when_a_head_changes(gateway):
     client,database,folder=gateway
-    (folder/'native-auth-fixture.json').write_text(json.dumps({
-        'schema':'les.native-auth-policy.v1','trusted_role':'admin','compatible':True,
-        'cors_origins':[],'cors_loopback':True,'proxy_header':'x-les-trusted-network',
-    }),encoding='utf-8')
+    native_trust(folder, 'admin')
     client.headers.pop('X-API-Key')
     registry=ModelConnectionRegistry(database)
     first=registry.create_connection(display_name='Тестовая модель',base_url='http://127.0.0.1:11434/v1',

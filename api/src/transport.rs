@@ -1,11 +1,11 @@
-use crate::{error, json_response, Context};
+use crate::{error, Context};
 use axum::{
     body::Body,
     extract::Request,
     http::{header, HeaderMap, StatusCode},
     response::Response,
 };
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 pub fn local_browser(headers: &HeaderMap) -> bool {
     let Some(host) = headers
@@ -155,59 +155,6 @@ pub async fn forward(context: Arc<Context>, request: Request) -> Response {
     *response.status_mut() = status;
     *response.headers_mut() = headers;
     response
-}
-
-pub async fn authorize_legacy(
-    context: &Context,
-    headers: &HeaderMap,
-    admin: bool,
-) -> Result<HeaderMap, Response> {
-    let check = async {
-        let mut response = context
-            .client
-            .get(format!(
-                "{}/api/light/{}",
-                context.upstream,
-                if admin {
-                    "native-admin-authorization"
-                } else {
-                    "native-authorization"
-                }
-            ))
-            .headers(upstream_headers(headers))
-            .send()
-            .await
-            .map_err(|_| ())?;
-        let status = response.status();
-        let mut cors = HeaderMap::new();
-        for (name, value) in response.headers() {
-            if name.as_str().starts_with("access-control-") || name == header::VARY {
-                cors.insert(name.clone(), value.clone());
-            }
-        }
-        let mut bytes = Vec::new();
-        while let Some(block) = response.chunk().await.map_err(|_| ())? {
-            if bytes.len() + block.len() > 16384 {
-                return Err(());
-            }
-            bytes.extend_from_slice(&block);
-        }
-        let value = serde_json::from_slice::<serde_json::Value>(&bytes).map_err(|_| ())?;
-        Ok((status, value, cors))
-    };
-    match tokio::time::timeout(Duration::from_secs(15), check).await {
-        Ok(Ok((status, value, cors))) if status == StatusCode::OK && value["allowed"] == true => {
-            Ok(cors)
-        }
-        Ok(Ok((status, value, cors)))
-            if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN =>
-        {
-            let mut response = json_response(status, value, "rust.workspace");
-            response.headers_mut().extend(cors);
-            Err(response)
-        }
-        _ => Err(crate::auth::unavailable()),
-    }
 }
 
 #[cfg(test)]

@@ -1,4 +1,5 @@
 //! Versioned C ABI. All returned buffers belong to this library until les_core_free.
+pub mod access_policy;
 pub mod agent_files;
 pub mod agent_loop;
 pub mod auth;

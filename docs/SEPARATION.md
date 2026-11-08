@@ -1,5 +1,10 @@
 # Самостоятельный LES RAG
 
+Кандидат 832: [политика доступа к API в Rust](modules/native-access-bootstrap.md).
+Обычный холодный допуск и proxy/CORS больше не спрашивают Python. Старые callback-
+обработчики удалены. Общий launcher/backend, первый индекс и classic ещё остаются.
+[Приёмка](acceptance/native-access-bootstrap-832.md); рабочая установка прежняя.
+
 Кандидат 831: [модельная карта набора в Rust](modules/native-dataset-reader.md).
 Ручной/автоматический reader, выбранная модель, валидация и revision-safe результат
 имеют одного нативного владельца. Старый Python-исполнитель удалён; обычные

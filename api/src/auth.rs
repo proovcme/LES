@@ -11,49 +11,65 @@ use std::time::Duration;
 pub const POLICY_PATH: &str = "/api/light/native-auth-policy";
 type Decision<T> = Result<T, Response>;
 
-pub enum Policy {
-    Local(LocalPolicy),
-    Legacy,
-}
+pub type Policy = LocalPolicy;
 
 pub struct LocalPolicy {
-    pub trusted_role: Option<String>,
+    trusted_role: Option<String>,
     proxy_header: HeaderName,
     cors_origins: Vec<String>,
     cors_loopback: bool,
+    native: Option<les_core::access_policy::Policy>,
 }
 
 pub fn unavailable() -> Response {
     error(
         StatusCode::SERVICE_UNAVAILABLE,
-        "Не удалось проверить доступ к диалогу. Дождитесь восстановления Леса и повторите действие.",
+        "Не удалось проверить права доступа. Проверьте настройки доступа и журнал Леса, затем повторите действие.",
     )
 }
 
-async fn load_policy(context: &Context) -> Result<Policy, ()> {
-    let mut response = context
-        .client
-        .get(format!("{}{POLICY_PATH}", context.upstream))
-        .timeout(Duration::from_secs(3))
-        .send()
-        .await
-        .map_err(|_| ())?;
-    if response.status() == StatusCode::NOT_FOUND {
-        // Older explicitly retained backend, or a non-default policy requiring the legacy evaluator.
-        return Ok(Policy::Legacy);
-    }
-    if response.status() != StatusCode::OK {
-        return Err(());
-    }
-    let mut bytes = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(|_| ())? {
-        if bytes.len() + chunk.len() > 16_384 {
-            return Err(());
-        }
-        bytes.extend_from_slice(&chunk);
-    }
-    let value: Value = serde_json::from_slice(&bytes).map_err(|_| ())?;
-    parse_policy(&value)
+async fn load_policy(context: &Context) -> Result<Policy, &'static str> {
+    let path = std::env::var_os("LES_ENV_PATH")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| context.state_root.join(".env"));
+    tokio::task::spawn_blocking(move || {
+        let native = les_core::access_policy::load(&path, |key| std::env::var(key).ok())?;
+        let proxy_header = native
+            .proxy_header
+            .parse()
+            .map_err(|_| "AUTH_PROXY_HEADER_INVALID")?;
+        Ok(LocalPolicy {
+            trusted_role: None,
+            proxy_header,
+            cors_origins: Vec::new(),
+            cors_loopback: false,
+            native: Some(native),
+        })
+    })
+    .await
+    .map_err(|_| "AUTH_SETTINGS_OWNER_FAILED")?
+    .map_err(|code: &'static str| {
+        eprintln!(
+            "{}",
+            serde_json::json!({"event":"native_auth_settings_rejected","code":code})
+        );
+        code
+    })
+}
+
+fn policy_failure(code: &str) -> Response {
+    let detail = match code {
+        "AUTH_SETTINGS_EXPANSION_UNSUPPORTED" => "В настройках доступа указана переменная вместо значения. Укажите явные сети и перезапустите Лес.",
+        "AUTH_CORS_PATTERN_UNSUPPORTED" => "Не удалось прочитать правило разрешённых источников. Укажите явные адреса в CORS_ALLOWED_ORIGINS или поддерживаемое правило.",
+        "AUTH_PROXY_HEADER_INVALID" => "В настройке доверенного прокси некорректное имя заголовка. Исправьте TRUSTED_PROXY_HEADER.",
+        "AUTH_SETTINGS_INVALID" => "Повреждены настройки доступа: проверьте кавычки и значения в файле настроек Леса.",
+        _ => "Не удалось загрузить настройки доступа. Проверьте доступ к файлу настроек и журнал Леса.",
+    };
+    crate::json_response(
+        StatusCode::SERVICE_UNAVAILABLE,
+        serde_json::json!({"detail":detail,"code":code}),
+        "rust.auth-policy",
+    )
 }
 
 fn parse_policy(value: &Value) -> Result<Policy, ()> {
@@ -61,11 +77,11 @@ fn parse_policy(value: &Value) -> Result<Policy, ()> {
         return Err(());
     }
     if !value["compatible"].as_bool().ok_or(())? {
-        return Ok(Policy::Legacy);
+        return Err(());
     }
     let proxy_header = match value["proxy_header"].as_str().ok_or(())?.parse() {
         Ok(header) => header,
-        Err(_) => return Ok(Policy::Legacy),
+        Err(_) => return Err(()),
     };
     let trusted_role = match &value["trusted_role"] {
         Value::Null => None,
@@ -80,12 +96,13 @@ fn parse_policy(value: &Value) -> Result<Policy, ()> {
         .map(|origin| origin.as_str().map(str::to_owned).ok_or(()))
         .collect::<Result<_, _>>()?;
     let cors_loopback = value["cors_loopback"].as_bool().ok_or(())?;
-    Ok(Policy::Local(LocalPolicy {
+    Ok(LocalPolicy {
         trusted_role,
         proxy_header,
         cors_origins,
         cors_loopback,
-    }))
+        native: None,
+    })
 }
 
 /// Explicit startup policy allows a cold native API without consulting Python.
@@ -105,9 +122,34 @@ pub fn from_file(path: &std::path::Path) -> Result<Policy, &'static str> {
     }
     let value: Value =
         serde_json::from_slice(&bytes).map_err(|_| "Invalid native authorization policy")?;
-    match parse_policy(&value).map_err(|_| "Invalid native authorization policy")? {
-        Policy::Local(policy) => Ok(Policy::Local(policy)),
-        Policy::Legacy => Err("Native startup policy requires a compatible local policy"),
+    parse_policy(&value).map_err(|_| "Invalid native authorization policy")
+}
+
+impl LocalPolicy {
+    pub fn trusted(&self, headers: &HeaderMap) -> Option<&str> {
+        if let Some(native) = &self.native {
+            let text = |key| {
+                headers
+                    .get(key)
+                    .map(|v| v.to_str().unwrap_or("invalid-header"))
+            };
+            return native.trusted_role(
+                text("x-forwarded-for"),
+                text("x-real-ip"),
+                headers
+                    .get(&self.proxy_header)
+                    .map(|v| v.to_str().unwrap_or("invalid-header")),
+            );
+        }
+        // v1 snapshots describe direct loopback only. They cannot confer trust
+        // on a forwarded foreign request; an explicit valid key still works.
+        if headers.contains_key("x-forwarded-for")
+            || headers.contains_key("x-real-ip")
+            || headers.contains_key(&self.proxy_header)
+        {
+            return None;
+        }
+        self.trusted_role.as_deref()
     }
 }
 
@@ -139,13 +181,21 @@ pub fn cors(policy: &LocalPolicy, headers: &HeaderMap) -> HeaderMap {
         HeaderValue::from_static("true"),
     );
     let origin_text = origin.to_str().unwrap_or_default();
-    let wildcard = policy.cors_origins.iter().any(|value| value == "*");
+    let wildcard = policy
+        .native
+        .as_ref()
+        .map(|p| p.wildcard_cors())
+        .unwrap_or_else(|| policy.cors_origins.iter().any(|value| value == "*"));
     if wildcard && !headers.contains_key(header::COOKIE) {
         result.insert(
             header::ACCESS_CONTROL_ALLOW_ORIGIN,
             HeaderValue::from_static("*"),
         );
-    } else if wildcard
+    } else if policy
+        .native
+        .as_ref()
+        .is_some_and(|p| p.allows_cors(origin_text))
+        || wildcard
         || policy.cors_origins.iter().any(|value| value == origin_text)
         || policy.cors_loopback && loopback_cors(origin_text)
     {
@@ -153,6 +203,60 @@ pub fn cors(policy: &LocalPolicy, headers: &HeaderMap) -> HeaderMap {
         result.insert(header::VARY, HeaderValue::from_static("Origin"));
     }
     result
+}
+
+/// CORS permission checks carry no credentials and never call a retained API.
+pub async fn preflight(context: &Context, headers: &HeaderMap) -> Response {
+    let policy = match local_policy(context).await {
+        Ok(policy) => policy,
+        Err(response) => return response,
+    };
+    let mut cors = cors(policy, headers);
+    let method = headers
+        .get(header::ACCESS_CONTROL_REQUEST_METHOD)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let methods = "DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT";
+    if !methods.split(", ").any(|allowed| allowed == method)
+        || !cors.contains_key(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+    {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "Запрос из этого источника или с этим методом не разрешён.",
+        );
+    }
+    if let Some(requested) = headers.get(header::ACCESS_CONTROL_REQUEST_HEADERS) {
+        let valid = requested.to_str().ok().is_some_and(|text| {
+            text.len() <= 16_384
+                && text
+                    .split(',')
+                    .all(|name| name.trim().parse::<HeaderName>().is_ok())
+        });
+        if !valid {
+            return error(StatusCode::BAD_REQUEST, "Некорректные заголовки запроса.");
+        }
+        cors.insert(header::ACCESS_CONTROL_ALLOW_HEADERS, requested.clone());
+    }
+    // Credentials require a concrete origin for preflight, even for wildcard.
+    if let Some(origin) = headers.get(header::ORIGIN) {
+        cors.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, origin.clone());
+    }
+    cors.insert(header::VARY, HeaderValue::from_static("Origin"));
+    cors.insert(
+        header::ACCESS_CONTROL_ALLOW_METHODS,
+        HeaderValue::from_static(methods),
+    );
+    cors.insert(
+        header::ACCESS_CONTROL_MAX_AGE,
+        HeaderValue::from_static("600"),
+    );
+    let mut response = crate::json_response(
+        StatusCode::OK,
+        serde_json::json!({"allowed":true}),
+        "rust.auth-policy",
+    );
+    response.headers_mut().extend(cors);
+    response
 }
 
 pub fn key_from(headers: &HeaderMap) -> String {
@@ -213,7 +317,7 @@ async fn authorize_local(
     } else {
         Some(lookup(context, key).await?)
     };
-    auth::authorize(key, policy.trusted_role.as_deref(), admin)
+    auth::authorize(key, policy.trusted(headers), admin)
         .map(|_| ())
         .map_err(denial_response)
 }
@@ -229,35 +333,18 @@ pub fn denial_response(denial: Denial) -> Response {
     error(status, detail)
 }
 
-pub async fn local_policy<'a>(
-    context: &'a Context,
-    clean: &HeaderMap,
-) -> Decision<Option<&'a LocalPolicy>> {
+pub async fn local_policy<'a>(context: &'a Context) -> Decision<&'a LocalPolicy> {
     let policy = context
         .auth_policy
         .get_or_try_init(|| load_policy(context))
         .await
-        .map_err(|_| unavailable())?;
-    let Policy::Local(policy) = policy else {
-        return Ok(None);
-    };
-    // Uvicorn and the legacy security layer both interpret forwarding headers.
-    // Keep their policy for proxy requests during the transition.
-    if ["x-forwarded-for", "x-real-ip", "x-forwarded-proto"]
-        .iter()
-        .any(|name| clean.contains_key(*name))
-        || clean.contains_key(&policy.proxy_header)
-    {
-        return Ok(None);
-    }
-    Ok(Some(policy))
+        .map_err(|code| policy_failure(code))?;
+    Ok(policy)
 }
 
 pub async fn authorize(context: &Context, headers: &HeaderMap, admin: bool) -> Decision<HeaderMap> {
     let clean = transport::clean(headers, true);
-    let Some(policy) = local_policy(context, &clean).await? else {
-        return transport::authorize_legacy(context, headers, admin).await;
-    };
+    let policy = local_policy(context).await?;
     let cors = cors(policy, headers);
     match authorize_local(context, policy, &clean, admin).await {
         Ok(()) => Ok(cors),

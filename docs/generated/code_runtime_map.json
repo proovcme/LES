@@ -2629,7 +2629,6 @@
       "inbound": [
         "backend/embedding_client.py",
         "proxy/app.py",
-        "proxy/light_frontend.py",
         "proxy/memory_core/store.py",
         "proxy/routers/auth.py",
         "proxy/routers/chat.py",
@@ -2683,11 +2682,10 @@
         "tests/test_light_frontend_assets.py",
         "tests/test_light_native_api.py"
       ],
-      "lines": 61,
+      "lines": 41,
       "module": "proxy.light_frontend",
       "outbound": [
         "proxy/__init__.py",
-        "proxy/config.py",
         "proxy/security.py"
       ],
       "path": "proxy/light_frontend.py",
@@ -11283,7 +11281,7 @@
     },
     {
       "inbound": [],
-      "lines": 121,
+      "lines": 122,
       "module": "tests.test_light_frontend_assets",
       "outbound": [
         "proxy/light_frontend.py",
@@ -11607,7 +11605,7 @@
         "tests/test_light_native_publication.py",
         "tests/test_light_native_table_publication.py"
       ],
-      "lines": 805,
+      "lines": 904,
       "module": "tests.test_light_native_api",
       "outbound": [
         "backend/workspace_native.py",
@@ -12001,7 +11999,7 @@
     },
     {
       "inbound": [],
-      "lines": 202,
+      "lines": 199,
       "module": "tests.test_light_native_model_runtime",
       "outbound": [
         "proxy/services/local_model_http.py",
@@ -15953,7 +15951,7 @@
     "runtime_support": 5,
     "test_or_tool_only": 258,
     "tracked_python_files": 711,
-    "tracked_python_lines": 170766
+    "tracked_python_lines": 170843
   },
   "warnings": []
 }

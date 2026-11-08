@@ -85,7 +85,13 @@ async fn dispatch(State(context): State<Arc<Context>>, request: Request) -> Resp
     {
         return edge::handle(context, request).await;
     }
-    if request.uri().path() == auth::POLICY_PATH || intake::internal(request.uri().path()) {
+    if matches!(
+        request.uri().path(),
+        auth::POLICY_PATH
+            | "/api/light/native-authorization"
+            | "/api/light/native-admin-authorization"
+    ) || intake::internal(request.uri().path())
+    {
         return error(StatusCode::NOT_FOUND, "Not Found");
     }
     if request.uri().path() == local_model::PATH {
@@ -110,6 +116,14 @@ async fn dispatch(State(context): State<Arc<Context>>, request: Request) -> Resp
     }
     if request.uri().path() == index_store::PATH {
         return index_store::handle(context, request).await;
+    }
+    if request.method() == "OPTIONS"
+        && request.headers().contains_key("origin")
+        && request
+            .headers()
+            .contains_key("access-control-request-method")
+    {
+        return auth::preflight(&context, request.headers()).await;
     }
     if let Some(frontend) = &context.frontend {
         if let Some(response) = frontend
