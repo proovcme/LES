@@ -1,5 +1,9 @@
 # Модули LES RAG
 
+836: [память разговора и команды](modules/native-conversation-memory.md) —
+`api/src/conversation/`, `core/src/conversation_summary/`, `core/src/chat_commands.rs`:
+генерация, durable outbox, приоритет чата, CAS и восстановление без Python callbacks.
+
 835: [общий кандидат чата](modules/native-chat-turn.md) — `api/src/chat/`,
 `core/src/chat_request/`, `api/src/documents.rs`: единый JSON/SSE, квитанции,
 инструменты, физический PDF и оригиналы. Публичный чат ещё не переключён.

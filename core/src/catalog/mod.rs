@@ -125,6 +125,14 @@ pub(crate) fn save_chat_row(conn: &Connection, history: i64, row: &Value) -> Res
             .ok_or_else(|| Failure::invalid("Invalid chat completion"))?,
     )
 }
+pub(crate) fn update_conversation(conn: &Connection, args: &Value) -> Result<Value> {
+    conversation::execute(
+        conn,
+        "context_update",
+        args.as_object()
+            .ok_or_else(|| Failure::invalid("Invalid context update"))?,
+    )
+}
 fn dispatch(request: &Value) -> Result<Value> {
     if request["schema"] != "les.catalog.v1" {
         return Err(Failure::invalid("Invalid catalog schema"));
@@ -228,6 +236,7 @@ fn dispatch(request: &Value) -> Result<Value> {
         | "context_exclusions"
         | "context_report"
         | "context_history"
+        | "context_summary_history"
         | "history_recall"
         | "history_session"
         | "history_questions"

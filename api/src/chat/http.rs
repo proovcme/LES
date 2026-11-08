@@ -24,7 +24,7 @@ pub fn handles(path: &str) -> bool {
 fn failed(error: Failure) -> Response {
     crate::json_response(error.status, error.payload(), "rust.chat")
 }
-async fn receipt(context: Arc<Context>, request: Value, key: Option<String>) -> Result<Value> {
+pub(crate) async fn initialize(context: &Arc<Context>) -> Result<()> {
     let owner = context.clone();
     context
         .chat
@@ -34,6 +34,11 @@ async fn receipt(context: Arc<Context>, request: Value, key: Option<String>) -> 
                 .map_err(|_| Failure::new("CHAT_STORAGE_UNAVAILABLE"))?
         })
         .await?;
+    crate::conversation::start(context);
+    Ok(())
+}
+async fn receipt(context: Arc<Context>, request: Value, key: Option<String>) -> Result<Value> {
+    initialize(&context).await?;
     let db = context.database.clone();
     tokio::task::spawn_blocking(move || {
         les_core::chat_request::journal::begin(&db, &request, key.as_deref())
@@ -50,6 +55,7 @@ async fn execute(context: Arc<Context>, request: Value, saved: Value, sink: Sink
         return Err("CHAT_REQUEST_NOT_REPLAYABLE".into());
     }
     let mut journal = Journal::new(context.database.clone(), &saved)?;
+    let _activity = crate::conversation::Foreground::new(context.clone());
     let sender = sink.sender.clone();
     let result = {
         let run = Box::pin(tokio::time::timeout(
@@ -62,17 +68,23 @@ async fn execute(context: Arc<Context>, request: Value, saved: Value, sink: Sink
             Either::Right(_) => Err("CHAT_CANCELLED".into()),
         }
     };
+    let result = match result {
+        Ok(value) => journal.finish(&request, &value).await.map(|_| value),
+        Err(error) => Err(error),
+    };
     match result {
-        Ok(value) => {
-            journal.finish(&request, &value).await?;
-            Ok(value)
-        }
+        Ok(value) => Ok(value),
         Err(error) => {
-            journal.fail(&error.payload()).await?;
             eprintln!(
                 "{}",
                 json!({"event":"chat_request_failed","history_id":journal.history,"code":error.code})
             );
+            if let Err(storage) = journal.fail(&error.payload()).await {
+                eprintln!(
+                    "{}",
+                    json!({"event":"chat_failure_recording_failed","history_id":journal.history,"cause":error.code,"code":storage.code})
+                );
+            }
             Err(error)
         }
     }

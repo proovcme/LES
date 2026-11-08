@@ -3,6 +3,7 @@ mod auth;
 mod auth_keys;
 mod catalog;
 mod chat;
+mod conversation;
 mod dataset_reader;
 mod document_dispatch;
 mod documents;
@@ -21,6 +22,7 @@ mod intake;
 mod library;
 mod local_model;
 mod mcp;
+mod model_answer;
 mod model_http;
 mod model_registry;
 mod model_runtime;
@@ -106,6 +108,12 @@ async fn dispatch(State(context): State<Arc<Context>>, request: Request) -> Resp
     }
     if chat::http::handles(request.uri().path()) {
         return chat::http::handle(context, request).await;
+    }
+    if request.uri().path() == "/api/commands" {
+        return chat::commands::handle(context, request).await;
+    }
+    if conversation::handles(request.uri().path()) {
+        return conversation::handle(context, request).await;
     }
     if request.uri().path() == embedding_inference::PATH {
         return embedding_inference::handle(context, request).await;
@@ -445,6 +453,7 @@ fn main() {
         runtime.block_on(async {
             let listener = tokio::net::TcpListener::bind(listen).await?;
             let context = Arc::new(context);
+            tokio::spawn(conversation::resume(context.clone()));
             let background = context.clone();
             if context.reader.is_some() {
                 let reader = context.clone();

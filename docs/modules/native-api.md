@@ -1,5 +1,10 @@
 # Rust HTTP API
 
+836: `GET /api/commands` и `POST /api/workspace/memory/context/{session_id}/summarize`
+обслуживает Rust. [Исполнитель сводки](native-conversation-memory.md) владеет
+моделью, durable очередью и восстановлением; Python callbacks не используются.
+Публичные маршруты общего чата до функционального паритета не переключены.
+
 835: [общий кандидат чата](native-chat-turn.md) доступен на двух внутренних,
 защищённых токеном адресах JSON/SSE. Публичный чат до паритета не переключён.
 GET/HEAD `/api/documents/by-id/{id}/raw` уже обслуживает Rust с проверкой оригинала

@@ -118,12 +118,25 @@ impl Evidence {
 }
 pub async fn run(
     context: Arc<Context>,
-    request: Value,
+    mut request: Value,
     journal: &mut Journal,
     sink: &Sink,
 ) -> Result<Value> {
     let started = Instant::now();
     sink.progress("prepare", "Подготавливаю запрос").await?;
+    let command = les_core::chat_commands::handle(
+        request["question"].as_str().ok_or("CHAT_REQUEST_INVALID")?,
+    );
+    if let Some(rewrite) = command["rewrite"].as_str() {
+        request["question"] = json!(rewrite);
+    } else if command["answer"].is_string() {
+        return Ok(
+            json!({"answer":command["answer"],"response":command["answer"],"command":command["command"],"crag_status":"DETERMINISTIC","success":true,
+            "sources":[],"source_map":[],"citation_map":[],"source_scope":{"resolved":[],"used":[]},"history_id":journal.history,"latency_sec":started.elapsed().as_secs_f64(),"tokens":0,
+            "query_route":{"channel":"command","operation":command["command"]["action"]},"retrieval_trace":{"engine":"rust.chat-commands"},
+            "artifact":{"completion_status":"completed","validation":"not_performed","tool_results":[]},"validation":{"enabled":false,"reason":"deterministic_command"}}),
+        );
+    }
     let turn = prepare::prepare(context.clone(), request).await?;
     let service = context.chat.get().ok_or("CHAT_SERVICE_BUSY")?;
     let slots = if turn.connection.endpoint.locality == "remote" {

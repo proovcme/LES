@@ -65,6 +65,24 @@ def web_ready() -> bool:
     return _bridge is not None
 
 
+async def context_request(action: str, **arguments):
+    """Framing only; Rust owns scheduling, model selection, compaction and recovery."""
+    if _bridge is None:
+        raise RuntimeError('Native conversation service is not configured')
+    url, token = _bridge
+    timeout = 210.0 if action == 'summarize' else 45.0
+    async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
+        response = await client.post(url.rsplit('/', 1)[0] + '/internal-context',
+            headers={'X-Les-Model-Token': token}, json={**arguments, 'action': action})
+        response.raise_for_status()
+        if response.headers.get('x-les-handler') != 'rust.conversation':
+            raise RuntimeError('SUMMARY_RESPONSE_INVALID')
+        result = response.json()
+        if result is not None and not isinstance(result, dict):
+            raise RuntimeError('SUMMARY_RESPONSE_INVALID')
+        return result
+
+
 def web_request(operation: str, arguments: dict) -> dict:
     """Local framing only. Rust owns external HTTP, DNS, limits and HTML parsing."""
     if _bridge is None:

@@ -19,11 +19,11 @@
 
 | Метрика | Значение |
 | --- | --- |
-| Python-файлов под git | 708 |
-| Строк Python | 170276 |
+| Python-файлов под git | 709 |
+| Строк Python | 170087 |
 | PRODUCT_REACHABLE | 419 |
 | RUNTIME_SUPPORT | 5 |
-| TEST_OR_TOOL_ONLY | 260 |
+| TEST_OR_TOOL_ONLY | 261 |
 | DORMANT_CANDIDATE | 24 |
 | Зарегистрированных API-маршрутов | 298 |
 | Ошибок разбора | 0 |

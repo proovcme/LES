@@ -8,6 +8,7 @@ pub struct Service {
     _lease: File,
     pub local: std::sync::Arc<tokio::sync::Semaphore>,
     pub remote: std::sync::Arc<tokio::sync::Semaphore>,
+    pub summary: crate::conversation::Scheduler,
 }
 impl Service {
     pub fn new(context: &Context) -> Result<Self> {
@@ -30,10 +31,12 @@ impl Service {
             .map_err(|_| "CHAT_STORAGE_UNAVAILABLE")?;
         lease.try_lock().map_err(|_| "CHAT_SERVICE_BUSY")?;
         les_core::chat_request::journal::recover(&context.database)?;
+        les_core::conversation_summary::queue::execute(&context.database, "recover", &json!({}))?;
         Ok(Self {
             _lease: lease,
             local: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
             remote: std::sync::Arc::new(tokio::sync::Semaphore::new(4)),
+            summary: crate::conversation::Scheduler::new(),
         })
     }
 }
@@ -96,7 +99,7 @@ impl Journal {
         let response = response.clone();
         tokio::task::spawn_blocking(move||->Result<()>{
             let mut row=json!({"question":request["question"],"answer":response["answer"],"sources":response["sources"].as_array().into_iter().flatten().filter_map(Value::as_str).collect::<Vec<_>>().join(","),
-                "crag_status":"UNVALIDATED","latency_sec":response["latency_sec"],"tokens":response["tokens"],"session_id":request["session_id"],
+                "crag_status":response["crag_status"].as_str().unwrap_or("UNVALIDATED"),"latency_sec":response["latency_sec"],"tokens":response["tokens"],"session_id":request["session_id"],
                 "route_channel":"generic","route_reason":"native_chat","requested_dataset_filter":request["dataset_filter"].as_str().unwrap_or(""),"effective_dataset_filter":"",
                 "source_dataset_mismatch":0,"cache_type":"","validation_enabled":0,"success":1,"retrieval_quality":"","attachment_context":request["attachment_context"].as_str().unwrap_or("")});
             for (field,value) in [("resolved_dataset_ids",response["source_scope"]["resolved"].clone()),("resolved_dataset_names",json!([])),

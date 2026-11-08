@@ -1075,7 +1075,9 @@
         "proxy/services/chat_evidence_context.py",
         "proxy/services/chat_profile_service.py",
         "proxy/services/chat_prompt_support.py",
+        "proxy/services/command_service.py",
         "proxy/services/context_governor_service.py",
+        "proxy/services/conversation_context_service.py",
         "proxy/services/document_original_service.py",
         "proxy/services/execution_receipt_service.py",
         "proxy/services/file_viewer_service.py",
@@ -1374,7 +1376,6 @@
         "proxy/services/answer_form_service.py",
         "proxy/services/chat_attachment_read_service.py",
         "proxy/services/chat_request_service.py",
-        "proxy/services/command_service.py",
         "proxy/services/dataset_deletion_service.py",
         "proxy/services/dataset_parse_service.py",
         "proxy/services/document_explorer_service.py",
@@ -2514,7 +2515,7 @@
         "tests/test_light_router_boundary.py",
         "tools/native_api_contract.py"
       ],
-      "lines": 720,
+      "lines": 718,
       "module": "proxy.app",
       "outbound": [
         "backend/format_process.py",
@@ -2565,7 +2566,6 @@
         "proxy/routers/workspace.py",
         "proxy/routers/workspace_memory.py",
         "proxy/services/auto_parse_resume_service.py",
-        "proxy/services/background_summary_service.py",
         "proxy/services/chat_durability_service.py",
         "proxy/services/colbert_generation_service.py",
         "proxy/services/dataset_parse_service.py",
@@ -2604,7 +2604,6 @@
         "proxy/security.py",
         "proxy/services/chat_inference_service.py",
         "proxy/services/cloud_drive_service.py",
-        "proxy/services/conversation_context_service.py",
         "proxy/services/external_radar_service.py",
         "proxy/services/job_service.py",
         "proxy/storage/file_storage.py",
@@ -4259,16 +4258,15 @@
     },
     {
       "inbound": [
-        "proxy/app.py",
         "proxy/services/chat_request_service.py",
-        "tests/test_light_durable_chat.py"
+        "tests/test_light_native_conversation.py"
       ],
-      "lines": 54,
+      "lines": 23,
       "module": "proxy.services.background_summary_service",
       "outbound": [
         "proxy/__init__.py",
         "proxy/services/__init__.py",
-        "proxy/services/conversation_context_service.py"
+        "proxy/services/local_model_http.py"
       ],
       "path": "proxy/services/background_summary_service.py",
       "status": "PRODUCT_REACHABLE",
@@ -4891,7 +4889,6 @@
         "proxy/routers/chat.py",
         "proxy/services/chat_inference_service.py",
         "proxy/services/chat_request_service.py",
-        "proxy/services/conversation_context_service.py",
         "proxy/services/generation_guard_service.py",
         "proxy/services/request_memory_service.py",
         "tests/oracles/context_python.py",
@@ -5123,13 +5120,12 @@
         "proxy/services/chat_request_service.py",
         "tests/test_light_commands_boundary.py"
       ],
-      "lines": 195,
+      "lines": 14,
       "module": "proxy.services.command_service",
       "outbound": [
-        "backend/product_edition.py",
+        "backend/native_core.py",
         "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/forms_service.py"
+        "proxy/services/__init__.py"
       ],
       "path": "proxy/services/command_service.py",
       "status": "PRODUCT_REACHABLE",
@@ -5207,7 +5203,6 @@
     {
       "inbound": [
         "proxy/routers/workspace_memory.py",
-        "proxy/services/background_summary_service.py",
         "proxy/services/context_memory_service.py",
         "proxy/services/memory_service.py",
         "proxy/services/typed_memory_projection_service.py",
@@ -5217,24 +5212,19 @@
         "tests/test_light_conversation_context.py",
         "tests/test_light_durable_chat.py",
         "tests/test_light_native_catalog.py",
+        "tests/test_light_native_conversation.py",
         "tests/test_workspace_context.py"
       ],
-      "lines": 157,
+      "lines": 83,
       "module": "proxy.services.conversation_context_service",
       "outbound": [
+        "backend/native_core.py",
         "backend/rag_config.py",
         "backend/workspace_native.py",
         "proxy/__init__.py",
-        "proxy/config.py",
         "proxy/services/__init__.py",
-        "proxy/services/chat_runtime.py",
         "proxy/services/chat_session_service.py",
-        "proxy/services/generation_guard_service.py",
-        "proxy/services/model_connection_contracts.py",
-        "proxy/services/model_connection_registry_service.py",
-        "proxy/services/model_connection_resolver_service.py",
-        "proxy/services/model_secret_service.py",
-        "proxy/services/openai_compatible_transport_service.py"
+        "proxy/services/local_model_http.py"
       ],
       "path": "proxy/services/conversation_context_service.py",
       "status": "PRODUCT_REACHABLE",
@@ -5960,7 +5950,6 @@
     {
       "inbound": [
         "proxy/routers/forms.py",
-        "proxy/services/command_service.py",
         "proxy/services/list_office_agent_service.py",
         "proxy/services/list_office_service.py"
       ],
@@ -5995,7 +5984,6 @@
     {
       "inbound": [
         "proxy/services/chat_evidence_application_service.py",
-        "proxy/services/conversation_context_service.py",
         "proxy/services/model_capability_refresh_service.py",
         "tests/oracles/context_python.py",
         "tests/test_chat_mail_query.py",
@@ -6408,15 +6396,18 @@
       "inbound": [
         "backend/embedding_client.py",
         "proxy/app.py",
+        "proxy/services/background_summary_service.py",
+        "proxy/services/conversation_context_service.py",
         "proxy/services/openai_compatible_transport_service.py",
         "proxy/services/web_page_reader_service.py",
         "proxy/services/web_search_service.py",
+        "tests/test_light_native_conversation.py",
         "tests/test_light_native_embedding_inference.py",
         "tests/test_light_native_model_runtime.py",
         "tests/test_light_native_web.py",
         "tests/test_openai_compatible_transport_service.py"
       ],
-      "lines": 225,
+      "lines": 243,
       "module": "proxy.services.local_model_http",
       "outbound": [
         "backend/http_client_policy.py",
@@ -6690,7 +6681,6 @@
         "proxy/services/canonical_route_service.py",
         "proxy/services/chat_evidence_application_service.py",
         "proxy/services/chat_inference_service.py",
-        "proxy/services/conversation_context_service.py",
         "proxy/services/local_model_http.py",
         "proxy/services/model_capability_refresh_service.py",
         "proxy/services/model_capability_service.py",
@@ -6710,6 +6700,7 @@
         "tests/test_light_native_api.py",
         "tests/test_light_native_batch_api.py",
         "tests/test_light_native_chat_turn.py",
+        "tests/test_light_native_conversation.py",
         "tests/test_light_native_dataset_reader.py",
         "tests/test_light_native_embedding_inference.py",
         "tests/test_light_native_intake_execution.py",
@@ -6744,7 +6735,6 @@
         "proxy/routers/model_connections.py",
         "proxy/routers/runtime.py",
         "proxy/services/chat_inference_service.py",
-        "proxy/services/conversation_context_service.py",
         "proxy/services/model_capability_service.py",
         "proxy/services/model_connection_resolver_service.py",
         "proxy/services/model_resource_service.py",
@@ -6785,7 +6775,6 @@
         "proxy/routers/model_connections.py",
         "proxy/services/canonical_route_service.py",
         "proxy/services/chat_inference_service.py",
-        "proxy/services/conversation_context_service.py",
         "proxy/services/dataset_parse_service.py",
         "proxy/services/model_capability_refresh_service.py",
         "proxy/services/openai_compatible_transport_service.py",
@@ -6944,7 +6933,6 @@
         "proxy/routers/chat.py",
         "proxy/routers/model_connections.py",
         "proxy/services/chat_inference_service.py",
-        "proxy/services/conversation_context_service.py",
         "proxy/services/model_capability_service.py",
         "proxy/services/model_connection_resolver_service.py",
         "proxy/services/openai_compatible_transport_service.py",
@@ -7159,7 +7147,6 @@
         "proxy/services/canonical_route_service.py",
         "proxy/services/chat_evidence_application_service.py",
         "proxy/services/chat_request_service.py",
-        "proxy/services/conversation_context_service.py",
         "proxy/services/model_streaming_service.py",
         "tests/oracles/context_python.py",
         "tests/test_chat_mail_query.py",
@@ -11001,7 +10988,7 @@
     },
     {
       "inbound": [],
-      "lines": 252,
+      "lines": 172,
       "module": "tests.test_light_conversation_context",
       "outbound": [
         "backend/qdrant_adapter.py",
@@ -11097,13 +11084,12 @@
     },
     {
       "inbound": [],
-      "lines": 153,
+      "lines": 123,
       "module": "tests.test_light_durable_chat",
       "outbound": [
         "backend/workspace_native.py",
         "proxy/routers/chat.py",
         "proxy/routers/chat_history.py",
-        "proxy/services/background_summary_service.py",
         "proxy/services/chat_durability_service.py",
         "proxy/services/chat_persistence_service.py",
         "proxy/services/chat_request_service.py",
@@ -11120,7 +11106,7 @@
         "tests/test_light_native_batch_api.py",
         "tests/test_light_native_intake_execution.py"
       ],
-      "lines": 147,
+      "lines": 149,
       "module": "tests.test_light_edge_migration",
       "outbound": [],
       "path": "tests/test_light_edge_migration.py",
@@ -11535,6 +11521,7 @@
         "tests/test_light_collection_safety.py",
         "tests/test_light_native_batch_api.py",
         "tests/test_light_native_chat_turn.py",
+        "tests/test_light_native_conversation.py",
         "tests/test_light_native_dataset_reader.py",
         "tests/test_light_native_index_batch.py",
         "tests/test_light_native_intake_execution.py",
@@ -11640,8 +11627,10 @@
       "windows_runtime_explicit": false
     },
     {
-      "inbound": [],
-      "lines": 210,
+      "inbound": [
+        "tests/test_light_native_conversation.py"
+      ],
+      "lines": 225,
       "module": "tests.test_light_native_chat_turn",
       "outbound": [
         "proxy/services/model_connection_contracts.py",
@@ -11659,6 +11648,22 @@
       "module": "tests.test_light_native_cli",
       "outbound": [],
       "path": "tests/test_light_native_cli.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
+      "lines": 174,
+      "module": "tests.test_light_native_conversation",
+      "outbound": [
+        "proxy/services/background_summary_service.py",
+        "proxy/services/conversation_context_service.py",
+        "proxy/services/local_model_http.py",
+        "proxy/services/model_connection_contracts.py",
+        "tests/test_light_native_api.py",
+        "tests/test_light_native_chat_turn.py"
+      ],
+      "path": "tests/test_light_native_conversation.py",
       "status": "TEST_OR_TOOL_ONLY",
       "windows_runtime_explicit": false
     },
@@ -15913,9 +15918,9 @@
     "product_reachable": 419,
     "registered_api_routes": 298,
     "runtime_support": 5,
-    "test_or_tool_only": 260,
-    "tracked_python_files": 708,
-    "tracked_python_lines": 170276
+    "test_or_tool_only": 261,
+    "tracked_python_files": 709,
+    "tracked_python_lines": 170087
   },
   "warnings": []
 }

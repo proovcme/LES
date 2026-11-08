@@ -20,7 +20,6 @@ def seeded_conversation(tmp_path, monkeypatch):
     path = tmp_path / 'meta.db'
     for module in (service, chat_session_service, memory_service):
         monkeypatch.setattr(module, 'rag_meta_db_path', lambda: str(path))
-    service._locks.clear()
     sid = chat_session_service.create_session(title='Контекст')['session_id']
     with sqlite3.connect(path) as conn:
         conn.execute('CREATE TABLE chat_history (id INTEGER PRIMARY KEY, session_id TEXT, question TEXT, answer TEXT, success INTEGER, retrieval_trace_json TEXT)')
@@ -34,25 +33,6 @@ def conversation(catalog_engine, seeded_conversation):
     return seeded_conversation
 
 
-@pytest.mark.asyncio
-async def test_summary_compacts_old_turns_keeps_recent_and_survives_restart(conversation, monkeypatch):
-    sid, path = conversation
-    calls = []
-    async def generate(previous, turns):
-        calls.append(turns)
-        return 'Сохранить библиотеку. Обсуждены шаги 1–6.', turns[-1]['id'], 'model:r1'
-    monkeypatch.setattr(service, '_generate', generate)
-    result = await service.summarize(sid)
-    assert result['through_id'] == 6
-    assert [row['id'] for row in calls[0]] == list(range(1, 7))
-    assert len(service.history_turns(sid)) == 8
-    assert [row['turn_id'] for row in memory_service.session_memory_items(sid)] == ['chat:7', 'chat:8']
-    assert 'не источник доказательств' in memory_service.session_memory(sid)
-    assert service.summary_record(sid)['is_evidence'] is False
-    service._locks.clear()
-    assert service.context_status(sid)['summarized_turns'] == 6
-    assert await service.summarize(sid) == result
-    assert len(calls) == 1
 
 
 def test_forget_blocks_every_old_recall_but_preserves_history_and_other_chats(conversation):
@@ -106,72 +86,12 @@ def test_message_isolation_applies_to_every_projection_and_restores_original(see
             'Требование 7: сохранить библиотеку', 'Обсудили шаг 7')
 
 
-@pytest.mark.asyncio
-async def test_concurrent_forget_cannot_be_overwritten_by_inflight_summary(conversation, monkeypatch):
-    sid, _ = conversation
-    started, done = asyncio.Event(), asyncio.Event()
-    async def generate(previous, turns):
-        started.set()
-        await done.wait()
-        return 'Must not return', 6, 'model:r1'
-    monkeypatch.setattr(service, '_generate', generate)
-    task = asyncio.create_task(service.summarize(sid))
-    await started.wait()
-    service.forget_context(sid, expected_revision=0)
-    done.set()
-    result = await task
-    assert result['summary'] == '' and result['cutoff_id'] == 8
 
 
-@pytest.mark.asyncio
-async def test_summary_failure_preserves_previous_and_does_not_leak_errors(conversation, monkeypatch):
-    sid, _ = conversation
-    service.update_context(sid, expected_revision=0, summary='Previously saved', through_id=2)
-    async def broken(*args): raise RuntimeError('secret transport details')
-    monkeypatch.setattr(service, '_generate', broken)
-    result = await service.summarize(sid, force=True)
-    assert result['summary'] == 'Previously saved' and result['through_id'] == 2
-    assert 'История сохранена' in result['last_error'] and 'secret' not in result['last_error']
 
 
-@pytest.mark.asyncio
-async def test_summary_waits_for_shared_model_slot_and_releases_it(conversation, monkeypatch):
-    sid, _ = conversation
-    semaphore = asyncio.Semaphore(1)
-    await semaphore.acquire()
-    calls = []
-    connection = SimpleNamespace(locality='loopback', revision_id='selected:r1',
-                                 effective_preset=SimpleNamespace(input_token_limit=8192))
-    runtime = SimpleNamespace(current_mode={'mode': 'chat'}, metrics_cache={'ram_free_gb': 12},
-                              job_service=None, job_tracker={}, llm_semaphore=semaphore)
-    monkeypatch.setattr('proxy.services.chat_runtime.get_chat_state', lambda: runtime)
-    monkeypatch.setattr('proxy.services.chat_runtime._active_dispatcher_reindex_jobs', lambda _: 0)
-    monkeypatch.setattr('proxy.services.generation_guard_service.live_memory_metrics', lambda metrics:dict(metrics))
-    monkeypatch.setattr('proxy.services.model_connection_resolver_service.ModelConnectionResolver.resolve',
-                        lambda *args, **kwargs: connection)
-    async def complete(self, actual, request):
-        calls.append(actual.revision_id)
-        assert semaphore.locked()
-        return SimpleNamespace(text='{"keep":[0]}', finish_reason='stop')
-    monkeypatch.setattr('proxy.services.openai_compatible_transport_service.OpenAICompatibleTransport.complete', complete)
-    task = asyncio.create_task(service.summarize(sid))
-    for _ in range(5): await asyncio.sleep(0)
-    assert calls == []
-    semaphore.release()
-    assert (await task)['summary'] == 'Пользователь: Требование 1: сохранить библиотеку'
-    assert calls == ['selected:r1']
-    assert not semaphore.locked()
 
 
-@pytest.mark.asyncio
-async def test_disabled_memory_does_not_generate_or_recall(conversation, monkeypatch):
-    sid, _ = conversation
-    async def forbidden(*args): pytest.fail('Disabled memory must not call a model')
-    monkeypatch.setattr(service, '_generate', forbidden)
-    service.update_context(sid, expected_revision=0, enabled=False, summary='Hidden')
-    await service.summarize(sid, force=True)
-    assert service.summary_record(sid) is None
-    assert memory_service.session_dialogue_messages(sid) == []
 
 
 def test_summary_batch_does_not_claim_unread_turns():
@@ -220,14 +140,14 @@ def test_internal_preprocessing_files_are_not_documents():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('outcome', ['saved', 'conflict'])
-async def test_memory_editor_preserves_text_on_failure_and_uses_revision(monkeypatch, outcome):
+async def test_memory_editor_preserves_text_on_failure_and_uses_revision(monkeypatch, outcome, tmp_path):
     from nicegui import ui, core
     monkeypatch.setattr(core, 'loop', asyncio.get_running_loop())
     monkeypatch.setattr(ui, 'timer', lambda *_args, **_kwargs: SimpleNamespace(activate=lambda: None, deactivate=lambda: None))
     from nicegui.client import Client
     from nicegui.page import page
     from sovushka.components import conversation_memory as component
-    state = dict(service._DEFAULT, remembered_turns=8, summarized_turns=0)
+    state = dict(service.catalog_call(str(tmp_path/'missing.db'), 'context_get', session_id='fixture'), remembered_turns=8, summarized_turns=0)
     calls = []
     async def get(route): return dict(state)
     async def patch(route, body):

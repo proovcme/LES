@@ -121,33 +121,3 @@ async def test_sse_disconnect_leaves_durable_text(history, monkeypatch):
     assert row(path)[0][1] == 'Полученный текст'  # Committed before delivery.
     await response.body_iterator.aclose()
     assert row(path)[0][2:] == ('INTERRUPTED', 0)
-
-
-@pytest.mark.asyncio
-async def test_foreground_cancels_idle_summary_and_requeues(monkeypatch):
-    from proxy.services import background_summary_service as background
-    await background.stop()
-    background._pending.clear()
-    started, cancelled = asyncio.Event(), asyncio.Event()
-    original_sleep = asyncio.sleep
-    async def fast_sleep(seconds):
-        await original_sleep(0)
-    async def summarize(sid):
-        started.set()
-        try:
-            await asyncio.Event().wait()
-        finally:
-            cancelled.set()
-    monkeypatch.setattr(background.asyncio, 'sleep', fast_sleep)
-    monkeypatch.setattr(context, 'summarize', summarize)
-    background.schedule('one')
-    await asyncio.wait_for(started.wait(), 1)
-    try:
-        async with background.foreground_request('two'):
-            assert cancelled.is_set()
-            assert not background._tasks
-            assert 'one' in background._pending
-        assert set(background._tasks) == {'one', 'two'}
-    finally:
-        await background.stop()
-        background._pending.clear()

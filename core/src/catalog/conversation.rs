@@ -79,6 +79,16 @@ fn history(conn: &Connection, action: &str, args: &Args, filtered: bool) -> Resu
     };
     let question = redact("question", &user);
     let answer = redact("answer", &assistant);
+    if action == "context_summary_history" {
+        // A single overlong utterance must be rejected, never truncated into
+        // memory. 12001 exceeds the largest summary batch (12000) while keeping
+        // even a legacy history containing very large answers bounded in RAM.
+        let question =
+            format!("CASE WHEN {user} THEN '' ELSE substr(question,1,12001) END AS question");
+        let answer =
+            format!("CASE WHEN {assistant} THEN '' ELSE substr(answer,1,12001) END AS answer");
+        return Ok(json!(rows(conn,&format!("SELECT id,{question},{answer} FROM chat_history WHERE session_id=? AND id>?{success} AND NOT ({user} AND {assistant}) ORDER BY id LIMIT 129"),params![sid,after])?));
+    }
     if action == "context_history" {
         if args.contains_key("limit") {
             let limit = integer(args, "limit", 40)?.clamp(1, 500);
@@ -205,7 +215,9 @@ pub(super) fn status(conn: Option<&Connection>, args: &Args) -> Result<Value> {
     Ok(value)
 }
 pub(super) fn execute(conn: &Connection, action: &str, args: &Args) -> Result<Value> {
-    if action.starts_with("history_") || action == "context_history" {
+    if action.starts_with("history_")
+        || matches!(action, "context_history" | "context_summary_history")
+    {
         return history(conn, action, args, true);
     }
     let sid = text(args, "session_id")?;

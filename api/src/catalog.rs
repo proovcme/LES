@@ -1,4 +1,5 @@
-//! Native project/note/context routes. Dossier, note creation side effects and model summary stay explicit upstream.
+//! Native project/note/context CRUD. Model summaries belong to conversation;
+//! dossier and note creation side effects still have their explicit legacy owner.
 use crate::{error, json_response, Context};
 use axum::{
     body::to_bytes,

@@ -81,7 +81,9 @@ def test_real_process_exit_resumes_the_durable_cursor(binary, tmp_path):
     before = path.read_bytes(); target = tmp_path / 'candidate'
     child = start(binary, 'import', manifest, target)
     while True:
-        event = json.loads(child.stdout.readline())
+        line = child.stdout.readline()
+        assert line, (child.wait(timeout=5), child.stderr.read())
+        event = json.loads(line)
         if event.get('phase') == 'importing' and event.get('completed', 0) >= 256:
             child.kill(); break
     child.wait(timeout=5)

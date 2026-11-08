@@ -1,9 +1,10 @@
 //! Request-owned native chat. No request or model/tool callback is delegated to Python.
+pub mod commands;
 mod error;
 pub mod http;
 mod journal;
 mod model;
-mod prepare;
+pub(crate) mod prepare;
 mod runner;
 mod tools;
 use crate::Context;
@@ -26,7 +27,7 @@ impl Sink {
             .await
     }
 }
-fn unwrap(value: Value) -> Result<Value> {
+pub(crate) fn unwrap(value: Value) -> Result<Value> {
     if value["status"] == "completed" {
         Ok(value["value"].clone())
     } else {

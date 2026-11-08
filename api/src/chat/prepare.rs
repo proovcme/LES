@@ -19,6 +19,40 @@ pub async fn prepare(context: Arc<Context>, input: Value) -> Result<Prepared> {
         .await
         .map_err(|_| "CHAT_PREPARATION_FAILED")?
 }
+pub(crate) fn answer(context: &Context) -> Result<model_runtime::Resolved> {
+    let database = &context.database;
+    catalog(database, "model_registry_init", json!({}))?;
+    let execution = catalog(
+        database,
+        "model_execution_snapshot",
+        json!({"role":"answer"}),
+    )?;
+    if execution.is_null() {
+        return Err("ANSWER_MODEL_NOT_ASSIGNED".into());
+    }
+    let settings = crate::index_batch::configuration::Settings::load(&context.state_root)?;
+    let env = std::env::var_os("LES_ENV_PATH")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| context.state_root.join(".env"));
+    let connection = model_runtime::resolve(&execution, "answer", &env)?;
+    if connection.endpoint.locality == "remote"
+        && !matches!(
+            settings
+                .get("LES_CLOUD_CONSENT", "false")
+                .to_ascii_lowercase()
+                .as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    {
+        return Err("CLOUD_CONSENT_REQUIRED".into());
+    }
+    if connection.endpoint.locality != "remote"
+        && les_core::system_memory::available()? < 4 * 1024 * 1024 * 1024
+    {
+        return Err("CHAT_MEMORY_GUARD".into());
+    }
+    Ok(connection)
+}
 fn prepare_sync(context: &Context, input: Value) -> Result<Prepared> {
     let request = les_core::chat_request::validate(&input)?;
     if request["provider_config"].is_object() {
@@ -41,35 +75,7 @@ fn prepare_sync(context: &Context, input: Value) -> Result<Prepared> {
         return Err("NATIVE_ATTACHMENT_CAPABILITY_PENDING".into());
     }
     let database = &context.database;
-    catalog(database, "model_registry_init", json!({}))?;
-    let execution = catalog(
-        database,
-        "model_execution_snapshot",
-        json!({"role":"answer"}),
-    )?;
-    if execution.is_null() {
-        return Err("ANSWER_MODEL_NOT_ASSIGNED".into());
-    }
-    let settings = crate::index_batch::configuration::Settings::load(&context.state_root)?;
-    let env = std::env::var_os("LES_ENV_PATH")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| context.state_root.join(".env"));
-    let connection = model_runtime::resolve(&execution, "answer", &env)?;
-    if connection.endpoint.locality == "remote"
-        && !["1", "true", "yes", "on"].contains(
-            &settings
-                .get("LES_CLOUD_CONSENT", "false")
-                .to_ascii_lowercase()
-                .as_str(),
-        )
-    {
-        return Err("CLOUD_CONSENT_REQUIRED".into());
-    }
-    if connection.endpoint.locality != "remote"
-        && les_core::system_memory::available()? < 4 * 1024 * 1024 * 1024
-    {
-        return Err("CHAT_MEMORY_GUARD".into());
-    }
+    let connection = answer(context)?;
     let sid = request["session_id"].as_str().unwrap_or("");
     let session = if sid.is_empty() {
         Value::Null

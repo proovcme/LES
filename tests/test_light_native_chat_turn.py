@@ -39,7 +39,9 @@ def native_turn(tmp_path):
                 if script.get('tool'):
                     send({'tool_calls':[{'index':0,'id':'call-fixture','type':'function','function':{'name':script['tool'],'arguments':json.dumps(script.get('args',{}),ensure_ascii=False)}}]},'tool_calls')
                 else:send({'content':script.get('text','Ответ 日本語')},None if script.get('broken') or script.get('wait') else script.get('finish','stop'))
-                if script.get('wait'):blocked.set();release.wait(timeout=10)
+                if script.get('wait'):
+                    blocked.set();release.wait(timeout=15)
+                    if script.get('complete_after_wait'):send({},'stop');self.wfile.write(b'data: [DONE]\n\n');self.wfile.flush()
                 if not script.get('broken') and not script.get('wait'):self.wfile.write(b'data: [DONE]\n\n');self.wfile.flush()
             except OSError:pass
     model=ThreadingHTTPServer(('127.0.0.1',0),Model);thread=Thread(target=model.serve_forever,daemon=True);thread.start()
@@ -61,7 +63,7 @@ def native_turn(tmp_path):
         wait_for(lambda:client.get('/api/profiles').status_code==200);return p
     try:
         start()
-        yield SimpleNamespace(client=client,database=database,state=state,seen=seen,scripts=scripts,children=children,start=start,registry=registry,revision=revision,blocked=blocked,release=release)
+        yield SimpleNamespace(client=client,database=database,state=state,seen=seen,scripts=scripts,children=children,start=start,registry=registry,revision=revision,blocked=blocked,release=release,env=env)
     finally:
         release.set();client.close()
         for child in children:
@@ -93,6 +95,19 @@ def test_broken_provider_preserves_exact_cause_and_partial_text_without_final(na
         answer,status,success,artifact=db.execute('SELECT answer,crag_status,success,artifact_json FROM chat_history').fetchone()
     assert answer=='Полученная часть 日本語' and status=='FAILED' and success==0
     assert json.loads(artifact)['error']['code']=='UPSTREAM_STREAM_INTERRUPTED'
+
+def test_command_palette_and_both_turn_routes_work_without_model_generation(native_turn):
+    t=native_turn
+    palette=t.client.get('/api/commands').raise_for_status()
+    assert palette.headers['x-les-handler']=='rust.chat-commands'
+    assert [row['cmd'] for row in palette.json()['commands']]==['/сводка','/мсп','/проекты','/команды']
+    request={'question':'/HELP','session_id':'command-fixture'}
+    answer=t.client.post(PATH,json=request,headers=HEADERS).raise_for_status().json()
+    assert answer['command']['action']=='help' and answer['crag_status']=='DETERMINISTIC'
+    stream=t.client.post(PATH+'/stream',json={'question':'/mcp'},headers=HEADERS).raise_for_status().text
+    assert 'event: final' in stream and 'mcp_info' in stream and not t.seen
+    with sqlite3.connect(t.database) as db:
+        assert db.execute('SELECT crag_status,success FROM chat_history ORDER BY id').fetchall()==[('DETERMINISTIC',1)]*2
 
 def test_truncated_generation_is_saved_but_never_marked_as_a_completed_answer(native_turn):
     t=native_turn;t.scripts.append({'text':'Незавершённая часть','finish':'length'})

@@ -149,6 +149,21 @@ pub(super) fn save(conn: &Connection, args: &Args) -> Result<Value> {
             id
         }
     };
+    if values
+        .get("success")
+        .is_some_and(|v| v.as_i64() == Some(1) || v == true)
+    {
+        if let Some(sid) = values.get("session_id").and_then(Value::as_str) {
+            if crate::workspace::records::get(conn, sid)?.is_some_and(|s| s["registered"] == true) {
+                crate::conversation_summary::queue::enqueue(conn, sid).map_err(|_| {
+                    Failure::new(
+                        "WORKSPACE_UNAVAILABLE",
+                        "Не удалось сохранить задание памяти вместе с ответом.",
+                    )
+                })?;
+            }
+        }
+    }
     Ok(json!(id))
 }
 

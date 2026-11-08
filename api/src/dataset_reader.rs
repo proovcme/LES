@@ -1,11 +1,6 @@
 //! Complete native navigation reader: durable queue -> exact model -> checked JSON -> revision-safe result.
 use crate::{auth, error, json_response, library::catalog, model_runtime, Context};
-use axum::{
-    body::{to_bytes, Body},
-    extract::Request,
-    http::StatusCode,
-    response::Response,
-};
+use axum::{body::to_bytes, extract::Request, http::StatusCode, response::Response};
 use serde_json::{json, Value};
 use std::{fs::File, path::Path, sync::Arc, time::Duration};
 use tokio::sync::Notify;
@@ -210,41 +205,6 @@ async fn automatic(context: &Context) -> bool {
     enabled
 }
 
-async fn collect(body: Body) -> Result<String, String> {
-    let bytes = to_bytes(body, 2 * 1024 * 1024)
-        .await
-        .map_err(|_| "READER_RESPONSE_LIMIT")?;
-    let text = std::str::from_utf8(&bytes).map_err(|_| "READER_MODEL_RESPONSE_INVALID")?;
-    let mut output = String::new();
-    let mut finished = false;
-    for line in text.lines().filter(|s| !s.trim().is_empty()) {
-        let event: Value =
-            serde_json::from_str(line).map_err(|_| "READER_MODEL_RESPONSE_INVALID")?;
-        if let Some(code) = event["error"].as_str() {
-            return Err(code.to_owned());
-        }
-        if let Some(delta) = event["text"].as_str() {
-            output.push_str(delta);
-        }
-        if let Some(finish) = event.get("finish") {
-            if !matches!(finish["finish_reason"].as_str(), Some("stop" | "eos")) {
-                return Err("READER_MODEL_TRUNCATED".into());
-            }
-            if finish["tool_calls"]
-                .as_array()
-                .is_some_and(|v| !v.is_empty())
-            {
-                return Err("READER_UNEXPECTED_TOOL".into());
-            }
-            finished = true;
-        }
-    }
-    if !finished || output.trim().is_empty() {
-        return Err("READER_MODEL_INTERRUPTED".into());
-    }
-    Ok(output)
-}
-
 async fn execute(context: &Arc<Context>, job: &Value) -> Result<(), String> {
     let selector = if job["model_revision"].as_str().unwrap_or("").is_empty() {
         json!({"role":"answer"})
@@ -363,9 +323,12 @@ async fn execute(context: &Arc<Context>, job: &Value) -> Result<(), String> {
                 [context.listen_port, upstream],
             )
             .await?;
-        let output = tokio::time::timeout(Duration::from_secs(180), collect(body))
-            .await
-            .map_err(|_| "READER_MODEL_TIMEOUT")??;
+        let output = tokio::time::timeout(
+            Duration::from_secs(180),
+            crate::model_answer::collect(body, "READER"),
+        )
+        .await
+        .map_err(|_| "READER_MODEL_TIMEOUT")??;
         let checked = call(
             context,
             "reader_validate",
