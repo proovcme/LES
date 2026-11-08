@@ -5,12 +5,14 @@ pub struct Config {
     pub root: PathBuf,
     pub state: PathBuf,
     pub python: PathBuf,
+    pub skill_python: PathBuf,
     pub qdrant: PathBuf,
     pub frontend: String,
     pub read_only: bool,
     pub parent_pipe: bool,
     pub browser: bool,
     pub native_api: bool,
+    pub edge_storage: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -52,7 +54,13 @@ impl Config {
                 }
             } else if matches!(
                 key.as_str(),
-                "--root" | "--state" | "--python" | "--qdrant" | "--frontend"
+                "--root"
+                    | "--state"
+                    | "--python"
+                    | "--skill-python"
+                    | "--qdrant"
+                    | "--frontend"
+                    | "--edge-storage"
             ) {
                 let value =
                     args.next()
@@ -91,6 +99,16 @@ impl Config {
         let state = path("--state")?;
         let python = path("--python")?;
         let qdrant = path("--qdrant")?;
+        let edge_storage = values.remove("--edge-storage").map(PathBuf::from);
+        if edge_storage
+            .as_ref()
+            .is_some_and(|p| !p.is_absolute() || !p.join("les-vector.sqlite").is_file())
+        {
+            return Err(Failure::new(
+                "EDGE_STORAGE_INVALID",
+                "Не найден подготовленный индекс Edge. Завершите перенос индекса.",
+            ));
+        }
         let frontend = values
             .remove("--frontend")
             .unwrap_or_else(|| "classic".into());
@@ -102,7 +120,7 @@ impl Config {
         }
         if !root.is_dir()
             || !python.is_file()
-            || !qdrant.is_file()
+            || (edge_storage.is_none() && !qdrant.is_file())
             || !root.join("proxy/app.py").is_file()
         {
             return Err(Failure::new(
@@ -121,6 +139,12 @@ impl Config {
             ));
         }
         let native_api = flags.contains("--native-api");
+        if edge_storage.is_some() && !native_api {
+            return Err(Failure::new(
+                "EDGE_NATIVE_API_REQUIRED",
+                "Edge требует нативный API Леса.",
+            ));
+        }
         if native_api
             && !root.parent().is_some_and(|parent| {
                 parent
@@ -136,16 +160,23 @@ impl Config {
                 "В установке отсутствует нативный API. Восстановите приложение.",
             ));
         }
+        let skill_python = crate::skill_runtime::select(
+            &root,
+            &python,
+            values.remove("--skill-python").map(PathBuf::from),
+        )?;
         Ok(Self {
             root,
             state,
             python,
+            skill_python,
             qdrant,
             frontend,
             read_only: flags.contains("--read-only"),
             parent_pipe: flags.contains("--parent-pipe"),
             browser: flags.contains("--browser"),
             native_api,
+            edge_storage,
         })
     }
 }
@@ -240,6 +271,77 @@ pub fn child_environment(
         ("LES_FORMAT_WORKER_MODE", "native".into()),
     ] {
         result.push((name.into(), value));
+    }
+    if let Some(storage) = &config.edge_storage {
+        result.push(("LES_NATIVE_EDGE".into(), "1".into()));
+        result.push((
+            "LES_INDEX_CONTENT_ROOT".into(),
+            storage.join("content").to_string_lossy().into_owned(),
+        ));
+    }
+    #[cfg(windows)]
+    if config.native_api {
+        let native = config.root.parent().unwrap().join("native/pdf/pdfium.dll");
+        let compatible = config
+            .python
+            .parent()
+            .map(|p| p.join("Lib/site-packages/pypdfium2_raw/pdfium.dll"));
+        if let Some(asset) = std::iter::once(native)
+            .chain(compatible)
+            .find(|p| p.is_file())
+        {
+            result.push((
+                "LES_NATIVE_PDFIUM".into(),
+                asset.to_string_lossy().into_owned(),
+            ));
+            result.push((
+                "LES_NATIVE_PDF_WORKER".into(),
+                config
+                    .root
+                    .parent()
+                    .unwrap()
+                    .join("native/api/les-api.exe")
+                    .to_string_lossy()
+                    .into_owned(),
+            ));
+        }
+    }
+    result.push((
+        "LES_NATIVE_MCP_WORKER".into(),
+        config
+            .root
+            .parent()
+            .unwrap()
+            .join(format!(
+                "native/api/les-api{}",
+                std::env::consts::EXE_SUFFIX
+            ))
+            .to_string_lossy()
+            .into_owned(),
+    ));
+    result.push((
+        "LES_SKILL_PYTHON".into(),
+        config.skill_python.to_string_lossy().into_owned(),
+    ));
+    let embedding = config.state.join("models/embeddings/active.json");
+    if config.native_api && embedding.is_file() {
+        result.push((
+            "LES_NATIVE_EMBEDDING_SPEC".into(),
+            embedding.to_string_lossy().into_owned(),
+        ));
+        result.push((
+            "LES_NATIVE_EMBEDDING_WORKER".into(),
+            config
+                .root
+                .parent()
+                .unwrap()
+                .join(format!(
+                    "native/api/les-api{}",
+                    std::env::consts::EXE_SUFFIX
+                ))
+                .to_string_lossy()
+                .into_owned(),
+        ));
     }
     result
 }

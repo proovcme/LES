@@ -69,6 +69,11 @@ def les(tmp_path):
             calls.append(("POST", self.path, self.headers.get("X-API-Key"), body))
             if self.path == "/api/workspace/sessions":
                 self.send_json({"session_id": "new-chat"})
+            elif self.path == "/api/tools/call":
+                if body['args'].get('q') == 'Сбой интернета':
+                    self.send_json({'status': 'error', 'warnings': ['Поисковик временно недоступен'], 'sources': []})
+                else:
+                    self.send_json({"tool": body['tool'], "status": "ok", "sources": [{"title": "Документ", "url": "https://example.org/doc"}]})
             elif self.path == "/api/chat":
                 self.send_json({"answer": "Ответ"})
             elif self.path == "/api/rag/datasets":
@@ -201,6 +206,14 @@ def test_stdio_mcp_interoperates_with_existing_client(les):
                 assert flags['search_sources'].readOnlyHint
                 assert not flags['create_dataset'].readOnlyHint
                 assert flags['workspace_write'].destructiveHint
+                assert flags['web_search'].readOnlyHint and flags['web_search'].openWorldHint
+                assert flags['web_read'].readOnlyHint and flags['web_read'].openWorldHint
+                web = await session.call_tool('web_search', {'q': 'Лес 日本語', 'limit': 4})
+                assert not web.isError and web.structuredContent['sources'][0]['url'] == 'https://example.org/doc'
+                page = await session.call_tool('web_read', {'url': 'https://example.org/doc', 'max_chars': 2000})
+                assert not page.isError and page.structuredContent['tool'] == 'web_read'
+                failed_web = await session.call_tool('web_search', {'q': 'Сбой интернета'})
+                assert failed_web.isError and 'Поисковик временно недоступен' in failed_web.content[0].text
                 result = await session.call_tool("list_datasets", {})
                 assert not result.isError
                 assert [row["id"] for row in result.structuredContent["datasets"]] == ["user-1", "user-2"]

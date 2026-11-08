@@ -13,6 +13,27 @@ def _query_embedder(adapter):
     return frozen, journal, stamp
 
 
+async def _edge_search(adapter, query, dataset_ids, top_k, doc_filter, *,
+                       node_roles=None, ancestor_ids=None, query_state=None, hierarchy=False):
+    from backend.native_index_store import hybrid_search
+    if query_state is None:
+        embedder, journal, stamp = _query_embedder(adapter)
+        vector = (await embedder.encode_async([query], query=True))[0]
+    else:
+        vector, journal, stamp = query_state
+    result = await hybrid_search(adapter.collection_name, text=query, vector=vector,
+        dense_name=support._dense_vector_name(), revision=stamp, limit=top_k,
+        rank_constant=getattr(adapter, 'rrf_rank_constant', 2.), hierarchy=hierarchy,
+        filters=dict(dataset_ids=dataset_ids, doc_filter=doc_filter,
+                     node_roles=node_roles, ancestor_ids=ancestor_ids))
+    journal.assert_unchanged(stamp)
+    return [support.Chunk(content=p['payload']['text'], doc_id=p['payload'].get('doc_id', ''),
+        doc_name=p['payload'].get('file_name', 'unknown'), score=p['score'],
+        meta={**p['payload'], 'qdrant_point_id': str(p['id']),
+              '_retrieval_channels': result['channels'], '_index_revision': result['revision']})
+        for p in result['points']]
+
+
 class QdrantRetrieval:
     async def retrieve(
         self,
@@ -102,6 +123,9 @@ class QdrantRetrieval:
         await self._ensure_collection()
         self._assert_dense_index_contract()
         if _query_state is None:
+            if support.os.getenv('LES_NATIVE_EDGE') == '1':
+                return await _edge_search(self, query, dataset_ids, top_k, doc_filter,
+                    node_roles=node_roles, ancestor_ids=ancestor_ids)
             if hasattr(self, "_prepare_sparse_index"):
                 await self._prepare_sparse_index()
             embedder, journal, stamp = _query_embedder(self)
@@ -196,6 +220,8 @@ class QdrantRetrieval:
 
         await self._ensure_collection()
         self._assert_dense_index_contract()
+        if support.os.getenv('LES_NATIVE_EDGE') == '1':
+            return await _edge_search(self, query, dataset_ids, top_k, doc_filter, hierarchy=True)
         if hasattr(self, "_prepare_sparse_index"):
             await self._prepare_sparse_index()
         embedder, journal, stamp = _query_embedder(self)

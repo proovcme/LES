@@ -7,10 +7,18 @@ import tempfile
 import sys
 
 from backend.runtime_paths import mutable_path
-from backend.windows_ocr import WindowsOCRParser
+from backend.windows_ocr import WindowsOCRParser, _native
 
 
 class MacOSOCRParser(WindowsOCRParser):
+    def parse_pdf(self, pdf_path, prompt=None, dpi=150):
+        helper = Path(__file__).resolve().parents[1] / 'native/vision/les-ocr'
+        if sys.platform == 'darwin' and helper.is_file():
+            text = _native(pdf_path, dpi, kind='pdf_ocr', engine='vision', helper=helper)
+            if text is not None:
+                return text
+        return super().parse_pdf(pdf_path, prompt=prompt, dpi=dpi)
+
     def ocr_page(self, image) -> str:
         if sys.platform != 'darwin':
             raise RuntimeError('Vision OCR requires macOS')

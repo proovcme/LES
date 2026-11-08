@@ -282,7 +282,12 @@ fn search(r: &Value) -> Result<Value> {
         ("role", "node_roles"),
     ] {
         if let Some(values) = r[key].as_array().filter(|v| !v.is_empty()) {
-            clauses.push(format!("d.{column} IN (SELECT value FROM json_each(?))"));
+            let predicate = format!("d.{column} IN (SELECT value FROM json_each(?))");
+            clauses.push(if key == "node_roles" && values.iter().any(|v| v == "") {
+                format!("({predicate} OR d.{column} IS NULL)")
+            } else {
+                predicate
+            });
             args.push(json!(values).to_string().into());
         }
     }

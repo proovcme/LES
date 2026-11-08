@@ -25,9 +25,10 @@ def current_history_id():
 
 
 def checkpoint(history_id, event, data):
-    if history_id is None or event not in {'token', 'reset'}:
+    if history_id is None or event not in {'token', 'reset', 'error'}:
         return
-    catalog_call(rag_meta_db_path(), 'chat_history_checkpoint', id=history_id, event=event, text=str(data or ''))
+    catalog_call(rag_meta_db_path(), 'chat_history_checkpoint', id=history_id, event=event,
+                 text=str(data or '') if event != 'error' else '', error=data if event == 'error' else None)
 
 
 def interrupt(history_id=None):

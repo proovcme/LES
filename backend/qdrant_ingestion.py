@@ -1,11 +1,33 @@
 """Bounded document conversion and indexing pipeline."""
 from __future__ import annotations
-from backend import qdrant_support as support
+from backend import native_core, qdrant_support as support
 from backend.qdrant_nodes import QdrantNodes
 from backend.index_replacement import retire_previous, discard_staged, ReplacementJournal, recover_adapter
 from backend.embedding_client import EmbedClient
 from backend.extraction_errors import DocumentExtractionError
-from backend.native_index_store import upsert
+from backend.native_index_store import publication_directory, publish_file, upsert
+
+
+def _compatibility_source_plan(db, dataset_id, data_dir, limit):
+    get_pairs = getattr(db, "get_pending_files_with_paths", None)
+    pairs = list(get_pairs(dataset_id, limit=limit)) if get_pairs is not None else [
+        (name, "") for name in db.get_pending_files(dataset_id, limit=limit)
+    ]
+    external = {name: path for name, path in pairs if path}
+    internal = {name for name, path in pairs if not path}
+    all_files = [
+        f for f in data_dir.rglob("*")
+        if f.is_file() and "_parquet" not in f.relative_to(data_dir).parts
+    ]
+    relative = [(f, f.relative_to(data_dir).as_posix()) for f in all_files]
+    legacy = internal - {name for _, name in relative}
+    selected = [
+        (f, name, name if name in internal else f.name)
+        for f, name in relative if name in internal or f.name in legacy
+    ]
+    internal_count = len(selected)
+    selected.extend((support.Path(path), name, name) for name, path in external.items())
+    return len(pairs), selected, external, len(all_files), internal_count
 
 
 class SourceRegistrationChanged(RuntimeError):
@@ -13,7 +35,9 @@ class SourceRegistrationChanged(RuntimeError):
 
 
 class QdrantIngestion:
-    async def parse_dataset(self, dataset_id: str, limit: int | None = None) -> support.Dict[str, support.Any]:
+    async def parse_dataset(self, dataset_id: str, limit: int | None = None, *,
+                            sources: list[tuple[str, str]] | None = None,
+                            intake_id: str | None = None) -> support.Dict[str, support.Any]:
         if limit is None and support.os.getenv(support.ALLOW_UNBOUNDED_PARSE, "").lower() not in ("1", "true", "yes"):
             return {
                 "status": "rejected",
@@ -24,12 +48,21 @@ class QdrantIngestion:
             }
         await self._ensure_collection()
         self._assert_dense_index_contract()
+        native_directory = publication_directory(self)
+        if native_directory is not None:
+            # Rust owns the durable job, every processing callback and cleanup.
+            # Losing this HTTP caller must not cancel or duplicate that owner.
+            return await support.asyncio.to_thread(self._sync_parse,dataset_id,limit,
+                sources=sources,intake_id=intake_id,native_directory=native_directory)
         self.db.update_dataset_status(dataset_id, "PARSING")
         from backend import embedding_residency
         residency_token, owned_embeddings = embedding_residency.begin()
         parse_cancelled = False
         try:
-            res = await support.asyncio.to_thread(self._sync_parse, dataset_id, limit)
+            selection = {} if sources is None else {"sources": sources}
+            if intake_id is not None:
+                selection["intake_id"] = intake_id
+            res = await support.asyncio.to_thread(self._sync_parse, dataset_id, limit, **selection)
         except BaseException as error:
             parse_cancelled = isinstance(error, support.asyncio.CancelledError)
             self.db.update_dataset_status(dataset_id, "ERROR")
@@ -61,6 +94,16 @@ class QdrantIngestion:
 
     @staticmethod
     def _source_fingerprint(path):
+        try:
+            value = native_core.call("fingerprint", path=str(path), include_mtime=True)
+        except native_core.NativeCoreError as error:
+            if str(error) == "CORE_FILE_CHANGED":
+                raise RuntimeError("SOURCE_CHANGED_DURING_INDEXING") from error
+            if str(error) in {"CORE_FILE_UNAVAILABLE", "CORE_NOT_REGULAR_FILE"}:
+                raise DocumentExtractionError("INDEX_SOURCE_UNAVAILABLE") from error
+            raise
+        if value is not None and "mtime" in value:
+            return dict(file_hash=value["sha256"], file_mtime=value["mtime"], file_size=value["size"])
         before = path.stat()
         digest = support._sha256_file(path)
         after = path.stat()
@@ -68,13 +111,19 @@ class QdrantIngestion:
             raise RuntimeError("SOURCE_CHANGED_DURING_INDEXING")
         return dict(file_hash=digest, file_mtime=after.st_mtime, file_size=after.st_size)
 
-    def _sync_parse(self, dataset_id: str, limit: int | None = None) -> support.Dict[str, support.Any]:
+    def _sync_parse(self, dataset_id: str, limit: int | None = None, *, sources=None, intake_id=None, native_directory=None) -> support.Dict[str, support.Any]:
+        directory = native_directory if native_directory is not None else publication_directory(self)
+        if directory is not None:
+            if not native_core.supports('index_run'):
+                raise native_core.NativeCoreError('CORE_CAPABILITY_MISMATCH')
+            from backend.native_index_batch import run
+            return run(self, dataset_id, limit, directory, sources=sources, intake_id=intake_id)
         recover_adapter(self)
         journal = ReplacementJournal.for_adapter(self)
         journal.assert_clean()
-        return QdrantIngestion._sync_parse_locked(self, dataset_id, limit, journal)
+        return QdrantIngestion._sync_parse_locked(self, dataset_id, limit, journal, sources=sources, intake_id=intake_id)
 
-    def _sync_parse_locked(self, dataset_id, limit, journal):
+    def _sync_parse_locked(self, dataset_id, limit, journal, *, sources=None, intake_id=None):
         """
         Синхронный парсинг в threadpool.
         Батч-эмбеддинги: 32 чанка за запрос вместо по одному.
@@ -115,64 +164,40 @@ class QdrantIngestion:
         )
 
         try:
-            # source_path != "" → внешний in-place источник (читается по абсолютному
-            # пути, без копии в storage). get_pending_files_with_paths опционален —
-            # старые/стабовые БД дают только имена (всё внутреннее).
-            get_pairs = getattr(self.db, "get_pending_files_with_paths", None)
-            if get_pairs is not None:
-                pending_pairs = list(get_pairs(dataset_id, limit=limit))
+            publisher = publication_directory(self)
+            selection_errors = {}
+            if sources is not None:
+                pending_count = len(sources)
+                external_sources = dict(sources)
+                files_to_parse = [(support.Path(path), name, name) for name, path in sources]
+                total_all = internal_count = 0
+            elif publisher is not None:
+                plan = native_core.required("index_sources", request={
+                    "database": str(support.Path(self.db.db_path).resolve()),
+                    "root": str(data_dir.resolve()), "dataset_id": dataset_id, "limit": limit,
+                })
+                files_to_parse = [(support.Path(row["path"]), row["file_key"], row["db_key"]) for row in plan["files"]]
+                external_sources = {row["db_key"]: row["source_path"] for row in plan["files"] if row["source_path"]}
+                selection_errors = {row["db_key"]: row["error"] for row in plan["files"] if row["error"]}
+                pending_count = len(files_to_parse)
+                total_all, internal_count = plan["total_files"], plan["matched_internal"]
             else:
-                pending_pairs = [(name, "") for name in self.db.get_pending_files(dataset_id, limit=limit)]
-            pending_names = {name for name, _ in pending_pairs}
-            external_sources = {name: src for name, src in pending_pairs if src}
-            all_files     = [
-                f for f in data_dir.rglob("*")
-                if f.is_file() and "_parquet" not in f.relative_to(data_dir).parts
-            ]
+                pending_count, files_to_parse, external_sources, total_all, internal_count = (
+                    _compatibility_source_plan(self.db, dataset_id, data_dir, limit)
+                )
 
-            if not pending_names:
+            if not pending_count:
                 return {
                     "status": "completed",
                     "chunks": 0,
                     "files_parsed": 0,
-                    "files_skipped": len(all_files),
+                    "files_skipped": total_all,
                     "remaining_pending": 0,
                     "errors": 0,
                     "elapsed_sec": 0,
                 }
 
-            sync_qdrant = support.qdrant_client.QdrantClient(
-                url=self.qdrant_url,
-                **support.qdrant_client_options(self.qdrant_url),
-                timeout=60.0,
-                check_compatibility=False,  # #2: версии-чек вис на Windows при недоступном Qdrant
-            )
-
-            # Внутренние (скопированные в storage) файлы: матчинг по относительному
-            # пути и по имени файла для совместимости со старыми записями БД (f.name).
-            internal_pending = pending_names - set(external_sources)
-            exact_pending_names = {
-                str(f.relative_to(data_dir))
-                for f in all_files
-                if str(f.relative_to(data_dir)) in internal_pending
-            }
-            legacy_pending_names = internal_pending - exact_pending_names
-            # Единый список к индексации: (путь, file_key, db_file_key). file_key — ключ
-            # в Qdrant/правилах/контексте; db_file_key — ключ строки documents.file_name.
-            files_to_parse: list[tuple[support.Path, str, str]] = []
-            for f in all_files:
-                rel = f.relative_to(data_dir).as_posix()
-                if rel in internal_pending:
-                    files_to_parse.append((f, rel, rel))
-                elif f.name in legacy_pending_names:
-                    files_to_parse.append((f, rel, f.name))
-            internal_count = len(files_to_parse)
-            # Внешние источники — по абсолютному пути; file_key == db_file_key == имя дока.
-            for name, src in external_sources.items():
-                files_to_parse.append((support.Path(src), name, name))
-
-            total     = len(files_to_parse)
-            total_all = len(all_files)
+            total = len(files_to_parse)
             support.logger.info(
                 f"[PARSE] {total}/{total_all} файлов к индексации (внешних in-place: {len(external_sources)})"
             )
@@ -180,8 +205,16 @@ class QdrantIngestion:
             if total == 0:
                 return {"status": "completed", "chunks": 0, "skipped": total_all}
 
+            if publisher is None:
+                sync_qdrant = support.qdrant_client.QdrantClient(
+                    url=self.qdrant_url,
+                    **support.qdrant_client_options(self.qdrant_url),
+                    timeout=60.0,
+                    check_compatibility=False,
+                )
+
             total_chunks = 0
-            errors       = 0
+            errors = 0
             embedding_cache_hits = 0
             embedded_chunks = 0
             embedding_descriptor = support._embedding_cache_descriptor()
@@ -220,6 +253,8 @@ class QdrantIngestion:
                 registration = self.db.document_registration(dataset_id, dbk)
                 if registration is None or registration[1] != external_sources.get(dbk, ""):
                     raise SourceRegistrationChanged("Источник удалён или изменён; нужна повторная проверка каталога.")
+                if code := selection_errors.get(dbk):
+                    raise DocumentExtractionError(code)
                 fingerprint = QdrantIngestion._source_fingerprint(f)
                 route, nodes = QdrantIngestion._convert_file(
                     self, f, data_dir, fk, dataset_id, md_parser, splitter, local_timings, allow_ocr,
@@ -231,15 +266,18 @@ class QdrantIngestion:
                 future = convert_pool.submit(
                     _convert_source, index, local_timings, False,
                 )
-                return future, local_timings
+                return index, future, local_timings
 
             next_convert = _submit_convert(0) if convert_pool else None
 
-            for i, (file_path, file_key, db_file_key) in enumerate(files_to_parse, 1):
+            def process_one(index, attempts):
+                nonlocal next_convert, convert_pool, total_chunks, errors, embedding_cache_hits, embedded_chunks
+                if attempts == 0:
+                    return 0  # The manifest entry changed after selection.
+                i = index + 1
+                file_path, file_key, db_file_key = files_to_parse[index]
                 if i % 50 == 0 or i == total:
                     support.logger.info(f"[PARSE] {i}/{total} ({_t.time()-t0:.0f}с)")
-                begin_attempt = getattr(self.db, "begin_document_attempt", None)
-                attempts = int(begin_attempt(dataset_id, db_file_key) or 1) if begin_attempt else 1
                 staged_ids: list[str] = []
                 replacement_committed = False
                 journal_started = False
@@ -249,7 +287,10 @@ class QdrantIngestion:
                         _parse_embed = _parse_embed.for_index(embedding_descriptor)
                     _stage(db_file_key, "CONVERT")
                     if next_convert is not None:
-                        future, local_timings = next_convert
+                        if next_convert[0] != index:
+                            next_convert[1].cancel()
+                            next_convert = _submit_convert(index)
+                        _, future, local_timings = next_convert
                         try:
                             route, file_nodes, source_fingerprint, registration = future.result(timeout=support.PARSE_FILE_TIMEOUT)
                         except support.FuturesTimeoutError:
@@ -291,8 +332,11 @@ class QdrantIngestion:
                     # its sparse companion.  Validate before deleting the old
                     # file points, so an invalid replacement cannot erase a
                     # previously usable document.
+                    vector_names = None
                     if support._qdrant_schema_mode() == "named":
-                        file_nodes = support._prepare_named_sparse_nodes(file_nodes, file_key)
+                        vector_names = {"dense": support._dense_vector_name(), "sparse": support._sparse_vector_name()}
+                        if publisher is None:
+                            file_nodes = support._prepare_named_sparse_nodes(file_nodes, file_key)
 
                     phase_start = _t.time()
                     existing_vectors = (
@@ -302,7 +346,7 @@ class QdrantIngestion:
                             file_key,
                             embedding_fingerprint,
                         )
-                        if support.CHUNK_HASH_CACHE and hasattr(self, "_sync_existing_file_vectors_by_hash")
+                        if publisher is None and support.CHUNK_HASH_CACHE and hasattr(self, "_sync_existing_file_vectors_by_hash")
                         else {}
                     )
                     _add_timing("cache_sec", phase_start)
@@ -310,7 +354,38 @@ class QdrantIngestion:
                     if not file_nodes:
                         raise DocumentExtractionError('NO_SEARCHABLE_TEXT')
 
+                    file_chunk_count = len(file_nodes)
+                    verify_count = i % support.VERIFY_POINTS_EVERY == 0 or i == total
                     _stage(db_file_key, "EMBED")
+                    if publisher is not None:
+                        try:
+                            result = publish_file(publisher, self.collection_name, dataset_id, file_key,
+                                db_file_key, registration, source_fingerprint, route, file_nodes,
+                                _parse_embed.encode_sync, embedding=embedding_descriptor,
+                                embedding_fingerprint=embedding_fingerprint, vector_names=vector_names,
+                                embed_batch=support.EMBED_BATCH, batch_size=support.UPSERT_BATCH,
+                                cache_enabled=support.CHUNK_HASH_CACHE, verify_count=verify_count,
+                                before_publish=lambda: _stage(db_file_key, "UPSERT"))
+                        except support.EmbeddingContractError as error:
+                            if str(error) == "INDEX_REGISTRATION_CHANGED":
+                                raise SourceRegistrationChanged("Источник удалён или изменён; результат индексации отменён.") from error
+                            if str(error) == "INDEX_SOURCE_ALIAS_CONFLICT":
+                                raise DocumentExtractionError("INDEX_SOURCE_ALIAS_CONFLICT") from error
+                            raise
+                        except native_core.NativeCoreError as error:
+                            if str(error) == "NO_SEARCHABLE_TEXT":
+                                raise DocumentExtractionError("NO_SEARCHABLE_TEXT") from error
+                            raise
+                        for phase in ("cache_sec", "embed_sec", "upsert_sec"):
+                            timings[phase] = timings.get(phase, 0.0) + result[phase]
+                        embedding_cache_hits += result["cache_hits"]
+                        embedded_chunks += result["embedded"]
+                        total_chunks += result["count"]
+                        if result["skipped_sparse"]:
+                            support.logger.warning("Skipped %s non-searchable chunks in %s",
+                                                   result["skipped_sparse"], file_key)
+                        return 0
+
                     # Батч-эмбеддинги по EMBED_BATCH чанков. Upsert начинаем только
                     # после успешного embedding всех чанков файла, чтобы не оставлять
                     # частичный индекс при сбое середины документа.
@@ -364,13 +439,13 @@ class QdrantIngestion:
                                 "embedding_coreml_fallback": embedding_descriptor.get("coreml_fallback", ""),
                             })
                             point_vector: support.Any = vec
-                            if support._qdrant_schema_mode() == "named":
+                            if vector_names is not None:
                                 sparse_vec = node.pop("_rrf_sparse_vector", None)
                                 if not sparse_vec:
                                     raise RuntimeError("missing prevalidated sparse vector")
                                 point_vector = {
-                                    support._dense_vector_name(): vec,
-                                    support._sparse_vector_name(): support.models.SparseVector(
+                                    vector_names["dense"]: vec,
+                                    vector_names["sparse"]: support.models.SparseVector(
                                         indices=list(sparse_vec.keys()),
                                         values=list(sparse_vec.values()),
                                     ),
@@ -381,8 +456,7 @@ class QdrantIngestion:
                                 payload=payload,
                             ))
 
-                    # Conversion and embeddings do not own the collection writer lease.
-                    # Verify the source generation before publishing any replacement.
+                    # Verify the source generation before entering the legacy writer lease.
                     if QdrantIngestion._source_fingerprint(file_path) != source_fingerprint:
                         raise RuntimeError("SOURCE_CHANGED_DURING_INDEXING: original changed; previous index preserved")
                     with journal.lease():
@@ -392,7 +466,6 @@ class QdrantIngestion:
                         _stage(db_file_key, "UPSERT")
                         journal.begin(dataset_id, file_key, db_file_key, [str(point.id) for point in points])
                         journal_started = True
-                        # Upsert батчами после успешного embedding всего файла.
                         for point_start in range(0, len(points), support.UPSERT_BATCH):
                             phase_start = _t.time()
                             batch_points = points[point_start:point_start + support.UPSERT_BATCH]
@@ -411,10 +484,8 @@ class QdrantIngestion:
                             _upsert_file_lexical(points)
                         self.db.clear_structured_rules(file_key)
 
-                        file_chunk_count = len(file_nodes)
-                        # W1.2: exact-count в Qdrant — дорогая проверка; выборочно (каждый N-й файл
-                        # и последний), а не после каждого. Upsert-ошибки и так поднимают исключение.
-                        if i % support.VERIFY_POINTS_EVERY == 0 or i == total:
+                        # Exact count is sampled for the legacy writer.
+                        if verify_count:
                             phase_start = _t.time()
                             indexed_points = self._sync_count_file_points(sync_qdrant, dataset_id, file_key)
                             _add_timing("count_sec", phase_start)
@@ -422,7 +493,6 @@ class QdrantIngestion:
                                 raise RuntimeError(
                                     f"qdrant point count mismatch: got {indexed_points}, expected {file_chunk_count}"
                                 )
-                        total_chunks    += file_chunk_count
                         phase_start = _t.time()
                         self.db.update_document_status(
                             dataset_id, db_file_key, "INDEXED", file_chunk_count, route=route
@@ -433,6 +503,7 @@ class QdrantIngestion:
                         _add_timing("db_sec", phase_start)
                         self.db.update_dataset_chunk_count(dataset_id)
                         journal.finish()
+                    total_chunks += file_chunk_count
 
                 except SourceRegistrationChanged as file_err:
                     # Do not recreate a deleted row or mark a replacement row as
@@ -497,16 +568,43 @@ class QdrantIngestion:
                     _add_timing("db_sec", phase_start)
                     errors += 1
                     if journal.pending() is not None:
-                        # Do not overwrite an unresolved transaction with the
-                        # next file. Recovery must complete before more writes.
-                        break
+                        # Recovery must complete before the next file can write.
+                        return 1
+                return 0
 
-            if convert_pool is not None:
-                convert_pool.shutdown(wait=False, cancel_futures=True)
+            attempted = 0
+            try:
+                if intake_id is not None:
+                    completed = native_core.dispatch_index_batch(self.db.db_path, intake_id, sources, process_one)
+                    attempted = completed["attempted"]
+                elif publisher is not None:
+                    selection = [(db_key, external_sources.get(db_key, '')) for _, _, db_key in files_to_parse]
+                    for offset in range(0, total, 500):
+                        completed = native_core.dispatch_index_batch(self.db.db_path, None, selection[offset:offset + 500],
+                            lambda index, attempts: process_one(offset + index, attempts), dataset_id=dataset_id)
+                        attempted += completed["attempted"]
+                        if completed["interrupted"]:
+                            break
+                else:
+                    begin_attempt = getattr(self.db, "begin_document_attempt", None)
+                    for index, (_, _, db_key) in enumerate(files_to_parse):
+                        attempts = int(begin_attempt(dataset_id, db_key) or 1) if begin_attempt else 1
+                        attempted += 1
+                        if process_one(index, attempts):
+                            break
+            finally:
+                if convert_pool is not None:
+                    convert_pool.shutdown(wait=False, cancel_futures=True)
 
             phase_start = _t.time()
             self.db.update_dataset_chunk_count(dataset_id)
-            remaining_pending = len(self.db.get_pending_files(dataset_id))
+            if publisher is not None:
+                remaining_pending = native_core.required("index_sources", request={
+                    "database": str(support.Path(self.db.db_path).resolve()),
+                    "dataset_id": dataset_id, "count_only": True,
+                })["remaining_pending"]
+            else:
+                remaining_pending = len(self.db.get_pending_files(dataset_id))
             _add_timing("db_sec", phase_start)
             elapsed = _t.time() - t0
             timings = {key: round(value, 3) for key, value in timings.items()}
@@ -518,7 +616,7 @@ class QdrantIngestion:
             return {
                 "status":       "completed",
                 "chunks":       total_chunks,
-                "files_parsed": total,
+                "files_parsed": attempted,
                 "files_skipped": max(0, total_all - internal_count),
                 "remaining_pending": remaining_pending,
                 "errors":       errors,
@@ -542,6 +640,10 @@ class QdrantIngestion:
     def _convert_file(
         self,file_path,data_dir,file_key,dataset_id,md_parser,splitter,timings,allow_ocr=True,
     ):
+        from backend.native_document_conversion import prepare as prepare_native
+        converted=prepare_native(file_path,data_dir,file_key,dataset_id,splitter,timings)
+        if converted is not None:
+            return converted
         from backend import format_process
         if format_process.enabled():
             try:

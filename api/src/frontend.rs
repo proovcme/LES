@@ -306,12 +306,15 @@ pub fn legacy_url(raw: &str) -> Result<String, &'static str> {
     Ok(url.to_string())
 }
 
-pub async fn configuration(context: &Context, headers: &HeaderMap, url: &str) -> Response {
+pub async fn configuration(context: &Context, headers: &HeaderMap, url: Option<&str>) -> Response {
     let cors = match auth::authorize(context, headers, false).await {
         Ok(cors) => cors,
         Err(response) => return response,
     };
     let mut response = json_response(StatusCode::OK, json!({"legacy_url":url}), "rust.frontend");
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
     response.headers_mut().extend(cors);
     response
 }

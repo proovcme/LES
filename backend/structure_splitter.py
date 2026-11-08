@@ -2,6 +2,7 @@
 import re
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.schema import TextNode
+from backend import native_core
 
 class StructureAwareSplitter:
     """Structure-aware chunking for SP and GOST documents.
@@ -17,7 +18,7 @@ class StructureAwareSplitter:
         # при токенном режиме берём ~3 символа на токен (русский текст).
         self._hard_slice_chars = chunk_size if len_fn is None else chunk_size * 3
         self.fallback = SentenceSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
-        
+
         # Regex to detect lines that start a new numbered section or markdown header
         self.boundary_pattern = re.compile(
             r"^(?:#{1,6}\s+|"
@@ -30,24 +31,24 @@ class StructureAwareSplitter:
         lines = text.split("\n")
         blocks = []
         current_block_lines = []
-        
+
         for line in lines:
             stripped = line.strip()
             if not stripped:
                 if current_block_lines:
                     current_block_lines.append(line)
                 continue
-                
+
             if self.boundary_pattern.match(stripped):
                 if current_block_lines:
                     blocks.append("\n".join(current_block_lines).strip())
                     current_block_lines = []
-            
+
             current_block_lines.append(line)
-            
+
         if current_block_lines:
             blocks.append("\n".join(current_block_lines).strip())
-            
+
         return [b for b in blocks if b]
 
     def _get_sentence_overlap(self, text_prev: str, max_overlap: int) -> str:
@@ -76,7 +77,7 @@ class StructureAwareSplitter:
         chunks = []
         current_chunk = []
         current_len = 0
-        
+
         for s in sentences:
             s = s.strip()
             if not s:
@@ -116,9 +117,61 @@ class StructureAwareSplitter:
                     separator_len = 1 if current_chunk else 0
                     current_chunk.append(s)
                     current_len += separator_len + s_len
-                    
+
         if current_chunk:
             chunks.append(" ".join(current_chunk))
+        return chunks
+
+    def _split(self, text: str) -> list[str]:
+        try:
+            chunks = native_core.split_chunks(
+                text, self.chunk_size, self.chunk_overlap, tokenizer=None if self._len is len else self._len,
+            )
+        except native_core.NativeCoreError as error:
+            if str(error) != 'CORE_INPUT_LIMIT':
+                raise
+            chunks = None
+        return self._split_compatibility(text) if chunks is None else chunks
+
+    def _split_compatibility(self, text: str) -> list[str]:
+        atomic_blocks = self._split_into_atomic_blocks(text)
+
+        chunks = []
+        current_chunk_blocks = []
+        current_chunk_len = 0
+
+        for block in atomic_blocks:
+            block_len = self._len(block)
+
+            if block_len > self.chunk_size:
+                if current_chunk_blocks:
+                    chunks.append("\n\n".join(current_chunk_blocks))
+                    current_chunk_blocks = []
+                    current_chunk_len = 0
+
+                sub_chunks = self._split_large_block(block, self.chunk_size, self.chunk_overlap)
+                chunks.extend(sub_chunks)
+            else:
+                separator_len = 2 if current_chunk_blocks else 0
+                if current_chunk_len + separator_len + block_len <= self.chunk_size:
+                    current_chunk_blocks.append(block)
+                    current_chunk_len += separator_len + block_len
+                else:
+                    chunks.append("\n\n".join(current_chunk_blocks))
+                    overlap_prefix = self._get_sentence_overlap(chunks[-1], self.chunk_overlap)
+
+                    current_chunk_blocks = []
+                    current_chunk_len = 0
+                    if overlap_prefix:
+                        current_chunk_blocks.append(overlap_prefix.strip())
+                        current_chunk_len = self._len(overlap_prefix.strip())
+
+                    separator_len = 2 if current_chunk_blocks else 0
+                    current_chunk_blocks.append(block)
+                    current_chunk_len += separator_len + block_len
+
+        if current_chunk_blocks:
+            chunks.append("\n\n".join(current_chunk_blocks))
         return chunks
 
     def get_nodes_from_documents(self, documents: list) -> list:
@@ -127,46 +180,8 @@ class StructureAwareSplitter:
             text = doc.text
             metadata = doc.metadata or {}
             doc_id = doc.node_id if hasattr(doc, "node_id") else doc.id_
-            
-            atomic_blocks = self._split_into_atomic_blocks(text)
-            
-            chunks = []
-            current_chunk_blocks = []
-            current_chunk_len = 0
-            
-            for block in atomic_blocks:
-                block_len = self._len(block)
-                
-                if block_len > self.chunk_size:
-                    if current_chunk_blocks:
-                        chunks.append("\n\n".join(current_chunk_blocks))
-                        current_chunk_blocks = []
-                        current_chunk_len = 0
-                    
-                    sub_chunks = self._split_large_block(block, self.chunk_size, self.chunk_overlap)
-                    chunks.extend(sub_chunks)
-                else:
-                    separator_len = 2 if current_chunk_blocks else 0
-                    if current_chunk_len + separator_len + block_len <= self.chunk_size:
-                        current_chunk_blocks.append(block)
-                        current_chunk_len += separator_len + block_len
-                    else:
-                        chunks.append("\n\n".join(current_chunk_blocks))
-                        overlap_prefix = self._get_sentence_overlap(chunks[-1], self.chunk_overlap)
-                        
-                        current_chunk_blocks = []
-                        current_chunk_len = 0
-                        if overlap_prefix:
-                            current_chunk_blocks.append(overlap_prefix.strip())
-                            current_chunk_len = self._len(overlap_prefix.strip())
-                            
-                        separator_len = 2 if current_chunk_blocks else 0
-                        current_chunk_blocks.append(block)
-                        current_chunk_len += separator_len + block_len
-            
-            if current_chunk_blocks:
-                chunks.append("\n\n".join(current_chunk_blocks))
-                
+
+            chunks = self._split(text)
             for idx, chunk_text in enumerate(chunks):
                 node = TextNode(
                     text=chunk_text,
@@ -174,5 +189,5 @@ class StructureAwareSplitter:
                     metadata=metadata
                 )
                 all_nodes.append(node)
-                
+
         return all_nodes

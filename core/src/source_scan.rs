@@ -1,6 +1,48 @@
 //! Complete read-only enumeration. An unreadable subtree never means an empty folder.
 use serde_json::{json, Value};
-use std::{collections::HashSet, path::PathBuf};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+};
+
+pub(crate) fn visit_files(
+    root: &Path,
+    skip: &HashSet<&str>,
+    mut visit: impl FnMut(PathBuf) -> Result<(), &'static str>,
+) -> Result<(), &'static str> {
+    let mut directories = vec![root.to_owned()];
+    while let Some(directory) = directories.pop() {
+        let entries = std::fs::read_dir(directory).map_err(|_| "CORE_SCAN_UNAVAILABLE")?;
+        for entry in entries {
+            let entry = entry.map_err(|_| "CORE_SCAN_UNAVAILABLE")?;
+            let kind = entry.file_type().map_err(|_| "CORE_SCAN_UNAVAILABLE")?;
+            if kind.is_symlink() {
+                continue;
+            }
+            #[cfg(windows)]
+            {
+                use std::os::windows::fs::MetadataExt;
+                if entry
+                    .metadata()
+                    .map_err(|_| "CORE_SCAN_UNAVAILABLE")?
+                    .file_attributes()
+                    & 0x400
+                    != 0
+                {
+                    continue;
+                }
+            }
+            if kind.is_dir() {
+                if !skip.contains(entry.file_name().to_str().ok_or("CORE_SCAN_NAME_INVALID")?) {
+                    directories.push(entry.path());
+                }
+            } else if kind.is_file() {
+                visit(entry.path())?;
+            }
+        }
+    }
+    Ok(())
+}
 
 pub fn scan(request: &Value) -> Result<Value, &'static str> {
     let root = PathBuf::from(request["path"].as_str().ok_or("CORE_SCAN_PATH_INVALID")?);
@@ -25,50 +67,22 @@ pub fn scan(request: &Value) -> Result<Value, &'static str> {
                 .ok_or("CORE_SCAN_SKIP_INVALID")
         })
         .collect::<Result<_, _>>()?;
-    let mut directories = vec![root];
     let mut files = Vec::new();
     let mut bytes = 0usize;
-    while let Some(directory) = directories.pop() {
-        let entries = std::fs::read_dir(directory).map_err(|_| "CORE_SCAN_UNAVAILABLE")?;
-        for entry in entries {
-            let entry = entry.map_err(|_| "CORE_SCAN_UNAVAILABLE")?;
-            let kind = entry.file_type().map_err(|_| "CORE_SCAN_UNAVAILABLE")?;
-            let path = entry.path();
-            if kind.is_symlink() {
-                continue;
-            }
-            #[cfg(windows)]
-            {
-                use std::os::windows::fs::MetadataExt;
-                if entry
-                    .metadata()
-                    .map_err(|_| "CORE_SCAN_UNAVAILABLE")?
-                    .file_attributes()
-                    & 0x400
-                    != 0
-                {
-                    continue;
-                }
-            }
-            if kind.is_dir() {
-                if !skip.contains(entry.file_name().to_str().ok_or("CORE_SCAN_NAME_INVALID")?) {
-                    directories.push(path);
-                }
-            } else if kind.is_file() {
-                if files.len() >= limit {
-                    return Err("CORE_SCAN_FILE_LIMIT");
-                }
-                let text = path.to_str().ok_or("CORE_SCAN_NAME_INVALID")?.to_owned();
-                bytes = bytes
-                    .checked_add(text.len())
-                    .ok_or("CORE_SCAN_OUTPUT_LIMIT")?;
-                if bytes > 8 * 1024 * 1024 {
-                    return Err("CORE_SCAN_OUTPUT_LIMIT");
-                }
-                files.push(text);
-            }
+    visit_files(&root, &skip, |path| {
+        if files.len() >= limit {
+            return Err("CORE_SCAN_FILE_LIMIT");
         }
-    }
+        let text = path.to_str().ok_or("CORE_SCAN_NAME_INVALID")?.to_owned();
+        bytes = bytes
+            .checked_add(text.len())
+            .ok_or("CORE_SCAN_OUTPUT_LIMIT")?;
+        if bytes > 8 * 1024 * 1024 {
+            return Err("CORE_SCAN_OUTPUT_LIMIT");
+        }
+        files.push(text);
+        Ok(())
+    })?;
     files.sort();
     Ok(json!({"files":files,"complete":true}))
 }

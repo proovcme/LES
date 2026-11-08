@@ -2,15 +2,32 @@ mod agent_state;
 mod auth;
 mod auth_keys;
 mod catalog;
+mod document_dispatch;
+#[cfg(feature = "edge")]
+mod edge;
+mod embedding_inference;
+mod embedding_worker;
+mod external_embed;
 mod frontend;
+mod history;
+mod index_batch;
 mod index_store;
+mod inference;
 mod intake;
 mod library;
 mod local_model;
+mod mcp;
+mod model_http;
+mod model_registry;
+mod model_runtime;
 mod ollama_chat;
 mod ollama_embed;
+mod openai_chat;
+mod pdf_ocr;
 mod pdf_text;
+mod profiles;
 mod transport;
+mod web;
 mod workspace;
 
 use axum::{
@@ -23,6 +40,7 @@ use serde_json::{json, Value};
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 pub struct Context {
+    pub listen_port: u16,
     pub database: PathBuf,
     pub state_root: PathBuf,
     pub upstream: String,
@@ -56,14 +74,35 @@ async fn dispatch(State(context): State<Arc<Context>>, request: Request) -> Resp
     if !transport::local_browser(request.headers()) {
         return error(StatusCode::FORBIDDEN, "Local LES browser access required");
     }
+    #[cfg(feature = "edge")]
+    if edge::handles(request.uri().path())
+        && context
+            .index_store
+            .as_ref()
+            .is_some_and(|s| s.edge.is_some())
+    {
+        return edge::handle(context, request).await;
+    }
     if request.uri().path() == auth::POLICY_PATH || intake::internal(request.uri().path()) {
         return error(StatusCode::NOT_FOUND, "Not Found");
     }
     if request.uri().path() == local_model::PATH {
         return local_model::handle(&context, request).await;
     }
+    if request.uri().path() == inference::PATH {
+        return inference::handle(context, request).await;
+    }
+    if request.uri().path() == embedding_inference::PATH {
+        return embedding_inference::handle(context, request).await;
+    }
+    if request.uri().path() == web::PATH {
+        return web::handle(context, request).await;
+    }
+    if request.uri().path() == index_batch::PATH {
+        return index_batch::handle(context, request).await;
+    }
     if request.uri().path() == index_store::PATH {
-        return index_store::handle(&context, request).await;
+        return index_store::handle(context, request).await;
     }
     if let Some(frontend) = &context.frontend {
         if let Some(response) = frontend
@@ -76,12 +115,27 @@ async fn dispatch(State(context): State<Arc<Context>>, request: Request) -> Resp
     }
     if request.uri().path() == "/api/light/frontend" && request.method() == axum::http::Method::GET
     {
-        if let Some(url) = &context.legacy_ui_url {
-            return frontend::configuration(&context, request.headers(), url).await;
-        }
+        return frontend::configuration(
+            &context,
+            request.headers(),
+            context.legacy_ui_url.as_deref(),
+        )
+        .await;
     }
     if let Some(route) = auth_keys::route(request.method(), request.uri().path()) {
         return auth_keys::handle(context, request, route).await;
+    }
+    if model_registry::handles(request.method().as_str(), request.uri().path()) {
+        return model_registry::handle(context, request).await;
+    }
+    if let Some(route) = profiles::route(request.method().as_str(), request.uri().path()) {
+        return profiles::handle(context, request, route).await;
+    }
+    if let Some(route) = mcp::route(request.method().as_str(), request.uri().path()) {
+        return mcp::handle(context, request, route).await;
+    }
+    if history::handles(request.method().as_str(), request.uri().path()) {
+        return history::handle(context, request).await;
     }
     if library::handles(request.method().as_str(), request.uri().path()) {
         return library::handle(context, request).await;
@@ -119,6 +173,8 @@ fn configuration() -> Result<(std::net::SocketAddr, Context), &'static str> {
                 | "--state"
                 | "--frontend-assets"
                 | "--legacy-ui-url"
+                | "--auth-policy-file"
+                | "--edge-storage"
         ) {
             return Err("Invalid native API argument");
         }
@@ -191,6 +247,30 @@ fn configuration() -> Result<(std::net::SocketAddr, Context), &'static str> {
         .map(index_store::Store::from_env)
         .transpose()?
         .flatten();
+    let index_store = if let Some(path) = values.get("--edge-storage") {
+        #[cfg(not(feature = "edge"))]
+        {
+            let _ = path;
+            return Err("This native API was built without Qdrant Edge");
+        }
+        #[cfg(feature = "edge")]
+        {
+            let token = ingest_token
+                .clone()
+                .ok_or("Edge requires an owned ingestion token")?;
+            let key = std::env::var("LES_LIGHT_QDRANT_API_KEY")
+                .map_err(|_| "Edge requires an owned storage key")?;
+            let shard = les_vector::Shard::open(std::path::Path::new(path))?;
+            Some(index_store::Store::embedded(
+                Arc::new(shard),
+                listen.port(),
+                key,
+                token,
+            )?)
+        }
+    } else {
+        index_store
+    };
     let intake = ingest_token
         .filter(|_| std::env::var("LES_STARTUP_BACKGROUND_MUTATIONS").as_deref() == Ok("true"))
         .map(intake::Service::new);
@@ -200,15 +280,22 @@ fn configuration() -> Result<(std::net::SocketAddr, Context), &'static str> {
         .connect_timeout(Duration::from_secs(2))
         .build()
         .map_err(|_| "Native API client unavailable")?;
+    let auth_policy = tokio::sync::OnceCell::new();
+    if let Some(path) = values.get("--auth-policy-file") {
+        auth_policy
+            .set(auth::from_file(std::path::Path::new(path))?)
+            .map_err(|_| "Native authorization policy already initialized")?;
+    }
     Ok((
         listen,
         Context {
+            listen_port: listen.port(),
             database,
             state_root,
             upstream: upstream.to_string().trim_end_matches('/').to_owned(),
             client,
             workspace_slots: Arc::new(tokio::sync::Semaphore::new(16)),
-            auth_policy: tokio::sync::OnceCell::new(),
+            auth_policy,
             frontend,
             legacy_ui_url,
             local_model,
@@ -220,7 +307,52 @@ fn configuration() -> Result<(std::net::SocketAddr, Context), &'static str> {
 
 fn main() {
     let args = std::env::args_os().skip(1).collect::<Vec<_>>();
+    if args == [std::ffi::OsString::from("--serve-tables")] {
+        if let Err(code) = les_core::tables::serve() {
+            eprintln!("{code}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if args == [std::ffi::OsString::from("--serve-document-formats")] {
+        if let Err(code) = document_dispatch::serve() {
+            eprintln!("{code}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if args == [std::ffi::OsString::from("--serve-mcp")] {
+        if let Err(code) = mcp::serve() {
+            eprintln!("{code}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if args == [std::ffi::OsString::from("--skill-host")] {
+        if let Err(code) = les_core::skills::serve_once() {
+            eprintln!("{code}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if args == [std::ffi::OsString::from("--builtin-workbook")] {
+        if let Err(code) = les_core::workbook_calculation::serve_once() {
+            eprintln!("{code}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if let [action, library] = args.as_slice() {
+        if action == "--serve-embeddings" {
+            if let Err(code) = embedding_worker::serve(std::path::Path::new(library)) {
+                eprintln!(
+                    "{}",
+                    json!({"event":"embedding_worker_stopped","code":code})
+                );
+                std::process::exit(1);
+            }
+            return;
+        }
         if action == "--serve-pdf-text" {
             if pdf_text::serve(std::path::Path::new(library)).is_err() {
                 eprintln!("PDF_WORKER_STOPPED");
@@ -245,7 +377,13 @@ fn main() {
             json!({"schema":"les.native-api.v1","native":["workspace.sessions","workspace.drafts","projects.crud","projects.links","workspace.notes.read_edit_delete","conversation.context","workspace.agent_state","auth.keys","auth.verify"],
             "legacy_proxy_remaining":true,"authentication_owner":"rust.local_policy","streaming_proxy":true,
             "frontend_assets":"rust.verified-manifest","local_model_http":"rust.private-loopback",
-            "local_model_stream":"ollama-chat.v1","local_model_embeddings":"ollama-embed.v1"})
+            "local_model_stream":"ollama-chat.v1","local_model_embeddings":"ollama-embed.v1",
+            "canonical_embeddings":"rust.revision-pinned","local_onnx_embeddings":true,
+            "embedded_edge":cfg!(feature="edge"),"skill_host":"rust.cpython-isolated","skill_runtime":"rust.verified-package","builtin_workbook":"rust.exact-decimal",
+            "mcp_client":"rust.http-stdio","tool_execution_policy":"rust",
+            "document_conversion":"rust.supervised","document_conversion_formats":["xlsx","xlsm","xls","csv","pptx","docx","doc","txt","md","json","jsonl","pdf"],
+            "index_batch_api":"rust.complete-or-refuse","index_batch_python_callbacks":false,
+            "native_format_dispatch":true,"parquet":"rust.snappy","table_prepare":"rust"})
         );
         return;
     }
@@ -264,9 +402,16 @@ fn main() {
         runtime.block_on(async {
             let listener = tokio::net::TcpListener::bind(listen).await?;
             let context = Arc::new(context);
-            if context.intake.is_some() {
-                tokio::spawn(intake::run(context.clone()));
-            }
+            let background = context.clone();
+            tokio::spawn(async move {
+                if index_store::start_recovery(background.clone())
+                    .await
+                    .is_ok()
+                    && background.intake.is_some()
+                {
+                    intake::run(background).await;
+                }
+            });
             axum::serve(
                 listener,
                 Router::new().fallback(dispatch).with_state(context),

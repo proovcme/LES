@@ -158,6 +158,34 @@ def context_packet_trace(packet: ContextPacket, *, purpose: str) -> dict[str, An
     }
 
 
+def prepared_context_trace(packet, *, purpose, source_map, evidence) -> dict[str, Any]:
+    visible = model_visible_source_map(packet, source_map)
+    visible_indexes = {source.get("index") for source in visible if isinstance(source, dict)}
+    candidate_indexes = {
+        int(index) for block in evidence
+        for index in re.findall(r"(?m)^\[Источник (\d+)(?:\s|\])", str(block))
+    }
+    return {
+        **context_packet_trace(packet, purpose=purpose),
+        "delivery": "prepared",
+        "sent_to_model": False,
+        "visible_sources": visible,
+        "omitted_sources": [
+            {"index": source["index"], "doc_name": source.get("doc_name", "")}
+            for source in source_map if isinstance(source, dict)
+            and source.get("index") in candidate_indexes - visible_indexes
+        ],
+    }
+
+
+def confirm_context_delivery(trace: dict, usage: dict) -> None:
+    trace["delivery"] = "confirmed"
+    trace["sent_to_model"] = True
+    prompt_tokens = usage.get("prompt_tokens")
+    if type(prompt_tokens) is int and prompt_tokens > 0:
+        trace["provider_prompt_tokens"] = prompt_tokens
+
+
 def profile_temperature(profile_snapshot: dict[str, Any] | None, *, fallback: float) -> float:
     """Return the bounded immutable profile temperature for generation."""
 

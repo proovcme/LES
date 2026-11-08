@@ -114,13 +114,14 @@ fn write(conn: &Connection, action: &str, args: &Value) -> Result<Value, &'stati
             }) {
                 return Err(INVALID);
             }
-            store(
-                conn,
-                &json!({"phase":"staging","revision":revision()?,"ids":ids,
+            let mut decision = json!({"phase":"staging","revision":revision()?,"ids":ids,
                 "dataset":args["dataset"].as_str().ok_or(INVALID)?,
                 "file_name":args["file_name"].as_str().ok_or(INVALID)?,
-                "db_file_name":args["db_file_name"].as_str().ok_or(INVALID)?}),
-            )?;
+                "db_file_name":args["db_file_name"].as_str().ok_or(INVALID)?});
+            if let Some(id) = args["document_id"].as_str() {
+                decision["document_id"] = json!(id);
+            }
+            store(conn, &decision)?;
         }
         "commit" => {
             if phase != "staging" {

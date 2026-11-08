@@ -56,7 +56,7 @@ fn header_score(values: &[Value]) -> usize {
         .sum()
 }
 
-fn to_table(name: &str, rows: BTreeMap<u32, Vec<Value>>) -> Option<Value> {
+pub(super) fn to_table(name: &str, rows: BTreeMap<u32, Vec<Value>>) -> Option<Value> {
     let mut best_score = 0;
     let mut header = 0;
     for (&row, values) in rows.range(..20) {

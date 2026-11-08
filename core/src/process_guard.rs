@@ -51,6 +51,17 @@ mod platform {
     }
     impl JobGuard {
         pub fn own(child: &Child, memory_bytes: Option<usize>) -> Result<Self, &'static str> {
+            Self::limits(child, memory_bytes, 16, None)
+        }
+        pub fn skill(child: &Child) -> Result<Self, &'static str> {
+            Self::limits(child, Some(512 * 1024 * 1024), 1, Some(15))
+        }
+        fn limits(
+            child: &Child,
+            memory_bytes: Option<usize>,
+            processes: u32,
+            cpu_seconds: Option<i64>,
+        ) -> Result<Self, &'static str> {
             unsafe {
                 let job = Self(CreateJobObjectW(std::ptr::null_mut(), std::ptr::null()));
                 if job.0.is_null() {
@@ -61,7 +72,11 @@ mod platform {
                 if let Some(bytes) = memory_bytes {
                     limits.basic.flags |= 0x200 | 0x8;
                     limits.job_memory = bytes;
-                    limits.basic.active = 16;
+                    limits.basic.active = processes;
+                }
+                if let Some(seconds) = cpu_seconds {
+                    limits.basic.flags |= 0x2;
+                    limits.basic.process_time = seconds * 10_000_000;
                 }
                 if SetInformationJobObject(
                     job.0,
@@ -100,6 +115,9 @@ mod platform {
     impl JobGuard {
         pub fn own(child: &Child, _memory_bytes: Option<usize>) -> Result<Self, &'static str> {
             Ok(Self(child.id()))
+        }
+        pub fn skill(child: &Child) -> Result<Self, &'static str> {
+            Self::own(child, None)
         }
     }
     pub fn prepare(command: &mut Command) {

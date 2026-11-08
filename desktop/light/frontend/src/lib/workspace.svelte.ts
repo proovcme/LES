@@ -1,6 +1,6 @@
 import { ApiError, errorMessage, request, streamChat } from './api';
-import type { Attachment, ChatPayload, Dataset, Draft, Message, ModelRole, Scope, Session } from './contracts';
-import { sourcesFor } from './contracts';
+import type { Attachment, ChatPayload, ContextExclusion, Dataset, Draft, Message, ModelRole, Scope, Session } from './contracts';
+import { contextPath, sourcesFor } from './contracts';
 import { DraftWriter } from './drafts';
 
 export class Workspace {
@@ -15,6 +15,8 @@ export class Workspace {
   legacyURL = $state<string | null>(null);
   loading = $state(true);
   busy = $state(false);
+  contextChanging = $state(false);
+  exclusions = $state<ContextExclusion[] | null>(null);
   closing = $state(false);
   beforeClose?: () => Promise<void>;
   uploading = $state(false);
@@ -103,15 +105,16 @@ export class Workspace {
   }
 
   async openSession(id: string): Promise<void> {
-    if (this.busy || this.uploading || this.closing) return;
+    if (this.busy || this.contextChanging || this.uploading || this.closing) return;
     await this.persist();
-    const [session, messages, draft] = await Promise.all([
+    const [session, messages, draft, exclusions] = await Promise.all([
       request<Session>(`/api/workspace/sessions/${encodeURIComponent(id)}`),
       request<Message[]>(`/api/chat/history?session_id=${encodeURIComponent(id)}`),
       request<Draft>(`/api/workspace/sessions/${encodeURIComponent(id)}/draft`),
+      request<ContextExclusion[]>(`${contextPath(id)}/messages`).catch(() => null),
     ]);
     if (!this.alive) return;
-    this.session = session; this.messages = messages;
+    this.session = session; this.messages = messages; this.exclusions = exclusions;
     this.text = draft.text; this.attachment = draft.attachment;
     this.writer = new DraftWriter(id, draft); this.error = ''; this.status = '';
     this.draftStatus = draft.text || draft.attachment ? 'Черновик сохранён' : '';
@@ -119,8 +122,28 @@ export class Workspace {
     history.replaceState(null, '', url);
   }
 
+  isExcluded(message: Message): boolean {
+    return this.exclusions?.some((item) => item.history_id === message.history_id
+      && item.role === (message.role === 'user' ? 'user' : 'assistant')) ?? false;
+  }
+
+  async toggleContext(message: Message): Promise<void> {
+    if (!this.session || !message.history_id || !this.exclusions || this.busy || this.contextChanging || this.closing) return;
+    this.contextChanging = true;
+    this.error = '';
+    try {
+      this.exclusions = await request<ContextExclusion[]>(`${contextPath(this.session.session_id)}/messages`, {
+        method: 'PUT', body: JSON.stringify({
+          history_id: message.history_id, role: message.role === 'user' ? 'user' : 'assistant',
+          excluded: !this.isExcluded(message),
+        }),
+      });
+    } catch (error) { this.error = errorMessage(error); }
+    finally { this.contextChanging = false; }
+  }
+
   async newSession(): Promise<void> {
-    if (this.busy || this.uploading || this.closing) return;
+    if (this.busy || this.contextChanging || this.uploading || this.closing) return;
     await this.persist();
     const session = await request<Session>('/api/workspace/sessions', { method: 'POST', body: '{}' });
     await this.refreshSessions(); await this.openSession(session.session_id);
@@ -150,7 +173,7 @@ export class Workspace {
   }
 
   async send(): Promise<void> {
-    if (this.busy || this.uploading || this.closing || !this.session || !this.text.trim()) return;
+    if (this.busy || this.contextChanging || this.uploading || this.closing || !this.session || !this.text.trim()) return;
     if (this.text.length > 20000) { this.error = 'Вопрос длиннее 20 000 символов. Сократите его или прикрепите файл.'; return; }
     if (!this.model || this.model.status === 'blocked') {
       this.error = 'Модель для ответов не назначена или недоступна. Откройте подключения и выберите модель.'; return;
@@ -185,9 +208,10 @@ export class Workspace {
           this.messages[reply].meta = { source_map: sourcesFor(payload) };
         } else if (item.event === 'final') {
           const payload = item.data as ChatPayload;
+          this.messages[reply - 1].history_id = payload.history_id;
           this.messages[reply] = { role: 'ai', text: payload.answer ?? payload.response ?? this.messages[reply].text,
-            srcs: payload.sources, crag: payload.crag_status,
-            meta: { source_map: sourcesFor(payload), partial: payload.partial, completion_status: payload.completion_status,
+            history_id: payload.history_id, srcs: payload.sources, crag: payload.crag_status,
+            meta: { source_map: sourcesFor(payload), partial: payload.partial, completion_status: payload.completion_status, error: payload.error,
               retrieval_trace: payload.retrieval_trace, blocker: payload.blocker, total_status: payload.total_status,
               execution: payload.execution ?? payload.retrieval_trace?.execution } };
           const incomplete = payload.partial || payload.crag_status === 'BLOCKED' || payload.total_status === 'blocked'
@@ -205,7 +229,8 @@ export class Workspace {
       }
       await this.refreshSessions().catch(() => undefined);
     } catch (error) {
-      if (reply >= 0) this.messages[reply].meta = { ...this.messages[reply].meta, partial: true, completion_status: 'interrupted' };
+      if (reply >= 0) this.messages[reply].meta = { ...this.messages[reply].meta, partial: true, completion_status: 'interrupted',
+        error: this.controller.signal.aborted ? undefined : { detail: errorMessage(error), code: error instanceof ApiError ? error.code : '' } };
       this.status = this.controller.signal.aborted ? 'Остановлено. Полученный текст сохранён.' : 'Ответ не завершён';
       if (!this.controller.signal.aborted) this.error = errorMessage(error);
       if (!this.text) { this.text = question; this.attachment = attachment; this.changed(); }

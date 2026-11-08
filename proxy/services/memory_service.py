@@ -243,7 +243,8 @@ def session_dialogue_messages(session_id: str, *, max_chars: int = 6000) -> list
         size = len(user) + len(answer)
         if size > remaining:
             break
-        batches.append([{"role": "user", "content": user}, {"role": "assistant", "content": answer}])
+        batches.append([{"role": role, "content": content}
+                        for role, content in (("user", user), ("assistant", answer)) if content])
         remaining -= size
     return [message for batch in reversed(batches) for message in batch]
 

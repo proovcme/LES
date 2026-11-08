@@ -11,12 +11,20 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 serde_json = { version = "=1.0.150", features = ["float_roundtrip", "arbitrary_precision"] }
 sha2 = "=0.10.9"
+sha1 = "=0.10.6"
 regex = "=1.12.3"
 rusqlite = { version = "=0.41.1", features = ["bundled", "functions"] }
 chrono = { version = "=0.4.45", default-features = false, features = ["clock", "std"] }
 calamine = "=0.37.0"
+quick-xml = "=0.42.0"
+tokenizers = { version = "=0.22.2", default-features = false, features = ["onig"] }
 zip = { version = "=9.4.1", default-features = false }
 getrandom = "=0.3.4"
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "load-dynamic", "api-17"] }
+jsonschema = { version = "=0.60.2", default-features = false, features = ["arbitrary-precision"] }
+mail-parser = { version = "=0.11.9", default-features = false, features = ["full_encoding"] }
+scraper = { version = "=0.27.0", default-features = false }
+parquet = { version = "=60.1.0", default-features = false, features = ["snap"] }
 
 [profile.release]
 lto = true

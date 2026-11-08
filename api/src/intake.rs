@@ -461,10 +461,15 @@ async fn record(context: &Context, id: &Value, action: &'static str, stop: Optio
 }
 
 async fn start_indexing(context: &Context, service: &Service, job: &Value) -> Result<(), Stop> {
-    let response = context.client.post(format!("{}{START_INDEXING}", context.upstream))
-        .header(TOKEN, &service.token).header("content-type", "application/json")
-        .body(json!({"dataset_id":job["dataset_id"],"intake_id":job["id"],"batch_limit":job["parse_limit"]}).to_string())
-        .timeout(Duration::from_secs(600)).send().await;
+    let response = context
+        .client
+        .post(format!("{}{START_INDEXING}", context.upstream))
+        .header(TOKEN, &service.token)
+        .header("content-type", "application/json")
+        .body(json!({"dataset_id":job["dataset_id"],"intake_id":job["id"]}).to_string())
+        .timeout(Duration::from_secs(600))
+        .send()
+        .await;
     match response.map(|response| response.status()) {
         Ok(StatusCode::OK) => Ok(()),
         Ok(StatusCode::PRECONDITION_FAILED) => Err(Stop {

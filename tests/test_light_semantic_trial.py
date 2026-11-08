@@ -19,7 +19,7 @@ def test_multiple_evidence_and_duplicate_chunks_do_not_inflate_score():
 
 
 def test_authored_fixture_has_disjoint_ids_and_explicit_no_answer_cases():
-    fixture = json.loads((Path(__file__).parent / 'fixtures/rag/semantic-v1.json').read_text())
+    fixture = json.loads((Path(__file__).parent / 'fixtures/rag/semantic-v1.json').read_text(encoding='utf-8'))
     docs, cases = validate_fixture(fixture)
     assert len(docs) == 22 and len(cases) == 20
     assert {c['category'] for c in cases} == {'versions', 'exceptions', 'conflicts', 'unanswerable', 'direct'}

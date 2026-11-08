@@ -1,7 +1,7 @@
 //! Model-neutral harness budget/ordering. No inference or intent heuristics.
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-const ORDER: &[&str] = &[
+pub(crate) const ORDER: &[&str] = &[
     "profile_prefix",
     "tool_shortlist",
     "request",

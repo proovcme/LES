@@ -15,7 +15,7 @@ from proxy.services import local_model_http
 
 from proxy.services.llm_transport_profile_service import assistant_delta_text
 from proxy.services.model_reasoning_service import ReasoningOutput
-from proxy.services.model_connection_contracts import CapabilityName, CapabilityState
+from proxy.services.model_connection_contracts import CapabilityName, CapabilityState, ConnectionLocality
 from proxy.services.model_connection_resolver_service import ResolvedModelConnection
 from proxy.services.model_connection_security_service import (
     ValidatedEndpoint,
@@ -136,6 +136,32 @@ def _message_text(message: Mapping[str, Any]) -> str:
     return assistant_delta_text(message)
 
 
+
+def _plain_json(value):
+    if isinstance(value, Mapping):
+        return {key: _plain_json(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain_json(item) for item in value]
+    return value
+
+
+def _model_body(connection, request, *, native, streaming):
+    from backend import native_core
+    try:
+        result = native_core.required('model_request', request={
+            'schema': 'les.model-request.v1', 'action': 'prepare', 'native': native, 'streaming': streaming,
+            'connection': {'model_id': connection.model_id, 'locality': connection.locality.value,
+                           'input_token_limit': connection.effective_preset.input_token_limit,
+                           'max_output_field': connection.capability_snapshot.transport_options.get('max_output_field', 'max_tokens')},
+            'request': {'messages': _plain_json(request.messages), 'tools': _plain_json(request.tools),
+                        'max_output_tokens': request.max_output_tokens, 'temperature': request.temperature,
+                        'reasoning_enabled': request.reasoning_enabled, 'response_format': _plain_json(request.response_format)},
+        })
+        return result['value']
+    except native_core.NativeCoreError as error:
+        raise ModelTransportError(str(error)) from error
+
+
 class OpenAICompatibleTransport:
     def __init__(
         self,
@@ -189,35 +215,11 @@ class OpenAICompatibleTransport:
         *,
         stream: bool,
     ) -> dict[str, Any]:
-        messages = [dict(item) for item in request.messages]
-        system_messages = [item for item in messages if item.get("role") == "system"]
-        conversation = [item for item in messages if item.get("role") != "system"]
-        if system_messages and all(isinstance(item.get("content"), str) for item in system_messages):
-            system_messages = [{
-                **system_messages[0],
-                "content": "\n\n".join(str(item["content"]) for item in system_messages),
-            }]
-        body: dict[str, Any] = {
-            "model": connection.model_id,
-            "messages": system_messages + conversation,
-            self._output_field(connection): request.max_output_tokens,
-        }
-        supports_local_options = connection.locality.value != "remote"
-        if request.reasoning_enabled and not supports_local_options:
-            raise ModelTransportError("REASONING_MODE_UNSUPPORTED")
-        if supports_local_options:
-            body["chat_template_kwargs"] = {"enable_thinking": request.reasoning_enabled}
-        if request.temperature is not None:
-            body["temperature"] = request.temperature
         if request.tools:
             self._require(connection, CapabilityName.TOOLS)
-            body["tools"] = [dict(item) for item in request.tools]
         if request.response_format is not None:
             self._require(connection, CapabilityName.STRUCTURED_OUTPUT)
-            body["response_format"] = dict(request.response_format)
-        if stream:
-            body["stream"] = True
-        return body
+        return _model_body(connection, request, native=False, streaming=stream)
 
     @staticmethod
     def _native_chat_url(connection: ResolvedModelConnection, operation: str = "chat") -> str:
@@ -234,49 +236,7 @@ class OpenAICompatibleTransport:
         connection: ResolvedModelConnection,
         request: InferenceRequest,
     ) -> dict[str, Any]:
-        try:
-            messages = [native_tool_message(item) for item in request.messages]
-        except ValueError as error:
-            raise ModelTransportError(str(error)) from error
-        for message in messages:
-            if isinstance(message.get("content"), list):
-                parts = message["content"]
-                message["content"] = "\n".join(str(part.get("text") or "") for part in parts if part.get("type") == "text")
-                images = []
-                for part in parts:
-                    if part.get("type") == "image_url":
-                        url = str((part.get("image_url") or {}).get("url") or "")
-                        if not url.startswith("data:image/") or ";base64," not in url:
-                            raise ValueError("Native image requests require inline image bytes")
-                        images.append(url.split(";base64,", 1)[1])
-                if images:
-                    message["images"] = images
-        options: dict[str, Any] = {
-            "num_predict": request.max_output_tokens,
-            "num_ctx": int(connection.effective_preset.input_token_limit),
-        }
-        if request.temperature is not None:
-            options["temperature"] = request.temperature
-        body: dict[str, Any] = {
-            "model": connection.model_id,
-            "messages": messages,
-            "think": request.reasoning_enabled,
-            # Native chat sends one NDJSON event per generated fragment.
-            # Consuming it keeps a long local generation alive while complete()
-            # still returns the exact concatenated model answer as one value.
-            "stream": True,
-            "options": options,
-        }
-        if request.tools:
-            body["tools"] = [dict(item) for item in request.tools]
-        if request.response_format is not None:
-            response_format = dict(request.response_format)
-            if response_format.get("type") == "json_schema":
-                json_schema = response_format.get("json_schema") or {}
-                body["format"] = dict(json_schema.get("schema") or {})
-            elif response_format.get("type") == "json_object":
-                body["format"] = "json"
-        return body
+        return _model_body(connection, request, native=True, streaming=True)
 
     async def _complete_native_chat(
         self,
@@ -402,7 +362,12 @@ class OpenAICompatibleTransport:
 
     @staticmethod
     async def _collect_local_chat(response: httpx.Response, model_id: str, token_sink) -> InferenceResponse:
-        parts: list[str] = []
+        from proxy.services.model_streaming_service import collect_stream
+
+        return await collect_stream(OpenAICompatibleTransport._bridge_chat_events(response, model_id), token_sink)
+
+    @staticmethod
+    async def _bridge_chat_events(response: httpx.Response, model_id: str):
         async for line in response.aiter_lines():
             try:
                 event = json.loads(line)
@@ -414,20 +379,18 @@ class OpenAICompatibleTransport:
                 raise ModelTransportError(event["error"])
             if "finish" in event:
                 result = event["finish"]
-                return InferenceResponse(
-                    text="".join(parts),
-                    tool_calls=tuple(MappingProxyType(call) for call in result["tool_calls"]),
-                    finish_reason=result["finish_reason"],
-                    usage=MappingProxyType(result["usage"]),
-                    model_id=result["model_id"] or model_id,
+                yield InferenceEvent(kind="usage", usage=result["usage"])
+                yield InferenceEvent(
+                    kind="finish", tool_calls=tuple(result["tool_calls"]),
+                    finish_reason=result["finish_reason"], model_id=result["model_id"] or model_id,
                 )
+                return
             if "text" in event:
-                text = event["text"]
-                parts.append(text)
-                if token_sink is not None:
-                    await token_sink({"event": "token", "data": text})
-            elif event.get("thinking") and token_sink is not None:
-                await token_sink({"event": "progress", "data": {"stage": "thinking", "label": "Модель думает"}})
+                yield InferenceEvent(kind="text_delta", text=event["text"])
+            elif event.get("thinking"):
+                yield InferenceEvent(kind="reasoning")
+            elif isinstance(event.get('progress'), dict):
+                yield InferenceEvent(kind='progress', text=str(event['progress'].get('label') or ''))
         raise ModelTransportError("UPSTREAM_STREAM_INTERRUPTED")
 
     @staticmethod
@@ -460,14 +423,19 @@ class OpenAICompatibleTransport:
         embed_limits: local_model_http.EmbedLimits | None = None,
     ) -> httpx.Response:
         bridge = None
+        options = {}
         if self.peer_verifier is validate_connected_peer:
             bridge = local_model_http.bridge_for(
                 url, connection.endpoint, has_secret=bool(connection.secret_ref),
             )
+            if bridge is None and (embed_limits is not None or chat_limits is not None):
+                bridge = local_model_http.external_embedding_bridge(url, connection.endpoint)
+                if bridge is not None:
+                    options['external'] = (connection.endpoint, self._headers(connection).get('Authorization'))
         if bridge is not None:
             try:
                 response = await local_model_http.open_stream(
-                    bridge, url, dict(body), self.timeout, chat_limits=chat_limits, embed_limits=embed_limits,
+                    bridge, url, dict(body), self.timeout, chat_limits=chat_limits, embed_limits=embed_limits, **options,
                 )
             except (httpx.HTTPError, OSError) as exc:
                 raise ModelTransportError(f"UPSTREAM_REQUEST_FAILED: {type(exc).__name__}") from exc
@@ -478,7 +446,8 @@ class OpenAICompatibleTransport:
                 await response.aclose()
                 raise ModelTransportError(code)
             protocol = (
-                local_model_http.CHAT_PROTOCOL if chat_limits is not None
+                (local_model_http.OPENAI_CHAT_PROTOCOL if urlsplit(url).path.endswith('/chat/completions')
+                 else local_model_http.CHAT_PROTOCOL) if chat_limits is not None
                 else local_model_http.EMBED_PROTOCOL if embed_limits is not None else None
             )
             if protocol is not None and response.is_success:
@@ -520,12 +489,31 @@ class OpenAICompatibleTransport:
             chunks.append(chunk)
         return b"".join(chunks)
 
+    async def _native_inference(self, connection, request, *, streaming, require_stream=False):
+        try:
+            return await local_model_http.open_inference(connection.revision_id, {
+                'messages': _plain_json(request.messages), 'tools': _plain_json(request.tools),
+                'max_output_tokens': request.max_output_tokens, 'temperature': request.temperature,
+                'reasoning_enabled': request.reasoning_enabled, 'response_format': _plain_json(request.response_format),
+            }, self.timeout, streaming=streaming, require_stream=require_stream,
+                allow_remote=connection.locality is ConnectionLocality.REMOTE)
+        except (httpx.HTTPError, OSError) as error:
+            raise ModelTransportError(f'UPSTREAM_REQUEST_FAILED: {type(error).__name__}') from error
+        except RuntimeError as error:
+            raise ModelTransportError(str(error)) from error
+
     async def complete(
         self,
         connection: ResolvedModelConnection,
         request: InferenceRequest,
         token_sink=None,
     ) -> InferenceResponse:
+        if self.peer_verifier is validate_connected_peer and local_model_http.inference_ready():
+            response = await self._native_inference(connection, request, streaming=token_sink is not None)
+            try:
+                return await self._collect_local_chat(response, connection.model_id, token_sink)
+            finally:
+                await response.aclose()
         self._require(connection, CapabilityName.CHAT_COMPLETIONS)
         if (
             connection.capability_snapshot.transport_options.get("chat_protocol")
@@ -543,8 +531,11 @@ class OpenAICompatibleTransport:
             connection,
             url=join_openai_path(connection.endpoint, "/chat/completions"),
             body=body,
+            chat_limits=(request.max_output_tokens, self.response_body_limit, request.reasoning_enabled),
         )
         try:
+            if response.extensions.get('les_model_protocol') == local_model_http.OPENAI_CHAT_PROTOCOL:
+                return await self._collect_local_chat(response, connection.model_id, token_sink)
             raw = await self._read_bounded(response)
             if (
                 response.status_code == 502
@@ -556,7 +547,10 @@ class OpenAICompatibleTransport:
                     connection,
                     url=join_openai_path(connection.endpoint, "/chat/completions"),
                     body=self._fold_system_into_user(body),
+                    chat_limits=(request.max_output_tokens, self.response_body_limit, request.reasoning_enabled),
                 )
+                if response.extensions.get('les_model_protocol') == local_model_http.OPENAI_CHAT_PROTOCOL:
+                    return await self._collect_local_chat(response, connection.model_id, token_sink)
                 raw = await self._read_bounded(response)
             if not 200 <= response.status_code < 300:
                 raise ModelTransportError(f"UPSTREAM_HTTP_ERROR: {response.status_code}")
@@ -595,12 +589,21 @@ class OpenAICompatibleTransport:
         connection: ResolvedModelConnection,
         request: InferenceRequest,
     ) -> AsyncIterator[InferenceEvent]:
+        if self.peer_verifier is validate_connected_peer and local_model_http.inference_ready():
+            response = await self._native_inference(connection, request, streaming=True, require_stream=True)
+            try:
+                async for event in self._bridge_chat_events(response, connection.model_id):
+                    yield event
+            finally:
+                await response.aclose()
+            return
         self._require(connection, CapabilityName.CHAT_COMPLETIONS)
         self._require(connection, CapabilityName.STREAMING)
         response = await self._open(
             connection,
             url=join_openai_path(connection.endpoint, "/chat/completions"),
             body=self._chat_body(connection, request, stream=True),
+            chat_limits=(request.max_output_tokens, self.response_body_limit, request.reasoning_enabled),
         )
         reasoning_output = ReasoningOutput(request.reasoning_enabled)
         thinking_reported = False
@@ -612,6 +615,10 @@ class OpenAICompatibleTransport:
             if not 200 <= response.status_code < 300:
                 await self._read_bounded(response)
                 raise ModelTransportError(f"UPSTREAM_HTTP_ERROR: {response.status_code}")
+            if response.extensions.get('les_model_protocol') == local_model_http.OPENAI_CHAT_PROTOCOL:
+                async for event in self._bridge_chat_events(response, connection.model_id):
+                    yield event
+                return
             if request.reasoning_enabled:
                 yield InferenceEvent(kind="reasoning", model_id=observed_model_id)
                 thinking_reported = True
@@ -703,10 +710,33 @@ class OpenAICompatibleTransport:
         *,
         release_after: bool = False,
     ) -> EmbeddingResponse:
-        self._require(connection, CapabilityName.EMBEDDINGS)
         normalized_inputs = tuple(str(item) for item in inputs)
         if not normalized_inputs:
             raise ValueError("inputs must not be empty")
+        if self.peer_verifier is validate_connected_peer and local_model_http.inference_ready():
+            try:
+                response = await local_model_http.open_embeddings(connection.revision_id, normalized_inputs,
+                    self.timeout, release_after=release_after,
+                    allow_remote=connection.locality is ConnectionLocality.REMOTE,
+                    response_limit=self.response_body_limit)
+            except (httpx.HTTPError, OSError, RuntimeError) as error:
+                raise ModelTransportError(str(error)) from error
+            try:
+                raw = await self._read_bounded(response, limit=self.response_body_limit * 8 + 256)
+                if not response.is_success:
+                    try:
+                        code = json.loads(raw).get('detail')
+                    except (ValueError, AttributeError):
+                        code = None
+                    raise ModelTransportError(code or f'UPSTREAM_HTTP_ERROR: {response.status_code}')
+                try:
+                    metadata, vectors = local_model_http.decode_embeddings(raw, len(normalized_inputs))
+                    return EmbeddingResponse(vectors, metadata['model_id'] or connection.model_id, _usage(metadata.get('usage')))
+                except (KeyError, ValueError) as error:
+                    raise ModelTransportError('UPSTREAM_EMBEDDING_RESPONSE_INVALID') from error
+            finally:
+                await response.aclose()
+        self._require(connection, CapabilityName.EMBEDDINGS)
         native = connection.capability_snapshot.transport_options.get("embedding_protocol") == "native_embedding_v1"
         body = {"model": connection.model_id, "input": list(normalized_inputs)}
         if native:
@@ -716,14 +746,14 @@ class OpenAICompatibleTransport:
             connection,
             url=self._native_chat_url(connection, "embed") if native else join_openai_path(connection.endpoint, "/embeddings"),
             body=body,
-            embed_limits=(len(normalized_inputs), self.response_body_limit) if native else None,
+            embed_limits=(len(normalized_inputs), self.response_body_limit),
         )
         try:
             if response.extensions.get("les_model_protocol") == local_model_http.EMBED_PROTOCOL:
                 raw = await self._read_bounded(response, limit=self.response_body_limit * 8 + 256)
                 try:
                     metadata, vectors = local_model_http.decode_embeddings(raw, len(normalized_inputs))
-                    return EmbeddingResponse(vectors, metadata["model_id"], _usage(metadata.get("usage")))
+                    return EmbeddingResponse(vectors, metadata["model_id"] or connection.model_id, _usage(metadata.get("usage")))
                 except (KeyError, ValueError) as exc:
                     raise ModelTransportError("UPSTREAM_EMBEDDING_RESPONSE_INVALID") from exc
             raw = await self._read_bounded(response)

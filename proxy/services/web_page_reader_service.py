@@ -117,6 +117,12 @@ def read_web_page(
     client_factory: Callable[..., Any] | None = None,
 ) -> dict[str, Any]:
     requested_url = str(url or "").strip()
+    from proxy.services import local_model_http
+    if config.mode == 'simple' and client_factory is None and resolver is socket.getaddrinfo and local_model_http.web_ready():
+        try:
+            return local_model_http.web_request('read', {'url': requested_url, 'max_chars': max_chars})
+        except (httpx.HTTPError, ValueError, RuntimeError):
+            return _empty_result('error', requested_url, warnings=['Служба чтения веб-страниц недоступна. Повторите запрос.'])
     from backend.product_edition import is_light
     if config.mode == "simple" and is_light():
         from proxy.services.public_page_reader import read_public_page

@@ -6,6 +6,7 @@ import re
 import json
 import asyncio
 from typing import Any
+from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -311,15 +312,9 @@ def _bound_roles(registry: ModelConnectionRegistry, revision_id: str) -> list[st
     ]
 
 
-_TEMPLATES: tuple[dict[str, Any], ...] = (
-    {"template_id": "freetoken", "display_name": "FreeToken", "base_url": "http://127.0.0.1:1919/v1", "locality": "loopback", "extension_type": "freetoken"},
-    {"template_id": "ollama", "display_name": "Ollama", "base_url": "http://127.0.0.1:11434/v1", "locality": "loopback", "extension_type": "ollama"},
-    {"template_id": "lemonade", "display_name": "Lemonade", "base_url": "http://127.0.0.1:13305/api/v1", "locality": "loopback", "extension_type": "lemonade"},
-    {"template_id": "mlx", "display_name": "MLX", "base_url": "http://127.0.0.1:8080/v1", "locality": "loopback", "extension_type": "mlx"},
-    {"template_id": "lm_studio", "display_name": "LM Studio", "base_url": "http://127.0.0.1:1234/v1", "locality": "loopback", "extension_type": "lm_studio"},
-    {"template_id": "llama_cpp", "display_name": "llama.cpp", "base_url": "http://127.0.0.1:8080/v1", "locality": "loopback", "extension_type": "llama_cpp"},
-    {"template_id": "openai_compatible", "display_name": "OpenAI-compatible", "base_url": "https://example.invalid/v1", "locality": "remote", "extension_type": None},
-)
+_TEMPLATES: tuple[dict[str, Any], ...] = tuple(json.loads(
+    (Path(__file__).resolve().parents[2] / 'config/model-connection-templates.json').read_text(encoding='utf-8')
+)['templates'])
 
 
 @router.get("")

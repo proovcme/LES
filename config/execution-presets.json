@@ -1,0 +1,16 @@
+{
+  "restrictive": {
+    "preset_id": "qwen-9b-restrictive", "model_family": "qwen-9b",
+    "input_token_limit": 6000, "generation_reserve_tokens": 1200,
+    "safety_reserve_tokens": 512, "normal_tool_count": 3, "max_tools": 5,
+    "max_batch_items": 5, "parallel_read_limit": 1, "reasoning_enabled": false,
+    "source_chain": ["workflow_invariants", "factory_preset"]
+  },
+  "extended": {
+    "preset_id": "qwen-35b-extended", "model_family": "qwen-35b",
+    "input_token_limit": 35000, "generation_reserve_tokens": 4096,
+    "safety_reserve_tokens": 2048, "normal_tool_count": 5, "max_tools": 8,
+    "max_batch_items": 12, "parallel_read_limit": 4, "reasoning_enabled": false,
+    "source_chain": ["workflow_invariants", "factory_preset"]
+  }
+}

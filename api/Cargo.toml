@@ -6,6 +6,7 @@ license-file = "../LICENSE"
 description = "Staged native LES API; route ownership is explicit"
 
 [dependencies]
+les-vector = { path = "../vector", optional = true }
 les-core = { path = "../core" }
 axum = { version = "=0.8.9", default-features = false, features = ["http1", "tokio"] }
 tokio = { version = "=1.54.1", features = ["rt-multi-thread", "net", "time", "sync"] }
@@ -14,6 +15,9 @@ futures-util = { version = "=0.3.34", default-features = false, features = ["std
 serde_json = { version = "=1.0.150", features = ["arbitrary_precision"] }
 percent-encoding = "=2.3.2"
 pdfium-render = { version = "=0.9.3", default-features = false, features = ["pdfium_7763"] }
+
+[features]
+edge = ["dep:les-vector"]
 
 [profile.release]
 lto = true

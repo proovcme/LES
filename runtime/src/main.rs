@@ -5,6 +5,7 @@ mod desktop_control;
 mod journal;
 mod probe;
 mod services;
+mod skill_runtime;
 
 use config::{Config, Failure, Result};
 use journal::Journal;

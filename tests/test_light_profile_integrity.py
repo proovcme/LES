@@ -1,5 +1,19 @@
 import copy
 import pytest
+
+
+@pytest.mark.parametrize('value',[None,True,False,1.9,-7,'1_2','1__2','_12','12_','１２','١٢','𝟙𝟚','+１２','＋１２',10**400,'9'*400,'\x1c12'])
+def test_native_retrieval_limits_preserve_previous_integer_and_unicode_semantics(value):
+    def previous(raw,default,low,high):
+        try:
+            number=int(raw)
+        except (TypeError,ValueError):
+            number=default
+        return min(high,max(low,number))
+    evidence=previous(value,6,1,64)
+    expected={'model_evidence_k':evidence,'retrieval_candidate_k':max(evidence,previous(value,64,1,512)),
+              'document_diversity_k':previous(value,2,1,32)}
+    assert profiles.effective_retrieval_policy({'rag_policy':{key:value for key in expected}})==expected
 from proxy.services import chat_profile_service as profiles
 from proxy.services.chat_evidence_application_service import profile_system_prompt
 

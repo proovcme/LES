@@ -43,6 +43,15 @@ pub fn route(method: &Method, path: &str) -> Option<Route> {
             ("POST", ["", "context", sid, "forget"]) if !sid.is_empty() => {
                 ("context_forget", Some(*sid), false)
             }
+            ("GET", ["", "context", sid, "messages"]) if !sid.is_empty() => {
+                ("context_exclusions", Some(*sid), false)
+            }
+            ("PUT", ["", "context", sid, "messages"]) if !sid.is_empty() => {
+                ("context_isolate", Some(*sid), false)
+            }
+            ("GET", ["", "context", sid, "report"]) if !sid.is_empty() => {
+                ("context_report", Some(*sid), false)
+            }
             _ => return None,
         }
     } else {
@@ -118,6 +127,13 @@ async fn arguments(request: Request, route: &Route) -> Result<Map<String, Value>
             query(&request, "kind").unwrap_or_default().into(),
         );
     }
+    if route.action == "context_report" {
+        let id = query(&request, "history_id")
+            .and_then(|id| id.parse::<i64>().ok())
+            .filter(|id| *id > 0)
+            .ok_or_else(|| invalid("Укажите сообщение для просмотра контекста."))?;
+        args.insert("history_id".into(), id.into());
+    }
     let needs_body = matches!(
         route.action,
         "project_create"
@@ -127,6 +143,7 @@ async fn arguments(request: Request, route: &Route) -> Result<Map<String, Value>
             | "note_update"
             | "context_update"
             | "context_forget"
+            | "context_isolate"
     );
     if needs_body {
         let bytes = to_bytes(request.into_body(), 1_048_576)
@@ -196,6 +213,13 @@ async fn arguments(request: Request, route: &Route) -> Result<Map<String, Value>
                         {
                             return Err(invalid("Invalid note value"));
                         }
+                        args.insert(key.into(), value.clone());
+                    }
+                }
+            }
+            "context_isolate" => {
+                for key in ["history_id", "role", "excluded"] {
+                    if let Some(value) = body.get(key) {
                         args.insert(key.into(), value.clone());
                     }
                 }

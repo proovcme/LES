@@ -7,7 +7,7 @@ from pathlib import Path
 from qdrant_client import models
 from backend import native_core
 from backend.interface import EmbeddingContractError
-from backend.native_index_store import mutate
+from backend.native_index_store import mutate, publication_directory, publication_request
 
 
 def retire_previous(client, collection: str, dataset: str, file_name: str, keep_ids: list[str]):
@@ -41,7 +41,8 @@ class ReplacementJournal:
 
     @classmethod
     def for_adapter(cls, adapter):
-        return cls(adapter.content_dir, adapter.collection_name)
+        return cls(os.environ.get("LES_INDEX_CONTENT_ROOT") or adapter.content_dir,
+                   adapter.collection_name)
 
     def _journal(self, action, **arguments):
         try:
@@ -155,8 +156,12 @@ class ReplacementJournal:
 
 def recover_adapter(adapter):
     journal = ReplacementJournal.for_adapter(adapter)
-    if journal.pending() is None:
+    pending = journal.pending()
+    if pending is None:
         return
+    if pending.get("document_id") and publication_directory(adapter) is not None:
+        if publication_request("recover_file", adapter.collection_name)["status"] in {"idle", "recovered"}:
+            return
     from backend import qdrant_support as support
     with journal.lease():
         with closing(support.qdrant_client.QdrantClient(

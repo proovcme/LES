@@ -53,6 +53,10 @@ async fn load_policy(context: &Context) -> Result<Policy, ()> {
         bytes.extend_from_slice(&chunk);
     }
     let value: Value = serde_json::from_slice(&bytes).map_err(|_| ())?;
+    parse_policy(&value)
+}
+
+fn parse_policy(value: &Value) -> Result<Policy, ()> {
     if value["schema"] != "les.native-auth-policy.v1" {
         return Err(());
     }
@@ -82,6 +86,29 @@ async fn load_policy(context: &Context) -> Result<Policy, ()> {
         cors_origins,
         cors_loopback,
     }))
+}
+
+/// Explicit startup policy allows a cold native API without consulting Python.
+/// A retained custom policy is never silently replaced with permissive defaults.
+pub fn from_file(path: &std::path::Path) -> Result<Policy, &'static str> {
+    use std::io::Read;
+    if !path.is_absolute() {
+        return Err("Absolute native authorization policy path required");
+    }
+    let file = std::fs::File::open(path).map_err(|_| "Native authorization policy unavailable")?;
+    let mut bytes = Vec::new();
+    file.take(16_385)
+        .read_to_end(&mut bytes)
+        .map_err(|_| "Native authorization policy unavailable")?;
+    if bytes.len() > 16_384 {
+        return Err("Native authorization policy too large");
+    }
+    let value: Value =
+        serde_json::from_slice(&bytes).map_err(|_| "Invalid native authorization policy")?;
+    match parse_policy(&value).map_err(|_| "Invalid native authorization policy")? {
+        Policy::Local(policy) => Ok(Policy::Local(policy)),
+        Policy::Legacy => Err("Native startup policy requires a compatible local policy"),
+    }
 }
 
 fn loopback_cors(origin: &str) -> bool {

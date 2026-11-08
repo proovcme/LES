@@ -128,7 +128,8 @@ def redirect(request:Request):return RedirectResponse(str(request.base_url)+'tar
         children.append(subprocess.Popen([executable,'--listen',f'127.0.0.1:{native_port}',
             '--upstream',upstream,'--database',str(database),'--state',str(tmp_path/'state'),
             '--frontend-assets',str(frontend),'--legacy-ui-url','http://127.0.0.1:55444/classic'],cwd=tmp_path,stdout=log,stderr=subprocess.STDOUT,
-            env={**os.environ,'LES_INTERNAL_MODEL_TOKEN':MODEL_BRIDGE_TOKEN},
+            env={**os.environ,'LES_INTERNAL_MODEL_TOKEN':MODEL_BRIDGE_TOKEN,
+                 'LES_ENV_PATH':str(tmp_path/'state/.env')},
             creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0)))
         url=f'http://127.0.0.1:{native_port}'
         with httpx.Client(base_url=url,timeout=15,trust_env=False,headers={'X-API-Key':'approved-fixture'}) as client:
@@ -545,6 +546,58 @@ def test_native_context_edit_forget_keeps_history_and_cas(gateway):
     with sqlite3.connect(database) as conn:assert conn.execute('SELECT count(*) FROM chat_history').fetchone()[0]==8
 
 
+def test_native_context_report_and_isolation_are_scoped_and_redact_private_sections(gateway):
+    from dataclasses import replace
+    from proxy.services.chat_evidence_context import (
+        confirm_context_delivery, govern_inference_messages, prepared_context_trace,
+    )
+    from proxy.services.model_execution_preset_service import _FACTORY_9B
+
+    client, database, _ = gateway
+    sid = client.post('/api/workspace/sessions', json={}).json()['session_id']
+    other = client.post('/api/workspace/sessions', json={}).json()['session_id']
+    path = f'/api/workspace/memory/context/{sid}'
+    visible_text = '[Источник 1] Лист проекта\nПроверяемая цитата 🌲'
+    evidence = (visible_text, '[Источник 2] ' + 'Длинный файл ' * 5000)
+    source_map = [
+        {'index': 1, 'doc_name': 'Проект 東京.pdf', 'source_page': 9, 'locator': {'source_sha256': 'a'*64, 'path': 'private-path'}},
+        {'index': 2, 'doc_name': 'Длинный файл.docx'},
+    ]
+    _, packet = govern_inference_messages(
+        preset=replace(_FACTORY_9B, input_token_limit=4000), profile_prefix='private-profile',
+        request_payload='private-question', evidence=evidence, source_map=source_map,
+    )
+    call = prepared_context_trace(packet, purpose='answer', source_map=source_map, evidence=evidence)
+    prepared = dict(call)
+    confirm_context_delivery(call, {'prompt_tokens': 234})
+    call['produced_answer'] = True
+    trace = {'context_governor': {'calls': [call, prepared]}}
+    with sqlite3.connect(database) as conn:
+        conn.execute('CREATE TABLE chat_history(id INTEGER PRIMARY KEY,session_id TEXT,question TEXT,answer TEXT,retrieval_trace_json TEXT)')
+        conn.execute('INSERT INTO chat_history VALUES (1,?,?,?,?)', (sid, 'Вопрос', 'Ответ', json.dumps(trace)))
+    assert client.get(f'/api/workspace/memory/context/{other}/report?history_id=1').status_code == 404
+    assert client.put(f'/api/workspace/memory/context/{other}/messages',
+                      json={'history_id': 1, 'role': 'assistant', 'excluded': True}).status_code == 404
+    response = client.get(path + '/report', params={'history_id': 1})
+    assert response.status_code == 200 and response.headers['x-les-handler'] == 'rust.catalog'
+    actual, unused = response.json()['calls']
+    assert actual['delivery'] == 'confirmed' and actual['produced_answer'] and actual['provider_prompt_tokens'] == 234
+    assert unused['delivery'] == 'prepared' and unused['provider_prompt_tokens'] is None
+    assert actual['sources'][0]['model_excerpt'] == visible_text
+    assert actual['sources'][0]['source_page'] == 9
+    assert actual['omitted_sources'] == [{'index': 2, 'doc_name': 'Длинный файл.docx'}]
+    assert actual['free'] == actual['budget'] - actual['used']
+    assert 'private-' not in response.text
+    assert 'Длинный файл Длинный файл' not in response.text
+    assert client.get(path + '/messages').json() == []
+    change = {'history_id': 1, 'role': 'assistant', 'excluded': True}
+    assert client.put(path + '/messages', json=change).json() == [{'history_id': 1, 'role': 'assistant'}]
+    assert client.put(path + '/messages', json=change).status_code == 200
+    assert client.get(path).json()['revision'] == 1
+    assert client.get(path + '/messages').json() == [{'history_id': 1, 'role': 'assistant'}]
+    assert client.put(path + '/messages', json={**change, 'excluded': False}).json() == []
+
+
 def test_native_agent_state_persists_plain_markdown_and_undo(gateway):
     client,database,folder=gateway
     path='/api/workspace/agent-state'
@@ -601,3 +654,152 @@ def test_native_agent_files_are_scoped_and_never_write_source_paths(gateway):
     changed=client.post(path,json={'action':'edit','area':'files','path':'notes/План #1.md','expected_revision':work.json()['revision'],'old_text':'Before','new_text':'After'})
     assert changed.status_code==200
     assert client.get(path,params={'action':'list'}).json()['files'][0]['path']=='notes/План #1.md'
+
+
+def test_native_model_listing_and_history_survive_upstream_stop(gateway):
+    from datetime import datetime, timedelta, timezone
+    from backend.workspace_native import catalog_call
+    from proxy.services.model_connection_contracts import (
+        CapabilityName, CapabilityObservation, CapabilitySnapshot, CapabilityState,
+        ConnectionLocality, ConnectionRole,
+    )
+    from proxy.services.model_connection_registry_service import ModelConnectionRegistry
+    from proxy.routers.model_connections import _admin_projection
+    from proxy.services.model_secret_service import EnvironmentSecretStore
+    client, database, folder = gateway
+    (folder/'native-auth-fixture.json').write_text(json.dumps({
+        'schema':'les.native-auth-policy.v1','trusted_role':None,'compatible':True,
+        'cors_origins':[],'cors_loopback':True,'proxy_header':'x-les-trusted-network',
+    }), encoding='utf-8')
+    # This fixture owns its keys and model registry; it never reads the working LES.
+    key_path = folder/'state/data/les_meta.db'
+    key_path.parent.mkdir(parents=True)
+    with sqlite3.connect(key_path) as db:
+        db.execute('CREATE TABLE auth_keys(key_value TEXT,role TEXT,expires_at TEXT,is_active INTEGER)')
+        db.executemany('INSERT INTO auth_keys VALUES (?,?,?,?)',[
+            ('approved-fixture','admin',None,1),('user-fixture','user',None,1)])
+    env_path = folder/'state/.env'
+    env_path.write_text('LES_MODEL_CONNECTION_TEST_API_KEY=fixture-never-return-this\n', encoding='utf-8')
+    registry = ModelConnectionRegistry(database)
+    revision = registry.create_connection(display_name='Модель 日本語 🌲',base_url='http://127.0.0.1:11434/v1',
+        model_id='fixture:9b',locality=ConnectionLocality.LOOPBACK,requested_context_tokens=24576,
+        secret_ref='env:LES_MODEL_CONNECTION_TEST_API_KEY',extension_type='ollama',actor='admin:test')
+    registry.bind_role(ConnectionRole.ANSWER, revision.revision_id, expected_binding_revision=None, actor='admin:test')
+    observed = datetime(2026,10,1,tzinfo=timezone.utc)
+    registry.save_capability_snapshot(CapabilitySnapshot('cap:fixture',revision.revision_id,(
+        CapabilityObservation(CapabilityName.CHAT_COMPLETIONS,CapabilityState.SUPPORTED,'probe',observed,'http_200'),
+    ),observed,observed+timedelta(days=1),{}),actor='admin:test')
+    secrets = EnvironmentSecretStore(env_path, environ={})
+    expected = _admin_projection(revision, registry=registry, secret_store=secrets).model_dump()
+    # Bootstrap native auth once, then stop the retained test backend completely.
+    templates = client.get('/api/model-connections/templates').raise_for_status()
+    assert templates.headers['x-les-handler']=='rust.model-registry'
+    assert any(t['template_id']=='ollama' for t in templates.json()['templates'])
+    assert client.post('/test-stop-upstream').status_code==200
+    wait_for(lambda:client.get('/api/light/instance').status_code==503)
+    listing=client.get('/api/model-connections').raise_for_status()
+    assert listing.headers['x-les-handler']=='rust.model-registry'
+    assert listing.headers['cache-control']=='no-store'
+    assert listing.json()['connections']==[expected]
+    assert listing.json()['bindings']['answer']['connection_revision_id']==revision.revision_id
+    assert 'secret_ref' not in listing.text and 'fixture-never-return-this' not in listing.text
+    assert client.get('/api/model-connections',headers={'X-API-Key':'user-fixture'}).status_code==403
+    # Legacy schemas migrate in Rust and keep a failed tool read distinct from success.
+    with sqlite3.connect(database) as db:
+        db.execute('CREATE TABLE chat_history(id INTEGER PRIMARY KEY,timestamp TEXT,question TEXT,answer TEXT,sources TEXT,crag_status TEXT,latency_sec REAL,tokens INTEGER,session_id TEXT)')
+        db.execute("INSERT INTO chat_history VALUES(1,'2026-10-01','Вопрос 日本語','Ответ','doc:1','UNVALIDATED',1,2,'chat:fixture')")
+    messages=client.get('/api/chat/history',params={'session_id':'chat:fixture'}).raise_for_status()
+    assert messages.headers['x-les-handler']=='rust.chat-history'
+    assert messages.json()[-1]['text']=='Ответ'
+    assert client.get('/api/chat/learning').json()[0]['id']==1
+    assert client.get('/api/chat/learning',params={'confirmed_only':True}).json()==[]
+    key=catalog_call(database,'chat_history_begin',safe_fallback='',session_id='chat:fixture',question='Прочитай PDF',attachment_context='')
+    failure={'code':'PDF_REVISION_CHANGED','detail':'PDF изменился. Проверка остановлена.'}
+    catalog_call(database,'chat_history_checkpoint',id=key,event='error',error=failure)
+    answer=client.get('/api/chat/history',params={'session_id':'chat:fixture'}).json()[-1]
+    assert answer['text']=='' and answer['crag']=='FAILED' and answer['meta']['error']==failure
+    assert [row['id'] for row in client.get('/api/chat/learning').json()]==[1]
+    sessions=client.get('/api/chat/sessions').raise_for_status().json()
+    assert sessions[0]['session_id']=='chat:fixture' and sessions[0]['msg_count']==2
+    assert client.get('/api/chat/history?limit=oops').status_code==422
+    assert client.get('/api/chat/learning?confirmed_only=oops').status_code==422
+
+
+def test_native_cold_start_and_restart_without_any_python_server(tmp_path):
+    from backend.workspace_native import catalog_call
+    executable=os.getenv('LES_TEST_NATIVE_API')
+    if not executable:
+        pytest.skip('Build les-api for the cold native startup gate')
+    state=tmp_path/'state'
+    (state/'data').mkdir(parents=True)
+    (state/'.env').write_text('',encoding='utf-8')
+    database=state/'data/meta.db'
+    auth_file=state/'native-auth-policy.json'
+    auth_file.write_text(json.dumps({
+        'schema':'les.native-auth-policy.v1','trusted_role':None,'compatible':True,
+        'cors_origins':[],'cors_loopback':True,'proxy_header':'x-les-trusted-network',
+    }),encoding='utf-8')
+    with sqlite3.connect(state/'data/les_meta.db') as db:
+        db.execute('CREATE TABLE auth_keys(key_value TEXT,role TEXT,expires_at TEXT,is_active INTEGER)')
+        db.executemany('INSERT INTO auth_keys VALUES(?,?,?,?)',[
+            ('admin-cold-fixture','admin',None,1),('user-cold-fixture','user',None,1)])
+    frontend=static_frontend(tmp_path)
+    listen=free_port();upstream=free_port()
+    while listen==upstream: upstream=free_port()
+    command=[executable,'--listen',f'127.0.0.1:{listen}','--upstream',f'http://127.0.0.1:{upstream}',
+        '--database',str(database),'--state',str(state),'--frontend-assets',str(frontend),
+        '--auth-policy-file',str(auth_file)]
+    environment={**os.environ,'LES_ENV_PATH':str(state/'.env')}
+    log=(tmp_path/'native-server.log').open('wb')
+    children=[]
+    def start():
+        child=subprocess.Popen(command,cwd=tmp_path,env=environment,stdout=log,stderr=subprocess.STDOUT,
+                               creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+        children.append(child)
+        wait_for(lambda:client.get('/api/model-connections/templates').status_code==200)
+        return child
+    with httpx.Client(base_url=f'http://127.0.0.1:{listen}',headers={'X-API-Key':'admin-cold-fixture'},
+                      trust_env=False,timeout=10) as client:
+        try:
+            child=start()
+            assert client.get('/api/model-connections').json()=={
+                'connections':[], 'bindings':{'answer':None,'embeddings':None,'local_fallback':None}}
+            assert client.get('/api/model-connections',headers={'X-API-Key':'user-cold-fixture'}).status_code==403
+            assert client.get('/api/model-connections',headers={'X-API-Key':''}).status_code==401
+            assert client.get('/api/workspace/sessions').status_code==200
+            created=client.post('/api/workspace/sessions',json={'title':'После перезапуска 日本語'}).raise_for_status().json()
+            sid=created['session_id']
+            key=catalog_call(database,'chat_history_begin',safe_fallback='',session_id=sid,question='Прочитай PDF',attachment_context='')
+            reason={'code':'PDF_PAGE_INCOMPLETE','detail':'Страница PDF прочитана не полностью.'}
+            catalog_call(database,'chat_history_checkpoint',id=key,event='error',error=reason)
+            before=client.get('/api/chat/history',params={'session_id':sid}).raise_for_status().json()
+            assert before[-1]['meta']['error']==reason
+            assert client.get('/app/').status_code==200
+            assert client.get('/api/light/native-auth-policy').status_code==404
+            child.kill();child.wait(timeout=10)
+            start()
+            after=client.get('/api/chat/history',params={'session_id':sid}).raise_for_status().json()
+            assert after==before
+            assert client.get(f'/api/workspace/sessions/{sid}').json()['title']=='После перезапуска 日本語'
+            assert client.get('/api/chat/sessions').json()[0]['session_id']==sid
+            # The retained routes are still unavailable, never reported as native functionality.
+            assert client.get('/unported-fixture-route').status_code==503
+        finally:
+            for child in reversed(children):
+                if child.poll() is None:child.kill()
+                child.wait(timeout=10)
+            log.close()
+
+
+@pytest.mark.parametrize('policy', [b'{}',b'x'*16385,b'{"schema":"les.native-auth-policy.v1","compatible":false}'])
+def test_invalid_native_startup_policy_never_starts_or_creates_database(tmp_path,policy):
+    executable=os.getenv('LES_TEST_NATIVE_API')
+    if not executable:pytest.skip('Build les-api for startup policy validation')
+    file=tmp_path/'policy.json';file.write_bytes(policy)
+    listen=free_port();upstream=free_port()
+    while listen==upstream:upstream=free_port()
+    result=subprocess.run([executable,'--listen',f'127.0.0.1:{listen}','--upstream',f'http://127.0.0.1:{upstream}',
+        '--database',str(tmp_path/'never-created.db'),'--state',str(tmp_path),'--auth-policy-file',str(file)],
+        cwd=tmp_path,capture_output=True,timeout=10)
+    assert result.returncode==1 and b'native_api_configuration_rejected' in result.stderr
+    assert not (tmp_path/'never-created.db').exists()

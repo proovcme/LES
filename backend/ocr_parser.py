@@ -248,6 +248,15 @@ class TesseractOCRParser:
 
     def parse_pdf(self, pdf_path: Path, prompt: Optional[str] = None, dpi: int = 0) -> str:
         dpi = dpi or int(os.getenv("RAG_OCR_TESSERACT_DPI", "300"))  # tesseract любит 300
+        from backend.windows_ocr import _native
+        import shutil
+        binary = shutil.which(self.binary)
+        if binary:
+            text = _native(pdf_path, dpi, kind='pdf_ocr', engine='tesseract', helper=Path(binary).resolve(),
+                language=self.lang, psm=int(self.psm),
+                timeout_ms=int(float(os.getenv('RAG_OCR_TESSERACT_TIMEOUT', '120')) * 1000))
+            if text is not None:
+                return text
         images = render_pdf_to_images(pdf_path, dpi=dpi)
         if not images:
             return ""

@@ -49,7 +49,6 @@ async def native_intake_policy():
 class NativeIntakeBatch(BaseModel):
     dataset_id: str
     intake_id: str = Field(pattern=r"^[0-9a-f]{32}$")
-    batch_limit: int = Field(ge=1, le=500)
 
 
 @native_router.post("/internal-intake-parse", dependencies=[Depends(_require_native_intake)])
@@ -59,13 +58,19 @@ async def native_intake_parse(batch: NativeIntakeBatch):
 
     state = dataset_runtime.get_dataset_state()
     async with state.parse_semaphore:
-        job = await asyncio.to_thread(catalog_call, rag_meta_db_path(), "intake_get", id=batch.intake_id)
+        database = rag_meta_db_path()
+        job = await asyncio.to_thread(catalog_call, database, "intake_get", id=batch.intake_id)
         if not job or job["dataset_id"] != batch.dataset_id or job["phase"] != "index" or job["status"] != "running":
             raise HTTPException(404, "Задание индексации не найдено.")
-        progress = state.backend.db.dataset_parse_progress
-        pending = (await asyncio.to_thread(progress, batch.dataset_id))["pending"]
-        if not pending:
-            return Response(status_code=204)
+        selected = await asyncio.to_thread(catalog_call, database, "intake_index_batch", id=batch.intake_id)
+        if not selected:
+            # The last catalog transaction may have committed before the journal was cleared.
+            from backend.index_replacement import recover_adapter
+            await asyncio.to_thread(recover_adapter, state.backend)
+            selected = await asyncio.to_thread(catalog_call, database, "intake_index_batch", id=batch.intake_id)
+            if not selected:
+                return Response(status_code=204)
+        sources = [(source["file_name"], source["source_path"]) for source in selected]
         try:
             await dataset_scheduler.assert_parse_admission(state)
         except HTTPException as error:
@@ -73,12 +78,13 @@ async def native_intake_parse(batch: NativeIntakeBatch):
             if error.status_code == 409:
                 raise HTTPException(412, "Проверьте модель поиска.") from error
             raise
-        result = await state.backend.parse_dataset(batch.dataset_id, limit=batch.batch_limit)
+        result = await state.backend.parse_dataset(batch.dataset_id, limit=len(sources), sources=sources,
+                                                   intake_id=batch.intake_id)
         dataset_scheduler._schedule_reader_after_parse(
             batch.dataset_id, reason="native_intake", parse_result=result,
         )
-        after = (await asyncio.to_thread(progress, batch.dataset_id))["pending"]
-        if after >= pending:
+        after = await asyncio.to_thread(catalog_call, database, "intake_index_batch", id=batch.intake_id)
+        if after == selected:
             raise HTTPException(409, "Партия не продвинулась.")
         return {"status": "processed"}
 

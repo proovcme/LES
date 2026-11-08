@@ -17,15 +17,30 @@ export interface Source {
 }
 export interface Message {
   role: 'user' | 'ai'; text: string; srcs?: string[]; crag?: string;
+  history_id?: number;
   meta?: AnswerMeta;
 }
+export interface ContextExclusion { history_id: number; role: 'user' | 'assistant' }
+export interface ContextReportSource extends Source { model_excerpt?: string; excerpt_limited?: boolean }
+export interface ContextReportCall {
+  purpose: 'answer' | 'tool_decision'; delivery: 'confirmed' | 'prepared' | 'legacy'; produced_answer: boolean;
+  used: number; budget: number; free: number; generation_reserve: number | null; safety_reserve: number | null;
+  provider_prompt_tokens: number | null;
+  sections: { kind: string; tokens: number }[];
+  omissions: { kind: string; count: number; reason: 'budget_exhausted' }[];
+  sources: ContextReportSource[]; omitted_sources: { index: number; doc_name: string }[];
+}
+export const contextPath = (sid: string) => `/api/workspace/memory/context/${encodeURIComponent(sid)}`;
 export interface AnswerMeta {
+  error?: { code?: string; detail: string };
   execution?: ExecutionSummary | null;
   source_map?: Source[]; partial?: boolean; completion_status?: string;
   retrieval_trace?: { status?: string; tool_loop?: { status?: string }; execution?: ExecutionSummary; citation_check?: CitationCheck };
   blocker?: { action?: string }; total_status?: string;
 }
 export interface ChatPayload {
+  error?: { code?: string; detail: string };
+  history_id?: number;
   execution?: ExecutionSummary | null;
   answer?: string; response?: string; sources?: string[]; source_map?: Source[];
   retrieval_trace?: { source_map?: Source[]; status?: string; tool_loop?: { status?: string }; execution?: ExecutionSummary; citation_check?: CitationCheck };

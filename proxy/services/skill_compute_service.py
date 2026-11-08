@@ -1,99 +1,62 @@
-"""Execute only operator-reviewed, hash-pinned pure skill functions."""
+"""Compatibility codec for native approved-skill scheduling and persistence."""
 import asyncio
-import hashlib
-import json
 import os
 from pathlib import Path
-import re
-import subprocess
 import sys
-import time
 
-import psutil
-from uuid import uuid4
-
+from backend import native_core
 from backend.runtime_paths import mutable_path
-from proxy.services.installed_skill_service import _file, library_root
+from proxy.services.installed_skill_service import library_root
+
+
+class SkillExecutionError(ValueError):
+    def __init__(self,code,message):
+        self.code=code
+        super().__init__(message)
+
+
+def _program():
+    explicit=os.getenv('LES_SKILL_PYTHON')
+    if explicit:
+        return str(Path(explicit).resolve())
+    if not native_core.supports('skill_runtime'):
+        raise SkillExecutionError('SKILL_RUNTIME_COMPONENT_MISSING',
+            'Компонент внешних навыков устарел. Восстановите установку Леса.')
+    response=native_core.required('skills',request={
+        'schema':'les.skills.v1','action':'runtime',
+        'root':str(Path(__file__).resolve().parents[2]),
+        'application':str(Path(sys.executable).resolve())})
+    if response.get('ok') is not True:
+        error=response.get('error',{})
+        raise SkillExecutionError(error.get('code','SKILL_RUNTIME_INVALID'),
+                                  error.get('message','Не удалось выбрать исполнитель внешних навыков'))
+    return response['value']['program']
+
+
+def _native(action, **fields):
+    if action in {'calculate','resume'}:
+        fields['program']=_program()
+    response = native_core.required('skills', request={
+        'schema': 'les.skills.v1', 'action': action,
+        'library': str(library_root().resolve()),
+        'artifacts': str(mutable_path('artifacts/skill-compute').resolve()),
+        **fields})
+    if response.get('ok') is not True:
+        error=response.get('error',{})
+        raise SkillExecutionError(error.get('code','SKILL_EXECUTION_FAILED'),error.get('message','Не удалось выполнить навык'))
+    return response['value']
 
 
 def approved_scripts():
-    path = library_root() / 'approved-compute.json'
-    return json.loads(path.read_text(encoding='utf-8')) if path.exists() else []
+    return _native('approvals')['scripts']
 
 
 def calculate(skill, path, items):
-    approved = next((item for item in approved_scripts() if item['skill'] == skill and item['path'] == path), None)
-    if approved is None:
-        raise ValueError('Скрипт не разрешён для вычислений')
-    source = _file(skill, path).read_bytes()
-    digest = hashlib.sha256(source).hexdigest()
-    if digest != approved['sha256']:
-        raise ValueError('Скрипт изменён после проверки. Выполнение остановлено')
-    if not re.fullmatch(r'[A-Za-z][A-Za-z0-9_]*', approved['entrypoint']):
-        raise ValueError('Некорректная точка входа')
-    if not isinstance(items, list) or not 1 <= len(items) <= 100:
-        raise ValueError('Передайте от 1 до 100 позиций')
-    ids = [item.get('id') for item in items if isinstance(item, dict)]
-    if len(ids) != len(items) or any(not isinstance(key, str) or not 1 <= len(key) <= 100 for key in ids) or len(set(ids)) != len(ids):
-        raise ValueError('Для каждой позиции нужен уникальный строковый ID')
-    if any(not isinstance(item.get('input'), dict) for item in items):
-        raise ValueError('Входные данные каждой позиции должны быть объектом JSON')
-    request = json.dumps({'sha256': digest, 'entrypoint': approved['entrypoint'], 'items': items},
-                         ensure_ascii=False, allow_nan=False)
-    if len(request.encode('utf-8')) > 256000:
-        raise ValueError('Входные данные превышают 256 КБ')
-    job_id = uuid4().hex
-    work = mutable_path('artifacts/skill-compute') / job_id
-    work.mkdir(parents=True)
-    (work / 'script.py').write_bytes(source)
-    (work / 'input.json').write_text(request, encoding='utf-8')
-    worker = Path(__file__).resolve().parents[2] / 'tools/skill_compute_worker.py'
-    # No connection tokens, model settings or user-defined Python paths in the child.
-    environment = {key: value for key, value in os.environ.items()
-                   if key.upper() in {'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP'}}
-    interrupted = False
-    try:
-        command=[sys.executable, '-I', '-S', '-X', 'utf8', str(worker)]
-        if sys.platform == 'darwin':
-            with subprocess.Popen(command, cwd=work, env=environment, stdin=subprocess.DEVNULL,
-                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) as child:
-                deadline=time.monotonic()+20
-                while child.poll() is None:
-                    try:
-                        over_memory=psutil.Process(child.pid).memory_info().rss > 512*1024*1024
-                    except psutil.NoSuchProcess:
-                        break
-                    if over_memory or time.monotonic() >= deadline:
-                        child.kill();child.wait();interrupted=True;break
-                    time.sleep(.02)
-                interrupted=interrupted or child.wait() != 0
-        else:
-            completed = subprocess.run([sys.executable, '-I', '-S', '-X', 'utf8', str(worker)],
-                cwd=work, env=environment, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL, timeout=20,
-                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-            interrupted = completed.returncode != 0
-    except subprocess.TimeoutExpired:
-        interrupted = True
-    results = [json.loads(file.read_text(encoding='utf-8')) for file in sorted(work.glob('[0-9][0-9][0-9][0-9].json'))]
-    summary = {'job_id': job_id, 'script_sha256': digest, 'total': len(items),
-               'completed': len(results), 'succeeded': sum(row['status'] == 'ok' for row in results),
-               'interrupted': interrupted, 'pending_ids': ids[len(results):]}
-    (work / 'summary.json').write_text(json.dumps(summary, ensure_ascii=False), encoding='utf-8')
-    return {**summary, 'rows': results[:10], 'next_offset': 10 if len(results) > 10 else None}
+    return _native('calculate', skill=skill, path=path, items=items)
 
 
 def read_job(job_id, offset=0):
-    if not re.fullmatch(r'[a-f0-9]{32}', job_id):
-        raise ValueError('Некорректный номер расчёта')
-    work = mutable_path('artifacts/skill-compute') / job_id
-    if not work.is_dir():
-        raise ValueError('Расчёт не найден')
-    files = sorted(work.glob('[0-9][0-9][0-9][0-9].json'))
-    offset = max(0, int(offset))
-    rows = [json.loads(file.read_text(encoding='utf-8')) for file in files[offset:offset + 10]]
-    return {'job_id': job_id, 'rows': rows, 'saved_rows': len(files),
-            'next_offset': offset + len(rows) if offset + len(rows) < len(files) else None}
+    return _native('read_job', job_id=job_id, offset=max(0, int(offset)))
 
 
 def register_tools(registry):

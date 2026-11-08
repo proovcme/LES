@@ -6,9 +6,9 @@ import pytest
 
 from proxy.services import typed_memory_projection_service as memory
 from proxy.services.chat_evidence_application_service import (
-    context_packet_trace,
     govern_inference_messages,
 )
+from proxy.services.chat_evidence_context import context_packet_trace
 from proxy.services.context_governor_service import ContextKind
 from proxy.services.model_execution_preset_service import _FACTORY_9B
 

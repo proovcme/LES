@@ -16,6 +16,7 @@ def pytest_configure(config):
 # Test collection/imports and health/config reads must not download models or
 # depend on whether the workstation currently has internet access.
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("HF_HUB_CACHE", str(Path(__file__).resolve().parent / '.empty-hf-cache'))
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 os.environ.setdefault("RAG_TOKENIZER_LOCAL_FILES_ONLY", "true")
 os.environ.setdefault("LES_FORMAT_WORKER_MODE", "inline")  # Unit mocks stay local; worker gates explicitly select native.

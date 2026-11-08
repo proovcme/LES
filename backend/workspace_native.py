@@ -35,6 +35,10 @@ def invoke(operation, schema, database, action, arguments):
     logger.warning('Native workspace operation failed: action=%s code=%s sqlite_extended=%s',
                    action, code, result.get('sqlite_extended'))
     detail = str(result.get('detail') or 'Не удалось прочитать или сохранить диалог.')
+    if code in {'MODEL_REGISTRY_ERROR', 'MODEL_REGISTRY_CONFLICT'}:
+        from proxy.services.model_connection_registry_service import ModelConnectionRegistryError, RevisionConflictError
+        error_type = RevisionConflictError if code == 'MODEL_REGISTRY_CONFLICT' else ModelConnectionRegistryError
+        raise error_type(detail)
     if code == 'WORKSPACE_CONFLICT':
         from proxy.services.chat_session_service import SessionConflictError
         raise SessionConflictError(detail)

@@ -19,12 +19,12 @@
 
 | Метрика | Значение |
 | --- | --- |
-| Python-файлов под git | 673 |
-| Строк Python | 170360 |
-| PRODUCT_REACHABLE | 412 |
+| Python-файлов под git | 716 |
+| Строк Python | 173570 |
+| PRODUCT_REACHABLE | 421 |
 | RUNTIME_SUPPORT | 5 |
-| TEST_OR_TOOL_ONLY | 221 |
-| DORMANT_CANDIDATE | 35 |
+| TEST_OR_TOOL_ONLY | 256 |
+| DORMANT_CANDIDATE | 34 |
 | Зарегистрированных API-маршрутов | 300 |
 | Ошибок разбора | 0 |
 
@@ -36,38 +36,38 @@
 | proxy/services/dataset_memory_service.py | 2284 | 9 |
 | mlx_host.py | 2216 | 0 |
 | sovushka/pages/chat.py | 2200 | 2 |
-| proxy/services/chat_evidence_application_service.py | 2115 | 7 |
+| proxy/services/chat_evidence_application_service.py | 2122 | 7 |
 | proxy/services/project_pdf_table_service.py | 1653 | 2 |
 | sovushka/pages/diag.py | 1606 | 1 |
 | proxy/services/checklist_review_service.py | 1518 | 1 |
 | proxy/routers/mail.py | 1502 | 4 |
 | proxy/services/retrieval_service.py | 1440 | 12 |
 | proxy/services/cad_bim_graph.py | 1425 | 3 |
-| proxy/services/tool_harness_service.py | 1421 | 21 |
+| proxy/services/tool_harness_service.py | 1274 | 25 |
 | proxy/services/context_memory_service.py | 1175 | 8 |
 | sovushka/pages/samovar.py | 1143 | 3 |
-| backend/document_router.py | 1118 | 9 |
+| backend/document_router.py | 1118 | 10 |
 | tools/build_rag_contract_sibling.py | 1114 | 2 |
-| backend/document_catalog.py | 1068 | 11 |
+| backend/document_catalog.py | 1068 | 16 |
 | tools/reindex_datasets_guarded.py | 1016 | 1 |
 | proxy/services/drawing_manifest_service.py | 1012 | 3 |
-| sovushka/components/header.py | 991 | 2 |
-| backend/parquet_writer.py | 983 | 4 |
+| sovushka/components/header.py | 1003 | 2 |
 | proxy/routers/runtime.py | 922 | 3 |
 | proxy/services/project_pdf_extract_service.py | 915 | 4 |
-| proxy/services/chat_profile_service.py | 914 | 8 |
 | tools/les_runtime_control.py | 913 | 4 |
 | proxy/services/document_explorer_service.py | 904 | 5 |
 | proxy/services/mail_registry_service.py | 903 | 6 |
 | proxy/services/project_document_registry_service.py | 853 | 3 |
+| backend/parquet_writer.py | 834 | 6 |
 | proxy/services/notebook_study_service.py | 833 | 3 |
 | backend/mail_profile.py | 825 | 5 |
+| proxy/services/chat_request_service.py | 800 | 6 |
 
 ## Чат Light: фактические потребители
 
 ### `proxy/routers/chat.py`
 
-Статус: `PRODUCT_REACHABLE`; строк: 464.
+Статус: `PRODUCT_REACHABLE`; строк: 469.
 
 | Импортируемый символ | Потребители |
 | --- | --- |
@@ -118,7 +118,6 @@
 | proxy/services/spreadsheet_object_model.py | 153 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/stesnennost_service.py | 116 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/table_detect.py | 86 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
-| proxy/services/table_sql_service.py | 222 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/tool_provider_projection_service.py | 23 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/unified_construction_harness_service.py | 959 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/update_service.py | 1082 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |

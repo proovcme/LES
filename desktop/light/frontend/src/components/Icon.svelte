@@ -10,6 +10,7 @@
     stop: 'M6 6h12v12H6Z', file: 'M5 3h9l5 5v13H5V3Zm9 0v6h5M8 13h8M8 17h6',
     external: 'M14 3h7v7M21 3l-11 11M10 5H3v16h16v-7',
     menu: 'M4 6h16M4 12h16M4 18h16', check: 'm5 12 4 4L19 6',
+    status: 'M3 12h5l3-7 3 14 3-7h4',
   };
 </script>
 <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={paths[name] || paths.file} /></svg>

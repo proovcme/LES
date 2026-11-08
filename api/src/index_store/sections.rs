@@ -28,13 +28,29 @@ fn id(value: &Value) -> Result<String, &'static str> {
     value.as_u64().map(|n| n.to_string()).ok_or(CHANGED)
 }
 
-async fn request(
+pub(super) async fn request(
     context: &Context,
     store: &Store,
     collection: &str,
     scroll: bool,
     body: Value,
 ) -> Result<Value, &'static str> {
+    #[cfg(feature = "edge")]
+    if let Some(edge) = &store.edge {
+        if edge.collection() != collection {
+            return Err(SCOPE);
+        }
+        let edge = edge.clone();
+        let action = if scroll { "scroll" } else { "retrieve" };
+        let value = tokio::task::spawn_blocking(move || edge.call(action, &body))
+            .await
+            .map_err(|_| UNAVAILABLE)?
+            .map_err(|_| UNAVAILABLE)?;
+        if value.to_string().len() > 24 * 1024 * 1024 {
+            return Err(LIMIT);
+        }
+        return Ok(value);
+    }
     let mut url = store.target.clone();
     {
         let mut path = url.path_segments_mut().map_err(|_| UNAVAILABLE)?;
@@ -73,6 +89,10 @@ async fn request(
 
 async fn read(context: &Context, store: &Store, body: &Value) -> Result<Value, &'static str> {
     let collection = collection_name(body).ok_or(SCOPE)?;
+    let revision = store.revision(context, collection).await?;
+    if body.get("revision").is_some_and(|v| v != &revision) {
+        return Err(CHANGED);
+    }
     let seeds = body["seeds"]
         .as_array()
         .filter(|items| !items.is_empty() && items.len() <= 50)
@@ -84,6 +104,9 @@ async fn read(context: &Context, store: &Store, body: &Value) -> Result<Value, &
     let mut ids = Vec::new();
     let mut seen = HashSet::new();
     for seed in seeds {
+        if seed.get("_index_revision").is_some_and(|v| v != &revision) {
+            return Err(CHANGED);
+        }
         let key = seed["id"].as_str().ok_or(SCOPE)?;
         let id = if valid_id(&seed["id"]) {
             json!(key)
@@ -178,6 +201,14 @@ async fn read(context: &Context, store: &Store, body: &Value) -> Result<Value, &
                 if fields(payload) != key || !evidence(payload) {
                     return Err(SCOPE);
                 }
+                if seeds.iter().filter(|seed| fields(seed) == key).any(|seed| {
+                    seed["source_sha256"]
+                        .as_str()
+                        .is_some_and(|s| !s.is_empty())
+                        && seed["source_sha256"] != payload["source_sha256"]
+                }) {
+                    return Err(CHANGED);
+                }
                 let id = id(&row["id"])?;
                 if !point_ids.insert(id.clone()) {
                     return Err(CHANGED);
@@ -202,6 +233,9 @@ async fn read(context: &Context, store: &Store, body: &Value) -> Result<Value, &
             return Err(CHANGED);
         }
         sections.push(json!({"scope":scope,"points":points}));
+    }
+    if store.revision(context, collection).await? != revision {
+        return Err(CHANGED);
     }
     Ok(json!({"current":current,"sections":sections}))
 }

@@ -620,8 +620,6 @@ async def _run_chat(req: chat_request_contracts.ChatRequest, token_sink=None):
             "evidence": "source_map+project_inventory_artifact",
         }
 
-    table_result = None
-
     from proxy.services.runtime_admission import live_memory_metrics
     fresh_metrics = await asyncio.to_thread(live_memory_metrics, state.metrics_cache)
     admission = evaluate_chat_admission(
@@ -753,7 +751,6 @@ async def _run_chat(req: chat_request_contracts.ChatRequest, token_sink=None):
         use_validation=use_validation,
         validation_skip_reason=validation_skip_reason,
         route=query_intent,
-        table_result=table_result,
         request_started_at=t_request_start,
         profile_snapshot=_profile_snapshot,
     )

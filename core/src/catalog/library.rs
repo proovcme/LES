@@ -4,7 +4,7 @@ use crate::workspace::{Failure, Result};
 use rusqlite::{functions::FunctionFlags, params, Connection};
 use serde_json::{json, Value};
 
-fn visible(name: &str) -> bool {
+pub(crate) fn visible(name: &str) -> bool {
     let leaf = name.rsplit(['/', '\\']).next().unwrap_or_default();
     !["~$", ".~lock.", "._"]
         .iter()
@@ -13,6 +13,19 @@ fn visible(name: &str) -> bool {
             leaf,
             ".pdf_preprocess_state.json" | "_les_dataset_profile.json"
         )
+}
+
+pub(crate) fn register_visibility(conn: &Connection) -> rusqlite::Result<()> {
+    conn.create_scalar_function(
+        "les_visible_document",
+        1,
+        FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+        |ctx| {
+            Ok(ctx
+                .get::<Option<String>>(0)?
+                .is_some_and(|name| visible(&name)))
+        },
+    )
 }
 
 fn create(conn: &Connection, args: &Args) -> Result<Value> {
@@ -117,11 +130,7 @@ pub(super) fn execute(conn: &Connection, action: &str, args: &Args) -> Result<Va
         return create(conn, args);
     }
     let flags = FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC;
-    conn.create_scalar_function("les_visible_document", 1, flags, |ctx| {
-        Ok(ctx
-            .get::<Option<String>>(0)?
-            .is_some_and(|name| visible(&name)))
-    })?;
+    register_visibility(conn)?;
     conn.create_scalar_function("les_name_matches", 2, flags, |ctx| {
         let name = ctx.get::<Option<String>>(0)?.unwrap_or_default();
         Ok(name.to_lowercase().contains(&ctx.get::<String>(1)?))

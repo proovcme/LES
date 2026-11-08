@@ -159,6 +159,7 @@ def rag_chunk_overlap() -> int:
 # старое поведение (символы) без реиндекса.
 
 _token_len_fn_cache: object = None
+_token_len_fn_key: tuple | None = None
 
 
 def rag_chunk_unit() -> str:
@@ -179,15 +180,50 @@ def embed_seq_len() -> int:
     return int(os.getenv("COREML_EMBED_SEQ_LEN", "512"))
 
 
+def _local_tokenizer_asset(model_id: str) -> Path | None:
+    explicit = os.getenv('RAG_TOKENIZER_FILE', '').strip()
+    if explicit:
+        return Path(explicit).expanduser().resolve()
+    if not re.fullmatch(r'[\w.-]+(?:/[\w.-]+)?', model_id) or '..' in model_id:
+        return None
+    hf_home = Path(os.getenv('HF_HOME') or Path.home() / '.cache/huggingface').expanduser()
+    hub = Path(os.getenv('HF_HUB_CACHE') or os.getenv('HUGGINGFACE_HUB_CACHE') or hf_home / 'hub').expanduser()
+    repository = hub / ('models--' + model_id.replace('/', '--'))
+    try:
+        revision = (repository / 'refs/main').read_text(encoding='ascii').strip()
+    except (OSError, UnicodeError):
+        revision = ''
+    if re.fullmatch(r'[a-f0-9]{40,64}', revision):
+        file = repository / 'snapshots' / revision / 'tokenizer.json'
+        return file if file.is_file() else None
+    candidates = [file for file in (repository / 'snapshots').glob('*/tokenizer.json') if file.is_file()]
+    return candidates[0] if len(candidates) == 1 else None
+
+
 def token_length_fn():
     """Счётчик токенов токенизатором модели эмбеддингов (лениво, кэшируется).
 
     None — если transformers/токенизатор недоступны: вызывающий код обязан
     откатиться на символьный режим с громким предупреждением.
     """
-    global _token_len_fn_cache
-    if _token_len_fn_cache is not None:
+    global _token_len_fn_cache, _token_len_fn_key
+    model_id = embedding_model_id()
+    explicit = os.getenv('RAG_TOKENIZER_FILE', '').strip()
+    key = (model_id, explicit, os.getenv('HF_HUB_CACHE'), os.getenv('HF_HOME'))
+    if _token_len_fn_key == key and _token_len_fn_cache is not None:
         return _token_len_fn_cache if callable(_token_len_fn_cache) else None
+    _token_len_fn_key = key
+    _token_len_fn_cache = None
+    from backend import native_core
+    asset = _local_tokenizer_asset(model_id)
+    if asset is not None and native_core.supports('document_tokenizer'):
+        try:
+            _token_len_fn_cache = native_core.LocalTokenizer(asset)
+            return _token_len_fn_cache
+        except native_core.NativeCoreError:
+            if explicit:
+                raise
+            logging.getLogger(__name__).warning('[CHUNK] локальный токенизатор %s не удалось прочитать', model_id)
     try:
         from transformers import AutoTokenizer
 
@@ -197,7 +233,7 @@ def token_length_fn():
             "1", "true", "yes", "on"
         }
         tokenizer = AutoTokenizer.from_pretrained(
-            embedding_model_id(),
+            model_id,
             local_files_only=local_only,
         )
 
@@ -217,7 +253,9 @@ def token_length_fn():
 
 def chunking_config() -> dict:
     """Итоговая конфигурация чанкера: unit/size/overlap/len_fn + страховка ADR-7."""
-    if rag_chunk_unit() == "tokens":
+    stored = read_index_contract() or {}
+    explicit = bool(os.getenv('RAG_TOKENIZER_FILE', '').strip())
+    if rag_chunk_unit() == "tokens" and (stored.get('chunk_unit') != 'chars' or explicit):
         len_fn = token_length_fn()
         if len_fn is not None:
             size = rag_chunk_tokens()
@@ -276,6 +314,10 @@ def index_contract_payload() -> dict[str, Any]:
                 "embedding_fallback": os.getenv("COREML_EMBED_FALLBACK", ""),
             }
         )
+    asset = getattr(chunking['len_fn'], 'asset', None)
+    stored = read_index_contract()
+    if asset is not None and (stored is None or 'chunk_tokenizer_sha256' in stored or os.getenv('RAG_TOKENIZER_FILE')):
+        payload['chunk_tokenizer_sha256'] = asset['sha256']
     stable = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     payload["fingerprint"] = hashlib.sha256(stable.encode("utf-8")).hexdigest()
     return payload

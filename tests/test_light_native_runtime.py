@@ -55,7 +55,7 @@ def fixture_root(tmp_path):
     (root/'proxy').mkdir(parents=True)
     (root/'proxy/__init__.py').write_text('',encoding='utf-8')
     # SQLite marker verifies reuse of exactly the same state after an API crash.
-    (root/'proxy/app.py').write_text('''import os,sqlite3,subprocess,sys
+    (root/'proxy/app.py').write_text('''import os,sqlite3,subprocess,sys,json
 from pathlib import Path
 from fastapi import FastAPI
 app=FastAPI()
@@ -64,6 +64,12 @@ def instance():return {'instance_id':os.environ['LES_LIGHT_INSTANCE_ID']}
 @app.get('/environment')
 def environment():return {'foreign_present':any(os.getenv(key) for key in ('OPENAI_API_KEY','LLM_MODEL','OLLAMA_API_KEY','PYTHONHOME')),
                           'mutations':os.environ['LES_STARTUP_BACKGROUND_MUTATIONS']}
+@app.get('/skill-runtime')
+def skill_runtime():
+    program=os.environ['LES_SKILL_PYTHON']
+    code='import sys,json,importlib.util; startup_site="site" in sys.modules; import numpy,openpyxl; print(json.dumps({"site_startup":startup_site,"bytecode_writes":not sys.dont_write_bytecode,"application_imports":importlib.util.find_spec("proxy") is not None,"numpy":numpy.__version__}))'
+    result=subprocess.run([program,'-I','-S','-B','-c',code],capture_output=True,text=True,encoding='utf-8',check=True,timeout=15)
+    return {'program':program,'details':json.loads(result.stdout)}
 @app.post('/marker')
 def write_marker():
     with sqlite3.connect(Path(os.environ['LES_STATE_ROOT'])/'data/probe.sqlite') as db:
@@ -219,6 +225,32 @@ def test_owner_crash_stops_owned_services_and_grandchildren(running):
     process.kill();process.wait(timeout=5)
     for pid in [grandchild,ready['api_pid'],ready['ui_pid'],ready['qdrant_pid']]:
         assert_dead(pid)
+
+
+def test_packaged_skill_interpreter_is_selected_without_app_imports_and_corruption_never_falls_back(
+        executable,fixture_root,tmp_path,request):
+    program=os.getenv('LES_TEST_SKILL_PYTHON')
+    if not program:pytest.skip('Prepared portable skill Python required')
+    from tools.skill_python_asset import stage
+    target=fixture_root.parent/'native/skill-python'
+    stage(target,Path(program).parent)
+    (target.parent/'skill-python-required.json').write_text('{"required":true}',encoding='utf-8')
+    process,state,ready=request.getfixturevalue('running')
+    with httpx.Client(timeout=20,trust_env=False) as client:
+        probe=client.get(ready['api_url']+'/skill-runtime')
+        probe.raise_for_status();value=probe.json()
+    assert Path(value['program'])==target/'python.exe'
+    assert value['details']['site_startup'] is False
+    assert value['details']['bytecode_writes'] is False
+    assert value['details']['application_imports'] is False
+    assert value['details']['numpy']
+    process.stdin.write(b'stop\n');process.stdin.flush();process.wait(timeout=10)
+    stdlib=next(target.glob('python*.zip'));stdlib.write_bytes(b'corrupt fixture')
+    fresh_state=tmp_path/'must-not-start'
+    result=subprocess.run(command(executable,fixture_root,fresh_state,Path(os.environ['LES_TEST_NATIVE_QDRANT'])),
+        capture_output=True,timeout=10)
+    assert result.returncode!=0 and b'SKILL_RUNTIME_INVALID' in result.stdout+result.stderr
+    assert not fresh_state.exists()
 
 
 def test_native_asset_requires_current_source_receipt_and_never_overwrites(tmp_path,monkeypatch):

@@ -4,7 +4,6 @@ converter.py — конвертация документов в Markdown для 
 Поддерживаемые форматы:
   PDF, DOCX, EML/EMLX, MSG, XLSX/XLS/CSV, JSON/JSONL, MD, TXT
 """
-import json
 import io
 import hashlib
 import logging
@@ -74,7 +73,7 @@ def convert_to_markdown(file_path: Path, route=None) -> Optional[str]:
         elif suffix in IMAGE_SUFFIXES:
             result = _parse_image_ocr(file_path)
         elif suffix == ".docx":
-            result = _parse_with_markitdown(file_path) or _parse_docx(file_path)
+            result = _parse_docx_native(file_path) or _parse_with_markitdown(file_path) or _parse_docx(file_path)
         elif suffix == ".doc":
             result = _parse_legacy_doc(file_path)
         elif suffix in (".eml", ".emlx", ".msg"):
@@ -82,7 +81,9 @@ def convert_to_markdown(file_path: Path, route=None) -> Optional[str]:
         elif suffix in (".xlsx", ".xlsm", ".xls", ".csv"):
             result = _parse_spreadsheet(file_path) or _parse_with_markitdown(file_path)
         elif suffix == ".pptx":
-            result = _parse_with_markitdown(file_path)
+            from backend.native_document_conversion import read
+            native = read(file_path)
+            result = native['text'] if native is not None else _parse_with_markitdown(file_path)
         elif suffix in (".json", ".jsonl"):
             result = _parse_json(file_path)
         elif suffix in (".md", ".txt"):
@@ -387,6 +388,15 @@ def _pdf_image_dir(path: Path) -> Path:
     return image_dir
 
 
+def _parse_docx_native(path: Path) -> str | None:
+    from backend import native_core
+
+    if not native_core.supports('document_docx'):
+        return None
+    result = native_core.required('document', request={'action': 'docx_text', 'path': str(path.resolve())})
+    return result['text'] if result['status'] == 'completed' else None
+
+
 def _parse_docx(path: Path) -> str:
     import mammoth
     with open(path, "rb") as f:
@@ -446,6 +456,11 @@ def _parse_image_ocr(path: Path) -> Optional[str]:
         from .ocr_parser import make_ocr_parser
 
         parser = make_ocr_parser()
+        from .windows_ocr import WindowsOCRParser
+        if isinstance(parser, WindowsOCRParser):
+            text = parser.ocr_image_file(path)
+            if text is not None:
+                return text if text.strip() else None
         with Image.open(path) as img:
             text = parser.ocr_page(img.convert("RGB"))
         return text if text and text.strip() else None
@@ -507,6 +522,13 @@ def _parse_email(path: Path) -> str:
 
 
 def _parse_spreadsheet(path: Path) -> str:
+    from backend.native_document_conversion import read
+    native = read(path, read_rows=SPREADSHEET_READ_ROWS,
+        full_table_max_cells=SPREADSHEET_FULL_TABLE_MAX_CELLS,
+        profile_columns=SPREADSHEET_PROFILE_MAX_COLUMNS,
+        profile_values=SPREADSHEET_PROFILE_MAX_VALUES, sample_rows=SPREADSHEET_SAMPLE_ROWS)
+    if native is not None:
+        return native['text']
     import pandas as pd
     md_parts = []
 
@@ -621,85 +643,5 @@ def _safe_number(value: Any) -> str:
 
 
 def _parse_json(path: Path) -> str:
-    md = []
-    size_mb = path.stat().st_size / (1024 * 1024)
-    MAX_ENTRIES = 2000
-
-    try:
-        with io.StringIO(read_document_text(path)) as f:
-            first_line = f.readline().strip()
-            second_line = ""
-            for _l in f:                      # следующая НЕПУСТАЯ строка (readline уже съел первую)
-                if _l.strip():
-                    second_line = _l.strip()
-                    break
-            f.seek(0)
-
-            # JSONL = расширение .jsonl ЛИБО есть ВТОРАЯ строка, тоже парсящаяся как JSON.
-            # Компактный json-массив (json.dumps([...]) — ОДНА строка) → second_line="" → НЕ jsonl,
-            # читаем целиком (иначе весь list уходил в построчную ветку → "" → файл индексировался ПУСТЫМ).
-            is_jsonl = path.suffix.lower() == ".jsonl"
-            if not is_jsonl and second_line:
-                try:
-                    json.loads(first_line)
-                    json.loads(second_line)
-                    is_jsonl = True
-                except Exception:
-                    pass
-
-            if is_jsonl or (size_mb > 10 and bool(second_line)):
-                # Стриминг построчно
-                for i, line in enumerate(f):
-                    if i >= MAX_ENTRIES:
-                        md.append(f"*[обрезано после {MAX_ENTRIES} записей]*")
-                        break
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        obj = json.loads(line)
-                        txt = _extract_json_text(obj)
-                        if txt:
-                            md.append(f"### Запись {i+1}\n{txt}")
-                    except Exception:
-                        pass
-            else:
-                data = json.load(f)
-                items = data if isinstance(data, list) else [data]
-                for i, item in enumerate(items[:MAX_ENTRIES]):
-                    txt = _extract_json_text(item)
-                    if txt:
-                        md.append(f"### Запись {i+1}\n{txt}")
-
-    except Exception as e:
-        return f"[ERROR] JSON parse failed: {e}"
-
-    return "\n\n".join(md) if md else f"[WARN] {path.name}: нет извлекаемого текста"
-
-
-# Поля которые содержат полезный текст в типичных JSON датасетах
-_TEXT_KEYS = frozenset([
-    "role", "user", "assistant", "system", "prompt", "response",
-    "content", "message", "text", "subject", "body", "delta",
-    "question", "answer", "title", "description", "summary",
-])
-
-def _extract_json_text(obj, depth: int = 0) -> str:
-    """Рекурсивно извлекает текст из JSON-объекта (глубина до 2)."""
-    if depth > 2:
-        return ""
-    if isinstance(obj, str):
-        return obj[:2000] if len(obj) > 5 else ""
-    if not isinstance(obj, dict):
-        return ""
-    parts = []
-    for k, v in obj.items():
-        k_lower = k.lower()
-        if k_lower in _TEXT_KEYS:
-            if isinstance(v, str) and len(v) > 5:
-                parts.append(f"**{k}:** {v[:2000]}")
-            elif isinstance(v, dict):
-                nested = _extract_json_text(v, depth + 1)
-                if nested:
-                    parts.append(nested)
-    return "\n".join(parts)
+    from backend.json_document import read
+    return read(path, max_chars=_max_file_chars(path))

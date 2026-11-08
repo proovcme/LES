@@ -80,32 +80,12 @@ def _augment_model_tool_args(
     question: str,
     dataset_ids: list[str],
     target_file_ref: dict[str, Any] | None,
+    sources: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    tool = str(call.get("tool") or "")
-    args = dict(call.get("args") or {})
-    if tool == "dataset_map" and dataset_ids and not args.get("dataset_id"):
-        args["dataset_id"] = dataset_ids[0]
-    if tool in {"search_sources", "read_source", "read_pdf_source", "read_excel_source", "look_at_pdf_page"}:
-        if (
-            tool != "search_sources"
-            and question
-            and not (args.get("q") or args.get("question"))
-        ):
-            args["question" if tool == "look_at_pdf_page" else "q"] = question
-        if dataset_ids:
-            if tool == "search_sources" and not args.get("dataset_ids") and not args.get("dataset_id"):
-                args["dataset_ids"] = dataset_ids
-            elif tool != "search_sources" and not args.get("dataset_id") and not args.get("doc_id"):
-                args["dataset_id"] = dataset_ids[0]
-        if target_file_ref and target_file_ref.get("match_status") == "matched":
-            if not args.get("doc_id") and not args.get("doc_name"):
-                args["doc_name"] = target_file_ref.get("file_name") or ""
-            if not args.get("doc_id") and target_file_ref.get("dataset_id"):
-                args["dataset_id"] = target_file_ref.get("dataset_id")
-    augmented = {"tool": tool, "args": args}
-    if call.get("call_id"):
-        augmented["call_id"] = str(call["call_id"])
-    return augmented
+    return native_core.required("harness_evidence", request={
+        "action": "augment_tool_args", "call": call, "question": question,
+        "dataset_ids": dataset_ids, "target": target_file_ref or {}, "sources": list(sources or []),
+    })
 
 
 def _compact_tool_result_for_prompt(payload: dict[str, Any], *, max_chars: int = 7000) -> dict[str, Any]:

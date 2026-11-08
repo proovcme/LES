@@ -54,6 +54,9 @@ def prepare(file_path, data_dir, file_key, dataset_id, splitter, timings, allow_
         'chunk_size': splitter.chunk_size, 'chunk_overlap': splitter.chunk_overlap,
         'embedding_model': embedding_model_id(),
     }
+    asset = getattr(getattr(splitter, '_len', None), 'asset', None)
+    if asset is not None:
+        chunking['tokenizer_sha256'] = asset['sha256']
     try:
         timeout = max(.1, min(3600., float(os.getenv('RAG_PARSE_FILE_TIMEOUT_SEC', '1800')) * .95))
     except ValueError:

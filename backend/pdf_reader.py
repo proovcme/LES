@@ -13,20 +13,30 @@ _PDFIUM_LOCK = RLock()
 logger = logging.getLogger(__name__)
 
 
-def _native_markdown(path: Path) -> tuple[str, bool] | None:
+def _native_worker_result(path: Path, *, timeout_ms: int = 30_000, **options) -> dict | None:
     from backend import native_core
 
     worker = os.getenv("LES_NATIVE_PDF_WORKER")
     library = os.getenv("LES_NATIVE_PDFIUM")
     if not worker or not library or not native_core.supports("worker_pdf"):
         return None
+    response = native_core.required("worker_pdf", request={
+        "schema": "les.worker-host.v1", "program": worker, "directory": str(Path(worker).parent),
+        "args": ["--serve-pdf-text", library], "context": "les.pdf-text.v1", "timeout_ms": timeout_ms,
+        "input": {"path": str(path.resolve()), **options},
+    })
+    if response.get("diagnostics") and options.get("ocr"):
+        logger.info("PDF OCR worker: %s", str(response["diagnostics"])[-3000:])
+    return response["result"] if response["status"] == "completed" else response
+
+
+def _native_markdown(path: Path) -> tuple[str, bool] | None:
+    from backend import native_core
+
     try:
-        response = native_core.required("worker_pdf", request={
-            "schema": "les.worker-host.v1", "program": worker, "directory": str(Path(worker).parent),
-            "args": ["--serve-pdf-text", library], "context": "les.pdf-text.v1", "timeout_ms": 30_000,
-            "input": {"path": str(path.resolve())},
-        })
-        result = response.get("result") if response["status"] == "completed" else response
+        result = _native_worker_result(path)
+        if result is None:
+            return None
         value = result.get("value")
         if (result.get("status") == "completed" and isinstance(value, dict)
                 and isinstance(value.get("text"), str) and isinstance(value.get("needs_ocr"), bool)):
@@ -35,6 +45,25 @@ def _native_markdown(path: Path) -> tuple[str, bool] | None:
     except (OSError, native_core.NativeCoreError) as error:
         logger.warning("PDF_NATIVE_COMPAT type=%s", type(error).__name__)
     return None
+
+
+def read_source_page(database: str, source: dict) -> dict:
+    """Rust resolves catalog identity, verifies the revision and reads one PDF page."""
+    from backend import native_core
+    from backend.runtime_paths import mutable_path
+
+    worker = os.getenv('LES_NATIVE_PDF_WORKER')
+    library = os.getenv('LES_NATIVE_PDFIUM')
+    if not worker or not library:
+        return {'status': 'failed', 'code': 'PDF_NATIVE_UNAVAILABLE'}
+    response = native_core.required('worker_pdf', request={
+        'schema': 'les.worker-host.v1', 'program': worker, 'directory': str(Path(worker).parent),
+        'args': ['--serve-pdf-text', library], 'context': 'les.pdf-text.v1', 'timeout_ms': 30_000,
+        'input': {'kind': 'source_page', 'database': str(Path(database).resolve()), 'source': source,
+                  'content_root': str(mutable_path('storage/datasets').resolve())},
+    })
+    return response['result'] if response.get('status') == 'completed' else {
+        'status': 'failed', 'code': 'PDF_WORKER_UNAVAILABLE'}
 
 
 def render_page(path: str | Path, number: int, *, width: int = 1200, dpi: int | None = None,

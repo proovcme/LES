@@ -317,7 +317,7 @@ def source_map_for_context(
         if isinstance(score, (int, float)):
             item["score"] = round(float(score), 3)
         if isinstance(meta, dict):
-            for key in ("dataset_id", "source_page", "page", "page_number", "doc_type", "source_ref"):
+            for key in ("dataset_id", "source_page", "page", "page_number", "doc_type", "source_ref", "source_sha256"):
                 if meta.get(key):
                     item[key] = meta[key]
             if meta.get("atomic_evidence"):
@@ -325,7 +325,7 @@ def source_map_for_context(
                 for key in ("qdrant_point_id", "parent_id", "section_fragment_count", "context_origin"):
                     if meta.get(key) is not None:
                         item[key] = meta[key]
-            if meta.get("support_scope") in {"original_table_row", "original_table_total", "original_word_block"}:
+            if meta.get("source_sha256") or meta.get("support_scope") in {"original_table_row", "original_table_total", "original_word_block"}:
                 item["locator"] = source_locator(chunk, excerpt=clean[:snippet_chars])
         out.append(item)
     return out

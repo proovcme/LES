@@ -55,7 +55,6 @@ class EvidenceRequestContext:
     use_validation: bool
     validation_skip_reason: str
     route: Any
-    table_result: Any
     request_started_at: float
     profile_snapshot: dict[str, Any] = field(default_factory=dict)
     scope_resolution: dict[str, Any] = field(default_factory=dict)

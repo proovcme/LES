@@ -18,6 +18,10 @@ const REQUEST_LIMIT: usize = 8 * 1024 * 1024;
 const OUTPUT_LIMIT: usize = 32 * 1024 * 1024 - 65536;
 static POOL: OnceLock<Mutex<Option<Session>>> = OnceLock::new();
 static PDF_POOL: OnceLock<Mutex<Option<Session>>> = OnceLock::new();
+static FORMAT_POOL: OnceLock<Mutex<Option<Session>>> = OnceLock::new();
+static TABLE_POOL: OnceLock<Mutex<Option<Session>>> = OnceLock::new();
+static ML_POOL: OnceLock<Mutex<Option<Session>>> = OnceLock::new();
+static MCP_POOL: OnceLock<Mutex<Option<Session>>> = OnceLock::new();
 static SEQUENCE: AtomicU64 = AtomicU64::new(1);
 static GENERATION: AtomicU64 = AtomicU64::new(0);
 
@@ -77,6 +81,7 @@ impl Session {
         args: &[&str],
         directory: &str,
         key: String,
+        memory_limit: usize,
     ) -> Result<Self, &'static str> {
         let mut command = Command::new(program);
         command
@@ -87,7 +92,7 @@ impl Session {
             .stderr(Stdio::piped());
         prepare(&mut command);
         let mut child = command.spawn().map_err(|_| "WORKER_START_FAILED")?;
-        let guard = match JobGuard::own(&child, Some(2 * 1024 * 1024 * 1024)) {
+        let guard = match JobGuard::own(&child, Some(memory_limit)) {
             Ok(value) => value,
             Err(code) => {
                 let _ = child.kill();
@@ -228,16 +233,29 @@ impl Session {
 }
 
 pub fn run(request: &Value) -> Result<Value, &'static str> {
-    run_in(request, &POOL)
+    run_in(request, &POOL, 2 * 1024 * 1024 * 1024)
 }
 
 pub fn run_pdf(request: &Value) -> Result<Value, &'static str> {
-    run_in(request, &PDF_POOL)
+    run_in(request, &PDF_POOL, 2 * 1024 * 1024 * 1024)
+}
+pub fn run_documents(request: &Value) -> Result<Value, &'static str> {
+    run_in(request, &FORMAT_POOL, 2 * 1024 * 1024 * 1024)
+}
+pub fn run_tables(request: &Value) -> Result<Value, &'static str> {
+    run_in(request, &TABLE_POOL, 2 * 1024 * 1024 * 1024)
+}
+pub fn run_embeddings(request: &Value) -> Result<Value, &'static str> {
+    run_in(request, &ML_POOL, 8 * 1024 * 1024 * 1024)
+}
+pub fn run_mcp(request: &Value) -> Result<Value, &'static str> {
+    run_in(request, &MCP_POOL, 2 * 1024 * 1024 * 1024)
 }
 
 fn run_in(
     request: &Value,
     pool: &'static OnceLock<Mutex<Option<Session>>>,
+    memory_limit: usize,
 ) -> Result<Value, &'static str> {
     if request["schema"] != "les.worker-host.v1" {
         return Err("WORKER_HOST_SCHEMA_INVALID");
@@ -325,7 +343,18 @@ fn run_in(
     }
     let reused = slot.is_some();
     if slot.is_none() {
-        *slot = Some(Session::spawn(program, &args, directory, key)?);
+        if memory_limit > 2 * 1024 * 1024 * 1024
+            && crate::system_memory::available()? < 4 * 1024 * 1024 * 1024
+        {
+            return Err("MEMORY_ADMISSION_BLOCKED");
+        }
+        *slot = Some(Session::spawn(
+            program,
+            &args,
+            directory,
+            key,
+            memory_limit,
+        )?);
     }
     let session = slot.as_mut().unwrap();
     let pid = session.child.id();
@@ -343,20 +372,65 @@ fn run_in(
         }
         Err(code) => {
             session.terminate();
+            session.output.take();
+            for reader in session.readers.drain(..) {
+                let _ = reader.join();
+            }
             let status = session.child.try_wait().ok().flatten();
             let diagnostics = session.diagnostics();
+            let cause = if memory_limit > 2 * 1024 * 1024 * 1024 {
+                diagnostics
+                    .lines()
+                    .rev()
+                    .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+                    .find_map(|v| {
+                        let code = v["code"].as_str()?;
+                        (v["event"] == "embedding_worker_stopped"
+                            && code.starts_with("EMBEDDING_")
+                            && code.len() <= 120
+                            && code
+                                .bytes()
+                                .all(|b| b.is_ascii_uppercase() || b == b'_' || b.is_ascii_digit()))
+                        .then(|| code.to_owned())
+                    })
+            } else {
+                None
+            };
             slot.take();
             Ok(
-                json!({"status":"failed","code":code,"exit_code":status.and_then(|code|code.code()),"worker_pid":pid,"diagnostics":diagnostics}),
+                json!({"status":"failed","code":code,"cause":cause,"exit_code":status.and_then(|code|code.code()),"worker_pid":pid,"diagnostics":diagnostics}),
             )
         }
     }
 }
 
 pub fn release_idle() -> Result<Value, &'static str> {
+    release(
+        [
+            POOL.get(),
+            PDF_POOL.get(),
+            FORMAT_POOL.get(),
+            TABLE_POOL.get(),
+            ML_POOL.get(),
+            MCP_POOL.get(),
+        ]
+        .into_iter()
+        .flatten(),
+    )
+}
+
+pub fn release_batch() -> Result<Value, &'static str> {
+    // A completed indexing batch does not own persistent MCP/skill sessions
+    // or a chat's PDF/table reader. Release only its parser and embedding pools.
+    release([FORMAT_POOL.get(), ML_POOL.get()].into_iter().flatten())
+}
+
+fn release<'a>(
+    pools: impl IntoIterator<Item = &'a Mutex<Option<Session>>>,
+) -> Result<Value, &'static str> {
     let mut released = false;
     let mut busy = false;
-    for pool in [POOL.get(), PDF_POOL.get()].into_iter().flatten() {
+    for pool in pools {
         match pool.try_lock() {
             Ok(mut slot) => released |= slot.take().is_some(),
             Err(TryLockError::WouldBlock) => busy = true,
@@ -372,7 +446,17 @@ pub fn release_idle() -> Result<Value, &'static str> {
 
 pub fn shutdown() -> Result<Value, &'static str> {
     GENERATION.fetch_add(1, Ordering::SeqCst);
-    for pool in [POOL.get(), PDF_POOL.get()].into_iter().flatten() {
+    for pool in [
+        POOL.get(),
+        PDF_POOL.get(),
+        FORMAT_POOL.get(),
+        TABLE_POOL.get(),
+        ML_POOL.get(),
+        MCP_POOL.get(),
+    ]
+    .into_iter()
+    .flatten()
+    {
         pool.lock().map_err(|_| "WORKER_HOST_BUSY")?.take();
     }
     Ok(json!({"stopped":true}))

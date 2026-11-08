@@ -62,13 +62,14 @@ def stage_notices(root: Path, payload: Path):
         manifests.append('api/Cargo.toml')
     for manifest in manifests:
         result = subprocess.run(['cargo', 'metadata', '--locked', '--offline', '--format-version', '1',
+            *(['--all-features'] if manifest == 'api/Cargo.toml' else []),
             '--filter-platform', 'x86_64-pc-windows-msvc', '--manifest-path', str(root / manifest)],
             capture_output=True, check=True, encoding='utf-8')
         cargo = json.loads(result.stdout)
         resolved = {node['id'] for node in cargo['resolve']['nodes']}
         for package in cargo['packages']:
             identity = (package['name'], package['version'])
-            if package['id'] not in resolved or package['name'] in {'les-light','les-core','les-runtime','les-api'} or identity in seen:
+            if package['id'] not in resolved or package['name'] in {'les-light','les-core','les-runtime','les-api','les-vector'} or identity in seen:
                 continue
             seen.add(identity)
             source = Path(package['manifest_path']).parent

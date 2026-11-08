@@ -18,12 +18,16 @@
   let memoryOpen = $state(false); let memoryDirty = $state(false); let memoryEditor: AgentMemory;
   let composer: HTMLTextAreaElement; let transcript = $state<HTMLDivElement>(); let fileInput: HTMLInputElement;
   let sourceTrigger: HTMLElement | null = null; let followAnswer = $state(true);
-  const disabled = $derived(workspace.busy || workspace.uploading || workspace.closing || actionBusy || workspace.loading);
-  const scopeLabel = $derived(workspace.session?.scope.dataset_ids.length
+  const disabled = $derived(workspace.busy || workspace.contextChanging || workspace.uploading || workspace.closing || actionBusy || workspace.loading);
+  const scopeLabel = $derived(workspace.session?.scope.scope_type === 'mixed' ? 'Проект и наборы'
+    : workspace.session?.scope.project_ids.length ? 'Документы проекта'
+    : workspace.session?.scope.dataset_ids.length
     ? workspace.session.scope.dataset_ids.map((id) => workspace.datasets.find((item) => item.id === id)?.name || 'Набор недоступен').join(', ')
     : workspace.session?.scope.scope_type === 'all' ? 'Все документы' : 'Без набора документов');
   const sessions = $derived(workspace.sessions.filter((item) => item.title.toLocaleLowerCase('ru').includes(sessionQuery.toLocaleLowerCase('ru'))));
   const lastMessageText = $derived(workspace.messages.at(-1)?.text || '');
+  const statusPath = $derived('/app/?view=status' + (workspace.session
+    ? `&session=${encodeURIComponent(workspace.session.session_id)}` : ''));
 
   onMount(() => {
     workspace.beforeClose = async () => { await memoryEditor?.flush(); };
@@ -88,7 +92,8 @@
       <button class="nav-item" disabled={disabled} onclick={() => navigate('/qdrant-visualizer/index.html', location.origin)}><Icon name="tree" />Лес знаний</button>
     </div>
     <div class="nav-footer">
-      {#if workspace.legacyURL}<button class="nav-item" disabled={disabled} title="Модели, память и инструменты" onclick={() => navigate('/les/classic?tab=models')}><Icon name="settings" />Настройки</button>{/if}
+      <button class="nav-item" disabled={disabled} onclick={() => navigate(statusPath, location.origin)}><Icon name="status" />Состояние</button>
+      {#if workspace.legacyURL}<button class="nav-item" disabled={disabled} title="Модели, профили и почта" onclick={() => navigate('/les/classic?tab=models')}><Icon name="settings" />Настройки</button>{/if}
       <p>В лесу нельзя заблудиться.</p>
     </div>
   </nav>
@@ -116,8 +121,11 @@
                 {/if}
               </div>
             {/if}
-            {#each workspace.messages as message, index}
-              <Answer {message} {openSource} streaming={workspace.busy && index === workspace.messages.length - 1} />
+            {#each workspace.messages as message, index (`${workspace.session?.session_id}:${index}`)}
+              <Answer {message} {openSource} sessionId={workspace.session?.session_id}
+                excluded={workspace.isExcluded(message)} contextDisabled={disabled}
+                toggleContext={workspace.exclusions ? () => workspace.toggleContext(message) : undefined}
+                streaming={workspace.busy && index === workspace.messages.length - 1} />
             {/each}
           </div>
         </div>
@@ -131,7 +139,7 @@
           {#if workspace.attachment}<div class="attachment"><Icon name="file" /><span>{workspace.attachment.name}</span><button type="button" class="icon-button quiet" aria-label="Убрать вложение" disabled={workspace.busy} onclick={() => { workspace.attachment = null; workspace.changed(); }}><Icon name="close" size={16} /></button></div>{/if}
           <label for="question" class="sr-only">Ваш вопрос Лесу</label>
           <textarea id="question" bind:this={composer} bind:value={workspace.text} oninput={() => workspace.changed()} onkeydown={keyboard} ondragover={(event) => event.preventDefault()} ondrop={dropped} placeholder="Спросите Лес…" rows="2" maxlength="20000" disabled={workspace.loading || workspace.closing || !workspace.session} aria-describedby="composer-hint"></textarea>
-          <div class="composer-actions"><input class="sr-only" type="file" bind:this={fileInput} tabindex="-1" aria-label="Выбрать файл для чтения" onchange={() => { const file = fileInput.files?.[0]; if (file) void workspace.attach(file); fileInput.value = ''; }} /><button type="button" class="icon-button quiet" aria-label="Прикрепить файл для чтения" disabled={disabled || !workspace.session} onclick={() => fileInput.click()}><Icon name="paperclip" /></button><button type="button" class="scope-button quiet" disabled={disabled || !workspace.session} onclick={() => modal = 'scope'} title={scopeLabel}><Icon name="folder" /><span>{scopeLabel}</span></button><button type="button" class="icon-button quiet options-button" aria-label="Параметры ответа" aria-pressed={workspace.reranker} disabled={disabled} onclick={() => modal = 'options'}><Icon name="settings" /></button>
+          <div class="composer-actions"><input class="sr-only" type="file" bind:this={fileInput} tabindex="-1" aria-label="Выбрать файл для чтения" onchange={() => { const file = fileInput.files?.[0]; if (file) void workspace.attach(file); fileInput.value = ''; }} /><button type="button" class="icon-button quiet" aria-label="Прикрепить файл для чтения" disabled={disabled || !workspace.session} onclick={() => fileInput.click()}><Icon name="paperclip" /></button><button type="button" class="scope-button quiet" disabled={disabled || !workspace.session} onclick={() => modal = 'scope'} title={scopeLabel}><Icon name="folder" /><span>{scopeLabel}</span></button><button type="button" class="icon-button quiet options-button" aria-label="Параметры ответа" aria-haspopup="dialog" data-active={workspace.reranker} disabled={disabled} onclick={() => modal = 'options'}><Icon name="settings" /></button>
             {#if workspace.busy}<button type="button" class="stop-button" aria-label="Остановить ответ" onclick={() => workspace.stop()}><Icon name="stop" /><span class="send-label">Остановить</span></button>{:else}<button type="submit" class="send-button" disabled={disabled || !workspace.session || !workspace.text.trim()} aria-label="Отправить вопрос"><Icon name="arrow" /><span class="send-label">Отправить</span></button>{/if}
           </div>
         </form>
@@ -151,7 +159,7 @@
   <ScopePicker scope={workspace.session.scope} datasets={workspace.datasets} save={(scope) => workspace.setScope(scope)} close={() => modal = null} />
 {:else if modal === 'options'}
   <Modal title="Параметры ответа" close={() => modal = null}>
-    <label class="option"><input type="checkbox" bind:checked={workspace.reranker} /><span><strong>Уточнять результаты поиска</strong><small>Дополнительное ранжирование найденных фрагментов. Может увеличить время ответа.</small></span></label>
+    <label class="option"><input type="checkbox" bind:checked={workspace.reranker} /><span><strong>Уточнять результаты поиска</strong><small>Для вопросов по документам. Если доступен реранкер, он пересортирует найденные фрагменты. Ответ может занять больше времени.</small></span></label>
     <div class="modal-footer"><button onclick={() => modal = null}>Готово</button></div>
   </Modal>
 {/if}
