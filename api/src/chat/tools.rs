@@ -1,11 +1,12 @@
 //! Trusted native tool dispatcher. Paths, scope and programs are bound by the server.
 mod access;
 mod local;
-mod sources;
+pub(super) mod sources;
 use super::{prepare::Prepared, Context, Result};
 use serde_json::{json, Value};
 use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
 pub struct Tools {
+    pub review: Option<Arc<super::document_review::ReviewTool>>,
     pub table: Option<Arc<super::table_document::TableTool>>,
     handle: u64,
     pub contracts: Vec<Value>,
@@ -63,7 +64,7 @@ impl Tools {
             }
             let access=access::contract(&contracts);let access_name=access["name"].as_str().ok_or("TOOL_REGISTRY_INVALID")?.to_owned();contracts.push(access);
             let handle=execute(json!({"schema":"les.tool-execution.v1","action":"new","database":database,"cursor_capacity":128,"cursor_ttl_seconds":300.}))?["handle"].as_u64().ok_or("TOOL_EXECUTION_STATE_ERROR")?;
-            Ok(Self{handle,contracts,mcp,access:access_name,sequence:std::sync::atomic::AtomicU64::new(0),table:None})
+            Ok(Self{handle,contracts,mcp,access:access_name,sequence:std::sync::atomic::AtomicU64::new(0),table:None,review:None})
         }).await.map_err(|_|"TOOL_REGISTRY_INVALID")?
     }
     pub fn bind_table(&mut self, table: Option<Arc<super::table_document::TableTool>>) {
@@ -76,7 +77,26 @@ impl Tools {
         self.access = access["name"].as_str().unwrap().to_owned();
         self.contracts.push(access);
     }
+    pub fn bind_review(&mut self, review: Option<Arc<super::document_review::ReviewTool>>) {
+        if review.is_some() {
+            self.contracts.push(super::document_review::contract());
+        }
+        self.review = review;
+        self.contracts.retain(|c| c["name"] != self.access);
+        let access = access::contract(&self.contracts);
+        self.access = access["name"].as_str().unwrap().to_owned();
+        self.contracts.push(access);
+    }
+    #[cfg(test)]
     pub fn schemas(&self, limit: usize, grounded: bool) -> Vec<Value> {
+        self.disclosed_schemas(limit, grounded, &[])
+    }
+    pub fn disclosed_schemas(
+        &self,
+        limit: usize,
+        grounded: bool,
+        disclosed: &[String],
+    ) -> Vec<Value> {
         // The access tool keeps every granted read/compute capability reachable without
         // sending dozens of schemas into a small model's context on every round.
         let priority = if grounded {
@@ -101,15 +121,40 @@ impl Tools {
             .iter()
             .find(|c| c["name"] == self.access)
             .unwrap()];
+        for name in disclosed.iter().rev() {
+            if chosen.len() >= limit.max(1) {
+                break;
+            }
+            if let Some(c) = self.contracts.iter().find(|c| c["name"] == *name) {
+                if !chosen.iter().any(|v| v["name"] == c["name"]) {
+                    chosen.push(c);
+                }
+            }
+        }
         for name in priority {
             if chosen.len() >= limit.max(1) {
                 break;
             }
             if let Some(c) = self.contracts.iter().find(|c| c["name"] == name) {
-                chosen.push(c);
+                if !chosen.iter().any(|v| v["name"] == c["name"]) {
+                    chosen.push(c);
+                }
             }
         }
         chosen.into_iter().map(|c|json!({"type":"function","function":{"name":c["name"],"description":c["summary"],"parameters":c["input_schema"]}})).collect()
+    }
+    pub fn disclosed(&self, payload: &Value) -> Option<String> {
+        if payload["tool"] == self.access
+            && payload["operation"] == "describe"
+            && payload["status"] == "ok"
+        {
+            payload["result"]["name"]
+                .as_str()
+                .filter(|name| self.contracts.iter().any(|c| c["name"] == *name))
+                .map(str::to_owned)
+        } else {
+            None
+        }
     }
     pub fn run<'a>(
         &'a self,
@@ -128,6 +173,7 @@ impl Tools {
                 .cloned()
                 .ok_or("TOOL_NOT_ALLOWED")?;
             let args = call["args"].clone();
+            let operation = args["operation"].as_str().map(str::to_owned);
             let scope = turn.scope["resolved_dataset_ids"].clone();
             let resolved = if let Some(id) = args["doc_id"].as_str().filter(|s| !s.is_empty()) {
                 let database = context.database.clone();
@@ -166,19 +212,25 @@ impl Tools {
             "approval_receipt_id":null,"idempotency_key":call_id,"shadow":false,"allowed_attachment_ids":turn.request["attachment_id"].as_str().map(|id|vec![id]).unwrap_or_default()});
             let handle = self.handle;
             let admission = json!({"schema":"les.tool-execution.v1","action":"begin","handle":handle,"request":request,"contract":contract,
-            "admission":{"remaining_seconds":600.,"resolved_dataset_ids":resolved,"local_state_allowed":(name=="agent_workspace"&&turn.session["registered"]==true)||(name=="table_document"&&self.table.is_some())}});
+            "admission":{"remaining_seconds":600.,"resolved_dataset_ids":resolved,"local_state_allowed":(name=="agent_workspace"&&turn.session["registered"]==true)||(name=="table_document"&&self.table.is_some())||(name=="document_review"&&self.review.is_some())}});
             let admitted = tokio::task::spawn_blocking(move || execute(admission))
                 .await
                 .map_err(|_| "TOOL_EXECUTION_STATE_ERROR")??;
             if let Some(envelope) = admitted.get("envelope") {
-                return Ok(self.payload(name, envelope));
+                return Ok(self.payload(name, envelope, operation.as_deref()));
             }
             let timeout = admitted["timeout_seconds"]
                 .as_f64()
                 .unwrap_or(30.)
                 .clamp(0.001, 1200.);
             let action = async {
-                if name == "table_document" {
+                if name == "document_review" {
+                    self.review
+                        .as_ref()
+                        .ok_or("TOOL_NOT_ALLOWED")?
+                        .run(context, turn, args)
+                        .await
+                } else if name == "table_document" {
                     self.table
                         .as_ref()
                         .ok_or("TOOL_NOT_ALLOWED")?
@@ -237,7 +289,12 @@ impl Tools {
             let (raw, failure) = match value {
                 Ok(Ok(raw)) => (raw, Value::Null),
                 Ok(Err(error)) => {
-                    let mut raw = envelope(name, "native_handler", error.payload(), vec![]);
+                    let mut raw = envelope(
+                        name,
+                        operation.as_deref().unwrap_or("native_handler"),
+                        error.payload(),
+                        vec![],
+                    );
                     raw["status"] = json!("error");
                     (raw, Value::Null)
                 }
@@ -253,10 +310,10 @@ impl Tools {
                 "{}",
                 json!({"event":"chat_tool_finished","tool":name,"status":finished["envelope"]["status"],"code":finished["envelope"]["code"],"duration_ms":finished["envelope"]["duration_ms"]})
             );
-            Ok(self.payload(name, &finished["envelope"]))
+            Ok(self.payload(name, &finished["envelope"], operation.as_deref()))
         })
     }
-    fn payload(&self, name: &str, execution: &Value) -> Value {
+    fn payload(&self, name: &str, execution: &Value, attempted: Option<&str>) -> Value {
         let mut metadata = execution.clone();
         if let Some(m) = metadata.as_object_mut() {
             m.remove("result");
@@ -268,7 +325,11 @@ impl Tools {
         }
         let mut result = envelope(
             name,
-            "trusted_execution",
+            if ["document_review", "table_document", "agent_workspace"].contains(&name) {
+                attempted.unwrap_or("trusted_execution")
+            } else {
+                "trusted_execution"
+            },
             json!({"code":execution["code"],"reference":execution["cursor"]}),
             vec![],
         );
@@ -299,8 +360,9 @@ mod tests {
             access: "access".into(),
             sequence: std::sync::atomic::AtomicU64::new(0),
             table: None,
+            review: None,
         };
-        let result=tools.payload("fixture",&json!({"code":"TOOL_SCHEMA_INVALID","status":"rejected","result":{"arguments":"private-value"}}));
+        let result=tools.payload("fixture",&json!({"code":"TOOL_SCHEMA_INVALID","status":"rejected","result":{"arguments":"private-value"}}),None);
         assert_eq!(result["result"]["input_schema"], schema);
         assert_eq!(result["status"], "error");
         assert!(!result.to_string().contains("private-value"));
@@ -321,6 +383,7 @@ mod tests {
             access: "access".into(),
             sequence: std::sync::atomic::AtomicU64::new(0),
             table: None,
+            review: None,
         };
         let names = |grounded| {
             tools

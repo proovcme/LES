@@ -1,8 +1,10 @@
 //! Registered identities and frozen user scope bind every source read.
-mod retrieval;
+pub(crate) mod retrieval;
+mod verification;
 use super::{envelope, Context, Prepared, Result};
 use retrieval::search;
-pub(super) fn selected_files(turn: &Prepared) -> Vec<Value> {
+pub(crate) use verification::physical as verify_physical;
+pub(crate) fn selected_files(turn: &Prepared) -> Vec<Value> {
     let mut names = turn.request["target_files"]
         .as_array()
         .cloned()
@@ -58,7 +60,7 @@ mod tests {
 }
 use serde_json::{json, Value};
 use std::{path::PathBuf, sync::Arc};
-pub(super) async fn document(context: &Context, args: &Value) -> Result<Value> {
+pub(crate) async fn document(context: &Context, args: &Value) -> Result<Value> {
     let database = context.database.clone();
     let mut args = args.clone();
     if let Some(name) = args.get("doc_name").cloned() {
@@ -83,7 +85,7 @@ pub(super) fn scoped(turn: &Prepared, dataset: &Value) -> Result<()> {
     }
     Ok(())
 }
-pub(super) fn scoped_document(turn: &Prepared, doc: &Value) -> Result<()> {
+pub(crate) fn scoped_document(turn: &Prepared, doc: &Value) -> Result<()> {
     scoped(turn, &doc["dataset_id"])?;
     let selected = selected_files(turn);
     if turn.request["selected_sources_only"] == true
@@ -97,7 +99,7 @@ pub(super) fn scoped_document(turn: &Prepared, doc: &Value) -> Result<()> {
     }
     Ok(())
 }
-pub(super) fn reference(doc: &Value, page: Value) -> Value {
+pub(crate) fn reference(doc: &Value, page: Value) -> Value {
     let page = page
         .as_u64()
         .or_else(|| page.as_str()?.parse().ok())
@@ -162,7 +164,10 @@ pub async fn run(
             if value["status"]!="completed"{return Err(value["code"].as_str().unwrap_or("PDF_READ_FAILED").into());}
             super::super::unwrap(value["result"].clone())
         }).await.map_err(|_|"PDF_READ_FAILED")??;
-        let mut source = reference(&doc, result["page"].clone());
+        let mut provenance = doc;
+        provenance["file_hash"] = result["source_sha256"].clone();
+        let mut source = reference(&provenance, result["page"].clone());
+        source["evidence_kind"] = json!("physical_pdf_page");
         source["offset"] = result["offset"].clone();
         source["next_offset"] = result["next_offset"].clone();
         return Ok(envelope(name, "physical_page", result, vec![source]));

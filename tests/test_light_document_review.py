@@ -253,7 +253,9 @@ def test_harness_context_delivery_resume_and_real_source_invalidation(tmp_path, 
     started = call({'operation': 'start', 'selectors': [{'dataset_id': 'D', 'file_name': 'source.txt', 'parent_id': 's1'}]})
     assert started['status'] == 'ok'
     state = started['result']; unit = state['units'][0]['unit_id']
+    assert tool.context()['next_action']['operation'] == 'read'
     read = call({'operation': 'read', 'unit_id': unit})['result']
+    assert tool.context()['next_action']['operation'] == 'record'
     args = {'operation': 'record', 'unit_id': unit, 'request_id': 'one', 'expected_revision': 0,
             'source_fingerprint': read['source_fingerprint'], 'status': 'reviewed', 'note': 'Указано 12 м',
             'evidence': [{'fragment_id': read['fragment_id'], 'quote': '12 м'}]}
@@ -264,6 +266,7 @@ def test_harness_context_delivery_resume_and_real_source_invalidation(tmp_path, 
     tool.acknowledge_model_context(messages)
     saved = call(args)
     assert saved['status'] == 'ok' and saved['result']['coverage_complete']
+    assert tool.context()['next_action']['operation'] == 'finish_or_status'
     assert tool.last_chunks == ()
     resumed = DocumentReviewTool(ReviewTaskStore(store.path), tool.reader, 'owner', 'Продолжи')
     status = asyncio.run(resumed.execute({'operation': 'status', 'task_id': state['task_id']}))
@@ -398,3 +401,57 @@ def test_native_qdrant_review_filters_and_resumes_without_a_model(tmp_path, monk
         finally:
             await client.close()
     asyncio.run(scenario())
+
+
+def test_next_action_keeps_the_unit_explicitly_chosen_by_the_model(tmp_path):
+    selectors=[{'dataset_id':'D','file_name':f'file{i}.pdf'} for i in range(2)]
+    async def read(selector, **kwargs):
+        return {**snapshot('А😀Б'*500), 'selector':selector}
+    reader=SimpleNamespace(allowed=frozenset(['D']),files=frozenset(),journal=None,read=read)
+    tool=DocumentReviewTool(ReviewTaskStore(tmp_path/'tasks.db'),reader,'owner','Проверить',max_chars=203)
+    start=asyncio.run(tool.execute({'operation':'start','selectors':selectors}))
+    second=start['units'][1]['unit_id']
+    result=asyncio.run(tool.execute({'operation':'read','unit_id':second}))
+    hint=tool.context()['next_action']
+    assert hint['unit_id']==second and hint['operation']=='read'
+    assert hint['offset']==result['next_cursor']['offset']==203
+
+
+def test_literal_quote_can_cross_delivered_cursor_boundary_but_not_a_gap(tmp_path):
+    store,task,(unit,)=setup_store(tmp_path,1)
+    snap=snapshot('А😀Б12 мХ😀Я')
+    deliver(store,task,unit,snap,stop=5)
+    deliver(store,task,unit,snap,start=5)
+    assert record(store,task,unit,0,snap=snap)==1
+    missing=store.create('owner','Другой разбор',[store.task('owner',task)['units'][0]['selector']])
+    deliver(store,missing,unit,snap,stop=5)
+    deliver(store,missing,unit,snap,start=6)
+    with pytest.raises(ValueError,match='прочитанной'):
+        record(store,missing,unit,0,snap=snap)
+
+
+def test_excerpt_offset_needs_delivery_even_when_same_text_was_read_elsewhere(tmp_path):
+    selector={'dataset_id':'D','file_name':'repeated.txt'}
+    async def read(selector, **kwargs):
+        return {**snapshot('А'*400), 'selector':selector}
+    reader=SimpleNamespace(allowed=frozenset(['D']),files=frozenset(),journal=None,read=read)
+    tool=DocumentReviewTool(ReviewTaskStore(tmp_path/'tasks.db'),reader,'owner','Проверить',max_chars=200)
+    started=asyncio.run(tool.execute({'operation':'start','selectors':[selector]}))
+    unit=started['units'][0]['unit_id']
+    asyncio.run(tool.execute({'operation':'read'}))
+    from proxy.services.tabular_document_service import encode
+    def delivered():
+        tool.acknowledge_model_context([{'role':'tool','content':encode({'document_state':tool.context()})}])
+    delivered()
+    page=asyncio.run(tool.execute({'operation':'read','offset':200}))
+    args={'operation':'record','unit_id':unit,'expected_revision':0,'request_id':'one',
+          'source_fingerprint':page['source_fingerprint'],'status':'needs_review','note':'Нужно уточнение',
+          'evidence':[{'read_id':page['read_id'],'span_id':'q1'}]}
+    with pytest.raises(ValueError,match='прочитанной'):
+        asyncio.run(tool.execute(args))
+    delivered()
+    assert asyncio.run(tool.execute(args))['saved_revision']==1
+    # An identical receipt still replays after the current cursor moves.
+    asyncio.run(tool.execute({'operation':'read','unit_id':unit,'offset':0}))
+    assert asyncio.run(tool.execute(args))['saved_revision']==1
+    assert len(tool.store.history('owner',tool.task_id)['events'])==1

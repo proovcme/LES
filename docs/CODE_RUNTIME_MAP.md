@@ -20,10 +20,10 @@
 | Метрика | Значение |
 | --- | --- |
 | Python-файлов под git | 711 |
-| Строк Python | 169940 |
-| PRODUCT_REACHABLE | 418 |
+| Строк Python | 170007 |
+| PRODUCT_REACHABLE | 417 |
 | RUNTIME_SUPPORT | 5 |
-| TEST_OR_TOOL_ONLY | 264 |
+| TEST_OR_TOOL_ONLY | 265 |
 | DORMANT_CANDIDATE | 24 |
 | Зарегистрированных API-маршрутов | 298 |
 | Ошибок разбора | 0 |
@@ -43,7 +43,7 @@
 | proxy/routers/mail.py | 1502 | 4 |
 | proxy/services/retrieval_service.py | 1440 | 12 |
 | proxy/services/cad_bim_graph.py | 1425 | 3 |
-| proxy/services/tool_harness_service.py | 1274 | 25 |
+| proxy/services/tool_harness_service.py | 1275 | 25 |
 | proxy/services/context_memory_service.py | 1175 | 8 |
 | sovushka/pages/samovar.py | 1143 | 3 |
 | backend/document_router.py | 1118 | 10 |

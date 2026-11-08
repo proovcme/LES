@@ -100,6 +100,25 @@ impl AgentLoop {
             .extend(epochs.as_object().ok_or("AGENT_CONTEXT_INVALID")?.clone());
         self.set_epochs(combined)
     }
+    /// A server-confirmed transition also invalidates reads made through extensions.
+    pub fn capability_revision(&mut self, name: &str, revision: Value) -> Result<(), &'static str> {
+        if !self.allowed.contains(name) || revision.to_string().len() > 1024 {
+            return Err("AGENT_CONTEXT_INVALID");
+        }
+        if self.epochs[name] != revision {
+            self.epochs[name] = revision;
+            self.invalidate_extensions();
+        }
+        Ok(())
+    }
+    fn invalidate_extensions(&mut self) {
+        self.extension_epoch = self.extension_epoch.saturating_add(1);
+        for name in &self.allowed {
+            if name.starts_with("use_extensions_") {
+                self.epochs[name] = json!(self.extension_epoch);
+            }
+        }
+    }
     pub fn remaining(&self) -> u64 {
         self.control["remaining"].as_u64().unwrap_or(0)
     }
@@ -320,12 +339,7 @@ impl AgentLoop {
             self.epochs["table_document"] = effect["result"]["revision"].clone();
         }
         if workspace_changed || table_changed {
-            self.extension_epoch = self.extension_epoch.saturating_add(1);
-            for name in &self.allowed {
-                if name.starts_with("use_extensions_") {
-                    self.epochs[name] = json!(self.extension_epoch);
-                }
-            }
+            self.invalidate_extensions();
         }
         let outcome = crate::harness_evidence::execute(
             &json!({"action":"source_read_outcome","result":payload}),
@@ -353,6 +367,33 @@ mod tests {
     }
     fn extension(inner: Value) -> Value {
         json!({"tool":"use_extensions_fixture","operation":"call","status":"ok","result":inner})
+    }
+    #[test]
+    fn delivered_review_span_allows_retrying_an_earlier_rejected_record_through_extensions() {
+        let mut agent = AgentLoop::new(
+            8,
+            30.,
+            ["use_extensions_fixture".into(), "document_review".into()],
+        )
+        .unwrap();
+        agent
+            .capability_revision("document_review", json!(["task", 0, 0]))
+            .unwrap();
+        let save =
+            json!({"operation":"call","name":"document_review","arguments":{"operation":"record"}});
+        propose(&mut agent, save.clone());
+        agent.tool_result(extension(json!({"schema":"les_tool_result_v1","tool":"document_review","operation":"record","status":"error"}))).unwrap();
+        propose(
+            &mut agent,
+            json!({"operation":"call","name":"document_review","arguments":{"operation":"read"}}),
+        );
+        agent.tool_result(extension(json!({"schema":"les_tool_result_v1","tool":"document_review","operation":"read","status":"ok"}))).unwrap();
+        // The runtime acknowledges the complete context only after successful model IO.
+        agent
+            .capability_revision("document_review", json!(["task", 0, 1]))
+            .unwrap();
+        propose(&mut agent, save);
+        assert!(agent.capability_revision("not-granted", json!(1)).is_err());
     }
     #[test]
     fn wrapped_workspace_write_invalidates_prior_read_identity_and_survives_table_epoch_update() {

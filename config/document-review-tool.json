@@ -1,0 +1,202 @@
+{
+  "name": "document_review",
+  "version": "1.1.0",
+  "title": "Продолжить проверку документов",
+  "category": "source",
+  "summary": "Persistent review of an EXPLICIT inventory of documents/parent sections in selected datasets. start uses the current user question as goal and selectors from search provenance. status lists prior reviews; task_id resumes one. read returns exact indexed text with next_cursor (fragment_index, offset); follow every cursor before marking a unit reviewed. record requires unit_id, current expected_revision, source_fingerprint from read, an optional request_id (derived automatically from the unchanged decision when omitted in bound chat), status, note and evidence. Prefer {read_id,span_id} from current_read.quote_spans; choose the excerpt supporting your observation. The server copies its exact source characters. Literal {fragment_id,quote} remains supported and must be exact. dependencies names other reviewed unit IDs whose conclusions were used. Changed source bytes, indexed text or dependency revisions cause needs_recheck. history preserves old revisions. accepted is always false. Coverage is selected indexed text only; never claim a complete project audit or visual inspection.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "operation": {
+        "type": "string",
+        "enum": [
+          "start",
+          "status",
+          "read",
+          "record",
+          "history"
+        ]
+      },
+      "task_id": {
+        "type": "string",
+        "maxLength": 1000
+      },
+      "unit_id": {
+        "type": "string",
+        "maxLength": 1000
+      },
+      "request_id": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 120,
+        "description": "Optional stable receipt key. Bound chat derives one from the unchanged decision when omitted; an explicit key cannot be reused for different content."
+      },
+      "expected_revision": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "source_fingerprint": {
+        "type": "string",
+        "maxLength": 1000
+      },
+      "fragment_index": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "offset": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "selectors": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 32,
+        "items": {
+          "type": "object",
+          "properties": {
+            "dataset_id": {
+              "type": "string",
+              "maxLength": 1000
+            },
+            "file_name": {
+              "type": "string",
+              "maxLength": 1000
+            },
+            "parent_id": {
+              "type": "string",
+              "maxLength": 1000
+            }
+          },
+          "required": [
+            "dataset_id",
+            "file_name"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "status": {
+        "type": "string",
+        "enum": [
+          "reviewed",
+          "needs_review",
+          "excluded"
+        ]
+      },
+      "note": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1200
+      },
+      "dependencies": {
+        "type": "array",
+        "maxItems": 16,
+        "uniqueItems": true,
+        "items": {
+          "type": "string",
+          "maxLength": 1000
+        }
+      },
+      "evidence": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 4,
+        "items": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "read_id": {
+                  "type": "string",
+                  "description": "Copy current_read.read_id exactly.",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                "span_id": {
+                  "type": "string",
+                  "description": "Choose a quote_spans span_id from that read, e.g. q1.",
+                  "minLength": 1,
+                  "maxLength": 16
+                }
+              },
+              "required": [
+                "read_id",
+                "span_id"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "fragment_id": {
+                  "type": "string",
+                  "maxLength": 1000
+                },
+                "quote": {
+                  "type": "string",
+                  "description": "Copy a SHORT exact contiguous substring from current_read.text, preferably 10–60 characters. Never paraphrase, join separate lines, change spaces, or quote your own note or another source. A longer exact quote up to 300 characters is allowed.",
+                  "minLength": 1,
+                  "maxLength": 300
+                }
+              },
+              "required": [
+                "fragment_id",
+                "quote"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "description": "Prefer references {read_id,span_id} from current_read.quote_spans: choose the source excerpt supporting your note, and the server copies its exact characters with checked offsets. Literal {fragment_id,quote} remains available; it must be exact, never paraphrased."
+      }
+    },
+    "required": [
+      "operation"
+    ],
+    "additionalProperties": false,
+    "allOf": [
+      {
+        "if": {
+          "properties": {
+            "operation": {
+              "const": "record"
+            }
+          },
+          "required": [
+            "operation"
+          ]
+        },
+        "then": {
+          "required": [
+            "expected_revision",
+            "source_fingerprint",
+            "status",
+            "note",
+            "evidence"
+          ]
+        }
+      }
+    ]
+  },
+  "result_schema": "les_tool_result_v1",
+  "scopes": [],
+  "timeout_seconds": 30,
+  "model_owned_fields": [
+    "note",
+    "status",
+    "evidence"
+  ],
+  "provenance": "Selected original SHA256, indexed unit fingerprints and immutable model conclusion revisions",
+  "tags": [
+    "document",
+    "review",
+    "resume"
+  ],
+  "effect": "draft",
+  "retry": "never",
+  "idempotency": "none",
+  "result_budget": {
+    "max_chars": 60000,
+    "max_items": 4096
+  },
+  "approval_required": false
+}

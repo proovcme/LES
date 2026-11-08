@@ -138,6 +138,7 @@ def test_native_tool_requires_revision_and_preserves_unicode_paging(root):
     sid=sessions.create_session()['session_id'];harness=ToolHarness(web_config=WebResearchConfig('off','','',''));tools.bind(harness,sid)
     bad=harness.call('agent_workspace',{'operation':'save','area':'user','text':'Коротко'})
     assert bad['status']=='error' and 'expected_revision' in bad['result']['detail']
+    assert bad['execution']['status']=='error' and bad['execution']['code']==bad['result']['code']
     assert not (root/'agent/USER.md').exists()
     current=harness.call('agent_workspace',{'operation':'read','area':'user'})['result']
     good=harness.call('agent_workspace',{'operation':'save','area':'user','text':'Коротко','expected_revision':current['revision']})

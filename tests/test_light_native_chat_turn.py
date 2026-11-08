@@ -32,12 +32,14 @@ def native_turn(tmp_path):
         def do_POST(self):
             body=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
             seen.append(body);script=scripts.pop(0) if scripts else {'text':'Ответ 日本語'}
+            if callable(script):script=script(body)
             self.send_response(200);self.send_header('Content-Type','text/event-stream');self.end_headers()
             def send(delta,finish=None):
                 self.wfile.write(('data: '+json.dumps({'model':'fixture:9b','choices':[{'delta':delta,'finish_reason':finish}]},ensure_ascii=False)+'\n\n').encode());self.wfile.flush()
             try:
-                if script.get('tool'):
-                    send({'tool_calls':[{'index':0,'id':'call-fixture','type':'function','function':{'name':script['tool'],'arguments':json.dumps(script.get('args',{}),ensure_ascii=False)}}]},'tool_calls')
+                if script.get('tool') or script.get('calls'):
+                    calls=script.get('calls') or [script]
+                    send({'tool_calls':[{'index':i,'id':f'call-fixture-{i}','type':'function','function':{'name':item['tool'],'arguments':json.dumps(item.get('args',{}),ensure_ascii=False)}} for i,item in enumerate(calls)]},'tool_calls')
                 else:send({'content':script.get('text','Ответ 日本語')},None if script.get('broken') or script.get('wait') else script.get('finish','stop'))
                 if script.get('wait'):
                     blocked.set();release.wait(timeout=15)
@@ -267,3 +269,51 @@ def test_grounded_pdf_chat_keeps_bound_workspace_reachable_and_rereads_after_sav
     assert 'NATIVE WORKSPACE CONTENT' in json.dumps(rows[-1])
     assert list(t.state.rglob('Result.txt'))[0].read_text(encoding='utf-8')=='NATIVE WORKSPACE CONTENT'
     assert hashlib.sha256(path.read_bytes()).hexdigest()==digest
+
+
+def test_failed_native_workspace_write_has_an_incomplete_execution_receipt(native_turn):
+    t=native_turn
+    sid=t.client.post('/api/workspace/sessions',json={'title':'Write failure'}).raise_for_status().json()['session_id']
+    t.scripts.extend([{'tool':'agent_workspace','args':{'operation':'save','area':'files','path':'failed.txt','expected_revision':'wrong','text':'not saved'}},
+                     {'text':'Файл сохранён.'}])
+    result=t.client.post(PATH,json={'question':'Сохрани файл','session_id':sid,'mode':'agent'},headers=HEADERS).raise_for_status().json()
+    receipt=result['artifact']['execution_receipt']
+    assert receipt['status']=='incomplete' and receipt['kind']=='agent_file'
+    assert result['artifact']['completion_status']=='incomplete' and 'не выполнена' in result['answer']
+    assert not list(t.state.rglob('failed.txt'))
+
+
+def test_physical_pdf_changed_during_generation_never_commits_a_confident_final(native_turn):
+    t=native_turn;path,digest=source_pdf(t)
+    def changed(body):
+        stat=path.stat();raw=path.read_bytes();path.write_bytes(b'X'+raw[1:])
+        os.utime(path,ns=(stat.st_atime_ns,stat.st_mtime_ns))
+        return {'text':'Уверенный ответ [Источник 1]'}
+    t.scripts.extend([{'tool':'read_pdf_source','args':{'doc_id':'registered-document','page':2}},changed])
+    stream=t.client.post(PATH+'/stream',json={'question':'Прочти страницу','dataset_ids':['ds'],'session_id':'pdf-changed'},headers=HEADERS).raise_for_status().text
+    assert 'SOURCE_REVISION_CHANGED' in stream and 'event: final' not in stream
+    with sqlite3.connect(t.database) as db:
+        status,success,artifact=db.execute('SELECT crag_status,success,artifact_json FROM chat_history').fetchone()
+    assert status=='FAILED' and success==0
+    assert json.loads(artifact)['tool_results'][0]['result']['source_sha256']==digest
+
+
+def test_unindexed_physical_pdf_citation_uses_the_hash_of_the_read_handle(native_turn):
+    t=native_turn;_,digest=source_pdf(t)
+    with sqlite3.connect(t.database) as db:db.execute("UPDATE documents SET file_hash='' WHERE id='registered-document'")
+    t.scripts.extend([{'tool':'read_pdf_source','args':{'doc_id':'registered-document','page':2,'source_sha256':digest}},
+                     {'text':'Прочитана страница [Источник 1]'}])
+    result=t.client.post(PATH,json={'question':'Прочти страницу','dataset_ids':['ds']},headers=HEADERS).raise_for_status().json()
+    source=result['source_map'][0]
+    assert source['source_sha256']==digest and 'source_sha256='+digest in source['url']
+    assert hashlib.sha256(t.client.get(source['url']).raise_for_status().content).hexdigest()==digest
+
+
+def test_unindexed_pdf_without_a_revision_stops_before_a_model_followup(native_turn):
+    t=native_turn;source_pdf(t)
+    with sqlite3.connect(t.database) as db:db.execute("UPDATE documents SET file_hash='' WHERE id='registered-document'")
+    t.scripts.extend([{'tool':'read_pdf_source','args':{'doc_id':'registered-document','page':2}},
+                     {'text':'This must not be generated.'}])
+    stream=t.client.post(PATH+'/stream',json={'question':'Прочти страницу','dataset_ids':['ds']},headers=HEADERS).raise_for_status().text
+    assert 'PDF_REVISION_REQUIRED' in stream and 'event: final' not in stream
+    assert len(t.seen)==1

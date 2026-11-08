@@ -10,7 +10,7 @@ fn query_text(settings: &Settings, query: &str) -> Result<String> {
         _=>Err("QUERY_EMBEDDING_CONTRACT_INVALID".into())
     }
 }
-async fn configuration(
+pub(crate) async fn configuration(
     context: Arc<Context>,
     embedding: bool,
 ) -> Result<(Value, Value, String, bool)> {

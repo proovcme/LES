@@ -130,3 +130,23 @@ def test_native_fingerprints_match_independent_python_json_on_float_edges_and_un
             golden=json.dumps({'v':value},sort_keys=True,ensure_ascii=False,separators=(',',':'),allow_nan=False)
             assert one==golden
     assert native['sha256']==hashlib.sha256(expected.encode()).hexdigest()
+
+
+def test_reported_tool_failure_preserves_cause_in_durable_receipt_and_replay(tmp_path):
+    calls=[]
+    def fail(arguments):
+        calls.append(arguments)
+        return {**payload(arguments), 'status':'error', 'result':{'code':'PDF_PAGE_OUT_OF_RANGE'}}
+    store=SqliteExecutionStore(tmp_path/'ledger.db')
+    executor=TrustedExecutor(registry(fail,effect=EffectClass.EXTERNAL),store=store)
+    arguments={'dataset_id':'allowed','proposal_revision':'r1'}
+    approve(store,arguments)
+    req=request(arguments,approval_receipt_id='approval',idempotency_key='reported-error')
+    outcome=asyncio.run(executor.execute(req))
+    assert outcome.code=='PDF_PAGE_OUT_OF_RANGE' and outcome.status=='error'
+    assert outcome.result['status']=='error'
+    executor.close()
+    reopened=TrustedExecutor(registry(fail,effect=EffectClass.EXTERNAL),store=SqliteExecutionStore(tmp_path/'ledger.db'))
+    repeated=asyncio.run(reopened.execute(replace(req,deadline_monotonic=time.monotonic()+5)))
+    assert repeated.code==outcome.code and repeated.result==outcome.result and len(calls)==1
+    reopened.close()

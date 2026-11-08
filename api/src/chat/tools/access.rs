@@ -50,7 +50,11 @@ pub(super) async fn run(
             .find(|c| c["name"] == target)
             .ok_or("TOOL_NOT_ALLOWED")?;
         if operation == "describe" {
-            contract.clone()
+            let mut description = contract.clone();
+            description["call_via"] =
+                json!({"name":name,"arguments":{"operation":"call","name":target,"arguments":{}}});
+            description["call_instruction"] = json!("Call the function named in call_via.name. Preserve its outer operation=call and name; fill only its nested arguments using input_schema. Do not put the target operation (start/read/record) or target fields at the outer level.");
+            description
         } else if operation == "call" {
             Box::pin(tools.run(
                 context,

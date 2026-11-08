@@ -91,6 +91,17 @@ impl Journal {
         self.completed = true;
         Ok(())
     }
+    pub async fn tool_result(&self, payload: Value) -> Result<()> {
+        let database = self.database.clone();
+        let id = self.id.clone();
+        let history = self.history;
+        tokio::task::spawn_blocking(move || {
+            les_core::chat_request::journal::tool_result(&database, &id, history, &payload)
+        })
+        .await
+        .map_err(|_| "CHAT_STORAGE_UNAVAILABLE")??;
+        Ok(())
+    }
     pub async fn finish(&mut self, request: &Value, response: &Value) -> Result<()> {
         let database = self.database.clone();
         let history = self.history;

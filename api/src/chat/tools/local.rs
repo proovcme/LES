@@ -28,7 +28,7 @@ pub(super) async fn run(
         if name=="agent_workspace"{
             let result=crate::chat::unwrap(les_core::agent_files::execute(&json!({"schema":"les.agent-files.v1","database":context.database,"state_root":context.state_root,
                 "action":"tool_execute","arguments":{"session_id":session,"bound_project_id":project,"tool_arguments":args}})))?;
-            return Ok(envelope(&name,"agent_workspace",result,vec![]));
+            return Ok(envelope(&name,args["operation"].as_str().ok_or("TOOL_SCHEMA_INVALID")?,result,vec![]));
         }
         let (action,program)=match name.as_str(){
             "list_installed_skills"=>("catalog",None),"read_installed_skill"=>("read",None),

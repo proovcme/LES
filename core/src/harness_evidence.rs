@@ -203,6 +203,7 @@ fn source_read_outcome(request: &Value) -> Result<Value, &'static str> {
             | "filesystem_stat"
             | "filesystem_hash"
     );
+    let read = read || (result["tool"] == "document_review" && result["operation"] == "read");
     let allowed = !read || result["status"] == "ok";
     let code = text(&result["result"]["code"]);
     Ok(

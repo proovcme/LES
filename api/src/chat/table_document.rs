@@ -33,7 +33,8 @@ impl TableTool {
             .map(str::to_owned)
             .unwrap_or(les_core::chat_attachments::new_id()?);
         let scope = json!({"session":session,"project":turn.request["project_id"],"datasets":datasets,"scope":turn.request["scope"],"profile":turn.profile["revision_id"],"model":turn.connection.revision["revision_id"]});
-        let key = les_core::sha256_hex(scope.to_string().as_bytes());
+        let key =
+            les_core::sha256_hex(les_core::tool_execution::canonical_json(&scope)?.as_bytes());
         let database = context.state_root.join("data/document-tasks.sqlite3");
         let saved = if let Some(id) = turn.request["attachment_id"].as_str() {
             let policy = crate::attachments::policy(context)

@@ -97,6 +97,14 @@ fn recover_preserves_partial_text_and_never_interrupts_another_coordinator() {
     journal::recover(&db).unwrap();
     let request = validate(&json!({"question":"x","session_id":"s"})).unwrap();
     let saved = journal::begin(&db, &request, Some("one")).unwrap();
+    let read = json!({"schema":"les_tool_result_v1","tool":"document_review","operation":"read","status":"ok","result":{"text":"Прочитано 日本語","source_fingerprint":"version"}});
+    journal::tool_result(
+        &db,
+        saved["id"].as_str().unwrap(),
+        saved["history_id"].as_i64().unwrap(),
+        &read,
+    )
+    .unwrap();
     let conn = Connection::open(&db).unwrap();
     conn.execute(
         "UPDATE chat_history SET answer='Прочитано 日本語' WHERE id=?",
@@ -126,6 +134,20 @@ fn recover_preserves_partial_text_and_never_interrupts_another_coordinator() {
         ("Прочитано 日本語", "INTERRUPTED")
     );
     assert!(artifact.contains("CHAT_INTERRUPTED"));
+    assert_eq!(
+        serde_json::from_str::<Value>(&artifact).unwrap()["tool_results"],
+        json!([read])
+    );
+    assert_eq!(
+        journal::tool_result(
+            &db,
+            saved["id"].as_str().unwrap(),
+            saved["history_id"].as_i64().unwrap(),
+            &read
+        )
+        .unwrap_err(),
+        "CHAT_REQUEST_STATE_CHANGED"
+    );
     assert_eq!(
         conn.query_row(
             "SELECT crag_status FROM chat_history WHERE question='legacy-active'",

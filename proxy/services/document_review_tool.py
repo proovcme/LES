@@ -1,4 +1,4 @@
-"""Request-bound, model-owned review queue for explicitly selected indexed units."""
+"""Classic IO codec; review transitions, coverage and revisions are owned by Rust."""
 from __future__ import annotations
 
 import asyncio
@@ -8,7 +8,7 @@ from backend.runtime_paths import mutable_path
 from backend.interface import EmbeddingContractError
 from proxy.services.document_task_store import digest
 from proxy.services.review_task_store import ReviewTaskStore
-from proxy.services.review_source_reader import ReviewSourceReader, read_fragment, validate_selector
+from proxy.services.review_source_reader import ReviewSourceReader
 from proxy.services.tabular_document_service import encode
 
 TOOL_NAME = 'document_review'
@@ -17,21 +17,32 @@ TOOL_NAME = 'document_review'
 class DocumentReviewTool:
     def __init__(self, store, reader, owner, question, max_chars=4000):
         self.store, self.reader, self.owner, self.question = store, reader, owner, question
-        self.max_chars = min(4000, max(200, max_chars))
-        self.task_id = store.resolve_reference(owner, question)
-        self.last_exchange = []
-        self.current_read = {}
-        self.last_chunks = ()
-        self.pending_read = None
-        self.delivery_revision = 0
-        self.current_state = {'available_reviews': store.recent_reviews(owner), 'accepted': False}
+        self._state = dict(owner=owner, question=question, max_chars=min(4000, max(200, max_chars)),
+            # Receipt-only adapters grant no new source selection.
+            task_id=store.resolve_reference(owner, question), allowed=sorted(getattr(reader, 'allowed', ())),
+            files=sorted(getattr(reader, 'files', ())),
+            current_read={}, pending_read=None, delivery_revision=0,
+            current_state={'available_reviews': store.recent_reviews(owner), 'accepted': False})
+        self.last_exchange, self.last_chunks = [], ()
+
+    @property
+    def task_id(self):
+        return self._state['task_id']
+
+    @property
+    def current_read(self):
+        return self._state['current_read']
+
+    @property
+    def current_state(self):
+        return self._state['current_state']
+
+    @property
+    def delivery_revision(self):
+        return self._state['delivery_revision']
 
     def context(self):
-        return {'document_review': self.current_state, 'current_read': self.current_read,
-                'instruction': 'Resume only the review the user requests. The inventory covers selected indexed '
-                'text units, not the whole project or visual pages. Conclusions are model-authored, never accepted '
-                'by this tool. Never infer completion from chat history: only the current ledger counts establish '
-                'saved progress. Use read cursors before record; needs_recheck requires a fresh read and new revision.'}
+        return self.store._call('context', state=self._state)
 
     def model_context(self):
         return ({'native_tool_exchange': [self.last_exchange]} if self.last_exchange
@@ -42,20 +53,8 @@ class DocumentReviewTool:
             await self.refresh(self.task_id)
 
     async def coverage_notice(self):
-        if not self.task_id:
-            return ''
-        state, _ = await self.refresh(self.task_id)
-        if state['needs_recheck']:
-            return (f"**Проверка требует обновления: {state['needs_recheck']} из {state['total']} разделов "
-                    'нуждаются в перепроверке. Прежние выводы сохранены в истории.**')
-        if state['pending']:
-            saved = state['total'] - state['pending']
-            return (f"**Проверка не завершена: в журнале есть решения для {saved} из {state['total']} разделов.** "
-                    'Текст модели ниже не подтверждает завершение проверки.')
-        if state['needs_review']:
-            return (f"**В журнале остаются вопросы: {state['needs_review']} из {state['total']} разделов "
-                    'отмечены как требующие проверки.**')
-        return ''
+        receipt = await self.completion_receipt()
+        return receipt['notice'] if receipt and receipt['status'] != 'recorded' else ''
 
     def remember_validation_failure(self, arguments, result):
         self.remember(arguments, {'status': 'error', 'missing': result.get('missing', []),
@@ -77,13 +76,7 @@ class DocumentReviewTool:
              'content': encode({'result': payload, 'document_state': self.context()})}]
 
     def acknowledge_model_context(self, messages):
-        """Only successful inference with the complete native tool message credits a page."""
-        if self.pending_read and self.last_exchange and self.last_exchange[-1] in messages:
-            task_id, unit_id, snapshot, payload = self.pending_read
-            self.store.remember_read(self.owner, task_id, unit_id, snapshot,
-                                     payload['fragment_id'], payload['offset'], payload['stop'])
-            self.pending_read = None
-            self.delivery_revision += 1
+        self._state = self.store._call('ack', state=self._state, messages=messages)
 
     async def snapshots(self, task):
         snapshots, errors, originals = {}, {}, {}
@@ -92,7 +85,6 @@ class DocumentReviewTool:
             try:
                 snapshots[unit['unit_id']] = await self.reader.read(unit['selector'], originals=originals)
             except ValueError as error:
-                # Missing/changed originals invalidate coverage without deleting old conclusions.
                 errors[unit['unit_id']] = str(error)
             except OSError:
                 errors[unit['unit_id']] = 'Оригинал недоступен: файл отсутствует или нет прав чтения'
@@ -105,20 +97,13 @@ class DocumentReviewTool:
         try:
             snapshots, errors = await self.snapshots(task)
         except EmbeddingContractError:
-            self.current_state = {'task_id': task_id, 'coverage_complete': False,
-                                  'verification_unavailable': True, 'accepted': False}
+            self._state['current_state'] = {'task_id': task_id, 'coverage_complete': False,
+                                           'verification_unavailable': True, 'accepted': False}
             raise
-        state = self.store.status(self.owner, task_id, {key: value['fingerprint'] for key, value in snapshots.items()})
-        state['source_errors'] = errors
-        state['blocked_units'] = len(errors)
-        state['needs_attention'] = state['needs_attention'] or bool(errors)
-        state['next_unit_id'] = next((unit['unit_id'] for name in ('needs_recheck', 'pending')
-                                     for unit in state['units'] if unit['state'] == name and unit['unit_id'] in snapshots), None)
-        self.current_state = {key: value for key, value in state.items() if key not in {'units', 'source_errors'}}
-        if self.task_id != task_id or self.current_read.get('source_fingerprint') not in {
-                snapshot['fingerprint'] for snapshot in snapshots.values()}:
-            self.current_read = {}
-        return state, snapshots
+        result = await asyncio.to_thread(self.store._call, 'refresh', state=self._state,
+                                         task_id=task_id, snapshots=snapshots, errors=errors)
+        self._state = result['state']
+        return result['payload'], snapshots
 
     async def assert_for_inference(self):
         if not self.current_read:
@@ -133,93 +118,31 @@ class DocumentReviewTool:
 
     async def execute(self, arguments):
         self.last_chunks = ()
-        self.pending_read = None
-        operation = arguments['operation']
-        if operation == 'start':
-            selectors = [validate_selector(item, self.reader.allowed) for item in arguments.get('selectors', [])]
-            if not 1 <= len(selectors) <= 32:
-                raise ValueError('Выберите от 1 до 32 документов или разделов')
-            # Fail atomically: do not create a successful inventory of unreadable sources.
-            originals = {}
-            for selector in selectors:
-                await self.reader.read(selector, originals=originals)
-            self.task_id = self.store.create(self.owner, self.question, selectors)
-            state, _ = await self.refresh(self.task_id)
-            return state
-        task_id = arguments.get('task_id') or self.task_id
-        if operation == 'status' and not task_id:
-            return {'available_reviews': self.store.recent_reviews(self.owner), 'accepted': False}
-        state, snapshots = await self.refresh(task_id)
-        self.task_id = task_id
-        if operation == 'status':
-            return state
-        if operation == 'history':
-            return {**self.store.history(self.owner, task_id, arguments.get('offset', 0)),
-                    'task_id': task_id, 'historical': True, 'accepted': False}
-        unit_id = arguments.get('unit_id') or state['next_unit_id']
-        if unit_id not in snapshots:
-            raise ValueError('Раздел недоступен или источник изменился; прочитайте status и обновите индекс')
-        snapshot = snapshots[unit_id]
-        if operation == 'read':
-            payload = read_fragment(snapshot, fragment_index=arguments.get('fragment_index', 0),
-                                    offset=arguments.get('offset', 0), max_chars=self.max_chars)
-            self.pending_read = (task_id, unit_id, snapshot, payload)
-            self.current_read = payload
+        plan = self.store._call('plan', state=self._state, arguments=arguments)
+        snapshots, errors = await self.snapshots({'units': [
+            {'unit_id': digest(selector), 'selector': selector} for selector in plan['selectors']]})
+        result = await asyncio.to_thread(self.store._call, 'execute', state=self._state,
+                                         arguments=arguments, snapshots=snapshots, errors=errors)
+        self._state = result['state']
+        fragment = result.get('chunk')
+        if fragment:
             from backend.interface import Chunk
-            fragment = snapshot['fragments'][arguments.get('fragment_index', 0)]
+            selector = result['payload']['selector']
             self.last_chunks = (Chunk(fragment['text'], str(fragment['locator'].get('doc_id') or ''),
-                snapshot['selector']['file_name'], 0.0, {**fragment['locator'],
-                'dataset_id': snapshot['selector']['dataset_id'], 'qdrant_point_id': fragment['id']}),)
-            return {'task_id': task_id, 'revision': state['revision'], 'unit_id': unit_id, **payload}
-        if operation == 'record':
-            dependencies = arguments.get('dependencies', [])
-            states = {unit['unit_id']: unit['state'] for unit in state['units']}
-            if not isinstance(dependencies, list) or any(states.get(dep) != 'reviewed' for dep in dependencies):
-                raise ValueError('Зависимые выводы отсутствуют или нуждаются в перепроверке')
-            revision = self.store.record(self.owner, task_id, request_id=arguments.get('request_id'),
-                expected_revision=arguments.get('expected_revision'), unit_id=unit_id, snapshot=snapshot,
-                source_fingerprint=arguments.get('source_fingerprint'), status=arguments.get('status'),
-                note=arguments.get('note'), evidence=arguments.get('evidence'), dependencies=dependencies)
-            state, _ = await self.refresh(task_id)
-            return {**state, 'saved_revision': revision}
-        raise ValueError('Неизвестное действие проверки документов')
+                selector['file_name'], 0.0, {**fragment['locator'],
+                'dataset_id': selector['dataset_id'], 'qdrant_point_id': fragment['id']}),)
+        return result['payload']
 
     def register(self, harness):
         from proxy.services.tool_contract_service import ToolContract, EffectClass, ResultBudget, RetryPolicy, IdempotencyPolicy
         from proxy.services.tool_registry_service import ToolRegistration
         from proxy.services.tool_harness_service import _result
-        string = {'type': 'string', 'maxLength': 1000}
-        contract = ToolContract(
-            name=TOOL_NAME, version='1.0.0', title='Продолжить проверку документов', category='source',
-            summary='Persistent review of an EXPLICIT inventory of documents/parent sections in selected datasets. '
-                'start uses the current user question as goal and selectors from search provenance. '
-                'status lists prior reviews; task_id resumes one. read returns exact indexed text with next_cursor '
-                '(fragment_index, offset); follow every cursor before marking a unit reviewed. '
-                'record requires unit_id, current expected_revision, source_fingerprint from read, unique request_id, '
-                'status, note and exact evidence quotes. dependencies names other reviewed unit IDs whose conclusions '
-                'were used. Changed source bytes, indexed text or dependency revisions cause needs_recheck. '
-                'history preserves old revisions. accepted is always false. Coverage is selected indexed text only; '
-                'never claim a complete project audit or visual inspection.',
-            input_schema={'type': 'object', 'properties': {
-                'operation': {'type': 'string', 'enum': ['start', 'status', 'read', 'record', 'history']},
-                'task_id': string, 'unit_id': string, 'request_id': {'type': 'string', 'minLength': 1, 'maxLength': 120},
-                'expected_revision': {'type': 'integer', 'minimum': 0}, 'source_fingerprint': string,
-                'fragment_index': {'type': 'integer', 'minimum': 0}, 'offset': {'type': 'integer', 'minimum': 0},
-                'selectors': {'type': 'array', 'minItems': 1, 'maxItems': 32, 'items': {
-                    'type': 'object', 'properties': {'dataset_id': string, 'file_name': string, 'parent_id': string},
-                    'required': ['dataset_id', 'file_name'], 'additionalProperties': False}},
-                'status': {'type': 'string', 'enum': ['reviewed', 'needs_review', 'excluded']},
-                'note': {'type': 'string', 'minLength': 1, 'maxLength': 1200},
-                'dependencies': {'type': 'array', 'maxItems': 16, 'uniqueItems': True, 'items': string},
-                'evidence': {'type': 'array', 'minItems': 1, 'maxItems': 4, 'items': {'type': 'object',
-                    'properties': {'fragment_id': string, 'quote': {'type': 'string', 'minLength': 1, 'maxLength': 300}},
-                    'required': ['fragment_id', 'quote'], 'additionalProperties': False}}},
-                'required': ['operation'], 'additionalProperties': False},
-            result_schema='les_tool_result_v1', effect=EffectClass.DRAFT, scopes=(), timeout_seconds=30,
-            retry=RetryPolicy.NEVER, idempotency=IdempotencyPolicy.NONE,
-            result_budget=ResultBudget(max_chars=60000, max_items=4096), model_owned_fields=('note', 'status', 'evidence'),
-            provenance='Selected original SHA256, indexed unit fingerprints and immutable model conclusion revisions',
-            tags=('document', 'review', 'resume'))
+        fields = self.store._call('contract')
+        fields['effect'] = EffectClass(fields['effect'])
+        fields['retry'] = RetryPolicy(fields['retry'])
+        fields['idempotency'] = IdempotencyPolicy(fields['idempotency'])
+        fields['result_budget'] = ResultBudget(**fields['result_budget'])
+        contract = ToolContract(**fields)
 
         async def handler(arguments):
             try:

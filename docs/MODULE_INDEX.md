@@ -1,5 +1,9 @@
 # Модули LES RAG
 
+838: [нативная проверка документов](modules/native-document-review.md) —
+`core/src/document_review/`, `api/src/chat/document_review/`: неизменяемый журнал,
+передача текста модели, цитаты, зависимости, курсоры и источник в общем чате.
+
 837: [вложения и табличные задания](modules/native-chat-attachments.md) —
 `core/src/chat_attachments/`, `core/src/document_tasks/`, `api/src/attachments/`,
 `api/src/chat/table_document.rs`: оригиналы, multipart, изображения, точные окна,

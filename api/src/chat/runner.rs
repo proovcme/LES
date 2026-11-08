@@ -1,5 +1,11 @@
 //! One turn implementation for JSON and SSE. There is no legacy callback or fallback.
-use super::{journal::Journal, model, prepare, tools, Context, Result, Sink};
+use super::{
+    evidence::Evidence,
+    journal::Journal,
+    model, prepare,
+    protocol::{bound_pair, complete_pending, effective, proposal, strip_bound_calls},
+    tools, Context, Result, Sink,
+};
 use les_core::agent_loop::{AgentLoop, Step};
 use serde_json::{json, Value};
 use std::{
@@ -7,115 +13,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[derive(Default)]
-struct Evidence {
-    sources: Vec<Value>,
-    blocks: Vec<Value>,
-}
-impl Evidence {
-    fn key(source: &Value) -> Value {
-        json!([
-            source["doc_id"],
-            source["source_sha256"],
-            source["page"],
-            source["qdrant_point_id"],
-            source["offset"]
-        ])
-    }
-    fn add(&mut self, result: &Value) {
-        if result["status"] != "ok" {
-            return;
-        }
-        let result = if result["tool"]
-            .as_str()
-            .is_some_and(|v| v.starts_with("use_extensions_"))
-            && result["operation"] == "call"
-        {
-            &result["result"]
-        } else {
-            result
-        };
-        let passages = result["result"]["passages"]
-            .as_array()
-            .cloned()
-            .unwrap_or_else(|| {
-                result["result"]["text"]
-                    .as_str()
-                    .map(|s| vec![json!({"text":s,"source":result["sources"][0]})])
-                    .unwrap_or_default()
-            });
-        for passage in passages {
-            let mut source = passage["source"].clone();
-            let Some(text) = passage["text"].as_str().filter(|v| !v.is_empty()) else {
-                continue;
-            };
-            if !source.is_object() {
-                continue;
-            }
-            let key = Self::key(&source);
-            if self.sources.iter().any(|s| s["native_identity"] == key) {
-                continue;
-            }
-            let index = self.sources.len() + 1;
-            source["index"] = json!(index);
-            source["native_identity"] = key;
-            let name = source["doc_name"].as_str().unwrap_or("Документ");
-            let label = source["page"]
-                .as_u64()
-                .map(|p| format!("{name} · стр. {p}"))
-                .unwrap_or_else(|| name.into());
-            source["label"] = json!(label);
-            source["header"] = json!(format!("[Источник {index} | {label}]"));
-            self.blocks.push(json!(format!(
-                "{}\n{text}",
-                source["header"].as_str().unwrap()
-            )));
-            self.sources.push(source);
-        }
-    }
-    fn reference(&self, source: &Value) -> Option<Value> {
-        self.sources
-            .iter()
-            .find(|s| s["native_identity"] == Self::key(source))
-            .map(|s| json!({"index":s["index"],"label":s["header"]}))
-    }
-    fn projection(&self, payload: &Value) -> Value {
-        let mut value = payload.clone();
-        if value["tool"]
-            .as_str()
-            .is_some_and(|v| v.starts_with("use_extensions_"))
-            && value["operation"] == "call"
-        {
-            value["result"] = self.projection(&value["result"]);
-        }
-        if let Some(rows) = value["result"]["passages"].as_array_mut() {
-            for row in rows {
-                if let Some(reference) = self.reference(&row["source"]) {
-                    row["text"] = reference["label"].clone();
-                    row["source"] = reference;
-                }
-            }
-        }
-        if value["result"]["text"].is_string() {
-            if let Some(reference) = self.reference(&value["sources"][0]) {
-                value["result"]["text"] = reference["label"].clone();
-            }
-        }
-        if value["sources"].is_array() {
-            value["sources"] = json!(value["sources"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|s| self.reference(s).unwrap_or_else(|| s.clone()))
-                .collect::<Vec<_>>());
-        }
-        if !value["execution"].is_null() {
-            value["execution"] =
-                json!({"status":value["execution"]["status"],"code":value["execution"]["code"]});
-        }
-        value
-    }
-}
 pub async fn run(
     context: Arc<Context>,
     request: &mut Value,
@@ -157,6 +54,15 @@ pub async fn run(
         .map_err(|_| "MODEL_QUEUE_TIMEOUT")?;
     let mut tools = tools::Tools::new(&context, &turn).await?;
     tools.bind_table(super::table_document::TableTool::bind(&context, &turn).await?);
+    let available = turn.connection.profile["normal_tool_count"]
+        .as_u64()
+        .unwrap_or(3)
+        > 1 + u64::from(tools.table.is_some())
+        && turn.profile["tools"].as_array().is_some_and(|v| {
+            v.iter()
+                .any(|n| n == "search_sources" || n == "read_source" || n == "document_review")
+        });
+    tools.bind_review(super::document_review::ReviewTool::bind(&context, &turn, available).await?);
     if let Some(table) = &tools.table {
         turn.request["attachment_context"] = json!(table.manifest().to_string());
         request["attachment_context"] = turn.request["attachment_context"].clone();
@@ -167,12 +73,7 @@ pub async fn run(
     let native =
         les_core::model_capabilities::require(&turn.connection.snapshot, &["tools".into()], None)
             .is_ok();
-    let schemas = tools.schemas(
-        turn.connection.profile["normal_tool_count"]
-            .as_u64()
-            .unwrap_or(3) as usize,
-        turn.scope["document_grounding_enabled"] == true,
-    );
+    let mut disclosed = Vec::new();
     let mut evidence = Evidence::default();
     let mut exchanges = Vec::new();
     let mut contexts = Vec::new();
@@ -200,23 +101,65 @@ pub async fn run(
     )?;
     let mut native_pending = Value::Null;
     let mut table_result = Value::Null;
+    let mut review_result = Value::Null;
+    let mut table_proposal = Value::Null;
+    let mut review_proposal = Value::Null;
     loop {
         match agent.next()? {
             Step::Model { final_answer } => {
+                if native {
+                    complete_pending(&mut exchanges, agent.stop_reason());
+                }
                 let mut required = evidence.blocks.clone();
+                let mut native_groups = Vec::new();
+                if native && !exchanges.is_empty() {
+                    native_groups.push(json!(exchanges));
+                }
                 if let Some(table) = &tools.table {
                     let state = table.state().await?;
                     agent
                         .update_epochs(json!({"table_document":state["table_task"]["revision"]}))?;
-                    required.push(
-                        json!({"table_document_state":state,"last_table_result":table_result}),
-                    );
+                    let state =
+                        json!({"table_document_state":state,"last_table_result":table_result});
+                    if native && table_proposal.is_object() {
+                        native_groups.push(bound_pair(&table_proposal, state));
+                    } else {
+                        required.push(state);
+                    }
                 }
-                let advertised = if final_answer {
+                if let Some(review) = &tools.review {
+                    let view = review.context(context.clone(), &turn).await?;
+                    agent.capability_revision("document_review", review.revision().await)?;
+                    if native && review_proposal.is_object() {
+                        required.push(json!(evidence.review_header(&view)));
+                        native_groups.push(bound_pair(
+                            &review_proposal,
+                            json!({"document_state":view,"last_review_result":review_result}),
+                        ));
+                    } else {
+                        required.push(evidence.review_context(&view)?);
+                        required.push(json!({"last_review_result":review_result}));
+                    }
+                    review.assert_current(context.clone(), &turn).await?;
+                }
+                let mut advertised = if final_answer {
                     vec![]
                 } else {
-                    schemas.clone()
+                    tools.disclosed_schemas(
+                        turn.connection.profile["normal_tool_count"]
+                            .as_u64()
+                            .unwrap_or(3) as usize,
+                        turn.scope["document_grounding_enabled"] == true,
+                        &disclosed,
+                    )
                 };
+                if let Some(review) = &tools.review {
+                    for schema in &mut advertised {
+                        if schema["function"]["name"] == "document_review" {
+                            schema["function"]["parameters"] = review.schema().await;
+                        }
+                    }
+                }
                 let schema_text = json!(advertised).to_string();
                 // Schemas are transmitted separately, but still consume model context.
                 let reserve = ((schema_text.chars().count() + 1) / 2) as u64;
@@ -234,7 +177,7 @@ pub async fn run(
                     &json!({"action":"assemble","preset":{"preset_id":profile["preset_id"],"input_limit":input,"generation_reserve":profile["generation_reserve_tokens"],"safety_reserve":profile["safety_reserve_tokens"]},
                     "profile_prefix":prompt,"request_payload":question,"shortlist":if native{json!([])}else{json!(advertised)},
                     "checkpoint":[],"working_memory":turn.memory,"dialogue":turn.dialogue,"evidence":[],"source_map":evidence.sources,
-                    "required_evidence":required,"tool_exchange":if native{json!([])}else{json!(exchanges)},"native_tool_exchange":if native{json!([exchanges])}else{json!([])}}),
+                    "required_evidence":required,"tool_exchange":if native{json!([])}else{json!(exchanges)},"native_tool_exchange":native_groups}),
                 )?;
                 if packed["overflow"] == true {
                     return Err("CONTEXT_REQUIRED_SECTION_OVERFLOW".into());
@@ -259,6 +202,10 @@ pub async fn run(
                     sink,
                 )
                 .await?;
+                if let Some(review) = &tools.review {
+                    review.acknowledge(packed["messages"].clone()).await?;
+                    agent.capability_revision("document_review", review.revision().await)?;
+                }
                 if !native && !final_answer {
                     response["selection_text"] = response["text"].clone();
                 }
@@ -299,14 +246,29 @@ pub async fn run(
                 let payload = tools
                     .run(context.clone(), &turn, &call, &journal.id)
                     .await?;
+                journal.tool_result(payload.clone()).await?;
+                if let Some(name) = tools.disclosed(&payload) {
+                    disclosed.retain(|n| n != &name);
+                    disclosed.push(name);
+                    if disclosed.len() > 128 {
+                        disclosed.remove(0);
+                    }
+                }
                 evidence.add(&payload);
                 let projected = evidence.projection(&payload);
-                if call["tool"] == "table_document" {
-                    table_result = json!({"arguments":call["args"],"result":projected});
+                let effect = effective(&payload);
+                if effect["tool"] == "table_document" || effect["tool"] == "document_review" {
+                    if effect["tool"] == "table_document" {
+                        table_result = json!({"arguments":call["args"],"result":projected});
+                        table_proposal = proposal(&native_pending, &call);
+                    } else {
+                        review_result = json!({"arguments":call["args"],"result":projected});
+                        review_proposal = proposal(&native_pending, &call);
+                    }
                     // Row packets live in the ledger. Keep no growing table transcript
                     // in the model context, including mixed provider tool-call groups.
                     if native {
-                        strip_table_calls(&mut exchanges);
+                        strip_bound_calls(&mut exchanges, effect["tool"].as_str().unwrap());
                     }
                 } else if native {
                     if let Some(id) = call["call_id"]
@@ -337,6 +299,14 @@ pub async fn run(
                     .last()
                     .map(|c| c["sources"].clone())
                     .unwrap_or(json!([]));
+                if visible
+                    .as_array()
+                    .is_some_and(|v| v.iter().any(|s| s["evidence_kind"] == "physical_pdf_page"))
+                {
+                    sink.progress("verification", "Проверяю источники ответа")
+                        .await?;
+                    tools::sources::verify_physical(context.clone(), &visible).await?;
+                }
                 let citations = les_core::citations::execute(
                     &json!({"answer":terminal["text"],"sources":visible}),
                 )?;
@@ -351,10 +321,37 @@ pub async fn run(
                 } else {
                     Value::Null
                 };
-                let answer = if !receipt.is_null() {
+                let review_receipt = if let Some(review) = &tools.review {
+                    review.receipt(context.clone(), &turn).await?
+                } else {
+                    Value::Null
+                };
+                let mut receipts = vec![receipt.clone(), review_receipt]
+                    .into_iter()
+                    .filter(|r| !r.is_null())
+                    .collect::<Vec<_>>();
+                for result in agent.results().iter().map(effective).filter(|p| {
+                    p["tool"] == "agent_workspace"
+                        && ["save", "edit", "delete", "restore"]
+                            .iter()
+                            .any(|op| p["operation"] == *op)
+                }) {
+                    receipts.push(
+                        les_core::execution_receipt(
+                            &json!({"action":"local_file_receipt","payload":result}),
+                        )?["receipt"]
+                            .clone(),
+                    );
+                }
+                let summary = les_core::execution_receipt(
+                    &json!({"action":"receipt_summary","receipts":receipts}),
+                )?["summary"]
+                    .clone();
+                let receipt = receipts.first().cloned().unwrap_or(Value::Null);
+                let answer = if !summary.is_null() {
                     format!(
                         "{}\n\n{answer}",
-                        receipt["notice"].as_str().ok_or("TABLE_TASK_INVALID")?
+                        summary["notice"].as_str().ok_or("REVIEW_TASK_INVALID")?
                     )
                 } else {
                     answer.to_owned()
@@ -370,66 +367,10 @@ pub async fn run(
                     "history_id":journal.history,"latency_sec":started.elapsed().as_secs_f64(),"tokens":terminal["usage"]["completion_tokens"].as_u64().unwrap_or(0),"crag_status":"UNVALIDATED","success":true,
                     "source_scope":{"resolved":turn.scope["resolved_dataset_ids"],"used":evidence.sources.iter().map(|s|s["dataset_id"].clone()).collect::<Vec<_>>()},
                     "query_route":{"channel":"generic","reason":"native_chat"},"retrieval_trace":{"engine":"rust.chat","rounds":agent.rounds,"contexts":contexts,"citation_syntax":citations},
-                    "artifact":{"completion_status":if !receipt.is_null()&&receipt["status"]!="recorded"{"incomplete"}else{"completed"},"execution_receipt":receipt,"validation":"not_performed","tool_results":agent.results(),"attachment":{
+                    "artifact":{"completion_status":if !summary.is_null()&&summary["status"]!="recorded"{"incomplete"}else{"completed"},"execution_receipt":receipt,"execution_summary":summary,"validation":"not_performed","tool_results":agent.results(),"attachment":{
                         "attachment_id":turn.attachment["attachment_id"],"name":turn.attachment["name"],"source_sha256":turn.attachment["source_sha256"],"media_type":turn.attachment["media_type"],"truncated":turn.attachment["truncated"]}},"model":turn.connection.public()}),
                 );
             }
         }
-    }
-}
-fn strip_table_calls(exchanges: &mut Vec<Value>) {
-    let mut ids = Vec::new();
-    let mut kept = Vec::new();
-    for mut message in exchanges.drain(..) {
-        if message["role"] == "assistant" {
-            ids = message["tool_calls"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter(|c| c["function"]["name"] == "table_document")
-                .map(|c| c["id"].clone())
-                .collect();
-            if let Some(calls) = message["tool_calls"].as_array_mut() {
-                calls.retain(|c| c["function"]["name"] != "table_document");
-            }
-            if message["tool_calls"]
-                .as_array()
-                .is_some_and(|c| c.is_empty())
-                && message["content"].is_null()
-            {
-                continue;
-            }
-        } else if message["role"] == "tool" && ids.contains(&message["tool_call_id"]) {
-            continue;
-        }
-        kept.push(message);
-    }
-    *exchanges = kept;
-}
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn table_projection_preserves_other_groups_with_reused_provider_ids() {
-        let call = |name: &str| json!({"role":"assistant","content":null,"tool_calls":[{"id":"same","function":{"name":name}}]});
-        let result = |value: &str| json!({"role":"tool","tool_call_id":"same","content":value});
-        let mut messages = vec![
-            call("read_pdf_source"),
-            result("PDF before"),
-            call("table_document"),
-            result("old packet"),
-            call("read_source"),
-            result("PDF after"),
-        ];
-        strip_table_calls(&mut messages);
-        assert_eq!(
-            messages,
-            vec![
-                call("read_pdf_source"),
-                result("PDF before"),
-                call("read_source"),
-                result("PDF after")
-            ]
-        );
     }
 }

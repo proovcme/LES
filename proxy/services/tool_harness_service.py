@@ -336,7 +336,8 @@ class ToolHarness:
             )
         )
         raw = envelope.to_dict()["result"]
-        if envelope.status == "ok" and raw.get("schema") == TOOL_RESULT_SCHEMA:
+        if (envelope.status in {"ok", "error"} and raw.get("schema") == TOOL_RESULT_SCHEMA
+                and raw.get("tool") == tool):
             payload = dict(raw)
             registration = self._registry.get(tool)
             if registration is not None:

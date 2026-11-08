@@ -1,5 +1,6 @@
 //! Trusted executor state and policy. Dispatchers provide effects; they cannot bypass admission/results policy.
 pub(crate) mod canonical;
+pub use canonical::encode as canonical_json;
 mod store;
 use serde_json::{json, Value};
 use std::{
@@ -328,7 +329,40 @@ impl Executor {
                     && items
                         <= contract["result_budget"]["max_items"].as_u64().unwrap_or(0) as usize
                 {
-                    envelope(request, "ok", "TOOL_OK", raw.clone())
+                    let mut effective = raw;
+                    for _ in 0..8 {
+                        if effective["tool"]
+                            .as_str()
+                            .is_some_and(|v| v.starts_with("use_extensions_"))
+                            && effective["operation"] == "call"
+                            && effective["result"]["schema"] == "les_tool_result_v1"
+                        {
+                            effective = &effective["result"];
+                        } else {
+                            break;
+                        }
+                    }
+                    if matches!(
+                        raw["status"].as_str(),
+                        Some("error" | "missing" | "blocked")
+                    ) || matches!(
+                        effective["status"].as_str(),
+                        Some("error" | "missing" | "blocked")
+                    ) {
+                        let code = effective["result"]["code"]
+                            .as_str()
+                            .filter(|v| {
+                                !v.is_empty()
+                                    && v.len() <= 100
+                                    && v.bytes().all(|c| {
+                                        c.is_ascii_uppercase() || c.is_ascii_digit() || c == b'_'
+                                    })
+                            })
+                            .unwrap_or("TOOL_REPORTED_ERROR");
+                        envelope(request, "error", code, raw.clone())
+                    } else {
+                        envelope(request, "ok", "TOOL_OK", raw.clone())
+                    }
                 } else {
                     let cursor = format!(
                         "tool-result:{}:{}",

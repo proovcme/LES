@@ -9,11 +9,11 @@ pub fn contract() -> Value {
     serde_json::from_str(include_str!("../../../config/table-document-tool.json"))
         .expect("checked table contract")
 }
-fn text<'a>(r: &'a Value, k: &str) -> Result<&'a str> {
+pub(crate) fn text<'a>(r: &'a Value, k: &str) -> Result<&'a str> {
     r[k].as_str()
         .ok_or_else(|| Failure::invalid("Некорректные параметры задания"))
 }
-fn number(r: &Value, k: &str, default: i64) -> Result<i64> {
+pub(crate) fn number(r: &Value, k: &str, default: i64) -> Result<i64> {
     r.get(k).map_or(Ok(default), |v| {
         v.as_i64()
             .ok_or_else(|| Failure::invalid("Некорректный бюджет или смещение"))
@@ -22,10 +22,10 @@ fn number(r: &Value, k: &str, default: i64) -> Result<i64> {
 pub(crate) fn encode(v: &Value) -> Result<String> {
     crate::tool_execution::canonical::encode(v).map_err(Failure::invalid)
 }
-fn digest(v: &Value) -> Result<String> {
+pub(crate) fn digest(v: &Value) -> Result<String> {
     Ok(crate::sha256_hex(encode(v)?.as_bytes()))
 }
-fn parse(v: &str) -> Result<Value> {
+pub(crate) fn parse(v: &str) -> Result<Value> {
     serde_json::from_str(v)
         .map_err(|_| Failure::invalid("Не удалось прочитать сохранённое задание"))
 }
@@ -423,6 +423,12 @@ fn transport(req: &Value) -> Result<Value> {
 fn run(req: &Value) -> Result<Value> {
     if req["schema"] != "les.document-tasks.v1" {
         return Err(Failure::invalid("Некорректная схема задания"));
+    }
+    if let Some(action) = req["action"]
+        .as_str()
+        .and_then(|s| s.strip_prefix("review_"))
+    {
+        return crate::document_review::run(req, action);
     }
     if req["action"] == "contract" {
         return Ok(contract());
