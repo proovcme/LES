@@ -31,10 +31,14 @@ fn identity(file: &File) -> Result<(u64, u64), &'static str> {
 
 pub fn fingerprint(request: &Value) -> Result<Value, &'static str> {
     let path = request["path"].as_str().ok_or("CORE_FILE_PATH_INVALID")?;
-    fingerprint_path(path, || {})
+    fingerprint_path(path, request["include_mtime"] == true, || {})
 }
 
-fn fingerprint_path(path: &str, after_read: impl FnOnce()) -> Result<Value, &'static str> {
+fn fingerprint_path(
+    path: &str,
+    include_mtime: bool,
+    after_read: impl FnOnce(),
+) -> Result<Value, &'static str> {
     if !std::fs::metadata(path)
         .map_err(|_| "CORE_FILE_UNAVAILABLE")?
         .is_file()
@@ -77,7 +81,16 @@ fn fingerprint_path(path: &str, after_read: impl FnOnce()) -> Result<Value, &'st
     {
         return Err("CORE_FILE_CHANGED");
     }
-    Ok(json!({"sha256":format!("{:x}",hash.finalize()), "size":size, "stable":true}))
+    let mut result = json!({"sha256":format!("{:x}",hash.finalize()), "size":size, "stable":true});
+    if include_mtime {
+        use std::time::UNIX_EPOCH;
+        let seconds = match modified.duration_since(UNIX_EPOCH) {
+            Ok(elapsed) => elapsed.as_secs_f64(),
+            Err(before_epoch) => -before_epoch.duration().as_secs_f64(),
+        };
+        result["mtime"] = json!(seconds);
+    }
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -102,7 +115,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let path = root.join("source.txt");
         std::fs::write(&path, b"original").unwrap();
-        let result = fingerprint_path(path.to_str().unwrap(), || {
+        let result = fingerprint_path(path.to_str().unwrap(), true, || {
             std::fs::write(&path, b"changed size").unwrap();
         });
         assert_eq!(result, Err("CORE_FILE_CHANGED"));

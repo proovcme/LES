@@ -4,7 +4,7 @@ use crate::workspace::{Failure, Result};
 use rusqlite::{functions::FunctionFlags, params, Connection};
 use serde_json::{json, Value};
 
-fn visible(name: &str) -> bool {
+pub(crate) fn visible(name: &str) -> bool {
     let leaf = name.rsplit(['/', '\\']).next().unwrap_or_default();
     !["~$", ".~lock.", "._"]
         .iter()
@@ -13,6 +13,19 @@ fn visible(name: &str) -> bool {
             leaf,
             ".pdf_preprocess_state.json" | "_les_dataset_profile.json"
         )
+}
+
+pub(crate) fn register_visibility(conn: &Connection) -> rusqlite::Result<()> {
+    conn.create_scalar_function(
+        "les_visible_document",
+        1,
+        FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+        |ctx| {
+            Ok(ctx
+                .get::<Option<String>>(0)?
+                .is_some_and(|name| visible(&name)))
+        },
+    )
 }
 
 fn create(conn: &Connection, args: &Args) -> Result<Value> {
@@ -117,17 +130,29 @@ pub(super) fn execute(conn: &Connection, action: &str, args: &Args) -> Result<Va
         return create(conn, args);
     }
     let flags = FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC;
-    conn.create_scalar_function("les_visible_document", 1, flags, |ctx| {
-        Ok(ctx
-            .get::<Option<String>>(0)?
-            .is_some_and(|name| visible(&name)))
-    })?;
+    register_visibility(conn)?;
     conn.create_scalar_function("les_name_matches", 2, flags, |ctx| {
         let name = ctx.get::<Option<String>>(0)?.unwrap_or_default();
         Ok(name.to_lowercase().contains(&ctx.get::<String>(1)?))
     })?;
     match action {
         "library_datasets" => Ok(json!({"datasets":datasets(conn)?})),
+        "library_document" => {
+            let id = args.get("doc_id").and_then(Value::as_str).unwrap_or("");
+            let dataset = args.get("dataset_id").and_then(Value::as_str).unwrap_or("");
+            let name = args.get("file_name").and_then(Value::as_str).unwrap_or("");
+            if id.is_empty() && (dataset.is_empty() || name.is_empty()) {
+                return Err(Failure::invalid("Document identity required"));
+            }
+            let records=rows(conn,"SELECT doc.* FROM documents doc JOIN datasets d ON doc.dataset_id=d.id WHERE (?1='' OR doc.id=?1) AND (?2='' OR doc.dataset_id=?2) AND (?3='' OR doc.file_name=?3) AND COALESCE(d.dataset_scope,'user') <> 'system' AND les_visible_document(doc.file_name) LIMIT 2",params![id,dataset,name])?;
+            if records.len() > 1 {
+                return Err(Failure::new(
+                    "DOCUMENT_IDENTITY_AMBIGUOUS",
+                    "Найдено несколько редакций документа. Выберите точный источник.",
+                ));
+            }
+            Ok(records.into_iter().next().unwrap_or(Value::Null))
+        }
         "library_dataset" => {
             let id = text(args, "dataset_id")?;
             check_dataset(conn, id)?;

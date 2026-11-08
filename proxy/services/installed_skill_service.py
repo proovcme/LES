@@ -1,70 +1,27 @@
-"""Read installed skill packages without putting every reference into context."""
-from pathlib import Path
-import re
-
+"""Compatibility codec for the native installed-skill library owner."""
+from backend import native_core
 from backend.runtime_paths import mutable_path
-
-_NAME = re.compile(r'^[a-z0-9][a-z0-9_-]{0,100}$')
-_TEXT = {'.md', '.txt', '.py', '.json', '.yaml', '.yml', '.csv'}
 
 
 def library_root():
     return mutable_path('storage/skills').resolve()
 
 
-def _file(skill, relative):
-    if not _NAME.fullmatch(skill):
-        raise ValueError('Некорректное имя навыка')
-    root = library_root()
-    package = (root / skill).resolve()
-    path = Path(relative)
-    if path.is_absolute() or path.drive or ':' in relative:
-        raise ValueError('Нужен относительный путь внутри библиотеки навыков')
-    target = (package / path).resolve()
-    if not package.is_relative_to(root) or not target.is_relative_to(root):
-        raise ValueError('Файл находится вне библиотеки навыков')
-    if not (package / 'SKILL.md').is_file() or not target.is_file():
-        raise ValueError('Навык или файл не найден')
-    if any(part.startswith('.') for part in target.relative_to(root).parts):
-        raise ValueError('Скрытые файлы недоступны')
-    return target
+def _native(action, **fields):
+    response = native_core.required('skills', request={
+        'schema': 'les.skills.v1', 'action': action,
+        'library': str(library_root().resolve()), **fields})
+    if response.get('ok') is not True:
+        raise ValueError(response.get('error', {}).get('message', 'Не удалось прочитать навык'))
+    return response['value']
 
 
 def catalog(offset=0):
-    root = library_root()
-    items = []
-    for package in sorted(root.iterdir()) if root.exists() else []:
-        if not _NAME.fullmatch(package.name):
-            continue
-        try:
-            path = _file(package.name, 'SKILL.md')
-            if path.stat().st_size > 1_000_000:
-                continue
-            text = path.read_text(encoding='utf-8-sig')
-        except (OSError, ValueError):
-            continue
-        description = next((line.partition(':')[2].strip() for line in text.splitlines()
-                            if line.startswith('description:')), '')
-        items.append({'skill': package.name, 'description': description[:500]})
-    offset = max(0, int(offset))
-    page = items[offset:offset + 10]
-    return {'skills': page, 'total': len(items),
-            'next_offset': offset + len(page) if offset + len(page) < len(items) else None}
+    return _native('catalog', offset=max(0, int(offset)))
 
 
 def read(skill, path='SKILL.md', offset=0):
-    target = _file(skill, path)
-    if target.suffix.lower() not in _TEXT:
-        raise ValueError('Этот файл нельзя прочитать как текст')
-    if target.stat().st_size > 1_000_000:
-        raise ValueError('Файл навыка слишком большой')
-    text = target.read_text(encoding='utf-8-sig')
-    offset = max(0, int(offset))
-    chunk = text[offset:offset + 6000]
-    return {'skill': skill, 'path': target.relative_to(library_root()).as_posix(),
-            'text': chunk, 'total_chars': len(text), 'offset': offset,
-            'next_offset': offset + len(chunk) if offset + len(chunk) < len(text) else None,
-            'arbitrary_code_execution': False}
+    return _native('read', skill=skill, path=path, offset=max(0, int(offset)))
 
 
 def register_tools(registry):

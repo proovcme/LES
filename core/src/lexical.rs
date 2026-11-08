@@ -1,4 +1,4 @@
-//! Exact les.lexical.v2 stemming after Python-owned Unicode normalization.
+//! Versioned les.lexical.v2 preparation; normalization and stemming have one native owner.
 use regex::Regex;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashSet};
@@ -90,8 +90,11 @@ pub fn prepare(request: &Value) -> Result<Value, &'static str> {
     if request["tokenizer"] != "les.lexical.v2" {
         return Err("CORE_TOKENIZER_MISMATCH");
     }
-    let normalized_texts = request.get("texts").is_some();
-    let words = request[if normalized_texts {
+    let raw = request.get("raw_texts").is_some();
+    let normalized_texts = raw || request.get("texts").is_some();
+    let words = request[if raw {
+        "raw_texts"
+    } else if normalized_texts {
         "texts"
     } else {
         "documents"
@@ -113,9 +116,20 @@ pub fn prepare(request: &Value) -> Result<Value, &'static str> {
     let mut documents = Vec::with_capacity(words.len());
     let mut total = 0;
     for row in words {
+        let normalized = if raw {
+            Some(crate::unicode::lexical(
+                row.as_str().ok_or("CORE_INVALID_DOCUMENTS")?,
+            ))
+        } else {
+            None
+        };
         let tokens: Vec<&str> = if normalized_texts {
             token_regex()
-                .find_iter(row.as_str().ok_or("CORE_INVALID_DOCUMENTS")?)
+                .find_iter(
+                    normalized
+                        .as_deref()
+                        .unwrap_or(row.as_str().ok_or("CORE_INVALID_DOCUMENTS")?),
+                )
                 .map(|item| item.as_str())
                 .collect()
         } else {
@@ -140,6 +154,52 @@ pub fn prepare(request: &Value) -> Result<Value, &'static str> {
         documents.push(json!({"terms": counts, "length": length}));
     }
     Ok(json!({"documents": documents, "tokenizer": "les.lexical.v2"}))
+}
+
+pub fn tokens(request: &Value) -> Result<Value, &'static str> {
+    let action = request["action"]
+        .as_str()
+        .ok_or("CORE_TOKEN_ACTION_INVALID")?;
+    if action == "stem" {
+        return Ok(json!({"word":stem(request["word"].as_str().ok_or("CORE_INVALID_TOKEN")?)}));
+    }
+    if !matches!(action, "words" | "tokens" | "compact") {
+        return Err("CORE_TOKEN_ACTION_INVALID");
+    }
+    let text = crate::unicode::lexical(request["text"].as_str().ok_or("CORE_INVALID_TOKEN")?);
+    let stops: HashSet<&str> = request["stop_words"]
+        .as_array()
+        .ok_or("CORE_INVALID_STOP_WORDS")?
+        .iter()
+        .map(|v| v.as_str().ok_or("CORE_INVALID_STOP_WORDS"))
+        .collect::<Result<_, _>>()?;
+    let mut tokens = Vec::new();
+    for matched in token_regex().find_iter(&text) {
+        let word = matched.as_str();
+        if action == "words" {
+            tokens.push(word);
+            continue;
+        }
+        if stops.contains(word) {
+            continue;
+        }
+        if action == "compact" {
+            if word.chars().count() < 3 || word.contains(['_', '/']) {
+                tokens.push(word);
+            }
+        } else {
+            tokens.push(stem(word));
+        }
+    }
+    Ok(json!({"tokens":tokens}))
+}
+
+pub fn current(texts: &[String]) -> Result<Value, &'static str> {
+    let config: Value = serde_json::from_str(include_str!("../../config/lexical-v2.json"))
+        .map_err(|_| "CORE_LEXICAL_CONFIG_INVALID")?;
+    prepare(
+        &json!({"tokenizer":"les.lexical.v2","raw_texts":texts,"stop_words":config["stop_words"]}),
+    )
 }
 
 #[cfg(test)]

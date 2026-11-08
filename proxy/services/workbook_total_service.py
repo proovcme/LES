@@ -2,84 +2,21 @@
 from __future__ import annotations
 
 import asyncio
-from decimal import Decimal, Inexact, localcontext
-import re
-
-from openpyxl.utils.cell import coordinate_to_tuple, get_column_letter
-from openpyxl.worksheet.cell_range import CellRange
+from backend.workbook_calculation import execute as native_calculation
 
 from backend.interface import Chunk
 from proxy.services.document_original_service import resolve_original
-from proxy.services.tabular_document_service import MAX_CELLS, MAX_COLUMNS, MAX_ROWS, read_table
+from proxy.services.tabular_document_service import read_table
 
 TOOL_NAME = "sum_excel_ranges"
 EXCEL_SUFFIXES = (".xlsx", ".xlsm")
 MAX_RANGES = 8
-_A1 = re.compile(r"\$?[A-Z]{1,3}\$?[1-9][0-9]{0,4}(?::\$?[A-Z]{1,3}\$?[1-9][0-9]{0,4})?", re.IGNORECASE)
 
 
 def calculate_ranges(document, ranges):
-    """Return one subtotal per range. A failed cell invalidates the entire sum."""
-    if not 1 <= len(ranges) <= MAX_RANGES:
-        raise ValueError(f"Укажите от 1 до {MAX_RANGES} диапазонов")
-    sheets = {sheet["name"]: sheet for sheet in document["sheets"]}
-    selected = []
-    requested_cells = 0
-    for item in ranges:
-        name, address = item["sheet"], item["range"]
-        if name not in sheets or not _A1.fullmatch(address):
-            raise ValueError("Укажите точное имя листа и адрес A1 или A1:B10")
-        region = CellRange(address.upper())
-        if region.max_row > MAX_ROWS or region.max_col > MAX_COLUMNS:
-            raise ValueError("Диапазон превышает предел чтения таблицы")
-        if any(sheet == name and not prior.isdisjoint(region) for sheet, prior, _ in selected):
-            raise ValueError("Диапазоны на одном листе пересекаются")
-        if any(not CellRange(merged).isdisjoint(region) for merged in sheets[name]["merged_ranges"]):
-            raise ValueError(f"{name}!{region.coord} содержит объединённые ячейки")
-        size = region.size["rows"] * region.size["columns"]
-        requested_cells += size
-        if requested_cells > MAX_CELLS:
-            raise ValueError("Суммарный диапазон превышает 300000 ячеек")
-        selected.append((name, region, size))
+    """The built-in Rust calculator rejects any unverified/non-numeric cell."""
+    return native_calculation(document, action='sum', ranges=ranges)
 
-    def display(value):
-        value = value.normalize()
-        return format(value, "f") if -12 <= value.adjusted() <= 20 else str(value)
-
-    with localcontext() as context:
-        # Excel finite numbers have at most 309 integer and 324 fractional places.
-        context.prec = 1024
-        context.traps[Inexact] = True
-        subtotals = []
-        total = Decimal(0)
-        for name, region, size in selected:
-            subtotal = Decimal(0)
-            numeric = cached = 0
-            for row in document["rows"]:
-                if row["sheet"] != name or not region.min_row <= row["row"] <= region.max_row:
-                    continue
-                for cell in row["cells"]:
-                    _, column = coordinate_to_tuple(cell["coordinate"])
-                    if not region.min_col <= column <= region.max_col:
-                        continue
-                    location = f"{name}!{cell['coordinate']}"
-                    value = cell
-                    if cell["kind"] == "formula":
-                        value = cell.get("cached")
-                        if cell.get("needs_recalculation") or not value or value["kind"] == "error":
-                            raise ValueError(f"У {location} нет сохранённого результата формулы")
-                        cached += 1
-                    if value["kind"] != "number":
-                        raise ValueError(f"{location} содержит значение, которое нельзя сложить как число")
-                    subtotal += Decimal(value["value"])
-                    numeric += 1
-            subtotals.append({
-                "sheet": name, "range": region.coord, "first_row": region.min_row,
-                "sum": display(subtotal), "numeric_cells": numeric,
-                "blank_cells": size - numeric, "cached_formulas": cached,
-            })
-            total += subtotal
-        return {"total": display(total), "ranges": subtotals, "source_sha256": document["sha256"]}
 
 
 def register_workbook_totals(harness, backend, candidates):
@@ -111,12 +48,7 @@ def register_workbook_totals(harness, backend, candidates):
         if document["sha256"] != source["file_hash"]:
             raise ValueError("Версия оригинала не совпадает с индексом")
         if operation == "describe":
-            last_rows = {}
-            for row in document["rows"]:
-                last_rows[row["sheet"]] = max(last_rows.get(row["sheet"], 0), row["row"])
-            return {"sheets": [{"name": sheet["name"], "last_row": last_rows.get(sheet["name"], 0),
-                                "last_column": get_column_letter(sheet["columns"]), "hidden": sheet["hidden"]}
-                               for sheet in document["sheets"]]}
+            return native_calculation(document, action='describe')
         return {"doc_id": source["id"], **calculate_ranges(document, args.get("ranges", []))}
 
     async def handler(args):

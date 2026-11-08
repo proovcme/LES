@@ -31,7 +31,7 @@ fn get(conn: &Connection, sid: &str) -> Result<Value> {
     }
     Ok(result)
 }
-fn history(conn: &Connection, action: &str, args: &Args) -> Result<Value> {
+fn history(conn: &Connection, action: &str, args: &Args, filtered: bool) -> Result<Value> {
     if !table(conn, "chat_history")? {
         return Ok(json!([]));
     }
@@ -53,29 +53,53 @@ fn history(conn: &Connection, action: &str, args: &Args) -> Result<Value> {
     if !required.iter().all(|s| has(s)) {
         return Ok(json!([]));
     }
+    let isolate = filtered && table(conn, "les_context_exclusions")? && has("session_id");
+    let excluded = |role: &str| {
+        if !isolate {
+            return "0".to_string();
+        }
+        let role = if role.is_empty() {
+            "".to_string()
+        } else {
+            format!(" AND e.role='{role}'")
+        };
+        format!("EXISTS(SELECT 1 FROM les_context_exclusions e WHERE e.session_id=chat_history.session_id AND e.history_id=chat_history.id{role})")
+    };
     if action == "history_recall" {
-        return Ok(json!(rows(conn,"SELECT id,question,answer,feedback_status FROM chat_history WHERE success=1 AND crag_status IN ('VERIFIED','DETERMINISTIC') AND feedback_status NOT IN ('bad_answer','incorrect','wrong_dataset','bad_source') AND question != ? ORDER BY id DESC LIMIT ?",params![text(args,"question")?,integer(args,"limit",300)?])?));
+        let hidden = excluded("");
+        return Ok(json!(rows(conn,&format!("SELECT id,question,answer,feedback_status FROM chat_history WHERE success=1 AND crag_status IN ('VERIFIED','DETERMINISTIC') AND feedback_status NOT IN ('bad_answer','incorrect','wrong_dataset','bad_source') AND question != ? AND NOT {hidden} ORDER BY id DESC LIMIT ?"),params![text(args,"question")?,integer(args,"limit",300)?])?));
     }
     let after = integer(args, "after_id", 0)?;
     let sid = text(args, "session_id")?;
     let success = if has("success") { " AND success=1" } else { "" };
+    let user = excluded("user");
+    let assistant = excluded("assistant");
+    let redact = |field: &str, condition: &str| {
+        format!("CASE WHEN {condition} THEN '' ELSE {field} END AS {field}")
+    };
+    let question = redact("question", &user);
+    let answer = redact("answer", &assistant);
     if action == "context_history" {
-        return Ok(json!(rows(conn,&format!("SELECT id,question,answer FROM chat_history WHERE session_id=? AND id>?{success} ORDER BY id"),params![sid,after])?));
+        if args.contains_key("limit") {
+            let limit = integer(args, "limit", 40)?.clamp(1, 500);
+            return Ok(json!(rows(conn,&format!("SELECT * FROM (SELECT id,{question},{answer} FROM chat_history WHERE session_id=? AND id>?{success} AND NOT ({user} AND {assistant}) ORDER BY id DESC LIMIT ?) ORDER BY id"),params![sid,after,limit])?));
+        }
+        return Ok(json!(rows(conn,&format!("SELECT id,{question},{answer} FROM chat_history WHERE session_id=? AND id>?{success} AND NOT ({user} AND {assistant}) ORDER BY id"),params![sid,after])?));
     }
     let fields = match action {
         "history_questions" => "question".to_string(),
         "history_traces" => "retrieval_trace_json".to_string(),
         _ => format!(
-            "id,question,answer,{} AS attachment_context,{} AS retrieval_trace_json",
+            "id,{question},{answer},{},{}",
             if has("attachment_context") {
-                "attachment_context"
+                redact("attachment_context", &user)
             } else {
-                "''"
+                "'' AS attachment_context".to_string()
             },
             if has("retrieval_trace_json") {
-                "retrieval_trace_json"
+                redact("retrieval_trace_json", &excluded(""))
             } else {
-                "'{}'"
+                "'{}' AS retrieval_trace_json".to_string()
             }
         ),
     };
@@ -84,9 +108,78 @@ fn history(conn: &Connection, action: &str, args: &Args) -> Result<Value> {
     } else {
         ""
     };
-    let mut values=rows(conn,&format!("SELECT {fields} FROM chat_history WHERE session_id=? AND id>?{completed} ORDER BY id DESC LIMIT ?"),params![sid,after,integer(args,"limit",6)?])?;
+    let skip = match action {
+        "history_questions" => user,
+        "history_traces" => excluded(""),
+        _ => format!("({user} AND {assistant})"),
+    };
+    let mut values=rows(conn,&format!("SELECT {fields} FROM chat_history WHERE session_id=? AND id>?{completed} AND NOT {skip} ORDER BY id DESC LIMIT ?"),params![sid,after,integer(args,"limit",6)?])?;
     values.reverse();
     Ok(json!(values))
+}
+
+fn exclusions(conn: &Connection, sid: &str) -> Result<Value> {
+    if !table(conn, "les_context_exclusions")? {
+        return Ok(json!([]));
+    }
+    Ok(json!(rows(conn, "SELECT history_id,role FROM les_context_exclusions WHERE session_id=? ORDER BY history_id,role", [sid])?))
+}
+
+fn isolate(conn: &Connection, sid: &str, args: &Args) -> Result<Value> {
+    let history_id = integer(args, "history_id", 0)?;
+    let role = text(args, "role")?;
+    if history_id <= 0
+        || !matches!(role, "user" | "assistant")
+        || args.get("excluded").and_then(Value::as_bool).is_none()
+    {
+        return Err(Failure::invalid(
+            "Укажите сообщение и действие с контекстом.",
+        ));
+    }
+    if !super::context_report::has_turn(conn, sid, history_id)? {
+        return Err(Failure::missing("Сообщение в этом чате не найдено."));
+    }
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS les_context_exclusions(
+        session_id TEXT NOT NULL, history_id INTEGER NOT NULL, role TEXT NOT NULL,
+        PRIMARY KEY(session_id,history_id,role)) WITHOUT ROWID;",
+    )?;
+    let excluded = boolean(args, "excluded", false)?;
+    let count = conn.execute(
+        if excluded {
+            "INSERT OR IGNORE INTO les_context_exclusions VALUES (?,?,?)"
+        } else {
+            "DELETE FROM les_context_exclusions WHERE session_id=? AND history_id=? AND role=?"
+        },
+        params![sid, history_id, role],
+    )?;
+    if count != 0 {
+        let mut value = get(conn, sid)?;
+        // Old extractive summaries lack per-message provenance. Rebuild from the
+        // last explicit cutoff so text from the isolated message cannot survive.
+        if history_id <= value["through_id"].as_i64().unwrap_or(0) {
+            let cutoff = value["cutoff_id"].clone();
+            value["through_id"] = cutoff;
+            value["summary"] = "".into();
+            value["model_revision"] = "".into();
+            value["last_error"] = "".into();
+        }
+        save(conn, sid, &mut value)?;
+    }
+    exclusions(conn, sid)
+}
+
+fn save(conn: &Connection, sid: &str, value: &mut Value) -> Result<()> {
+    value["revision"] = value["revision"]
+        .as_i64()
+        .unwrap_or(0)
+        .checked_add(1)
+        .ok_or_else(|| Failure::invalid("Context revision exhausted"))?
+        .into();
+    value["updated_at"] = json!(seconds());
+    conn.execute_batch("CREATE TABLE IF NOT EXISTS les_conversation_context(session_id TEXT PRIMARY KEY,state_json TEXT NOT NULL);")?;
+    conn.execute("INSERT INTO les_conversation_context VALUES (?,?) ON CONFLICT(session_id) DO UPDATE SET state_json=excluded.state_json",params![sid,value.to_string()])?;
+    Ok(())
 }
 pub(super) fn status(conn: Option<&Connection>, args: &Args) -> Result<Value> {
     let sid = text(args, "session_id")?;
@@ -113,7 +206,7 @@ pub(super) fn status(conn: Option<&Connection>, args: &Args) -> Result<Value> {
 }
 pub(super) fn execute(conn: &Connection, action: &str, args: &Args) -> Result<Value> {
     if action.starts_with("history_") || action == "context_history" {
-        return history(conn, action, args);
+        return history(conn, action, args, true);
     }
     let sid = text(args, "session_id")?;
     if boolean(args, "check_session", false)?
@@ -121,8 +214,14 @@ pub(super) fn execute(conn: &Connection, action: &str, args: &Args) -> Result<Va
     {
         return Err(Failure::missing("Чат не найден"));
     }
-    if action == "context_status" {
-        return status(Some(conn), args);
+    match action {
+        "context_status" => return status(Some(conn), args),
+        "context_exclusions" => return exclusions(conn, sid),
+        "context_isolate" => return isolate(conn, sid, args),
+        "context_report" => {
+            return super::context_report::read(conn, sid, integer(args, "history_id", 0)?)
+        }
+        _ => (),
     }
     let mut value = get(conn, sid)?;
     if action == "context_get" {
@@ -143,7 +242,7 @@ pub(super) fn execute(conn: &Connection, action: &str, args: &Args) -> Result<Va
         .cloned()
         .unwrap_or_default();
     if action == "context_forget" {
-        let history = history(conn, "context_history", args)?;
+        let history = history(conn, "context_history", args, false)?;
         let cutoff = history
             .as_array()
             .unwrap()
@@ -158,12 +257,6 @@ pub(super) fn execute(conn: &Connection, action: &str, args: &Args) -> Result<Va
         return Err(Failure::invalid("Unknown context field"));
     }
     value.as_object_mut().unwrap().extend(changes);
-    value["revision"] = revision
-        .checked_add(1)
-        .ok_or_else(|| Failure::invalid("Context revision exhausted"))?
-        .into();
-    value["updated_at"] = json!(seconds());
-    conn.execute_batch("CREATE TABLE IF NOT EXISTS les_conversation_context(session_id TEXT PRIMARY KEY,state_json TEXT NOT NULL);")?;
-    conn.execute("INSERT INTO les_conversation_context VALUES (?,?) ON CONFLICT(session_id) DO UPDATE SET state_json=excluded.state_json",params![sid,value.to_string()])?;
+    save(conn, sid, &mut value)?;
     Ok(value)
 }

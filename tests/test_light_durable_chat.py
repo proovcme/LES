@@ -57,6 +57,55 @@ def test_final_answer_updates_exactly_one_row(history):
     assert row(path) == [(request.question, 'Полный ответ', 'UNVALIDATED', 1)]
 
 
+def test_failure_survives_reopen_and_cannot_accept_more_tokens(history):
+    from backend.workspace_native import catalog_call
+    path, request=history
+    key=durable.begin(request)
+    durable.checkpoint(key,'token','Неполный текст 日本語')
+    failure={'code':'PDF_REVISION_CHANGED','detail':'PDF изменился. Проверка остановлена.'}
+    durable.checkpoint(key,'error',failure)
+    durable.checkpoint(key,'token','Это не должно сохраниться')
+    assert durable.interrupt()==0
+    messages=catalog_call(path,'chat_history_messages',session_id=request.session_id)
+    answer=messages[-1]
+    assert answer['text']=='Неполный текст 日本語'
+    assert answer['crag']=='FAILED' and answer['meta']['error']==failure
+    assert answer['meta']['partial'] is True
+    assert context.history_turns(request.session_id)==[]
+    binding=durable._history_id.set(key)
+    try:
+        with pytest.raises(LookupError):
+            persistence.save_chat_history(question=request.question,answer='Late success',sources=[],
+                crag_status='UNVALIDATED',latency_sec=1,tokens=1,session_id=request.session_id)
+    finally:
+        durable._history_id.reset(binding)
+    assert row(path)[0][2:] == ('FAILED',0)
+
+
+@pytest.mark.asyncio
+async def test_public_error_is_committed_before_delivery_and_restored_after_restart(history,monkeypatch):
+    from fastapi import HTTPException
+    from proxy.routers import chat,chat_history
+    from proxy.services import chat_request_service
+    path, request=history
+    monkeypatch.setattr(chat_history,'rag_meta_db_path',lambda:str(path))
+    async def generate(req,token_sink):
+        raise HTTPException(422,detail={'code':'PDF_PAGE_INCOMPLETE'})
+    monkeypatch.setattr(chat_request_service,'_run_chat_with_provider',generate)
+    response=await chat.chat_stream(chat.ChatRequest(**vars(request)),_user=None)
+    events=[]
+    async for event in response.body_iterator:
+        events.append(event)
+        if 'event: error' in event:
+            assert row(path)[0][2:] == ('FAILED',0)
+    assert not any('event: token' in event or 'event: final' in event for event in events)
+    durable.interrupt()
+    restored=(await chat_history.get_chat_history(session_id=request.session_id,_user=None))[-1]
+    assert restored['text']=='' and restored['meta']['partial'] is False
+    assert restored['meta']['error']['code']=='PDF_PAGE_INCOMPLETE'
+    assert 'прочитана не полностью' in restored['meta']['error']['detail']
+
+
 @pytest.mark.asyncio
 async def test_sse_disconnect_leaves_durable_text(history, monkeypatch):
     from proxy.routers import chat

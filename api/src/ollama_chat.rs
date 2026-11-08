@@ -1,6 +1,6 @@
 //! Bounded Ollama NDJSON decoder for the private model bridge.
 use axum::body::{Body, Bytes};
-use futures_util::stream;
+use futures_util::{stream, StreamExt};
 use serde_json::{json, Value};
 use std::{collections::VecDeque, convert::Infallible};
 
@@ -14,10 +14,10 @@ const INTERRUPTED: &str = "UPSTREAM_STREAM_INTERRUPTED";
 const REASONING_EXHAUSTED: &str = "REASONING_BUDGET_EXHAUSTED";
 
 pub struct Limits {
-    bytes: usize,
-    events: usize,
-    line: usize,
-    reasoning: bool,
+    pub(crate) bytes: usize,
+    pub(crate) events: usize,
+    pub(crate) line: usize,
+    pub(crate) reasoning: bool,
 }
 
 impl Limits {
@@ -52,7 +52,7 @@ enum Mode {
     Answer,
 }
 
-struct Reasoning {
+pub(crate) struct Reasoning {
     mode: Mode,
     buffer: String,
     observed: bool,
@@ -60,7 +60,7 @@ struct Reasoning {
 }
 
 impl Reasoning {
-    fn new(enabled: bool) -> Self {
+    pub(crate) fn new(enabled: bool) -> Self {
         Self {
             mode: if enabled { Mode::Pending } else { Mode::Answer },
             buffer: String::new(),
@@ -69,14 +69,14 @@ impl Reasoning {
         }
     }
 
-    fn separate(&mut self) {
+    pub(crate) fn separate(&mut self) {
         self.observed = true;
         if self.mode == Mode::Pending && self.buffer.is_empty() {
             self.mode = Mode::Answer;
         }
     }
 
-    fn feed(&mut self, text: &str) -> String {
+    pub(crate) fn feed(&mut self, text: &str) -> String {
         if self.mode == Mode::Answer {
             self.answer_seen |= !text.trim().is_empty();
             return text.to_owned();
@@ -107,7 +107,7 @@ impl Reasoning {
         String::new()
     }
 
-    fn finish(&mut self, reason: &str) -> Result<String, &'static str> {
+    pub(crate) fn finish(&mut self, reason: &str) -> Result<String, &'static str> {
         let exhausted = matches!(reason, "length" | "max_tokens");
         let missing = self.mode == Mode::Pending || self.observed && !self.answer_seen;
         if self.mode == Mode::Thinking || exhausted && missing {
@@ -292,7 +292,7 @@ fn token_count(value: &Value, prior: i64) -> Result<i64, &'static str> {
 }
 
 struct Stream {
-    response: Option<reqwest::Response>,
+    response: Option<crate::model_http::Source>,
     chunk: Bytes,
     line: Vec<u8>,
     chat: Chat,
@@ -302,12 +302,12 @@ impl Stream {
     async fn line(&mut self) -> Result<Option<Vec<u8>>, &'static str> {
         loop {
             if self.chunk.is_empty() {
-                match self.response.as_mut().unwrap().chunk().await {
-                    Ok(Some(chunk)) => self.chunk = chunk,
-                    Ok(None) => {
+                match self.response.as_mut().unwrap().next().await {
+                    Some(Ok(chunk)) => self.chunk = chunk,
+                    None => {
                         return Ok((!self.line.is_empty()).then(|| std::mem::take(&mut self.line)))
                     }
-                    Err(_) => return Err(INTERRUPTED),
+                    Some(Err(code)) => return Err(code),
                 }
             }
             let newline = self.chunk.iter().position(|byte| *byte == b'\n');
@@ -325,8 +325,11 @@ impl Stream {
 }
 
 pub fn body(response: reqwest::Response, limits: Limits) -> Body {
+    from_source(crate::model_http::source(response), limits)
+}
+pub fn from_source(source: crate::model_http::Source, limits: Limits) -> Body {
     let state = Stream {
-        response: Some(response),
+        response: Some(source),
         chunk: Bytes::new(),
         line: Vec::new(),
         chat: Chat::new(limits),

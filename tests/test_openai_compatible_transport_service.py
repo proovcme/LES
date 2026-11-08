@@ -6,6 +6,8 @@ from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import inspect
 import json
+import os
+from pathlib import Path
 import struct
 from threading import Event, Thread
 
@@ -41,6 +43,166 @@ NOW = datetime(2026, 8, 28, tzinfo=timezone.utc)
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('ending',['complete','interrupt','cancel'])
+@pytest.mark.parametrize('authenticated',[False,True])
+async def test_openai_native_stream_delivers_before_finish_and_keeps_tools(gateway,monkeypatch,ending,authenticated):
+    browser,_,folder=gateway
+    bridge=str(browser.base_url.join('/api/light/internal-model-http'))
+    monkeypatch.setattr(local_model_http,'_bridge',(bridge,MODEL_BRIDGE_TOKEN))
+    if authenticated:
+        monkeypatch.setattr(local_model_http,'getproxies',lambda:{})
+        for key in ('SSL_CERT_FILE','SSL_CERT_DIR','CURL_CA_BUNDLE'):monkeypatch.delenv(key,raising=False)
+    release=Event();disconnected=Event();observed=[]
+    argument='{"page":6,"ref":123456789012345678901234567890}'
+
+    class Model(BaseHTTPRequestHandler):
+        def log_message(self,*args):pass
+        def do_POST(self):
+            payload=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+            assert self.headers.get('Authorization')==('Bearer fixture-native-model-key' if authenticated else None)
+            observed.append(payload)
+            self.send_response(200);self.send_header('Content-Type','text/event-stream');self.end_headers()
+            frame='data: '+json.dumps({'model':'model-1','choices':[{'delta':{'content':'Лес 日本語 😀',
+                'tool_calls':[{'index':0,'id':'call-1','type':'function','function':{'name':'read_','arguments':argument[:10]}}]}}]},ensure_ascii=False)+'\r\n\r\n'
+            try:
+                for byte in frame.encode('utf-8'):self.wfile.write(bytes([byte]))
+                self.wfile.flush()
+                if ending=='cancel':
+                    while not release.wait(.03):
+                        self.wfile.write(b':still-running\n\n');self.wfile.flush()
+                else:
+                    release.wait(5)
+                    if ending=='complete':
+                        for payload in [
+                            {'choices':[{'delta':{'tool_calls':[{'index':0,'function':{'name':'pdf_source','arguments':argument[10:]}}]},'finish_reason':'tool_calls'}]},
+                            {'choices':[],'usage':{'prompt_tokens':21,'completion_tokens':7,'total_tokens':28}},
+                        ]:self.wfile.write(('data: '+json.dumps(payload)+'\n\n').encode())
+                        self.wfile.write(b'data: [DONE]\n\n');self.wfile.flush()
+            except (BrokenPipeError,ConnectionResetError,ConnectionAbortedError):disconnected.set()
+
+    server=ThreadingHTTPServer(('127.0.0.1',0),Model);thread=Thread(target=server.serve_forever,daemon=True);thread.start()
+    target=f'http://127.0.0.1:{server.server_port}/v1'
+    endpoint=validate_endpoint(target,ConnectionLocality.LOOPBACK)
+    connection=replace(_resolved(secret_ref='env:OPENAI_API_KEY' if authenticated else None),base_url=target,endpoint=endpoint)
+    def forbidden_python_transport(request):raise AssertionError('The Python inference HTTP client was used')
+    client=httpx.AsyncClient(transport=httpx.MockTransport(forbidden_python_transport))
+    transport=OpenAICompatibleTransport(client=client,secret_store=EnvironmentSecretStore(folder/'.env',environ={'OPENAI_API_KEY':'fixture-native-model-key'}))
+    first=asyncio.Event();events=[]
+    async def sink(event):
+        events.append(event)
+        if event['event']=='token':first.set()
+    task=asyncio.create_task(transport.complete(connection,InferenceRequest(
+        messages=({'role':'user','content':'Проверь страницу'},),max_output_tokens=1024),token_sink=sink))
+    try:
+        await asyncio.wait_for(first.wait(),5)
+        assert not task.done()
+        assert events==[{'event':'token','data':'Лес 日本語 😀'}]
+        if ending=='cancel':
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):await task
+            assert await asyncio.to_thread(disconnected.wait,3)
+        else:
+            release.set()
+            if ending=='interrupt':
+                with pytest.raises(ModelTransportError,match='UPSTREAM_STREAM_INTERRUPTED'):await task
+            else:
+                answer=await task
+                assert answer.text=='Лес 日本語 😀' and answer.finish_reason=='tool_calls'
+                assert answer.tool_calls[0]['function']=={'name':'read_pdf_source','arguments':argument}
+                assert answer.usage=={'prompt_tokens':21,'completion_tokens':7,'total_tokens':28}
+        assert observed[0]['stream'] is True
+    finally:
+        release.set();task.cancel();await asyncio.gather(task,return_exceptions=True);await client.aclose()
+        server.shutdown();server.server_close();thread.join(timeout=3)
+
+
+@pytest.mark.asyncio
+async def test_openai_native_nonstream_decode_and_errors(gateway,monkeypatch):
+    browser,_,folder=gateway
+    monkeypatch.setattr(local_model_http,'_bridge',(str(browser.base_url.join('/api/light/internal-model-http')),MODEL_BRIDGE_TOKEN))
+    class Model(BaseHTTPRequestHandler):
+        def log_message(self,*args):pass
+        def do_POST(self):
+            value=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+            scenario=value['messages'][-1]['content']
+            if scenario=='redirect':self.send_response(307);self.send_header('Location','/other');self.end_headers();return
+            if scenario=='missing':self.send_response(404);self.end_headers();return
+            payload={'model':'model-1','choices':[{'message':{'content':'<think>Не показывать</think>Точный ответ',
+                'tool_calls':[{'id':'1','type':'function','function':{'name':'read_pdf_source','arguments':'{"page":6}'}}]},'finish_reason':'tool_calls'}],
+                'usage':{'prompt_tokens':19,'completion_tokens':8,'total_tokens':27}}
+            if scenario=='exhausted':payload['choices'][0]={'message':{'content':'<think>unfinished'},'finish_reason':'length'}
+            raw=b'broken-json' if scenario=='invalid' else json.dumps(payload,ensure_ascii=False).encode()
+            self.send_response(200);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
+    server=ThreadingHTTPServer(('127.0.0.1',0),Model);thread=Thread(target=server.serve_forever,daemon=True);thread.start()
+    target=f'http://127.0.0.1:{server.server_port}/v1'
+    endpoint=validate_endpoint(target,ConnectionLocality.LOOPBACK)
+    connection=replace(_resolved(secret_ref=None),base_url=target,endpoint=endpoint)
+    def forbidden_python_transport(request):raise AssertionError('Python HTTP transport used')
+    async with httpx.AsyncClient(transport=httpx.MockTransport(forbidden_python_transport)) as client:
+        transport=OpenAICompatibleTransport(client=client,secret_store=EnvironmentSecretStore(folder/'.env',environ={}))
+        async def infer(text):return await transport.complete(connection,InferenceRequest(
+            messages=({'role':'user','content':text},),max_output_tokens=1024,reasoning_enabled=True))
+        try:
+            answer=await infer('read')
+            assert answer.text=='Точный ответ' and answer.model_id=='model-1'
+            assert answer.tool_calls[0]['function']['arguments']=='{"page":6}'
+            for scenario,code in [('exhausted','REASONING_BUDGET_EXHAUSTED'),('invalid','UPSTREAM_RESPONSE_INVALID'),
+                                  ('redirect','UPSTREAM_REDIRECT_REJECTED'),('missing','UPSTREAM_HTTP_ERROR: 404')]:
+                with pytest.raises(ModelTransportError,match=code):await infer(scenario)
+        finally:
+            server.shutdown();server.server_close();thread.join(timeout=3)
+
+
+def test_native_authenticated_embeddings_pin_the_destination_and_keep_unicode(gateway):
+    curl = Path(os.environ.get('SystemRoot', 'C:/Windows')) / 'System32/curl.exe' if os.name == 'nt' else Path('/usr/bin/curl')
+    if not curl.is_file():
+        pytest.skip('System TLS client unavailable')
+    browser, _, _ = gateway
+    seen = []
+
+    class Embedding(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_POST(self):
+            payload = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+            seen.append((payload, self.headers.get('Authorization')))
+            if payload.get('model') == 'redirect':
+                self.send_response(302)
+                self.send_header('Location', '/v1/embeddings')
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'{"model":"fixture","data":[{"index":0,"embedding":[0.1,-0.0]}]}')
+
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Embedding)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        target = f'http://localhost:{server.server_port}/v1/embeddings'
+        headers = {'x-les-model-token': MODEL_BRIDGE_TOKEN, 'x-les-model-target': target,
+            'x-les-embed-limits': '1/1024', 'x-les-embed-locality': 'loopback',
+            'x-les-embed-addresses': '127.0.0.1', 'x-les-embed-deadline': '4',
+            'Authorization': 'Bearer fixture-key'}
+        route = '/api/light/internal-model-http'
+        inputs = {'model': 'fixture', 'input': ['Кабель 東京 🌲 "точный" \\ тест\nСледующая строка']}
+        answer = browser.post(route, headers=headers, json=inputs).raise_for_status()
+        assert answer.headers['x-les-model-protocol'] == local_model_http.EMBED_PROTOCOL
+        _, vectors = local_model_http.decode_embeddings(answer.content, 1)
+        assert struct.pack('<2d', *vectors[0]) == struct.pack('<2d', 0.1, -0.0)
+        assert seen == [(inputs, 'Bearer fixture-key')]
+        redirect = browser.post(route, headers=headers, json={**inputs, 'model': 'redirect'})
+        assert redirect.json()['detail'] == 'UPSTREAM_REDIRECT_REJECTED'
+        bad_peer = browser.post(route, headers={**headers, 'x-les-embed-addresses': '169.254.169.254'}, json=inputs)
+        assert bad_peer.status_code == 400 and len(seen) == 2
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+@pytest.mark.asyncio
 async def test_local_generation_and_embeddings_use_rust_http(gateway, monkeypatch):
     browser, _, tmp_path = gateway
     bridge = str(browser.base_url.join('/api/light/internal-model-http'))
@@ -68,6 +230,15 @@ async def test_local_generation_and_embeddings_use_rust_http(gateway, monkeypatc
         def do_POST(self):
             request = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
             calls.append((self.path, request, dict(self.headers)))
+            if self.path == '/v1/embeddings':
+                second = 0 if request['input'][0] == 'duplicate index' else 1
+                raw = json.dumps({'data': [{'index': second, 'embedding': [7]}, {'index': 0, 'embedding': [4]}]}).encode()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+                return
             if self.path == '/api/embed':
                 scenario = request['input'][0]
                 payload = {'model': request['model'], 'embeddings': [precise_vector], 'usage': {'total_tokens': 7}}
@@ -203,6 +374,11 @@ async def test_local_generation_and_embeddings_use_rust_http(gateway, monkeypatc
                 with pytest.raises(ModelTransportError, match=code):
                     await transport.embed(connection, inputs)
             transport.response_body_limit = 32768
+            compatible = replace(connection, capability_snapshot=replace(snapshot, transport_options={}))
+            reply = await transport.embed(compatible, ['first input', 'second input'])
+            assert reply.model_id == 'model-1' and reply.vectors == ((4.0,), (7.0,))
+            with pytest.raises(ModelTransportError, match='UPSTREAM_EMBEDDING_RESPONSE_INVALID'):
+                await transport.embed(compatible, ['duplicate index', 'second input'])
             for text, error in (
                 ('redirect', 'UPSTREAM_REDIRECT_REJECTED'),
                 ('missing', 'UPSTREAM_HTTP_ERROR: 404'),
@@ -248,7 +424,9 @@ async def test_local_generation_and_embeddings_use_rust_http(gateway, monkeypatc
                 with pytest.raises(asyncio.CancelledError):
                     await task
             assert await asyncio.to_thread(cancelled.wait, 3)
-            assert [path for path, _, _ in calls] == ['/api/chat'] + ['/api/embed'] * 7 + ['/api/chat'] * 8
+            assert [path for path, _, _ in calls] == (
+                ['/api/chat'] + ['/api/embed'] * 7 + ['/v1/embeddings'] * 2 + ['/api/chat'] * 8
+            )
     finally:
         finish.set()
         cancelled.set()
@@ -669,6 +847,46 @@ async def test_stream_normalizes_text_deltas_and_finish(tmp_path):
     assert events[-1].kind == "finish"
     assert events[-1].finish_reason == "stop"
     assert {event.model_id for event in events} == {"observed-stream-model"}
+
+
+@pytest.mark.asyncio
+async def test_chat_completion_preserves_interleaved_streamed_tools_and_late_usage(tmp_path):
+    frames = [
+        {"choices": [{"delta": {"reasoning": "служебное рассуждение"}}]},
+        {"model": "fixture-chat", "choices": [{"delta": {"content": "Кабель 東京"}}]},
+        {"choices": [{"delta": {"tool_calls": [
+            {"index": 1, "id": "second", "function": {"name": "open_", "arguments": '{"page":'}},
+            {"index": 0, "id": "first", "function": {"name": "read", "arguments": "{}"}},
+        ]}}]},
+        {"choices": [{"delta": {"tool_calls": [
+            {"index": 1, "function": {"name": "file", "arguments": "2}"}},
+        ]}, "finish_reason": "tool_calls"}]},
+        {"choices": [], "usage": {"prompt_tokens": 11, "completion_tokens": 5}},
+    ]
+    payload = "".join(f"data: {json.dumps(frame, ensure_ascii=False)}\n\n" for frame in frames)
+    transport, client = _transport(tmp_path, lambda _: httpx.Response(200, text=payload + "data: [DONE]\n\n"))
+    shown = []
+
+    async def sink(event):
+        shown.append(event)
+
+    try:
+        result = await transport.complete(_resolved(), InferenceRequest(
+            messages=({"role": "user", "content": "Открой документ"},), max_output_tokens=32,
+        ), token_sink=sink)
+    finally:
+        await client.aclose()
+
+    assert result.model_id == "fixture-chat"
+    assert result.text == "Кабель 東京"
+    assert result.finish_reason == "tool_calls"
+    assert result.usage == {"prompt_tokens": 11, "completion_tokens": 5}
+    assert [(call["id"], call["function"]) for call in result.tool_calls] == [
+        ("first", {"name": "read", "arguments": "{}"}),
+        ("second", {"name": "open_file", "arguments": '{"page":2}'}),
+    ]
+    assert [event["event"] for event in shown] == ["progress", "token"]
+    assert shown[-1]["data"] == "Кабель 東京"
 
 
 @pytest.mark.asyncio

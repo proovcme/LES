@@ -1,0 +1,1693 @@
+{
+  "schema": "les_tool_registry_v1",
+  "tool_count": 21,
+  "tools": [
+    {
+      "name": "assemble_project_volume",
+      "version": "1.0.0",
+      "title": "Assemble virtual project volume",
+      "category": "dataset",
+      "summary": "Select a virtual project volume by cipher, section or discipline from documentation metadata; never merges files.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "dataset_id": {
+            "type": "string"
+          },
+          "index": {
+            "type": "string"
+          },
+          "storage_root": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "dataset_id",
+          "index"
+        ]
+      },
+      "args_schema": {
+        "type": "object",
+        "properties": {
+          "dataset_id": {
+            "type": "string"
+          },
+          "index": {
+            "type": "string"
+          },
+          "storage_root": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "dataset_id",
+          "index"
+        ]
+      },
+      "result_schema": "les_tool_result_v1",
+      "returns": "metadata selection of project stage, volume, sections, components and gaps",
+      "effect": "read",
+      "side_effects": "none",
+      "scopes": [
+        "dataset"
+      ],
+      "timeout_seconds": 30,
+      "retry": "safe",
+      "idempotency": "derived",
+      "result_budget": {
+        "max_chars": 7000,
+        "max_items": 20
+      },
+      "model_owned_fields": [],
+      "provenance": "source_refs_required",
+      "approval_required": false,
+      "tags": [
+        "project",
+        "documentation",
+        "volume",
+        "cipher",
+        "stage",
+        "section",
+        "metadata",
+        "том",
+        "шифр",
+        "shadow_validate_only"
+      ]
+    },
+    {
+      "name": "dataset_map",
+      "version": "1.0.0",
+      "title": "Dataset map",
+      "category": "dataset",
+      "summary": "Return the typed dataset navigation map: topics, sections, routes and operator guidance.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "dataset_id": {
+            "type": "string"
+          },
+          "depth": {
+            "type": "string",
+            "enum": [
+              "deep",
+              "shallow"
+            ]
+          },
+          "storage_root": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "dataset_id"
+        ]
+      },
+      "args_schema": {
+        "type": "object",
+        "properties": {
+          "dataset_id": {
+            "type": "string"
+          },
+          "depth": {
+            "type": "string",
+            "enum": [
+              "deep",
+              "shallow"
+            ]
+          },
+          "storage_root": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "dataset_id"
+        ]
+      },
+      "result_schema": "les_tool_result_v1",
+      "returns": "dataset navigation packet, not evidence",
+      "effect": "read",
+      "side_effects": "none",
+      "scopes": [
+        "dataset"
+      ],
+      "timeout_seconds": 30,
+      "retry": "safe",
+      "idempotency": "derived",
+      "result_budget": {
+        "max_chars": 7000,
+        "max_items": 20
+      },
+      "model_owned_fields": [],
+      "provenance": "source_refs_required",
+      "approval_required": false,
+      "tags": [
+        "dataset",
+        "topic_map",
+        "section_map",
+        "notebook",
+        "navigation",
+        "shadow_validate_only"
+      ]
+    },
+    {
+      "name": "filesystem_hash",
+      "version": "1.0.0",
+      "title": "Filesystem hash",
+      "category": "filesystem",
+      "summary": "Calculate SHA-256 for a file under an allowed root.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "root": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "args_schema": {
+        "type": "object",
+        "properties": {
+          "root": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "result_schema": "les_tool_result_v1",
+      "returns": "sha256 digest and file size",
+      "effect": "read",
+      "side_effects": "none",
+      "scopes": [
+        "filesystem"
+      ],
+      "timeout_seconds": 30,
+      "retry": "safe",
+      "idempotency": "derived",
+      "result_budget": {
+        "max_chars": 7000,
+        "max_items": 20
+      },
+      "model_owned_fields": [],
+      "provenance": "source_refs_required",
+      "approval_required": false,
+      "tags": [
+        "filesystem",
+        "hash",
+        "sha256"
+      ]
+    },
+    {
+      "name": "filesystem_list",
+      "version": "1.0.0",
+      "title": "Filesystem list",
+      "category": "filesystem",
+      "summary": "List files under an allowed root without leaving the whitelist.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "root": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "args_schema": {
+        "type": "object",
+        "properties": {
+          "root": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "result_schema": "les_tool_result_v1",
+      "returns": "bounded directory tree",
+      "effect": "read",
+      "side_effects": "none",
+      "scopes": [
+        "filesystem"
+      ],
+      "timeout_seconds": 30,
+      "retry": "safe",
+      "idempotency": "derived",
+      "result_budget": {
+        "max_chars": 7000,
+        "max_items": 20
+      },
+      "model_owned_fields": [],
+      "provenance": "source_refs_required",
+      "approval_required": false,
+      "tags": [
+        "filesystem",
+        "list",
+        "tree"
+      ]
+    },
+    {
+      "name": "filesystem_read_text",
+      "version": "1.0.0",
+      "title": "Filesystem read text",
+      "category": "filesystem",
+      "summary": "Read a small text file under an allowed root.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "root": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "max_chars": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "args_schema": {
+        "type": "object",
+        "properties": {
+          "root": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "max_chars": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "result_schema": "les_tool_result_v1",
+      "returns": "text content with truncation flag",
+      "effect": "read",
+      "side_effects": "none",
+      "scopes": [
+        "filesystem"
+      ],
+      "timeout_seconds": 30,
+      "retry": "safe",
+      "idempotency": "derived",
+      "result_budget": {
+        "max_chars": 7000,
+        "max_items": 20
+      },
+      "model_owned_fields": [],
+      "provenance": "source_refs_required",
+      "approval_required": false,
+      "tags": [
+        "filesystem",
+        "read",
+        "text"
+      ]
+    },
+    {
+      "name": "filesystem_roots",
+      "version": "1.0.0",
+      "title": "Filesystem roots",
+      "category": "filesystem",
+      "summary": "List read-only filesystem roots allowed for tool access.",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "args_schema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "result_schema": "les_tool_result_v1",
+      "returns": "allowed root keys and paths",
+      "effect": "read",
+      "side_effects": "none",
+      "scopes": [
+        "filesystem"
+      ],
+      "timeout_seconds": 30,
+      "retry": "safe",
+      "idempotency": "derived",
+      "result_budget": {
+        "max_chars": 7000,
+        "max_items": 20
+      },
+      "model_owned_fields": [],
+      "provenance": "source_refs_required",
+      "approval_required": false,
+      "tags": [
+        "filesystem",
+        "roots",
+        "whitelist"
+      ]
+    },
+    {
+      "name": "filesystem_search",
+      "version": "1.0.0",
+      "title": "Filesystem search",
+      "category": "filesystem",
+      "summary": "Search names and optionally text content under an allowed root.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "root": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "q": {
+            "type": "string"
+          },
+          "content": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "q"
+        ]
+      },
+      "args_schema": {
+        "type": "object",
+        "properties": {
+          "root": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "q": {
+            "type": "string"
+          },
+          "content": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "q"
+        ]
+      },
+      "result_schema": "les_tool_result_v1",
+      "returns": "bounded file hits",
+      "effect": "read",
+      "side_effects": "none",
+      "scopes": [
+        "filesystem"
+      ],
+      "timeout_seconds": 30,
+      "retry": "safe",
+      "idempotency": "derived",
+      "result_budget": {
+        "max_chars": 7000,
+        "max_items": 20
+      },
+      "model_owned_fields": [],
+      "provenance": "source_refs_required",
+      "approval_required": false,
+      "tags": [
+        "filesystem",
+        "search",
+        "find"
+      ]
+    },
+    {
+      "name": "filesystem_stat",
+      "version": "1.0.0",
+      "title": "Filesystem stat",
+      "category": "filesystem",
+      "summary": "Return metadata for a file or directory under an allowed root.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "root": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "args_schema": {
+        "type": "object",
+        "properties": {
+          "root": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "result_schema": "les_tool_result_v1",
+      "returns": "file metadata without content",
+      "effect": "read",
+      "side_effects": "none",
+      "scopes": [
+        "filesystem"
+      ],
+      "timeout_seconds": 30,
+      "retry": "safe",
+      "idempotency": "derived",
+      "result_budget": {
+        "max_chars": 7000,
+        "max_items": 20
+      },
+      "model_owned_fields": [],
+      "provenance": "source_refs_required",
+      "approval_required": false,
+      "tags": [
+        "filesystem",
+        "stat",
+        "metadata"
+      ]
+    },
+    {
+      "name": "list_installed_skills",
+      "version": "1.0.0",
+      "title": "Библиотека навыков",
+      "category": "skills",
+      "summary": "List installed skill descriptions. Continue with next_offset until null.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "args_schema": {
+        "type": "object",
+        "properties": {
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "result_schema": "les_tool_result_v1",
+      "returns": "les_tool_result_v1",
+      "effect": "read",
+      "side_effects": "none",
+      "scopes": [
+        "skills"
+      ],
+      "timeout_seconds": 5,
+      "retry": "safe",
+      "idempotency": "none",
+      "result_budget": {
+        "max_chars": 16000,
+        "max_items": 12
+      },
+      "model_owned_fields": [],
+      "provenance": "User-installed skill library",
+      "approval_required": false,
+      "tags": [
+        "skills"
+      ]
+    },
+    {
+      "name": "read_installed_skill",
+      "version": "1.0.0",
+      "title": "Прочитать навык",
+      "category": "skills",
+      "summary": "Read SKILL.md or a referenced text file in the installed skill library. Follow next_offset until null to read the entire file. Scripts are readable, not executable.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "skill": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "skill"
+        ],
+        "additionalProperties": false
+      },
+      "args_schema": {
+        "type": "object",
+        "properties": {
+          "skill": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "skill"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": "les_tool_result_v1",
+      "returns": "les_tool_result_v1",
+      "effect": "read",
+      "side_effects": "none",
+      "scopes": [
+        "skills"
+      ],
+      "timeout_seconds": 5,
+      "retry": "safe",
+      "idempotency": "none",
+      "result_budget": {
+        "max_chars": 16000,
+        "max_items": 12
+      },
+      "model_owned_fields": [],
+      "provenance": "User-installed skill library",
+      "approval_required": false,
+      "tags": [
+        "skills"
+      ]
+    },
+    {
+      "name": "read_skill_calculation",
+      "version": "1.0.0",
+      "title": "Результаты вычисления",
+      "category": "skills",
+      "summary": "Without job_id list approved Python skill scripts and entrypoints. With job_id read saved rows; continue using next_offset until null.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "args_schema": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "result_schema": "les_tool_result_v1",
+      "returns": "les_tool_result_v1",
+      "effect": "read",
+      "side_effects": "none",
+      "scopes": [
+        "skills"
+      ],
+      "timeout_seconds": 25,
+      "retry": "never",
+      "idempotency": "none",
+      "result_budget": {
+        "max_chars": 32000,
+        "max_items": 16
+      },
+      "model_owned_fields": [],
+      "provenance": "Operator-approved pure calculation; inputs and outputs saved",
+      "approval_required": false,
+      "tags": [
+        "skills"
+      ]
+    },
+    {
+      "name": "run_skill_calculation",
+      "version": "1.0.0",
+      "title": "Вычисление по навыку",
+      "category": "skills",
+      "summary": "Run an approved pure Python skill function on JSON inputs with unique row IDs. Persist each row, return job_id and pending_ids; this does not verify input facts. Only explicitly approved script hashes are executable. List approvals using read_skill_calculation.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "skill": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "required": [
+          "skill",
+          "path",
+          "items"
+        ],
+        "additionalProperties": false
+      },
+      "args_schema": {
+        "type": "object",
+        "properties": {
+          "skill": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "required": [
+          "skill",
+          "path",
+          "items"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": "les_tool_result_v1",
+      "returns": "les_tool_result_v1",
+      "effect": "compute",
+      "side_effects": "none",
+      "scopes": [
+        "skills"
+      ],
+      "timeout_seconds": 25,
+      "retry": "never",
+      "idempotency": "none",
+      "result_budget": {
+        "max_chars": 32000,
+        "max_items": 16
+      },
+      "model_owned_fields": [],
+      "provenance": "Operator-approved pure calculation; inputs and outputs saved",
+      "approval_required": false,
+      "tags": [
+        "skills"
+      ]
+    },
+    {
+      "name": "look_at_pdf_page",
+      "version": "1.0.0",
+      "title": "Посмотреть страницу PDF",
+      "category": "source",
+      "summary": "Render one selected PDF page or bounded region and let the local vision model inspect the actual drawing pixels.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "doc_id": {
+            "type": "string"
+          },
+          "dataset_id": {
+            "type": "string"
+          },
+          "doc_name": {
+            "type": "string"
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "question": {
+            "type": "string"
+          },
+          "q": {
+            "type": "string"
+          },
+          "bbox": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "minItems": 4,
+            "maxItems": 4
+          },
+          "max_tokens": {
+            "type": "integer"
+          }
+        },
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "doc_id"
+            ]
+          },
+          {
+            "required": [
+              "dataset_id",
+              "doc_name"
+            ]
+          }
+        ],
+        "required": [
+          "page"
+        ]
+      },
+      "args_schema": {
+        "type": "object",
+        "properties": {
+          "doc_id": {
+            "type": "string"
+          },
+          "dataset_id": {
+            "type": "string"
+          },
+          "doc_name": {
+            "type": "string"
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "question": {
+            "type": "string"
+          },
+          "q": {
+            "type": "string"
+          },
+          "bbox": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "minItems": 4,
+            "maxItems": 4
+          },
+          "max_tokens": {
+            "type": "integer"
+          }
+        },
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "doc_id"
+            ]
+          },
+          {
+            "required": [
+              "dataset_id",
+              "doc_name"
+            ]
+          }
+        ],
+        "required": [
+          "page"
+        ]
+      },
+      "result_schema": "les_tool_result_v1",
+      "returns": "visual observations tied to the original file and page",
+      "effect": "read",
+      "side_effects": "none",
+      "scopes": [
+        "dataset"
+      ],
+      "timeout_seconds": 120,
+      "retry": "safe",
+      "idempotency": "derived",
+      "result_budget": {
+        "max_chars": 7000,
+        "max_items": 20
+      },
+      "model_owned_fields": [],
+      "provenance": "source_refs_required",
+      "approval_required": false,
+      "tags": [
+        "vision",
+        "drawing",
+        "чертёж",
+        "схема",
+        "графика",
+        "изображение",
+        "лист",
+        "pdf",
+        "page",
+        "посмотри",
+        "глазами",
+        "model_backed",
+        "shadow_validate_only"
+      ]
+    },
+    {
+      "name": "read_excel_source",
+      "version": "1.0.0",
+      "title": "Read Excel source",
+      "category": "source",
+      "summary": "Read indexed text/table chunks for Excel-like sources and mark sheet/range extraction as missing when unavailable.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "doc_id": {
+            "type": "string"
+          },
+          "dataset_id": {
+            "type": "string"
+          },
+          "doc_name": {
+            "type": "string"
+          },
+          "q": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "max_chars": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "doc_id"
+            ]
+          },
+          {
+            "required": [
+              "dataset_id",
+              "doc_name"
+            ]
+          }
+        ]
+      },
+      "args_schema": {
+        "type": "object",
+        "properties": {
+          "doc_id": {
+            "type": "string"
+          },
+          "dataset_id": {
+            "type": "string"
+          },
+          "doc_name": {
+            "type": "string"
+          },
+          "q": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "max_chars": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "doc_id"
+            ]
+          },
+          {
+            "required": [
+              "dataset_id",
+              "doc_name"
+            ]
+          }
+        ]
+      },
+      "result_schema": "les_tool_result_v1",
+      "returns": "Excel indexed chunks with warnings about raw sheet/range limits",
+      "effect": "read",
+      "side_effects": "none",
+      "scopes": [
+        "dataset"
+      ],
+      "timeout_seconds": 30,
+      "retry": "safe",
+      "idempotency": "derived",
+      "result_budget": {
+        "max_chars": 7000,
+        "max_items": 20
+      },
+      "model_owned_fields": [],
+      "provenance": "source_refs_required",
+      "approval_required": false,
+      "tags": [
+        "excel",
+        "xlsx",
+        "csv",
+        "table",
+        "read",
+        "source",
+        "shadow_validate_only"
+      ]
+    },
+    {
+      "name": "read_pdf_source",
+      "version": "1.0.0",
+      "title": "Read PDF source",
+      "category": "source",
+      "summary": "Read a physical PDF page through Rust/PDFium, never the index. page is 1-based and REQUIRED. For a specific field set q to an EXACT literal word/phrase on the page (not the whole question): returns a verified excerpt around that match, not a full-page review. Without q, reads page text in portions; call this SAME tool with offset=next_offset until null. Use exact dataset_id+doc_name from sources; never invent ids or paths. source_sha256 pins the revision. Scans require OCR; errors are not evidence.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "doc_id": {
+            "type": "string"
+          },
+          "dataset_id": {
+            "type": "string"
+          },
+          "doc_name": {
+            "type": "string"
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "source_sha256": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "q": {
+            "type": "string"
+          },
+          "max_chars": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "doc_id"
+            ]
+          },
+          {
+            "required": [
+              "dataset_id",
+              "doc_name"
+            ]
+          }
+        ],
+        "required": [
+          "page"
+        ]
+      },
+      "args_schema": {
+        "type": "object",
+        "properties": {
+          "doc_id": {
+            "type": "string"
+          },
+          "dataset_id": {
+            "type": "string"
+          },
+          "doc_name": {
+            "type": "string"
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "source_sha256": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "q": {
+            "type": "string"
+          },
+          "max_chars": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "doc_id"
+            ]
+          },
+          {
+            "required": [
+              "dataset_id",
+              "doc_name"
+            ]
+          }
+        ],
+        "required": [
+          "page"
+        ]
+      },
+      "result_schema": "les_tool_result_v1",
+      "returns": "physical page text, verified catalog identity and SHA-256, completeness and next_offset",
+      "effect": "read",
+      "side_effects": "none",
+      "scopes": [
+        "dataset"
+      ],
+      "timeout_seconds": 30,
+      "retry": "safe",
+      "idempotency": "derived",
+      "result_budget": {
+        "max_chars": 60000,
+        "max_items": 20
+      },
+      "model_owned_fields": [],
+      "provenance": "source_refs_required",
+      "approval_required": false,
+      "tags": [
+        "pdf",
+        "read",
+        "document",
+        "source",
+        "shadow_validate_only"
+      ]
+    },
+    {
+      "name": "read_project_table",
+      "version": "1.0.0",
+      "title": "Read original project table",
+      "category": "source",
+      "summary": "Open one table from its table_id and return exact bounded rows from the original PDF with source_ref.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "dataset_id": {
+            "type": "string"
+          },
+          "table_id": {
+            "type": "string"
+          },
+          "max_rows": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "storage_root": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "dataset_id",
+          "table_id"
+        ]
+      },
+      "args_schema": {
+        "type": "object",
+        "properties": {
+          "dataset_id": {
+            "type": "string"
+          },
+          "table_id": {
+            "type": "string"
+          },
+          "max_rows": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "storage_root": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "dataset_id",
+          "table_id"
+        ]
+      },
+      "result_schema": "les_tool_result_v1",
+      "returns": "source-evidence table headers and rows",
+      "effect": "read",
+      "side_effects": "none",
+      "scopes": [
+        "dataset"
+      ],
+      "timeout_seconds": 30,
+      "retry": "safe",
+      "idempotency": "derived",
+      "result_budget": {
+        "max_chars": 7000,
+        "max_items": 20
+      },
+      "model_owned_fields": [],
+      "provenance": "source_refs_required",
+      "approval_required": false,
+      "tags": [
+        "table",
+        "project",
+        "read",
+        "pdf",
+        "rows",
+        "source_ref",
+        "shadow_validate_only"
+      ]
+    },
+    {
+      "name": "read_source",
+      "version": "1.0.0",
+      "title": "Read indexed source",
+      "category": "source",
+      "summary": "Read ordered indexed chunks from one document by doc_id or dataset_id+doc_name. Set clause to read an exact numbered heading.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "doc_id": {
+            "type": "string"
+          },
+          "dataset_id": {
+            "type": "string"
+          },
+          "doc_name": {
+            "type": "string"
+          },
+          "q": {
+            "type": "string"
+          },
+          "clause": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "max_chars": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "doc_id"
+            ]
+          },
+          {
+            "required": [
+              "dataset_id",
+              "doc_name"
+            ]
+          }
+        ]
+      },
+      "args_schema": {
+        "type": "object",
+        "properties": {
+          "doc_id": {
+            "type": "string"
+          },
+          "dataset_id": {
+            "type": "string"
+          },
+          "doc_name": {
+            "type": "string"
+          },
+          "q": {
+            "type": "string"
+          },
+          "clause": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "max_chars": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "doc_id"
+            ]
+          },
+          {
+            "required": [
+              "dataset_id",
+              "doc_name"
+            ]
+          }
+        ]
+      },
+      "result_schema": "les_tool_result_v1",
+      "returns": "ordered chunks or in-document search hits",
+      "effect": "read",
+      "side_effects": "none",
+      "scopes": [
+        "dataset"
+      ],
+      "timeout_seconds": 30,
+      "retry": "safe",
+      "idempotency": "derived",
+      "result_budget": {
+        "max_chars": 7000,
+        "max_items": 20
+      },
+      "model_owned_fields": [],
+      "provenance": "source_refs_required",
+      "approval_required": false,
+      "tags": [
+        "read",
+        "document",
+        "chunks",
+        "source",
+        "shadow_validate_only"
+      ]
+    },
+    {
+      "name": "search_project_tables",
+      "version": "1.0.0",
+      "title": "Search project tables",
+      "category": "source",
+      "summary": "Search Л.И.С.Т. table cards by meaning, headers, file and semantic type before reading the original table.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "dataset_id": {
+            "type": "string"
+          },
+          "q": {
+            "type": "string"
+          },
+          "semantic_type": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "storage_root": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "dataset_id"
+        ],
+        "anyOf": [
+          {
+            "required": [
+              "q"
+            ]
+          },
+          {
+            "required": [
+              "semantic_type"
+            ]
+          },
+          {
+            "required": [
+              "file"
+            ]
+          }
+        ]
+      },
+      "args_schema": {
+        "type": "object",
+        "properties": {
+          "dataset_id": {
+            "type": "string"
+          },
+          "q": {
+            "type": "string"
+          },
+          "semantic_type": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "storage_root": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "dataset_id"
+        ],
+        "anyOf": [
+          {
+            "required": [
+              "q"
+            ]
+          },
+          {
+            "required": [
+              "semantic_type"
+            ]
+          },
+          {
+            "required": [
+              "file"
+            ]
+          }
+        ]
+      },
+      "result_schema": "les_tool_result_v1",
+      "returns": "navigation-only table cards with table_id and source_ref",
+      "effect": "read",
+      "side_effects": "none",
+      "scopes": [
+        "dataset"
+      ],
+      "timeout_seconds": 30,
+      "retry": "safe",
+      "idempotency": "derived",
+      "result_budget": {
+        "max_chars": 7000,
+        "max_items": 20
+      },
+      "model_owned_fields": [],
+      "provenance": "source_refs_required",
+      "approval_required": false,
+      "tags": [
+        "table",
+        "project",
+        "list",
+        "search",
+        "registry",
+        "headers",
+        "смета",
+        "спецификация",
+        "shadow_validate_only"
+      ]
+    },
+    {
+      "name": "search_sources",
+      "version": "1.0.0",
+      "title": "Search indexed sources",
+      "category": "source",
+      "summary": "Search lexical chunks inside the selected dataset/document scope.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "q": {
+            "type": "string"
+          },
+          "dataset_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "doc_name": {
+            "type": "string"
+          },
+          "doc_id": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "max_chars": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "dataset_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "q"
+        ]
+      },
+      "args_schema": {
+        "type": "object",
+        "properties": {
+          "q": {
+            "type": "string"
+          },
+          "dataset_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "doc_name": {
+            "type": "string"
+          },
+          "doc_id": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "max_chars": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "dataset_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "q"
+        ]
+      },
+      "result_schema": "les_tool_result_v1",
+      "returns": "ranked indexed chunks with source ids",
+      "effect": "read",
+      "side_effects": "none",
+      "scopes": [
+        "dataset"
+      ],
+      "timeout_seconds": 30,
+      "retry": "safe",
+      "idempotency": "derived",
+      "result_budget": {
+        "max_chars": 7000,
+        "max_items": 20
+      },
+      "model_owned_fields": [],
+      "provenance": "source_refs_required",
+      "approval_required": false,
+      "tags": [
+        "retrieval",
+        "source",
+        "search",
+        "fts",
+        "doc_filter",
+        "shadow_validate_only"
+      ]
+    },
+    {
+      "name": "web_read",
+      "version": "1.0.0",
+      "title": "Read selected public web page",
+      "category": "web",
+      "summary": "Read exactly one public URL selected by the model through the configured bounded page reader; never auto-read search results.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "max_chars": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "url"
+        ]
+      },
+      "args_schema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "max_chars": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "url"
+        ]
+      },
+      "result_schema": "les_tool_result_v1",
+      "returns": "bounded page text with direct source provenance",
+      "effect": "read",
+      "side_effects": "none",
+      "scopes": [
+        "public_web"
+      ],
+      "timeout_seconds": 30,
+      "retry": "safe",
+      "idempotency": "derived",
+      "result_budget": {
+        "max_chars": 7000,
+        "max_items": 20
+      },
+      "model_owned_fields": [],
+      "provenance": "source_refs_required",
+      "approval_required": false,
+      "tags": [
+        "agent",
+        "web",
+        "internet",
+        "read",
+        "source",
+        "прочитай",
+        "страница",
+        "shadow_validate_only"
+      ]
+    },
+    {
+      "name": "web_search",
+      "version": "1.0.0",
+      "title": "Public web search",
+      "category": "web",
+      "summary": "Search the public internet and return bounded titles, snippets and source URLs; read-only and never a final answer.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "q": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "q"
+        ]
+      },
+      "args_schema": {
+        "type": "object",
+        "properties": {
+          "q": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "q"
+        ]
+      },
+      "result_schema": "les_tool_result_v1",
+      "returns": "public search results with direct source URLs",
+      "effect": "read",
+      "side_effects": "none",
+      "scopes": [
+        "public_web"
+      ],
+      "timeout_seconds": 30,
+      "retry": "safe",
+      "idempotency": "derived",
+      "result_budget": {
+        "max_chars": 7000,
+        "max_items": 20
+      },
+      "model_owned_fields": [],
+      "provenance": "source_refs_required",
+      "approval_required": false,
+      "tags": [
+        "agent",
+        "web",
+        "internet",
+        "search",
+        "актуальный",
+        "интернет",
+        "сайт",
+        "shadow_validate_only"
+      ]
+    }
+  ],
+  "policy": {
+    "model_owns_workflow": true,
+    "tools_return_evidence_not_final_domain_answers": true,
+    "write_tools_require_approval": true
+  }
+}

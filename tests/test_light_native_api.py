@@ -54,6 +54,11 @@ def static_frontend(folder):
     return frontend
 
 
+def native_trust(folder, role=None):
+    (folder/'state/.env').write_text('TRUSTED_NETWORKS=' + ('127.0.0.1/32' if role else '')
+                                   + '\nTRUSTED_NETWORK_ROLE=' + (role or 'admin') + '\n', encoding='utf-8')
+
+
 @pytest.fixture
 def gateway(tmp_path):
     executable=os.getenv('LES_TEST_NATIVE_API')
@@ -74,10 +79,9 @@ def instance():return {'instance_id':'fixture'}
 def origin(request:Request):return {'base_url':str(request.base_url)}
 @app.get('/api/light/native-auth-policy')
 def auth_policy():
-    source=Path('native-auth-fixture.json')
-    if not source.is_file():raise HTTPException(404)
     with Path('policy-calls.log').open('a') as log:log.write('bootstrap\\n')
-    return json.loads(source.read_text(encoding='utf-8'))
+    return {'schema':'les.native-auth-policy.v1','compatible':True,'trusted_role':'admin',
+            'cors_origins':[],'cors_loopback':True,'proxy_header':'x-les-trusted-network'}
 @app.post('/test-stop-upstream')
 async def stop_upstream():
     asyncio.get_running_loop().call_later(.1, os._exit, 0)
@@ -120,6 +124,12 @@ def redirect(request:Request):return RedirectResponse(str(request.base_url)+'tar
     log=(tmp_path/'servers.log').open('wb')
     children=[]
     try:
+        (tmp_path/'state/data').mkdir(parents=True)
+        native_trust(tmp_path)
+        with sqlite3.connect(tmp_path/'state/data/les_meta.db') as db:
+            db.execute('CREATE TABLE auth_keys(key_value TEXT PRIMARY KEY,role TEXT,expires_at TEXT,is_active INTEGER)')
+            db.executemany('INSERT INTO auth_keys VALUES(?,?,?,?)',[
+                ('approved-fixture','admin',None,1),('user-fixture','user',None,1)])
         children.append(subprocess.Popen([sys.executable,'-B','-m','uvicorn','upstream:app','--host','127.0.0.1','--port',str(upstream_port)],
             cwd=tmp_path,env=environment,stdout=log,stderr=subprocess.STDOUT,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0)))
         database=tmp_path/'Диалоги 日本語.sqlite'
@@ -128,7 +138,8 @@ def redirect(request:Request):return RedirectResponse(str(request.base_url)+'tar
         children.append(subprocess.Popen([executable,'--listen',f'127.0.0.1:{native_port}',
             '--upstream',upstream,'--database',str(database),'--state',str(tmp_path/'state'),
             '--frontend-assets',str(frontend),'--legacy-ui-url','http://127.0.0.1:55444/classic'],cwd=tmp_path,stdout=log,stderr=subprocess.STDOUT,
-            env={**os.environ,'LES_INTERNAL_MODEL_TOKEN':MODEL_BRIDGE_TOKEN},
+            env={**os.environ,'LES_INTERNAL_MODEL_TOKEN':MODEL_BRIDGE_TOKEN,
+                 'LES_ENV_PATH':str(tmp_path/'state/.env')},
             creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0)))
         url=f'http://127.0.0.1:{native_port}'
         with httpx.Client(base_url=url,timeout=15,trust_env=False,headers={'X-API-Key':'approved-fixture'}) as client:
@@ -281,14 +292,11 @@ def test_corrupt_frontend_receipt_fails_closed(tmp_path):
 @pytest.mark.parametrize('trusted_role', [None, 'admin'])
 def test_native_auth_policy_keys_revocation_and_upstream_independence(gateway, trusted_role):
     client, database, folder = gateway
-    (folder/'native-auth-fixture.json').write_text(json.dumps({
-        'schema': 'les.native-auth-policy.v1', 'trusted_role': trusted_role,
-        'compatible': True, 'cors_origins': [], 'cors_loopback': True,
-        'proxy_header': 'x-les-trusted-network',
-    }), encoding='utf-8')
+    native_trust(folder, trusted_role)
     registry = folder/'state/data/les_meta.db'
-    registry.parent.mkdir(parents=True)
+    registry.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(registry) as db:
+        db.execute('DROP TABLE auth_keys')
         db.execute('CREATE TABLE auth_keys (key_value TEXT PRIMARY KEY, role TEXT, expires_at TEXT, is_active INTEGER)')
         db.executemany('INSERT INTO auth_keys VALUES (?,?,?,?)', [
             ('approved-fixture', 'admin', '2099-01-01 12:00:00', 1),
@@ -326,8 +334,10 @@ def test_native_auth_policy_keys_revocation_and_upstream_independence(gateway, t
         assert request.get(sessions, headers=user).status_code == 403
         assert not (folder/'legacy-authorization.marker').exists()
         assert client.get(sessions, headers={'X-Forwarded-For': '127.0.0.1'}).status_code == 200
-        assert (folder/'legacy-authorization.marker').is_file()
-        assert (folder/'policy-calls.log').read_text().splitlines() == ['bootstrap']
+        assert not (folder/'legacy-authorization.marker').exists()
+        assert not (folder/'policy-calls.log').exists()
+        foreign = request.get(sessions, headers={'X-Forwarded-For':'192.0.2.10'})
+        assert foreign.status_code == 401
         assert client.post('/test-stop-upstream').status_code == 200
         wait_for(lambda: client.get('/api/light/instance').status_code == 503)
         created = client.post(sessions, json={'title': 'Живой диалог 🌲'})
@@ -336,16 +346,67 @@ def test_native_auth_policy_keys_revocation_and_upstream_independence(gateway, t
         assert client.get(f'{sessions}/{sid}').json()['title'] == 'Живой диалог 🌲'
 
 
+@pytest.mark.parametrize('settings,code', [
+    ("TRUSTED_NETWORKS='broken\n", 'AUTH_SETTINGS_INVALID'),
+    ('TRUSTED_NETWORKS=${OTHER_NETWORKS}\n', 'AUTH_SETTINGS_EXPANSION_UNSUPPORTED'),
+    ('CORS_ALLOWED_ORIGIN_REGEX="(?=unsupported)"\n', 'AUTH_CORS_PATTERN_UNSUPPORTED'),
+    ('TRUSTED_PROXY_HEADER="bad header"\n', 'AUTH_PROXY_HEADER_INVALID'),
+])
+def test_native_auth_invalid_settings_never_delegate_or_grant_default_access(gateway, settings, code):
+    client, database, folder = gateway
+    (folder/'state/.env').write_text(settings, encoding='utf-8')
+    response = client.get('/api/workspace/sessions')
+    assert response.status_code == 503 and not database.exists()
+    assert response.json()['code'] == code and response.json()['detail']
+    assert code in (folder/'servers.log').read_text(encoding='utf-8', errors='replace')
+    assert not (folder/'legacy-authorization.marker').exists()
+    assert not (folder/'policy-calls.log').exists()
+    # A rejected configuration is not cached as a permissive policy. Repairing
+    # the owned settings allows the same native process to retry safely.
+    native_trust(folder)
+    assert client.get('/api/workspace/sessions').status_code == 200
+
+
+def test_native_auth_custom_policy_forwarding_and_cors_without_legacy_calls(gateway):
+    client, _, folder = gateway
+    (folder/'state/.env').write_text(
+        "export\tTRUSTED_NETWORKS='192.0.2.0/24'\nTRUSTED_NETWORK_ROLE=user\n"
+        "TRUSTED_PROXY_HEADER=x-custom-trust\nCORS_ALLOWED_ORIGINS=\n"
+        r"CORS_ALLOWED_ORIGIN_REGEX='https?://127\.0\.0\.1:818[12]'" + '\n', encoding='utf-8')
+    with httpx.Client(base_url=client.base_url, trust_env=False) as request:
+        sessions = '/api/workspace/sessions'
+        assert request.get(sessions).status_code == 401
+        assert request.get(sessions, headers={'X-Forwarded-For':'192.0.2.8, 127.0.0.1'}).status_code == 200
+        assert request.post('/api/projects', json={'name':'Denied'}, headers={'X-Forwarded-For':'192.0.2.8'}).status_code == 403
+        assert request.get(sessions, headers={'X-Real-IP':'192.0.2.9'}).status_code == 200
+        assert request.get(sessions, headers={'X-Custom-Trust':'true'}).status_code == 200
+        assert request.get(sessions, headers={'X-Les-Trusted-Network':'true'}).status_code == 401
+        assert request.get(sessions, headers={'X-Forwarded-For':b'\xff'}).status_code == 401
+        for port, allowed in [(8181, True), (8182, True), (8183, False)]:
+            origin = f'http://127.0.0.1:{port}'
+            response = request.get(sessions, headers={'X-Forwarded-For':'192.0.2.8','Origin':origin})
+            assert response.status_code == 200
+            assert (response.headers.get('access-control-allow-origin') == origin) == allowed
+            preflight = request.options(sessions, headers={'Origin':origin,'Access-Control-Request-Method':'POST',
+                                                         'Access-Control-Request-Headers':'Content-Type,X-API-Key'})
+            assert preflight.status_code == (200 if allowed else 400)
+            if allowed:
+                assert preflight.headers['x-les-handler'] == 'rust.auth-policy'
+                assert preflight.headers['access-control-allow-origin'] == origin
+                assert preflight.headers['access-control-allow-headers'] == 'Content-Type,X-API-Key'
+        assert request.options(sessions, headers={'Origin':'http://127.0.0.1:8181',
+                                                  'Access-Control-Request-Method':'BREW'}).status_code == 400
+    assert not (folder/'legacy-authorization.marker').exists()
+    assert not (folder/'policy-calls.log').exists()
+
+
 def test_native_key_management_preserves_roles_and_serializes_device_binding(gateway):
     gateway_client, _, folder = gateway
-    (folder/'native-auth-fixture.json').write_text(json.dumps({
-        'schema': 'les.native-auth-policy.v1', 'trusted_role': 'admin',
-        'compatible': True, 'cors_origins': [], 'cors_loopback': True,
-        'proxy_header': 'x-les-trusted-network',
-    }), encoding='utf-8')
+    native_trust(folder, 'admin')
     registry = folder/'state/data/les_meta.db'
-    registry.parent.mkdir(parents=True)
+    registry.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(registry) as db:
+        db.execute('DROP TABLE auth_keys')
         db.execute("""CREATE TABLE auth_keys (
             key_value TEXT PRIMARY KEY, holder_name TEXT NOT NULL DEFAULT '',
             role TEXT NOT NULL DEFAULT 'user', is_active INTEGER NOT NULL DEFAULT 1,
@@ -545,10 +606,65 @@ def test_native_context_edit_forget_keeps_history_and_cas(gateway):
     with sqlite3.connect(database) as conn:assert conn.execute('SELECT count(*) FROM chat_history').fetchone()[0]==8
 
 
+def test_native_context_report_and_isolation_are_scoped_and_redact_private_sections(gateway):
+    from dataclasses import replace
+    from proxy.services.chat_evidence_context import (
+        confirm_context_delivery, govern_inference_messages, prepared_context_trace,
+    )
+    from proxy.services.model_execution_preset_service import _FACTORY_9B
+
+    client, database, _ = gateway
+    sid = client.post('/api/workspace/sessions', json={}).json()['session_id']
+    other = client.post('/api/workspace/sessions', json={}).json()['session_id']
+    path = f'/api/workspace/memory/context/{sid}'
+    visible_text = '[Источник 1] Лист проекта\nПроверяемая цитата 🌲'
+    evidence = (visible_text, '[Источник 2] ' + 'Длинный файл ' * 5000)
+    source_map = [
+        {'index': 1, 'doc_name': 'Проект 東京.pdf', 'source_page': 9, 'locator': {'source_sha256': 'a'*64, 'path': 'private-path'}},
+        {'index': 2, 'doc_name': 'Длинный файл.docx'},
+    ]
+    _, packet = govern_inference_messages(
+        preset=replace(_FACTORY_9B, input_token_limit=4000), profile_prefix='private-profile',
+        request_payload='private-question', evidence=evidence, source_map=source_map,
+    )
+    call = prepared_context_trace(packet, purpose='answer', source_map=source_map, evidence=evidence)
+    prepared = dict(call)
+    confirm_context_delivery(call, {'prompt_tokens': 234})
+    call['produced_answer'] = True
+    trace = {'context_governor': {'calls': [call, prepared]}}
+    with sqlite3.connect(database) as conn:
+        conn.execute('CREATE TABLE chat_history(id INTEGER PRIMARY KEY,session_id TEXT,question TEXT,answer TEXT,retrieval_trace_json TEXT)')
+        conn.execute('INSERT INTO chat_history VALUES (1,?,?,?,?)', (sid, 'Вопрос', 'Ответ', json.dumps(trace)))
+    assert client.get(f'/api/workspace/memory/context/{other}/report?history_id=1').status_code == 404
+    assert client.put(f'/api/workspace/memory/context/{other}/messages',
+                      json={'history_id': 1, 'role': 'assistant', 'excluded': True}).status_code == 404
+    response = client.get(path + '/report', params={'history_id': 1})
+    assert response.status_code == 200 and response.headers['x-les-handler'] == 'rust.catalog'
+    actual, unused = response.json()['calls']
+    assert actual['delivery'] == 'confirmed' and actual['produced_answer'] and actual['provider_prompt_tokens'] == 234
+    assert unused['delivery'] == 'prepared' and unused['provider_prompt_tokens'] is None
+    assert actual['sources'][0]['model_excerpt'] == visible_text
+    assert actual['sources'][0]['source_page'] == 9
+    assert actual['omitted_sources'] == [{'index': 2, 'doc_name': 'Длинный файл.docx'}]
+    assert actual['free'] == actual['budget'] - actual['used']
+    assert 'private-' not in response.text
+    assert 'Длинный файл Длинный файл' not in response.text
+    assert client.get(path + '/messages').json() == []
+    change = {'history_id': 1, 'role': 'assistant', 'excluded': True}
+    assert client.put(path + '/messages', json=change).json() == [{'history_id': 1, 'role': 'assistant'}]
+    assert client.put(path + '/messages', json=change).status_code == 200
+    assert client.get(path).json()['revision'] == 1
+    assert client.get(path + '/messages').json() == [{'history_id': 1, 'role': 'assistant'}]
+    assert client.put(path + '/messages', json={**change, 'excluded': False}).json() == []
+
+
 def test_native_agent_state_persists_plain_markdown_and_undo(gateway):
     client,database,folder=gateway
     path='/api/workspace/agent-state'
-    assert client.get(path).status_code==200 and not (folder/'state').exists()
+    def state_files():
+        return {p.relative_to(folder/'state'):p.read_bytes() for p in (folder/'state').rglob('*') if p.is_file()}
+    before = state_files()  # The fixture now owns its real native key registry.
+    assert client.get(path).status_code==200 and state_files()==before
     body={'action':'save','area':'user','project_id':0,'expected_revision':'missing','text':'Русский 🌲\n\nПредпочтения 日本語'}
     saved=client.post(path,json=body)
     assert saved.status_code==200 and saved.headers['x-les-handler']=='rust.agent-state'
@@ -601,3 +717,188 @@ def test_native_agent_files_are_scoped_and_never_write_source_paths(gateway):
     changed=client.post(path,json={'action':'edit','area':'files','path':'notes/План #1.md','expected_revision':work.json()['revision'],'old_text':'Before','new_text':'After'})
     assert changed.status_code==200
     assert client.get(path,params={'action':'list'}).json()['files'][0]['path']=='notes/План #1.md'
+
+
+def test_native_model_listing_and_history_survive_upstream_stop(gateway):
+    from datetime import datetime, timedelta, timezone
+    from backend.workspace_native import catalog_call
+    from proxy.services.model_connection_contracts import (
+        CapabilityName, CapabilityObservation, CapabilitySnapshot, CapabilityState,
+        ConnectionLocality, ConnectionRole,
+    )
+    from proxy.services.model_connection_registry_service import ModelConnectionRegistry
+    from proxy.routers.model_connections import _admin_projection
+    from proxy.services.model_secret_service import EnvironmentSecretStore
+    client, database, folder = gateway
+    native_trust(folder)
+    # This fixture owns its keys and model registry; it never reads the working LES.
+    key_path = folder/'state/data/les_meta.db'
+    key_path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(key_path) as db:
+        db.execute('DROP TABLE auth_keys')
+        db.execute('CREATE TABLE auth_keys(key_value TEXT,role TEXT,expires_at TEXT,is_active INTEGER)')
+        db.executemany('INSERT INTO auth_keys VALUES (?,?,?,?)',[
+            ('approved-fixture','admin',None,1),('user-fixture','user',None,1)])
+    env_path = folder/'state/.env'
+    env_path.write_text('TRUSTED_NETWORKS=\nLES_MODEL_CONNECTION_TEST_API_KEY=fixture-never-return-this\n', encoding='utf-8')
+    registry = ModelConnectionRegistry(database)
+    revision = registry.create_connection(display_name='Модель 日本語 🌲',base_url='http://127.0.0.1:11434/v1',
+        model_id='fixture:9b',locality=ConnectionLocality.LOOPBACK,requested_context_tokens=24576,
+        secret_ref='env:LES_MODEL_CONNECTION_TEST_API_KEY',extension_type='ollama',actor='admin:test')
+    registry.bind_role(ConnectionRole.ANSWER, revision.revision_id, expected_binding_revision=None, actor='admin:test')
+    observed = datetime(2026,10,1,tzinfo=timezone.utc)
+    registry.save_capability_snapshot(CapabilitySnapshot('cap:fixture',revision.revision_id,(
+        CapabilityObservation(CapabilityName.CHAT_COMPLETIONS,CapabilityState.SUPPORTED,'probe',observed,'http_200'),
+    ),observed,observed+timedelta(days=1),{}),actor='admin:test')
+    secrets = EnvironmentSecretStore(env_path, environ={})
+    expected = _admin_projection(revision, registry=registry, secret_store=secrets).model_dump()
+    # Bootstrap native auth once, then stop the retained test backend completely.
+    templates = client.get('/api/model-connections/templates').raise_for_status()
+    assert templates.headers['x-les-handler']=='rust.model-registry'
+    assert any(t['template_id']=='ollama' for t in templates.json()['templates'])
+    assert client.post('/test-stop-upstream').status_code==200
+    wait_for(lambda:client.get('/api/light/instance').status_code==503)
+    listing=client.get('/api/model-connections').raise_for_status()
+    assert listing.headers['x-les-handler']=='rust.model-registry'
+    assert listing.headers['cache-control']=='no-store'
+    assert listing.json()['connections']==[expected]
+    assert listing.json()['bindings']['answer']['connection_revision_id']==revision.revision_id
+    assert 'secret_ref' not in listing.text and 'fixture-never-return-this' not in listing.text
+    assert client.get('/api/model-connections',headers={'X-API-Key':'user-fixture'}).status_code==403
+    # Legacy schemas migrate in Rust and keep a failed tool read distinct from success.
+    with sqlite3.connect(database) as db:
+        db.execute('CREATE TABLE chat_history(id INTEGER PRIMARY KEY,timestamp TEXT,question TEXT,answer TEXT,sources TEXT,crag_status TEXT,latency_sec REAL,tokens INTEGER,session_id TEXT)')
+        db.execute("INSERT INTO chat_history VALUES(1,'2026-10-01','Вопрос 日本語','Ответ','doc:1','UNVALIDATED',1,2,'chat:fixture')")
+    messages=client.get('/api/chat/history',params={'session_id':'chat:fixture'}).raise_for_status()
+    assert messages.headers['x-les-handler']=='rust.chat-history'
+    assert messages.json()[-1]['text']=='Ответ'
+    assert client.get('/api/chat/learning').json()[0]['id']==1
+    assert client.get('/api/chat/learning',params={'confirmed_only':True}).json()==[]
+    key=catalog_call(database,'chat_history_begin',safe_fallback='',session_id='chat:fixture',question='Прочитай PDF',attachment_context='')
+    failure={'code':'PDF_REVISION_CHANGED','detail':'PDF изменился. Проверка остановлена.'}
+    catalog_call(database,'chat_history_checkpoint',id=key,event='error',error=failure)
+    answer=client.get('/api/chat/history',params={'session_id':'chat:fixture'}).json()[-1]
+    assert answer['text']=='' and answer['crag']=='FAILED' and answer['meta']['error']==failure
+    assert [row['id'] for row in client.get('/api/chat/learning').json()]==[1]
+    sessions=client.get('/api/chat/sessions').raise_for_status().json()
+    assert sessions[0]['session_id']=='chat:fixture' and sessions[0]['msg_count']==2
+    assert client.get('/api/chat/history?limit=oops').status_code==422
+    assert client.get('/api/chat/learning?confirmed_only=oops').status_code==422
+
+
+def test_native_cold_start_and_restart_without_any_python_server(tmp_path):
+    from backend.workspace_native import catalog_call
+    executable=os.getenv('LES_TEST_NATIVE_API')
+    if not executable:
+        pytest.skip('Build les-api for the cold native startup gate')
+    state=tmp_path/'state'
+    (state/'data').mkdir(parents=True)
+    (state/'.env').write_text('TRUSTED_NETWORKS=\n',encoding='utf-8')
+    database=state/'data/meta.db'
+    with sqlite3.connect(state/'data/les_meta.db') as db:
+        db.execute('CREATE TABLE auth_keys(key_value TEXT,role TEXT,expires_at TEXT,is_active INTEGER)')
+        db.executemany('INSERT INTO auth_keys VALUES(?,?,?,?)',[
+            ('admin-cold-fixture','admin',None,1),('user-cold-fixture','user',None,1)])
+    frontend=static_frontend(tmp_path)
+    listen=free_port();upstream=free_port()
+    while listen==upstream: upstream=free_port()
+    command=[executable,'--listen',f'127.0.0.1:{listen}','--upstream',f'http://127.0.0.1:{upstream}',
+        '--database',str(database),'--state',str(state),'--frontend-assets',str(frontend)]
+    environment={**os.environ,'LES_ENV_PATH':str(state/'.env'),
+                 'PYTHONHOME':str(tmp_path/'missing-python'),'PYTHONPATH':str(tmp_path/'missing-python')}
+    log=(tmp_path/'native-server.log').open('wb')
+    children=[]
+    def start():
+        child=subprocess.Popen(command,cwd=tmp_path,env=environment,stdout=log,stderr=subprocess.STDOUT,
+                               creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+        children.append(child)
+        wait_for(lambda:client.get('/api/model-connections/templates').status_code==200)
+        return child
+    with httpx.Client(base_url=f'http://127.0.0.1:{listen}',headers={'X-API-Key':'admin-cold-fixture'},
+                      trust_env=False,timeout=10) as client:
+        try:
+            child=start()
+            assert client.get('/api/model-connections').json()=={
+                'connections':[], 'bindings':{'answer':None,'embeddings':None,'local_fallback':None}}
+            assert client.get('/api/model-connections',headers={'X-API-Key':'user-cold-fixture'}).status_code==403
+            assert client.get('/api/model-connections',headers={'X-API-Key':''}).status_code==401
+            assert client.get('/api/workspace/sessions').status_code==200
+            created=client.post('/api/workspace/sessions',json={'title':'После перезапуска 日本語'}).raise_for_status().json()
+            sid=created['session_id']
+            key=catalog_call(database,'chat_history_begin',safe_fallback='',session_id=sid,question='Прочитай PDF',attachment_context='')
+            reason={'code':'PDF_PAGE_INCOMPLETE','detail':'Страница PDF прочитана не полностью.'}
+            catalog_call(database,'chat_history_checkpoint',id=key,event='error',error=reason)
+            before=client.get('/api/chat/history',params={'session_id':sid}).raise_for_status().json()
+            assert before[-1]['meta']['error']==reason
+            assert client.get('/app/').status_code==200
+            assert client.get('/api/light/native-auth-policy').status_code==404
+            child.kill();child.wait(timeout=10)
+            start()
+            after=client.get('/api/chat/history',params={'session_id':sid}).raise_for_status().json()
+            assert after==before
+            assert client.get(f'/api/workspace/sessions/{sid}').json()['title']=='После перезапуска 日本語'
+            assert client.get('/api/chat/sessions').json()[0]['session_id']==sid
+            # The retained routes are still unavailable, never reported as native functionality.
+            assert client.get('/unported-fixture-route').status_code==503
+        finally:
+            for child in reversed(children):
+                if child.poll() is None:child.kill()
+                child.wait(timeout=10)
+            log.close()
+
+
+def test_native_first_start_key_setup_and_key_only_restart_without_python(tmp_path):
+    executable = os.getenv('LES_TEST_NATIVE_API')
+    if not executable:
+        pytest.skip('Build les-api for native access bootstrap')
+    state = tmp_path/'state'; (state/'data').mkdir(parents=True)
+    database = state/'data/meta.db'
+    listen, upstream = free_port(), free_port()
+    while listen == upstream: upstream = free_port()
+    command = [executable, '--listen', f'127.0.0.1:{listen}', '--upstream', f'http://127.0.0.1:{upstream}',
+               '--database', str(database), '--state', str(state)]
+    environment = {k:v for k,v in os.environ.items() if not k.startswith(('TRUSTED_', 'CORS_'))}
+    environment.update(LES_ENV_PATH=str(state/'.env'), PYTHONHOME=str(tmp_path/'absent'), PYTHONPATH=str(tmp_path/'absent'))
+    children = []
+    with (tmp_path/'cold-access.log').open('wb') as log, httpx.Client(base_url=f'http://127.0.0.1:{listen}', trust_env=False) as client:
+        def start():
+            child = subprocess.Popen(command, cwd=tmp_path, env=environment, stdout=log, stderr=log,
+                                     creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+            children.append(child)
+            wait_for(lambda: client.get('/api/model-connections/templates').status_code in (200,401))
+            return child
+        try:
+            child = start()
+            assert not database.exists()
+            assert client.get('/api/auth/keys').raise_for_status().json() == []
+            key = 'cold-autonomous-user-fixture'
+            assert client.post('/api/auth/keys', json={'key_value':key,'role':'user'}).status_code == 200
+            assert client.get('/api/workspace/sessions', headers={'X-Forwarded-For':'192.0.2.1'}).status_code == 401
+            child.kill(); child.wait(timeout=10)
+            (state/'.env').write_text("export 'TRUSTED_NETWORKS'='' # ${comment is not a value}\nTRUSTED_PROXY_NETWORKS=''\n", encoding='utf-8')
+            start()
+            assert client.get('/api/workspace/sessions').status_code == 401
+            assert client.get('/api/workspace/sessions', headers={'X-Les-Trusted-Network':'true','X-Forwarded-For':'127.0.0.1'}).status_code == 401
+            assert client.get('/api/workspace/sessions', headers={'X-API-Key':key}).status_code == 200
+            assert client.post('/api/projects', headers={'X-API-Key':key}, json={'name':'Denied'}).status_code == 403
+            for path in ('native-auth-policy','native-authorization','native-admin-authorization'):
+                assert client.get('/api/light/'+path).status_code == 404
+            assert not (state/'native-auth-policy.json').exists()
+        finally:
+            for child in reversed(children):
+                if child.poll() is None: child.kill()
+                child.wait(timeout=10)
+
+
+@pytest.mark.parametrize('policy', [b'{}',b'x'*16385,b'{"schema":"les.native-auth-policy.v1","compatible":false}'])
+def test_invalid_native_startup_policy_never_starts_or_creates_database(tmp_path,policy):
+    executable=os.getenv('LES_TEST_NATIVE_API')
+    if not executable:pytest.skip('Build les-api for startup policy validation')
+    file=tmp_path/'policy.json';file.write_bytes(policy)
+    listen=free_port();upstream=free_port()
+    while listen==upstream:upstream=free_port()
+    result=subprocess.run([executable,'--listen',f'127.0.0.1:{listen}','--upstream',f'http://127.0.0.1:{upstream}',
+        '--database',str(tmp_path/'never-created.db'),'--state',str(tmp_path),'--auth-policy-file',str(file)],
+        cwd=tmp_path,capture_output=True,timeout=10)
+    assert result.returncode==1 and b'native_api_configuration_rejected' in result.stderr
+    assert not (tmp_path/'never-created.db').exists()

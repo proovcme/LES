@@ -1,5 +1,6 @@
 """Typed source nodes and structural context."""
 from __future__ import annotations
+from backend import native_core
 from backend import qdrant_support as support
 
 
@@ -14,20 +15,33 @@ class QdrantNodes:
         chunking: dict[str, support.Any],
     ) -> list[dict]:
         """Sanitize and enforce the final embedding budget for all node types."""
-        len_fn = chunking.get("len_fn") or len
+        tokenizer = chunking.get("len_fn")
+        len_fn = tokenizer or len
         budget = max(1, int(chunking.get("chunk_size") or 1))
         unit = str(chunking.get("unit") or "chars")
+        native = native_core.embedding_chunk_finalizer(budget, support.FINAL_MIN_CHUNK, tokenizer) if file_nodes else None
         finalized: list[dict] = []
         for node_index, node in enumerate(file_nodes):
-            clean, quality = support._sanitize_embedding_text(str(node.get("text") or ""))
-            if len(clean) < support.FINAL_MIN_CHUNK:
-                continue
-            parts = support._split_to_embedding_budget(clean, budget=budget, len_fn=len_fn)
-            parent_id = str(node.get("doc_id") or f"node-{node_index}")
-            for child_index, part in enumerate(parts):
-                if len(part) < support.FINAL_MIN_CHUNK:
+            text = str(node.get("text") or "")
+            prepared = None
+            if native is not None:
+                try:
+                    prepared = native(text)
+                except native_core.NativeCoreError as error:
+                    if str(error) not in {"CORE_INPUT_LIMIT", "CORE_OUTPUT_LIMIT"}:
+                        raise
+            if prepared is None:
+                clean, quality = support._sanitize_embedding_text(text)
+                if len(clean) < support.FINAL_MIN_CHUNK:
                     continue
-                measured = int(len_fn(part))
+                parts = ((i, part, int(len_fn(part))) for i, part in enumerate(
+                    support._split_to_embedding_budget(clean, budget=budget, len_fn=len_fn))
+                    if len(part) >= support.FINAL_MIN_CHUNK)
+            else:
+                quality = prepared["quality"]
+                parts = ((p["ord"], p["text"], p["length"]) for p in prepared["parts"])
+            parent_id = str(node.get("doc_id") or f"node-{node_index}")
+            for child_index, part, measured in parts:
                 if measured > budget:
                     raise RuntimeError(
                         f"embedding budget invariant failed: {measured}>{budget} {unit}"
@@ -90,11 +104,35 @@ class QdrantNodes:
             if file_nodes:
                 return file_nodes
 
+        if type(md_parser) is support.MarkdownNodeParser and type(splitter) is support.StructureAwareSplitter:
+            from backend.source_nodes import prepare
+            length = getattr(splitter, '_len', len)
+            file_nodes = prepare(md_content, dataset_id=dataset_id, file_key=file_key, route=route,
+                size=splitter.chunk_size, overlap=splitter.chunk_overlap,
+                minimum=support.MIN_CHUNK, final_minimum=support.FINAL_MIN_CHUNK,
+                unit='chars' if length is len else 'tokens', tokenizer=getattr(length, 'asset', None),
+                payload_type='spreadsheet_projection' if file_path.suffix.lower() in {'.xlsx','.xlsm','.xls','.csv'} else 'markdown')
+            if timings is not None:
+                timings['chunk_sec'] = timings.get('chunk_sec', 0.0) + (_t.time() - phase_start)
+            return file_nodes
+
+        # Custom parser/splitter adapters retain their explicitly supplied behavior.
         doc = support.Document(
             text=md_content,
             metadata={"file_name": file_key, "dataset_id": dataset_id},
         )
-        nodes = md_parser.get_nodes_from_documents([doc])
+        nodes = None
+        from backend import native_core
+        if type(md_parser) is support.MarkdownNodeParser and native_core.supports('document_chunks'):
+            try:
+                from llama_index.core.schema import TextNode
+                sections = native_core.required('document', request={'action': 'markdown_sections', 'text': md_content})
+                nodes = [TextNode(text=text) for text in sections['chunks']]
+            except native_core.NativeCoreError as error:
+                if str(error) != 'CORE_INPUT_LIMIT':
+                    raise
+        if nodes is None:
+            nodes = md_parser.get_nodes_from_documents([doc])
 
         file_nodes = []
         payload_type = "spreadsheet_projection" if file_path.suffix.lower() in {".xlsx", ".xlsm", ".xls", ".csv"} else "markdown"
@@ -133,86 +171,15 @@ class QdrantNodes:
         *,
         file_path: support.Path | None = None,
     ) -> list[dict]:
-        page_blocks = self._split_pdf_page_markdown(md_content)
-        if not page_blocks:
-            return []
-        page_passports: dict[int, dict[str, support.Any]] = {}
+        from backend.source_nodes import prepare
+        passport_reader = None
         if file_path is not None and support._pdf_page_passport_enabled(file_path):
-            try:
-                from proxy.services.pdf_contour_service import rag_page_metadata
-
-                page_passports = rag_page_metadata(
-                    file_path,
-                    [page_no for page_no, _text in page_blocks],
-                    file_name=file_key,
-                )
-            except Exception as error:  # noqa: BLE001 - passport enrichment must not lose searchable text
-                support.logger.warning("[PDF-CONTOUR] page passport failed for %s: %s", file_key, error)
-        max_chars = support._pdf_page_node_max_chars()
-        overlap = min(support._pdf_page_node_overlap_chars(), max_chars // 3)
-        nodes: list[dict] = []
-        for page_no, page_text in page_blocks:
-            text = page_text.strip()
-            if not text or text == "[no text extracted]":
-                continue
-            chunks = self._split_pdf_page_text(text, max_chars=max_chars, overlap=overlap)
-            part_count = len(chunks)
-            passport = page_passports.get(page_no) or {}
-            quality = passport.get("recognition_quality") if isinstance(passport.get("recognition_quality"), dict) else {}
-            signals = passport.get("signals") if isinstance(passport.get("signals"), dict) else {}
-            stamp = passport.get("stamp") if isinstance(passport.get("stamp"), dict) else {}
-            fragment_bboxes = [
-                {
-                    "fragment_id": item.get("fragment_id"),
-                    "bbox": item.get("bbox"),
-                    "source_ref": item.get("source_ref"),
-                }
-                for item in (passport.get("evidence_fragments") or [])
-                if isinstance(item, dict)
-            ][:5]
-            route_uses_ocr = str(getattr(route, "pipeline", "") or "") == "markdown_needs_ocr"
-            source_layer = "pdf_ocr_text" if route_uses_ocr or passport.get("requires_ocr") else "pdf_text_layer"
-            for part_no, chunk_text in enumerate(chunks, start=1):
-                # A short PDF page can still be decisive evidence: a cover mark,
-                # sheet number, room code or equipment designation.  The generic
-                # markdown noise threshold must not discard an entire non-empty
-                # page after the page router has already identified it.
-                if not chunk_text.strip():
-                    continue
-                title = f"## Page {page_no}"
-                if part_count > 1:
-                    title += f" part {part_no}/{part_count}"
-                text_for_index = f"{title}\n\n{chunk_text.strip()}"
-                payload = {
-                    "type": "pdf_page_text",
-                    "source_layer": source_layer,
-                    "page": page_no,
-                    "page_part": part_no,
-                    "page_parts": part_count,
-                    "source_ref": str(passport.get("source_ref") or f"{file_key}#page={page_no}"),
-                }
-                if passport:
-                    payload.update({
-                        "pdf_page_passport_schema": passport.get("schema"),
-                        "pdf_page_type": passport.get("page_type"),
-                        "pdf_page_type_label": passport.get("page_type_label"),
-                        "pdf_routing_confidence": passport.get("routing_confidence"),
-                        "pdf_requires_ocr": bool(passport.get("requires_ocr")),
-                        "pdf_recognition_quality": quality,
-                        "pdf_page_signals": signals,
-                        "pdf_stamp_status": stamp.get("status"),
-                        "pdf_sheet_number": stamp.get("sheet_number") or "",
-                        "pdf_fragment_bboxes": fragment_bboxes,
-                    })
-                nodes.append({
-                    "text": text_for_index,
-                    "doc_id": str(support.uuid.uuid5(
-                        support.uuid.NAMESPACE_URL,
-                        f"{dataset_id}:{file_key}:pdf-page:{page_no}:{part_no}",
-                    )),
-                    "payload": self._route_payload(route, payload),
-                })
-        return nodes
+            from proxy.services.pdf_contour_service import rag_page_metadata
+            passport_reader = lambda pages: rag_page_metadata(file_path, pages, file_name=file_key)
+        return prepare(md_content, dataset_id=dataset_id, file_key=file_key, route=route,
+            pdf=True, size=support._pdf_page_node_max_chars(),
+            overlap=min(support._pdf_page_node_overlap_chars(), support._pdf_page_node_max_chars()//3),
+            passport_reader=passport_reader)
 
     @staticmethod
     def _split_pdf_page_markdown(md_content: str) -> list[tuple[int, str]]:
@@ -230,6 +197,16 @@ class QdrantNodes:
 
     @staticmethod
     def _split_pdf_page_text(text: str, *, max_chars: int, overlap: int) -> list[str]:
+        from backend import native_core
+
+        try:
+            chunks = native_core.split_chunks(text or "", max_chars, overlap, kind="page")
+        except native_core.NativeCoreError as error:
+            if str(error) != "CORE_INPUT_LIMIT":
+                raise
+            chunks = None
+        if chunks is not None:
+            return chunks
         value = (text or "").strip()
         if len(value) <= max_chars:
             return [value] if value else []
@@ -460,23 +437,11 @@ class QdrantNodes:
                 "payload": self._route_payload(route, payload),
             })
         if not nodes and result.get("needs_ocr"):
-            scanned_pages = result.get("scanned_pages") or []
-            text = (
-                f"PDF {file_path.name} содержит страницы без текстового слоя; "
-                f"нужна OCR/VLM обработка. Страницы: {', '.join(map(str, scanned_pages)) or '?'}"
-            )
-            payload = {
-                "type": "pdf_needs_ocr",
-                "needs_ocr": True,
-                "scanned_pages": scanned_pages,
-                "parquet_path": "",
-                "table_kind": self._table_kind(route),
-            }
-            nodes.append({
-                "text": text,
-                "doc_id": str(support.uuid.uuid5(support.uuid.NAMESPACE_URL, f"{dataset_id}:{file_path}:needs_ocr")),
-                "payload": self._route_payload(route, payload),
-            })
+            # This is a processing state, not evidence from the document. The
+            # format dispatcher can try its ordinary OCR/markdown path; an
+            # unread scan must never be indexed as a diagnostic sentence.
+            from backend.extraction_errors import DocumentExtractionError
+            raise DocumentExtractionError('NO_SEARCHABLE_TEXT')
         if timings is not None:
             timings["chunk_sec"] = timings.get("chunk_sec", 0.0) + (_t.time() - phase_start)
         return nodes

@@ -102,7 +102,7 @@ fn sql_value(value: &Value) -> Result<SqlValue> {
     }
 }
 
-fn save(conn: &Connection, args: &Args) -> Result<Value> {
+pub(super) fn save(conn: &Connection, args: &Args) -> Result<Value> {
     let values = args
         .get("row")
         .and_then(Value::as_object)
@@ -140,7 +140,7 @@ fn save(conn: &Connection, args: &Args) -> Result<Value> {
                 .collect::<Vec<_>>()
                 .join(",");
             if conn.execute(
-                &format!("UPDATE chat_history SET {assignments} WHERE id=? AND session_id=?"),
+                &format!("UPDATE chat_history SET {assignments} WHERE id=? AND session_id IS ? AND crag_status!='FAILED'"),
                 params_from_iter(params),
             )? != 1
             {
@@ -187,6 +187,24 @@ fn feedback(conn: &Connection, args: &Args) -> Result<Value> {
 }
 
 pub(super) fn execute(conn: &Connection, action: &str, args: &Args) -> Result<Value> {
+    if matches!(
+        action,
+        "chat_history_http_messages" | "chat_history_http_learning"
+    ) {
+        // Same legacy-row migration as the compatibility API, without importing its runtime.
+        ensure(
+            conn,
+            concat!(
+                "Система безопасности (Т.О.С.К.А.) не смогла подтвердить ответ из базы знаний. ",
+                "Попробуйте переформулировать вопрос или выбрать другой датасет."
+            ),
+        )?;
+        return if action == "chat_history_http_messages" {
+            super::history_view::messages(conn, args)
+        } else {
+            super::history_view::learning(conn, args)
+        };
+    }
     match action {
         "chat_history_init"
         | "chat_history_begin"
@@ -198,11 +216,14 @@ pub(super) fn execute(conn: &Connection, action: &str, args: &Args) -> Result<Va
     }
     match action {
         "chat_history_init" => Ok(Value::Null),
+        "chat_history_sessions" => super::history_view::sessions(conn, args),
+        "chat_history_learning" => super::history_view::learning(conn, args),
+        "chat_history_messages" => super::history_view::messages(conn, args),
         "chat_history_begin" => {
             conn.execute(
                 "INSERT INTO chat_history (session_id,question,answer,crag_status,success,validation_enabled,attachment_context)
                  VALUES (?,?,'','IN_PROGRESS',0,0,?)",
-                params![text(args,"session_id")?, text(args,"question")?, text(args,"attachment_context")?],
+                params![args.get("session_id").and_then(Value::as_str), text(args,"question")?, text(args,"attachment_context")?],
             )?;
             Ok(json!(conn.last_insert_rowid()))
         }
@@ -218,6 +239,16 @@ pub(super) fn execute(conn: &Connection, action: &str, args: &Args) -> Result<Va
                     "UPDATE chat_history SET answer=COALESCE(answer,'')||?,tokens=COALESCE(tokens,0)+1
                      WHERE id=? AND crag_status='IN_PROGRESS'", params![text(args,"text")?, id],
                 )?,
+                "error" => {
+                    let error=args.get("error").and_then(Value::as_object).ok_or_else(||Failure::invalid("Invalid public error"))?;
+                    let code=error.get("code").and_then(Value::as_str).filter(|v|!v.is_empty() && v.len()<=100 && v.bytes().all(|b|b.is_ascii_uppercase() || b.is_ascii_digit() || b==b'_'))
+                        .ok_or_else(||Failure::invalid("Invalid public error code"))?;
+                    let detail=error.get("detail").and_then(Value::as_str).filter(|v|!v.is_empty() && v.chars().count()<=2048)
+                        .ok_or_else(||Failure::invalid("Invalid public error message"))?;
+                    let artifact=json!({"error":{"code":code,"detail":detail},"completion_status":"failed"});
+                    conn.execute("UPDATE chat_history SET crag_status='FAILED',success=0,validation_enabled=0,artifact_json=?
+                        WHERE id=? AND crag_status='IN_PROGRESS'",params![artifact.to_string(),id])?
+                },
                 _ => return Err(Failure::invalid("Invalid history event")),
             };
             Ok(Value::Null)

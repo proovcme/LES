@@ -23,7 +23,6 @@ from backend.rag_config import rag_meta_db_path
 TYPED_MEMORY_SCHEMA = "dataset_memory_v1"
 FILE_CARD_SCHEMA = "file_card_v1"
 EVIDENCE_ATOM_SCHEMA = "evidence_atom_v1"
-DATASET_READER_SCHEMA_ID = "dataset_reader_map_v1"
 DATASET_BRIEF_SCHEMA_ID = "dataset_brief_for_model_v1"
 DATASET_TOPIC_MAP_SCHEMA_ID = "dataset_topic_map_v1"
 DATASET_SECTION_MAP_SCHEMA_ID = "dataset_section_map_v1"
@@ -166,7 +165,6 @@ _SMETA_NESTED_ROLE_HINTS: tuple[tuple[str, str], ...] = (
     ("level_vc", "вспомогательная таблица связей уровня"),
     ("arctype", "тип архива/служебный классификатор"),
 )
-_RUNNING_READER_TASKS: set[str] = set()
 
 TOPIC_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {
@@ -222,57 +220,6 @@ TOPIC_DEFINITIONS: tuple[dict[str, Any], ...] = (
     },
 )
 
-DATASET_READER_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "additionalProperties": False,
-    "required": [
-        "schema",
-        "corpus_kind",
-        "reader_summary",
-        "where_to_look",
-        "file_roles",
-        "known_gaps",
-        "answer_guidance",
-        "confidence",
-    ],
-    "properties": {
-        "schema": {"type": "string", "enum": [DATASET_READER_SCHEMA_ID]},
-        "corpus_kind": {"type": "string", "maxLength": 120},
-        "reader_summary": {"type": "string"},
-        "where_to_look": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "required": ["question_type", "target_files", "reason"],
-                "properties": {
-                    "question_type": {"type": "string"},
-                    "target_files": {"type": "array", "items": {"type": "string"}, "maxItems": 12},
-                    "reason": {"type": "string"},
-                },
-            },
-            "maxItems": 16,
-        },
-        "file_roles": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "required": ["file_name", "role", "what_inside", "confidence"],
-                "properties": {
-                    "file_name": {"type": "string"},
-                    "role": {"type": "string"},
-                    "what_inside": {"type": "string"},
-                    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-                },
-            },
-            "maxItems": 40,
-        },
-        "known_gaps": {"type": "array", "items": {"type": "string"}, "maxItems": 20},
-        "answer_guidance": {"type": "string"},
-        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-    },
-}
 
 
 def _connect(meta_db_path: str | None = None) -> sqlite3.Connection:
@@ -1070,7 +1017,7 @@ def build_typed_dataset_memory(
             (dataset_id, revision_id),
         ).fetchone()
         if existing and not force:
-            return _ensure_memory_navigation(_loads(existing["memory_json"], {}))
+            return _reader_overlay(_ensure_memory_navigation(_loads(existing["memory_json"], {})), dataset_id, meta_db_path)
 
         indexed_count = sum(1 for d in docs if str(d.get("status") or "") == "INDEXED")
         chunk_count = sum(int(d.get("chunk_count") or 0) for d in docs)
@@ -1211,7 +1158,7 @@ def build_typed_dataset_memory(
             (dataset_id, revision_id, TYPED_MEMORY_SCHEMA, _json(memory), "bootstrap", now),
         )
         conn.commit()
-        return memory
+        return _reader_overlay(memory, dataset_id, meta_db_path)
 
 
 def _important_files(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1459,455 +1406,35 @@ def _known_gaps(docs: list[dict[str, Any]], by_layer: dict[str, int]) -> list[st
     return gaps
 
 
-def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
-    try:
-        return max(minimum, int(os.getenv(name, str(default))))
-    except ValueError:
-        return default
-
-
-def _reader_context(
-    memory: dict[str, Any],
-    *,
-    file_limit: int | None = None,
-    char_limit: int | None = None,
-) -> str:
-    cards = list(memory.get("file_cards") or [])
-    if file_limit is None:
-        configured_limit = os.getenv("LES_DATASET_READER_FILE_LIMIT", "").strip()
-        file_limit = _env_int("LES_DATASET_READER_FILE_LIMIT", len(cards), minimum=4) if configured_limit else len(cards)
-    if char_limit is None:
-        char_limit = _env_int("LES_DATASET_READER_CONTEXT_CHARS", 12000, minimum=4000)
-    selected_cards, corpus_groups, corpus_group_total = _reader_card_coverage(cards, file_limit=file_limit)
-    section_map = memory.get("section_map") if isinstance(memory.get("section_map"), dict) else {}
-    payload = {
-        "schema": "dataset_reader_input_v1",
-        "dataset_id": memory.get("dataset_id"),
-        "revision_id": memory.get("revision_id"),
-        "document_count": memory.get("document_count", 0),
-        "indexed_count": memory.get("indexed_count", 0),
-        "chunk_count": memory.get("chunk_count", 0),
-        "dataset_kind": memory.get("dataset_kind") or "",
-        "dataset_kind_label": memory.get("dataset_kind_label") or "",
-        "operator_guidance": str(memory.get("operator_guidance") or "")[:1200],
-        "operator_guidance_role": memory.get("operator_guidance_role") or "",
-        "data_layers": memory.get("data_layers") or [],
-        "file_kinds": memory.get("file_kinds") or [],
-        "document_roles": memory.get("document_roles") or [],
-        "important_files": [
-            {
-                "file_name": item.get("file_name"),
-                "role": item.get("document_role") or item.get("role"),
-            }
-            for item in (memory.get("important_files") or [])[:8]
-            if isinstance(item, dict)
-        ],
-        "known_gaps": memory.get("known_gaps") or [],
-        "file_cards_scope": {
-            "included": len(selected_cards),
-            "total": len(cards),
-            "selection": (
-                "all files if they fit; otherwise one readable representative from each actual "
-                "folder group, then chunk-rich files. This is navigation, not proof that omitted files do not exist"
-            ),
-        },
-        "corpus_groups": corpus_groups,
-        "corpus_groups_scope": {
-            "included": len(corpus_groups),
-            "total": corpus_group_total,
-            "truncated": len(corpus_groups) < corpus_group_total,
-        },
-        "file_cards": [
-            {
-                "file_name": card.get("file_name"),
-                "status": card.get("status"),
-                "chunk_count": card.get("chunk_count", 0),
-                "file_kind": card.get("file_kind"),
-                "content_layers": card.get("content_layers") or [],
-                "document_role": card.get("document_role"),
-                "navigation_terms": list(card.get("navigation_terms") or [])[:5],
-                "summary": str(card.get("summary") or "")[:180],
-            }
-            for card in selected_cards
-        ],
-        "section_map": _reader_section_map(section_map),
-        "reader_task": {
-            "goal": "build navigation memory only; do not answer user questions",
-            "evidence_rule": "facts still require retrieved chunks, table rows, graph atoms or calculation trace",
-        },
-    }
-    text = _json(payload)
-    if len(text) > char_limit:
-        return text[:char_limit] + "\n...TRUNCATED..."
-    return text
-
-
-def _reader_group_key(file_name: str) -> str:
-    parent = Path(str(file_name or "").replace("\\", "/")).parent
-    return str(parent) if str(parent) not in {"", "."} else "(root)"
-
-
-def _reader_card_coverage(
-    cards: list[dict[str, Any]], *, file_limit: int
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
-    """Summarise every actual file group and select a bounded representative spread."""
-    readable = [card for card in cards if isinstance(card, dict) and str(card.get("file_name") or "").strip()]
-    readable.sort(key=lambda card: (-int(card.get("chunk_count") or 0), str(card.get("file_name") or "")))
-    by_group: dict[str, list[dict[str, Any]]] = {}
-    for card in readable:
-        by_group.setdefault(_reader_group_key(str(card.get("file_name") or "")), []).append(card)
-    groups = [
-        {
-            "group": group,
-            "files": len(group_cards),
-            "indexed_files": sum(1 for card in group_cards if str(card.get("status") or "").upper() == "INDEXED"),
-            "chunks": sum(int(card.get("chunk_count") or 0) for card in group_cards),
-            "examples": [str(card.get("file_name") or "") for card in group_cards[:3]],
-        }
-        for group, group_cards in by_group.items()
-    ]
-    groups.sort(key=lambda item: (-int(item["chunks"]), -int(item["files"]), str(item["group"])))
-    group_total = len(groups)
-    selected: list[dict[str, Any]] = []
-    for group in groups:
-        group_cards = by_group[str(group["group"])]
-        selected.append(group_cards[0])
-        if len(selected) >= file_limit:
-            return selected, groups[:48], group_total
-    for card in readable:
-        if card in selected:
-            continue
-        selected.append(card)
-        if len(selected) >= file_limit:
-            break
-    return selected, groups[:48], group_total
-
-
-def _reader_file_ref(item: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "file_name": item.get("file_name"),
-        "role": item.get("document_role") or item.get("role"),
-        "layers": list(item.get("content_layers") or [])[:4],
-        "navigation_terms": list(item.get("navigation_terms") or [])[:5],
-        "chunk_count": int(item.get("chunk_count") or 0),
-        "summary": str(item.get("summary") or "")[:160],
-    }
-
-
-def _reader_route_ref(route: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "id": route.get("id"),
-        "when": str(route.get("when") or "")[:140],
-        "method": route.get("method"),
-        "prefer_layers": list(route.get("prefer_layers") or [])[:4],
-        "prefer_roles": list(route.get("prefer_roles") or [])[:4],
-        "target_files": [
-            item.get("file_name")
-            for item in (route.get("target_files") or [])[:4]
-            if isinstance(item, dict)
-        ],
-    }
-
-
-def _reader_topic_map(topic_map: dict[str, Any]) -> dict[str, Any]:
-    topics = []
-    for topic in (topic_map.get("topics") or [])[:2]:
-        if not isinstance(topic, dict):
-            continue
-        topics.append(
-            {
-                "id": topic.get("id"),
-                "label": topic.get("label"),
-                "aliases": list(topic.get("query_aliases") or [])[:4],
-                "top_files": [
-                    {
-                        "file_name": item.get("file_name"),
-                        "role": item.get("document_role") or item.get("role"),
-                        "chunk_count": int(item.get("chunk_count") or 0),
-                    }
-                    for item in (topic.get("top_files") or [])[:3]
-                    if isinstance(item, dict)
-                ],
-                "top_sections": [
-                    {
-                        "file_name": section.get("file_name"),
-                        "heading": section.get("heading"),
-                        "score": section.get("score"),
-                    }
-                    for section in (topic.get("top_sections") or [])[:3]
-                    if isinstance(section, dict)
-                ],
-            }
-        )
-    return {
-        "schema": topic_map.get("schema") or "dataset_topic_map_v1",
-        "context_role": "navigation",
-        "topics": topics,
-    }
-
-
-def _reader_section_map(section_map: dict[str, Any]) -> dict[str, Any]:
-    files = []
-    for file_item in (section_map.get("files") or [])[:2]:
-        if not isinstance(file_item, dict):
-            continue
-        files.append(
-            {
-                "file_name": file_item.get("file_name"),
-                "sections": [
-                    {
-                        "heading": section.get("heading"),
-                        "chunk_count": section.get("chunk_count"),
-                    }
-                    for section in (file_item.get("sections") or [])[:5]
-                    if isinstance(section, dict)
-                ],
-            }
-        )
-    return {
-        "schema": section_map.get("schema") or "dataset_section_map_v1",
-        "context_role": "navigation",
-        "coverage": section_map.get("coverage") or {},
-        "files": files,
-    }
-
-
-def _reader_instruction() -> str:
-    return (
-        "Ты reader-pass Л.Е.С.: читаешь карту датасета и составляешь навигационную память, НЕ evidence. "
-        "Не выдумывай факты, типы корпуса и файлы. Дай corpus_kind свободной короткой меткой только по "
-        "входной карте. Для широкого вопроса опиши, какие реальные группы файлов и разделы стоит читать; "
-        "не предполагая проект, нормативку, смету или иной заранее заданный состав. Для малого корпуса "
-        "перечисли все видимые файлы в file_roles. known_gaps — только реальные пробелы из входа. Верни только JSON."
-    )
-
-
-async def _run_reader_extraction(schema: dict[str, Any], instruction: str, context: str, *, max_attempts: int):
-    from proxy.services import structured_extract as se
-    from proxy.services.extract_service import _format_exception, _provider_call
-
-    max_tokens = _env_int("LES_DATASET_READER_MAX_TOKENS", 768, minimum=384)
-    prompt = _reader_compact_prompt(instruction, context)
-    errors: list[str] = []
-    previous = ""
-    for attempt in range(1, max_attempts + 1):
-        try:
-            reply = await _provider_call(prompt, None, max_tokens=max_tokens)
-        except Exception as exc:
-            return se.ExtractResult(
-                ok=False,
-                data=None,
-                attempts=attempt - 1,
-                errors=[f"provider error: {_format_exception(exc)}"],
-            )
-        previous = reply
-        data = se.parse_json(reply)
-        if data is None:
-            errors = ["ответ не содержит валидного JSON-объекта"]
-        else:
-            errors = se.validate(data, schema)
-            if not errors:
-                return se.ExtractResult(ok=True, data=data, attempts=attempt, errors=[])
-        if attempt < max_attempts:
-            prompt = _reader_repair_prompt(previous, errors)
-    return se.ExtractResult(ok=False, data=None, attempts=max_attempts, errors=errors)
-
-
-def _reader_compact_prompt(instruction: str, context: str) -> str:
-    return (
-        f"{instruction.strip()}\n\n"
-        "ВХОДНАЯ КАРТА ДАТАСЕТА JSON:\n"
-        f"{context.strip()}\n\n"
-        "Верни только один JSON-объект без markdown и пояснений. Формат:\n"
-        "{\n"
-        f'  "schema": "{DATASET_READER_SCHEMA_ID}",\n'
-        '  "corpus_kind": "короткая нейтральная метка по входной карте",\n'
-        '  "reader_summary": "1-3 предложения о корпусе",\n'
-        '  "where_to_look": [\n'
-        '    {"question_type": "тип вопроса", "target_files": ["имя файла из входа"], "reason": "почему туда"}\n'
-        "  ],\n"
-        '  "file_roles": [\n'
-        '    {"file_name": "имя файла из входа", "role": "роль", "what_inside": "что искать", "confidence": 0.8}\n'
-        "  ],\n"
-        '  "known_gaps": ["только реальные пробелы из входа"],\n'
-        '  "answer_guidance": "как отвечать: сначала retrieval/source chunks, затем вывод",\n'
-        '  "confidence": 0.8\n'
-        "}\n"
-        "Для малого корпуса перечисли все видимые файлы. Не выдумывай отсутствующие файлы."
-        " Начни ответ символом { и закончи символом }."
-    )
-
-
-def _reader_repair_prompt(previous: str, errors: list[str]) -> str:
-    return (
-        "Исправь предыдущий reader-pass ответ. Верни только JSON-объект, без markdown.\n"
-        f"Ошибки валидации:\n- " + "\n- ".join(errors) + "\n\n"
-        f"Предыдущий ответ:\n{previous[:4000]}"
-    )
-
-
-def _store_reader_update(
-    dataset_id: str,
-    *,
-    revision_id: str,
-    status: str,
-    updates: dict[str, Any],
-    meta_db_path: str | None = None,
-) -> dict[str, Any]:
-    now = time.time()
-    with _connect(meta_db_path) as conn:
-        row = conn.execute(
-            "SELECT memory_json FROM dataset_memory WHERE dataset_id=? AND revision_id=?",
-            (dataset_id, revision_id),
-        ).fetchone()
-        memory = _loads(row["memory_json"], {}) if row else {}
-        memory.update(updates)
-        memory["reader_status"] = status
-        memory["updated_at"] = now
-        conn.execute(
-            """
-            UPDATE dataset_memory
-            SET memory_json=?, reader_status=?, updated_at=?
-            WHERE dataset_id=? AND revision_id=?
-            """,
-            (_json(memory), status, now, dataset_id, revision_id),
-        )
-        conn.commit()
-        return memory
-
-
-def _sanitize_reader_output(data: dict[str, Any], memory: dict[str, Any]) -> dict[str, Any]:
-    """Keep model reader navigation attached to files that really exist in the map."""
-    known_files = {
-        str(card.get("file_name") or "")
-        for card in (memory.get("file_cards") or [])
-        if str(card.get("file_name") or "")
-    }
-    clean = dict(data)
-    roles = []
-    for item in data.get("file_roles") or []:
-        if not isinstance(item, dict) or str(item.get("file_name") or "") not in known_files:
-            continue
-        roles.append({
-            "file_name": str(item.get("file_name") or ""),
-            "role": str(item.get("role") or "")[:180],
-            "what_inside": str(item.get("what_inside") or "")[:360],
-            "confidence": max(0.0, min(1.0, float(item.get("confidence") or 0))),
-        })
-    routes = []
-    for item in data.get("where_to_look") or []:
-        if not isinstance(item, dict):
-            continue
-        files = [str(name) for name in (item.get("target_files") or []) if str(name) in known_files]
-        if not files:
-            continue
-        routes.append({
-            "question_type": str(item.get("question_type") or "")[:180],
-            "target_files": files[:12],
-            "reason": str(item.get("reason") or "")[:360],
-        })
-    clean["corpus_kind"] = str(data.get("corpus_kind") or "unknown")[:120]
-    clean["reader_summary"] = str(data.get("reader_summary") or "")[:900]
-    clean["file_roles"] = roles[:40]
-    clean["where_to_look"] = routes[:16]
-    clean["known_gaps"] = [str(item)[:240] for item in (data.get("known_gaps") or []) if str(item).strip()][:20]
-    clean["answer_guidance"] = str(data.get("answer_guidance") or "")[:600]
-    clean["confidence"] = max(0.0, min(1.0, float(data.get("confidence") or 0)))
-    return clean
-
-
-async def run_dataset_reader_pass(
-    dataset_id: str,
-    *,
-    force: bool = False,
-    meta_db_path: str | None = None,
-    max_attempts: int = 2,
-) -> dict[str, Any]:
-    """Ask the active model to build a navigation map over typed memory.
-
-    The result is stored as dataset memory, not evidence. Final answers must
-    still retrieve chunks/tables/graph/calculations before asserting facts.
-    """
-    memory = await asyncio.to_thread(build_typed_dataset_memory, dataset_id, force=force, meta_db_path=meta_db_path)
-    if memory.get("reader_status") == "model" and not force:
-        return memory
-    context = _reader_context(memory)
-    result = await _run_reader_extraction(
-        DATASET_READER_SCHEMA,
-        _reader_instruction(),
-        context,
-        max_attempts=max_attempts,
-    )
-    revision_id = str(memory.get("revision_id") or "")
-    if result.ok and isinstance(result.data, dict):
-        reader_output = _sanitize_reader_output(result.data, memory)
-        return await asyncio.to_thread(
-            _store_reader_update,
-            dataset_id,
-            revision_id=revision_id,
-            status="model",
-            updates={
-                "reader_schema": DATASET_READER_SCHEMA_ID,
-                "reader_output": reader_output,
-                "reader_errors": [],
-                "reader_attempts": result.attempts,
-                "reader_note": (
-                    "Model reader output is navigation memory only. Evidence must be fetched from "
-                    "chunks, tables, graph atoms or calculation services before final claims."
-                ),
-            },
-            meta_db_path=meta_db_path,
-        )
-    return await asyncio.to_thread(
-        _store_reader_update,
-        dataset_id,
-        revision_id=revision_id,
-        status="model_failed",
-        updates={
-            "reader_schema": DATASET_READER_SCHEMA_ID,
-            "reader_output": None,
-            "reader_errors": list(result.errors or []),
-            "reader_attempts": result.attempts,
-        },
-        meta_db_path=meta_db_path,
-    )
+async def run_dataset_reader_pass(dataset_id: str, *, force: bool = False,
+                                  meta_db_path: str | None = None, max_attempts: int = 2) -> dict[str, Any]:
+    """Compatibility IO only; Rust owns input, model, attempts and durable result."""
+    from backend.native_index_store import read_dataset_memory
+    if meta_db_path and Path(meta_db_path).resolve() != Path(rag_meta_db_path()).resolve():
+        raise ValueError('READER_DATABASE_SCOPE_MISMATCH')
+    return await asyncio.to_thread(read_dataset_memory, dataset_id, force=force, max_attempts=max_attempts)
 
 
 def dataset_reader_after_parse_enabled() -> bool:
     return os.getenv("LES_DATASET_READER_AFTER_PARSE", "0").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def schedule_dataset_reader_pass(
-    dataset_id: str,
-    *,
-    reason: str = "",
-    force: bool = True,
-    require_enabled: bool = True,
-) -> dict[str, Any]:
-    """Schedule a model reader pass on the current event loop, with per-process dedupe."""
-    dataset_id = str(dataset_id)
+def schedule_dataset_reader_pass(dataset_id: str, *, reason: str = "", force: bool = True,
+                                  require_enabled: bool = True) -> dict[str, Any]:
+    from backend.native_index_store import read_dataset_memory
     if require_enabled and not dataset_reader_after_parse_enabled():
-        return {"scheduled": False, "reason": "disabled", "dataset_id": dataset_id}
-    if dataset_id in _RUNNING_READER_TASKS:
-        return {"scheduled": False, "reason": "already_running", "dataset_id": dataset_id}
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        return {"scheduled": False, "reason": "no_event_loop", "dataset_id": dataset_id}
+        return {"scheduled": False, "reason": "disabled", "dataset_id": str(dataset_id)}
+    return read_dataset_memory(str(dataset_id), background=True, force=force)
 
-    _RUNNING_READER_TASKS.add(dataset_id)
 
-    async def _runner() -> None:
-        try:
-            await run_dataset_reader_pass(dataset_id, force=force)
-            logger.info("[dataset-reader] completed dataset=%s reason=%s", dataset_id, reason)
-        except Exception:
-            logger.exception("[dataset-reader] failed dataset=%s reason=%s", dataset_id, reason)
-        finally:
-            _RUNNING_READER_TASKS.discard(dataset_id)
-
-    loop.create_task(_runner())
-    return {"scheduled": True, "reason": reason or "manual", "dataset_id": dataset_id}
+def _reader_overlay(memory: dict[str, Any], dataset_id: str, meta_db_path: str | None) -> dict[str, Any]:
+    from backend.native_index_store import enabled
+    if enabled():
+        from backend.workspace_native import catalog_call
+        value = catalog_call(meta_db_path or rag_meta_db_path(), 'reader_memory', dataset_id=dataset_id)
+        memory.update({key: item for key, item in value.items() if key.startswith('reader_')})
+        memory['reader_source_revision'] = value.get('source_revision')
+    return memory
 
 
 def get_typed_dataset_memory(dataset_id: str, *, meta_db_path: str | None = None) -> dict[str, Any]:
@@ -1917,7 +1444,7 @@ def get_typed_dataset_memory(dataset_id: str, *, meta_db_path: str | None = None
             memory = _ensure_memory_navigation(_loads(row["memory_json"], {}))
             if isinstance(memory, dict) and (not memory.get("operator_guidance") or not memory.get("dataset_kind")):
                 memory.update(_operator_guidance_from_profiles(conn, dataset_id))
-            return memory
+            return _reader_overlay(memory, dataset_id, meta_db_path)
     return build_typed_dataset_memory(dataset_id, meta_db_path=meta_db_path)
 
 

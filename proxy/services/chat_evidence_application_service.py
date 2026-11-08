@@ -41,7 +41,7 @@ from proxy.services.context_governor_service import (
     ContextPacket,
     ContextRequiredSectionOverflow,
 )
-from proxy.services.harness_loop_service import HarnessLoop, admitted_tool_evidence
+from proxy.services.harness_loop_service import admitted_tool_evidence
 from proxy.services.chat_section_context_service import ChatSectionReader, SectionReadError, visible_chunks
 from proxy.services.document_review_tool import bind_review_tool, TOOL_NAME as REVIEW_TOOL
 from proxy.services.bound_document_tools import document_tool_context, bound_contract_shortlist
@@ -97,13 +97,12 @@ from proxy.services.chat_evidence_tools import native_model_tool_schemas
 from proxy.services.chat_evidence_contracts import _SkippedRetrievalQuality
 from proxy.services.chat_evidence_contracts import _SkippedRetrievalTrace
 from proxy.services.chat_evidence_contracts import _SkippedDocumentRetrieval
-from proxy.services.chat_evidence_tools import tool_call_identity
 from proxy.services.chat_evidence_tools import safe_selected_call_trace
 from proxy.services.chat_evidence_context import _context_objects
 from proxy.services.chat_evidence_context import _text_context_objects
 from proxy.services.chat_evidence_context import workspace_memory_objects
 from proxy.services.chat_evidence_context import govern_inference_messages, source_context_blocks, model_visible_source_map
-from proxy.services.chat_evidence_context import context_packet_trace
+from proxy.services.chat_evidence_context import confirm_context_delivery, prepared_context_trace
 from proxy.services.chat_evidence_tools import execute_canonical_shadow_decision
 from proxy.services.chat_evidence_tools import safe_execute_canonical_shadow_decision
 from proxy.services.chat_evidence_context import profile_temperature
@@ -156,7 +155,6 @@ async def _execute_chat_evidence_application(
     session_block = request.session_block
     study_requested = request.study_requested
     t_request_start = request.request_started_at
-    table_result = request.table_result
     target_doc_filter = request.target_doc_filter
     target_file_ref = request.target_file_ref
     topic_doc_filter = request.topic_doc_filter
@@ -171,7 +169,6 @@ async def _execute_chat_evidence_application(
     cache_embedding = runtime.cache_embedding
     cache_marker = runtime.cache_marker
     cache_scope = runtime.cache_scope
-    _augment_model_tool_args = runtime.augment_model_tool_args
     _compact_tool_result_for_prompt = runtime.compact_tool_result_for_prompt
     _dataset_ids_from_chunks = runtime.dataset_ids_from_chunks
     _dataset_sensitivities = runtime.dataset_sensitivities
@@ -182,7 +179,6 @@ async def _execute_chat_evidence_application(
     _generation_token_budget = runtime.generation_token_budget
     _local_context_budget = runtime.local_context_budget
     _names_for_dataset_ids = runtime.names_for_dataset_ids
-    _parse_model_tool_calls = runtime.parse_model_tool_calls
     _prepare_notebook_reader_memory = runtime.prepare_notebook_reader_memory
     _record_cloud_cost = runtime.record_cloud_cost
     retrieve_chat_chunks = runtime.retrieve_chat_chunks
@@ -1013,7 +1009,7 @@ async def _execute_chat_evidence_application(
                 )
                 active_model_result = await run_bound_inference(
                     bound_runner, inference_request,
-                    token_sink=forward_stream if token_sink is not None else None,
+                    token_sink=forward_stream if token_sink is not None and allow_stream else None,
                     remote_allowed=cloud_allowed(
                         sensitivities,
                         consent=_env_bool("LES_CLOUD_CONSENT", False),
@@ -1067,7 +1063,6 @@ async def _execute_chat_evidence_application(
 
             tool_results_for_model: list[dict[str, Any]] = []
             local_file_receipts: list[dict[str, Any]] = []
-            local_file_epoch = 0
             local_agent_tools = False
 
             tool_context = ""
@@ -1162,14 +1157,15 @@ async def _execute_chat_evidence_application(
                         workbook_contract = register_workbook_totals(tool_harness, rag_backend, workbook_sources)
 
                     async def _fallback_model_tool(tool_name: str, args: dict[str, Any]):
-                        nonlocal local_file_epoch
-                        payload = await tool_harness.call_async(tool_name, args)
+                        payload = await tool_harness.call_async(tool_name, args,
+                            allowed_dataset_ids=tuple(str(item) for item in _dataset_ids))
+                        if tool_name == 'read_pdf_source' and payload.get('status') == 'ok':
+                            from proxy.services.pdf_source_evidence_service import physical_page_chunks
+                            from proxy.services.model_research_tool_service import ModelResearchToolResult
+                            return ModelResearchToolResult(payload, physical_page_chunks(payload))
                         if tool_name == 'agent_workspace' and args.get('operation') in {'save', 'edit', 'delete', 'restore'}:
                             from proxy.services.execution_receipt_service import local_file_receipt
                             local_file_receipts.append(local_file_receipt(payload))
-                            outcome = payload.get('result') or {}
-                            if outcome.get('changed') is True or outcome.get('code') == 'AGENT_CONFLICT':
-                                local_file_epoch += 1
                             if payload.get('status') == 'ok' and (payload.get('result') or {}).get('changed') is True:
                                 retrieval_trace['route_comparison']['persisted_effects'] += 1
                         if review_tool is not None and tool_name == REVIEW_TOOL:
@@ -1242,27 +1238,23 @@ async def _execute_chat_evidence_application(
                     selected_calls: list[dict[str, Any]] = []
                     selector_usage: list[dict[str, Any]] = []
                     research_rounds: list[dict[str, Any]] = []
-                    def iteration_call_identity(call):
-                        identity = tool_call_identity(call)
-                        if call.get('tool') == 'agent_workspace':
-                            return f"agent:{local_file_epoch}:{identity}"
-                        if table_tool is not None and call.get('tool') == TABLE_TOOL:
-                            state = table_tool.state()
-                            return f"{state['task_id']}:{state['revision']}:{identity}"
-                        if review_tool is not None and call.get('tool') == REVIEW_TOOL:
-                            return (f"{review_tool.current_state.get('task_id')}:{review_tool.current_state.get('revision')}:"
-                                    f"{review_tool.delivery_revision}:{identity}")
-                        return identity
                     research_deadline_seconds = max(
-                        1.0,
-                        _env_float("LES_CHAT_RESEARCH_DEADLINE_SECONDS", 120.0),
+                        1.0, _env_float("LES_CHAT_RESEARCH_DEADLINE_SECONDS", 120.0),
                     )
-                    research_loop = HarnessLoop(max_calls=max_calls,
-                        deadline_seconds=research_deadline_seconds)
-                    calls_remaining = max_calls
-                    stop_reason = "deadline"
-                    while research_loop.enter_round():
-                        research_round = research_loop.round
+                    last_selector = {}
+
+                    def tool_epochs():
+                        epochs = {}
+                        if table_tool is not None and TABLE_TOOL in allowed_tools:
+                            state = table_tool.state()
+                            epochs[TABLE_TOOL] = [state['task_id'], state['revision']]
+                        if review_tool is not None and REVIEW_TOOL in allowed_tools:
+                            epochs[REVIEW_TOOL] = [review_tool.current_state.get('task_id'),
+                                review_tool.current_state.get('revision'), review_tool.delivery_revision]
+                        return epochs
+
+                    async def select_research_round(turn):
+                        nonlocal tool_loop_stage, t_llm
                         prior_results = [
                             _compact_tool_result_for_prompt(item, max_chars=2400)
                             for item in without_table_replays(tool_results_for_model[-max_calls:])
@@ -1294,9 +1286,11 @@ async def _execute_chat_evidence_application(
                             dialogue=dialogue_context,
                             **document_tool_context(table_tool, review_tool),
                         )
-                        retrieval_trace["context_governor"]["calls"].append(
-                            {**context_packet_trace(selector_packet, purpose="tool_decision"), "sent_to_model": True}
+                        selector_trace = prepared_context_trace(
+                            selector_packet, purpose="tool_decision",
+                            source_map=selector_source_map, evidence=selector_evidence,
                         )
+                        retrieval_trace["context_governor"]["calls"].append(selector_trace)
                         selector_body = {
                             "messages": selector_messages,
                             "stream": False,
@@ -1306,120 +1300,115 @@ async def _execute_chat_evidence_application(
                         selector_body["tools"] = native_tools
                         t_tool_selector = time.time()
                         tool_loop_stage = "selector_model"
-                        selector_text, round_usage = await _post_llm(
-                            selector_body,
-                            allow_stream=False,
-                        )
+                        selector_text, round_usage = await _post_llm(selector_body, allow_stream=False)
+                        confirm_context_delivery(selector_trace, round_usage)
                         t_llm += time.time() - t_tool_selector
                         selector_usage.append(round_usage)
-                        tool_loop_stage = "selector_parse"
-                        proposed_calls = [
-                            _augment_model_tool_args(
-                                call,
-                                question=req.question,
-                                dataset_ids=[str(d) for d in _dataset_ids],
-                                target_file_ref=target_file_ref,
+                        last_selector.update(packet=selector_packet, trace=selector_trace, streamed=active_model_streamed)
+                        response = active_model_result.response
+                        return {
+                            'response': {'text': response.text, 'usage': dict(response.usage),
+                                         'selection_text': selector_text,
+                                         'tool_calls': list(response.tool_calls or ())},
+                            'sources': selector_source_map,
+                            'epochs': tool_epochs(),
+                        }
+
+                    async def execute_research_tool(call):
+                        nonlocal tool_loop_stage, model_evidence_chunks, context, answer_source_map
+                        nonlocal final_evidence_packet, selector_evidence, selector_source_map
+                        tool_loop_stage = "tool_execution"
+                        tool_name = str(call.get("tool") or "")
+                        await chat_progress(token_sink, "tool", call.get('progress_label') or "Читаю и проверяю найденные материалы")
+                        research_result = await model_research_tools.execute(call)
+                        payload = research_result.payload
+                        if payload.get('status') in {'error', 'missing', 'blocked'}:
+                            logger.warning('[SOURCE_TOOL] tool=%s status=%s code=%s execution=%s',
+                                tool_name, payload.get('status'), (payload.get('result') or {}).get('code'),
+                                (payload.get('execution') or {}).get('code'))
+                        from proxy.services.pdf_source_evidence_service import require_source_read_success
+                        require_source_read_success(payload)
+                        if table_tool is not None and tool_name == TABLE_TOOL and payload.get('status') == 'error':
+                            table_tool.remember_validation_failure(call.get('args') or {}, payload)
+                        if review_tool is not None and tool_name == REVIEW_TOOL and payload.get('status') == 'error':
+                            review_tool.remember_validation_failure(call.get('args') or {}, payload)
+                        if research_result.chunks:
+                            added_evidence = admitted_tool_evidence(
+                                chunks, research_result.chunks,
+                                exact_original_docs if tool_name == "search_sources" else (),
                             )
-                            for call in _parse_model_tool_calls(
-                                selector_text,
-                                allowed_tools=allowed_tools,
-                                max_calls=calls_remaining,
+                            if tool_name in {WORKBOOK_TOTAL_TOOL, 'read_pdf_source'}:
+                                chunks[:0] = added_evidence
+                            else:
+                                chunks.extend(added_evidence)
+                            research_windows = await expand_chat_context(
+                                chunks,
+                                collection=getattr(rag_backend, "collection_name", ""),
+                                logger=logger,
+                                max_chunks=context_max_chunks,
+                                max_chars_per_chunk=context_window_chars,
+                                radius=context_radius,
                             )
-                        ]
-                        selected_indexes = research_loop.select([
-                            iteration_call_identity(call) for call in proposed_calls])
-                        calls = [proposed_calls[index] for index in selected_indexes]
-                        research_rounds.append(
-                            {"round": research_round, "proposed": len(proposed_calls), "executed": 0}
-                        )
-                        if not calls:
-                            stop_reason = research_loop.reason
-                            if not proposed_calls:
-                                response = active_model_result.response
-                                if response.text.strip() and not response.tool_calls:
-                                    terminal_model_answer = (response.text, dict(response.usage))
-                                    terminal_answer_streamed = active_model_streamed
-                                    terminal_context_packet = selector_packet
-                            break
-                        for call in calls:
-                            call_identity = iteration_call_identity(call)
-                            tool_loop_stage = "tool_execution"
-                            tool_name = str(call.get("tool") or "")
-                            await chat_progress(token_sink, "tool", "Читаю и проверяю найденные материалы")
-                            if not research_loop.begin(call_identity):
-                                if research_loop.stopped:
-                                    stop_reason = research_loop.reason
-                                    break
-                                continue
-                            research_rounds[-1]['executed'] += 1
-                            research_result = await model_research_tools.execute(call)
-                            payload = research_result.payload
-                            if table_tool is not None and tool_name == TABLE_TOOL and payload.get('status') == 'error':
-                                table_tool.remember_validation_failure(call.get('args') or {}, payload)
-                            if review_tool is not None and tool_name == REVIEW_TOOL and payload.get('status') == 'error':
-                                review_tool.remember_validation_failure(call.get('args') or {}, payload)
-                            if research_result.chunks:
-                                added_evidence = admitted_tool_evidence(
-                                    chunks, research_result.chunks,
-                                    exact_original_docs if tool_name == "search_sources" else (),
-                                )
-                                if tool_name == WORKBOOK_TOTAL_TOOL:
-                                    chunks[:0] = added_evidence
-                                else:
-                                    chunks.extend(added_evidence)
-                                research_windows = await expand_chat_context(
-                                    chunks,
-                                    collection=getattr(rag_backend, "collection_name", ""),
-                                    logger=logger,
-                                    max_chunks=context_max_chunks,
-                                    max_chars_per_chunk=context_window_chars,
-                                    radius=context_radius,
-                                )
-                                model_evidence_chunks = list(research_windows.chunks)
-                                (
-                                    _research_evidence_packet,
-                                    context,
-                                    answer_source_map,
-                                    final_evidence_packet,
-                                ) = _build_model_evidence(model_evidence_chunks)
-                                retrieval_trace["evidence_packet"] = (
-                                    _research_evidence_packet.trace_summary(
-                                        max_chars=context_chars_limit,
-                                        include_metadata=True,
-                                    )
-                                )
-                                selector_evidence = selector_evidence_payload(
-                                    attachment_context=attachment_context,
-                                    rendered_context=context,
-                                )
-                                selector_source_map = answer_source_map
-                            selected_calls.append(call)
-                            if review_tool is not None and tool_name == REVIEW_TOOL:
-                                review_state = review_tool.current_state
-                                retrieval_trace['document_review'] = review_state
-                                if 'total' in review_state:
-                                    await chat_progress(token_sink, 'document',
-                                        f"Проверено разделов: {review_state['reviewed']} из {review_state['total']}; "
-                                        f"нужна перепроверка: {review_state['needs_recheck']}")
-                            research_loop.finish(failed=(payload.get("status") == "error" or payload.get("ok") is False))
-                            calls_remaining = research_loop.remaining
-                            tool_results_for_model.append(payload)
-                            if table_tool is not None and tool_name == TABLE_TOOL:
-                                task_status = table_tool.state()
-                                retrieval_trace["document_task"] = task_status
-                                done = task_status['total'] - task_status['pending']
-                                await chat_progress(token_sink, "document", f"Проверено строк: {done} из {task_status['total']}")
-                            answer_source_map = _merge_web_source_map(
+                            model_evidence_chunks = list(research_windows.chunks)
+                            (
+                                _research_evidence_packet,
+                                context,
                                 answer_source_map,
-                                tool_results_for_model,
+                                final_evidence_packet,
+                            ) = _build_model_evidence(model_evidence_chunks)
+                            retrieval_trace["evidence_packet"] = (
+                                _research_evidence_packet.trace_summary(
+                                    max_chars=context_chars_limit,
+                                    include_metadata=True,
+                                )
+                            )
+                            selector_evidence = selector_evidence_payload(
+                                attachment_context=attachment_context,
+                                rendered_context=context,
                             )
                             selector_source_map = answer_source_map
+                        selected_calls.append(call)
+                        if review_tool is not None and tool_name == REVIEW_TOOL:
+                            review_state = review_tool.current_state
+                            retrieval_trace['document_review'] = review_state
+                            if 'total' in review_state:
+                                await chat_progress(token_sink, 'document',
+                                    f"Проверено разделов: {review_state['reviewed']} из {review_state['total']}; "
+                                    f"нужна перепроверка: {review_state['needs_recheck']}")
+                        tool_results_for_model.append(payload)
+                        if table_tool is not None and tool_name == TABLE_TOOL:
+                            task_status = table_tool.state()
+                            retrieval_trace["document_task"] = task_status
+                            done = task_status['total'] - task_status['pending']
+                            await chat_progress(token_sink, "document", f"Проверено строк: {done} из {task_status['total']}")
+                        answer_source_map = _merge_web_source_map(
+                            answer_source_map,
+                            tool_results_for_model,
+                        )
+                        selector_source_map = answer_source_map
 
-                        if research_loop.stopped:
-                            stop_reason = research_loop.reason
-                            break
-                    stop_reason = research_loop.reason
+                        return {'payload': payload, 'epochs': tool_epochs()}
+
+                    from proxy.services.native_research_loop_service import run_research
+                    research_result = await run_research(
+                        allowed_tools=allowed_tools, max_calls=max_calls,
+                        deadline_seconds=research_deadline_seconds,
+                        binding={'question': req.question, 'dataset_ids': [str(d) for d in _dataset_ids],
+                                 'target': target_file_ref or {}, 'sources': selector_source_map},
+                        model=select_research_round, tool=execute_research_tool,
+                    )
+                    research_rounds = research_result['rounds']
+                    calls_remaining = research_result['remaining']
+                    stop_reason = research_result['stop_reason']
+                    if research_result['status'] == 'completed':
+                        response = research_result['terminal']
+                        terminal_model_answer = (response['text'], dict(response.get('usage') or {}))
+                        terminal_answer_streamed = last_selector.get('streamed', False)
+                        terminal_context_packet = last_selector.get('packet')
+                        last_selector['trace']['produced_answer'] = True
                     tool_context = _format_tool_results_for_model(without_table_replays(tool_results_for_model))
+                    from proxy.services.pdf_source_evidence_service import require_complete_pdf_reads
+                    retrieval_trace['pdf_read_coverage'] = require_complete_pdf_reads(tool_results_for_model)
                     web_research_trace = public_web_research_config(
                         web_research_config
                     )
@@ -1501,6 +1490,8 @@ async def _execute_chat_evidence_application(
                     elif isinstance(tool_err, ModelTransportError):
                         # Preserve outage/timeout instead of repeating the same failed inference.
                         raise
+                    else:
+                        raise SectionReadError(503, detail={'code': 'SOURCE_READ_FAILED'}) from tool_err
             else:
                 retrieval_trace["tool_loop"] = {
                     "schema": "les_model_research_loop_v1",
@@ -1513,8 +1504,13 @@ async def _execute_chat_evidence_application(
             # the profile + request overflow an 8K Qwen window before evidence
             # could reach the model at all.
             answer_execution_preset = execution_preset
-            max_attempts = 2
-            for attempt in range(1, max_attempts + 1):
+            ctx_chunks = []
+            evidence_packet = None
+
+            async def generate_answer_attempt(turn):
+                nonlocal answer, tokens, llm_model, t_llm, ctx_chunks, evidence_packet
+                nonlocal context, answer_source_map, final_evidence_packet, crag_status
+                attempt = turn['attempt']
                 if attempt == 2:
                     # Ретрай не выбрасывает найденные источники: повторная генерация получает
                     # весь уже собранный evidence packet, а не новый кодовый shortlist.
@@ -1657,9 +1653,10 @@ async def _execute_chat_evidence_application(
                             "message": "Обязательная часть запроса не помещается в безопасный контекст модели.",
                         },
                     ) from context_error
-                retrieval_trace["context_governor"]["calls"].append(
-                    {**context_packet_trace(answer_packet, purpose="answer"), "sent_to_model": terminal_model_answer is None}
+                answer_trace = prepared_context_trace(
+                    answer_packet, purpose="answer", source_map=answer_source_map, evidence=answer_evidence,
                 )
+                retrieval_trace["context_governor"]["calls"].append(answer_trace)
                 user_prompt = next(
                     (message["content"] for message in messages if message["role"] == "user"),
                     "",
@@ -1734,14 +1731,13 @@ async def _execute_chat_evidence_application(
                     retrieval_trace["model_terminal_answer_preserved"] = True
                 else:
                     answer, usage = await _post_llm(chat_body, allow_stream=True)
+                    confirm_context_delivery(answer_trace, usage)
+                    answer_trace["produced_answer"] = bool(answer)
                     if active_model_result is not None:
                         llm_model = active_model_result.connection.model_id
                 t_llm += time.time() - t_llm_call
-                if not answer:
-                    if attempt < max_attempts:
-                        logger.warning("[CHAT] empty LLM answer on attempt=%s — retrying strict", attempt)
-                        continue
-                    raise ValueError(f"Пустой ответ LLM (stream={token_sink is not None})")
+                if not answer.strip():
+                    return {'response': {'text': answer, 'tool_calls': list(active_model_result.response.tool_calls or ())}}
                 actual_packet = terminal_context_packet if terminal_model_answer is not None else answer_packet
                 if actual_packet is not None:
                     answer_source_map = model_visible_source_map(actual_packet, answer_source_map)
@@ -1774,7 +1770,18 @@ async def _execute_chat_evidence_application(
 
                 crag_status = "MODEL_OUTPUT"
                 logger.info("[CHAT] model content accepted; citation syntax normalized separately")
-                break
+                return {'response': {'text': answer, 'usage': usage,
+                    'tool_calls': list(active_model_result.response.tool_calls or ())}}
+
+            from proxy.services.native_research_loop_service import run_answer
+            answer_result = await run_answer(
+                model=generate_answer_attempt, max_attempts=2,
+                deadline_seconds=max(1., _env_float('LES_CHAT_ANSWER_DEADLINE_SECONDS', 900.)),
+            )
+            retrieval_trace['answer_loop'] = {
+                'owner': 'rust.agent_loop', 'attempts': answer_result['attempts'],
+                'status': answer_result['status'],
+            }
 
 
             from proxy.services.execution_receipt_service import summarize, no_local_changes

@@ -1,10 +1,14 @@
 //! Existing project/note/context tables, shared transaction owner; no model decisions.
+mod context_report;
 mod conversation;
+mod dataset_reader;
 mod history;
+mod history_view;
 mod intake;
 mod job_store;
-mod library;
+pub(crate) mod library;
 mod model_connection;
+mod model_registry;
 mod notes;
 mod projects;
 
@@ -112,6 +116,15 @@ pub fn execute(request: &Value) -> Value {
         }
     }
 }
+pub(crate) fn save_chat_row(conn: &Connection, history: i64, row: &Value) -> Result<Value> {
+    let arguments = json!({"id":history,"row":row});
+    history::save(
+        conn,
+        arguments
+            .as_object()
+            .ok_or_else(|| Failure::invalid("Invalid chat completion"))?,
+    )
+}
 fn dispatch(request: &Value) -> Result<Value> {
     if request["schema"] != "les.catalog.v1" {
         return Err(Failure::invalid("Invalid catalog schema"));
@@ -131,12 +144,30 @@ fn dispatch(request: &Value) -> Result<Value> {
         .as_object()
         .ok_or_else(|| Failure::invalid("Invalid catalog arguments"))?;
     let write = match action {
-        "dataset_create"
+        "model_registry_init"
+        | "model_registry_create"
+        | "model_registry_import"
+        | "model_registry_revise"
+        | "model_registry_bind"
+        | "model_registry_save_snapshot"
+        | "dataset_create"
+        | "reader_enqueue"
+        | "reader_recover"
+        | "reader_reconcile"
+        | "reader_claim"
+        | "reader_bind"
+        | "reader_prepare"
+        | "reader_attempt"
+        | "reader_retry"
+        | "reader_finish"
         | "intake_enqueue"
         | "intake_claim"
         | "intake_manifest"
         | "intake_register"
         | "intake_index_checkpoint"
+        | "intake_index_attempt"
+        | "intake_retry_due"
+        | "index_attempt"
         | "intake_wait"
         | "intake_fail"
         | "project_create"
@@ -150,24 +181,39 @@ fn dispatch(request: &Value) -> Result<Value> {
         | "note_list"
         | "context_update"
         | "context_forget"
+        | "context_isolate"
         | "job_init"
         | "job_create"
         | "job_update"
         | "job_recover"
         | "chat_history_init"
+        | "chat_history_http_messages"
+        | "chat_history_http_learning"
         | "chat_history_begin"
         | "chat_history_save"
         | "chat_history_feedback"
         | "chat_history_checkpoint"
         | "chat_history_interrupt" => true,
-        "library_datasets"
+        "model_registry_view"
+        | "reader_memory"
+        | "reader_job"
+        | "reader_validate"
+        | "model_registry_get"
+        | "model_registry_revision"
+        | "model_registry_list"
+        | "model_registry_revisions"
+        | "model_registry_binding"
+        | "model_registry_snapshot"
+        | "library_datasets"
         | "intake_get"
         | "intake_list"
         | "intake_batch"
+        | "intake_index_batch"
         | "intake_owned_datasets"
         | "intake_active_index"
         | "intake_has_work"
         | "library_dataset"
+        | "library_document"
         | "library_documents"
         | "library_forest"
         | "project_list"
@@ -179,19 +225,25 @@ fn dispatch(request: &Value) -> Result<Value> {
         | "note_projection"
         | "context_get"
         | "context_status"
+        | "context_exclusions"
+        | "context_report"
         | "context_history"
         | "history_recall"
         | "history_session"
         | "history_questions"
         | "history_traces"
+        | "chat_history_messages"
+        | "chat_history_sessions"
+        | "chat_history_learning"
         | "model_execution_snapshot"
+        | "model_execution_roles"
         | "job_get"
         | "job_list"
         | "job_active"
         | "job_pending_documents" => false,
         _ => return Err(Failure::invalid("Unknown catalog action")),
     };
-    if action == "job_init" {
+    if matches!(action, "job_init" | "model_registry_init") {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|_| {
                 Failure::new(
@@ -218,6 +270,9 @@ fn dispatch(request: &Value) -> Result<Value> {
             _ => json!([]),
         });
     };
+    if action.starts_with("model_registry_") {
+        conn.pragma_update(None, "foreign_keys", true)?;
+    }
     if action.starts_with("job_") {
         conn.busy_timeout(std::time::Duration::from_secs(30))?;
         if write {
@@ -237,6 +292,23 @@ fn dispatch(request: &Value) -> Result<Value> {
     }
 }
 fn operate(conn: &Connection, action: &str, args: &Args) -> Result<Value> {
+    if action.starts_with("reader_") {
+        return dataset_reader::execute(conn, action, args);
+    }
+    if action == "index_attempt" {
+        let dataset = text(args, "dataset_id")?;
+        let name = text(args, "file_name")?;
+        let source = text(args, "source_path")?;
+        let attempts: Option<i64> = conn.query_row(
+            "UPDATE documents SET parse_attempts=coalesce(parse_attempts,0)+1,
+                last_attempt_at=?4,retryable=0,retry_after=0,error_code='',last_error='',stage='CONVERT'
+             WHERE status='PENDING' AND coalesce(source_path,'')=?3 AND id=(SELECT d.id FROM documents d
+                JOIN datasets s ON d.dataset_id=s.id WHERE d.dataset_id=?1 AND d.file_name=?2
+                ORDER BY d.rowid LIMIT 1) RETURNING parse_attempts",
+            rusqlite::params![dataset, name, source, seconds()], |row| row.get(0),
+        ).optional()?;
+        return Ok(json!(attempts.unwrap_or(0)));
+    }
     if action.starts_with("intake_") {
         intake::execute(conn, action, args)
     } else if action.starts_with("library_") || action == "dataset_create" {
@@ -245,6 +317,10 @@ fn operate(conn: &Connection, action: &str, args: &Args) -> Result<Value> {
         job_store::execute(conn, action, args)
     } else if action.starts_with("chat_history_") {
         history::execute(conn, action, args)
+    } else if action.starts_with("model_registry_") {
+        model_registry::execute(conn, action, args)
+    } else if action == "model_execution_roles" {
+        model_connection::roles(conn)
     } else if action == "model_execution_snapshot" {
         model_connection::snapshot(conn, args)
     } else if action.starts_with("project_") {

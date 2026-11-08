@@ -35,6 +35,8 @@ def convert(request):
     if chunking['embedding_model'] != embedding_model_id():
         raise ValueError('FORMAT_CHUNKING_CHANGED')
     length = token_length_fn() if chunking['unit'] == 'tokens' else None
+    if chunking.get('tokenizer_sha256') and getattr(length, 'asset', {}).get('sha256') != chunking['tokenizer_sha256']:
+        raise ValueError('FORMAT_TOKENIZER_CHANGED')
     if chunking['unit'] not in {'chars', 'tokens'} or chunking['unit'] == 'tokens' and length is None:
         raise ValueError('FORMAT_TOKENIZER_UNAVAILABLE')
     splitter = support.StructureAwareSplitter(chunk_size=size, chunk_overlap=overlap, len_fn=length)

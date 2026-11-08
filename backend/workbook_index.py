@@ -12,6 +12,9 @@ _COMPATIBILITY = {
 
 
 def read(path: Path, *, action: str) -> dict | None:
+    from backend.native_document_conversion import read as convert
+    if path.suffix.lower() == '.xls' and action == 'read':
+        return convert(path, view='tables', read_rows=20_000)
     if path.suffix.lower() not in {".xlsx", ".xlsm"} or not native_core.supports("workbook_index"):
         return None
     try:
@@ -20,4 +23,6 @@ def read(path: Path, *, action: str) -> dict | None:
         if str(error) not in _COMPATIBILITY:
             raise
         logger.info("Excel %s uses compatibility reader: %s", action, error)
+        if action == 'read':
+            return convert(path, view='tables', read_rows=20_000)
         return None

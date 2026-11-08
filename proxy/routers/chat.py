@@ -129,7 +129,6 @@ from proxy.services.semantic_cache import (
     semantic_cache_enabled,
     semantic_cache_threshold,
 )
-from proxy.services.table_query_service import maybe_answer_table_query, parquet_ref_chunks_for_datasets
 
 from proxy.services import chat_inference_service
 from proxy.services import chat_persistence_service
@@ -413,22 +412,28 @@ async def chat_stream(req: chat_request_contracts.ChatRequest, _user=Depends(req
                     await sink({"event": "token", "data": answer_text})
             await queue.put({"event": "final", "data": result})
         except HTTPException as he:
+            public = public_error_payload(status_code=he.status_code, detail=he.detail)
             recovered = _recoverable_stream_payload(req, stream_state, he)
             if recovered is not None:
+                recovered['error'] = public
+                recovered['artifact'] = {**(recovered.get('artifact') or {}), 'error': public}
                 recovered = chat_persistence_service._persist_recovered_stream_history(req, recovered)
                 await queue.put({"event": "final", "data": decorate_payload(recovered)})
             else:
                 public = public_error_payload(status_code=he.status_code, detail=he.detail)
-                await queue.put({"event": "error", "data": {"status": he.status_code, **public}})
+                await sink({"event": "error", "data": {"status": he.status_code, **public}})
         except Exception as e:  # noqa: BLE001 — любую ошибку доносим клиенту как событие
             logger.error("[CHAT/STREAM] %s", e)
+            public = public_error_payload(status_code=500, detail=str(e))
             recovered = _recoverable_stream_payload(req, stream_state, e)
             if recovered is not None:
+                recovered['error'] = public
+                recovered['artifact'] = {**(recovered.get('artifact') or {}), 'error': public}
                 recovered = chat_persistence_service._persist_recovered_stream_history(req, recovered)
                 await queue.put({"event": "final", "data": decorate_payload(recovered)})
             else:
                 public = public_error_payload(status_code=500, detail=str(e))
-                await queue.put({"event": "error", "data": {"status": 500, **public}})
+                await sink({"event": "error", "data": {"status": 500, **public}})
         finally:
             try:
                 if history_id is not None:

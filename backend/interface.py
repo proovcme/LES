@@ -67,7 +67,9 @@ class RAGBackend(ABC):
         ...
 
     @abstractmethod
-    async def parse_dataset(self, dataset_id: str, limit: Optional[int] = None) -> Dict[str, Any]: ...
+    async def parse_dataset(self, dataset_id: str, limit: Optional[int] = None, *,
+                            sources: list[tuple[str, str]] | None = None,
+                            intake_id: str | None = None) -> Dict[str, Any]: ...
 
     @abstractmethod
     async def retrieve(

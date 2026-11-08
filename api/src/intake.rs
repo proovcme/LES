@@ -19,19 +19,16 @@ use tokio::sync::Notify;
 pub const PATH: &str = "/api/rag/index-external";
 const POLICY: &str = "/api/light/internal-intake-policy";
 const START_INDEXING: &str = "/api/light/internal-intake-parse";
-const TOKEN: &str = "x-les-intake-token";
 const ENGINE: &str = "rust.intake";
 const MAX_FILES: usize = 50_000;
 
 pub struct Service {
-    token: String,
     wake: Notify,
 }
 
 impl Service {
-    pub fn new(token: String) -> Self {
+    pub fn new() -> Self {
         Self {
-            token,
             wake: Notify::new(),
         }
     }
@@ -398,46 +395,44 @@ fn register(database: &Path, state: &Path, job: &Value, policy: &Policy) -> Resu
     }
 }
 
-async fn policy(context: &Context, service: &Service) -> Option<Policy> {
-    let mut response = context
-        .client
-        .get(format!("{}{POLICY}", context.upstream))
-        .header(TOKEN, &service.token)
-        .timeout(Duration::from_secs(5))
-        .send()
-        .await
-        .ok()?;
-    if !response.status().is_success() {
-        return None;
-    }
-    let mut bytes = Vec::new();
-    while let Some(chunk) = response.chunk().await.ok()? {
-        if bytes.len() + chunk.len() > 128 * 1024 {
-            return None;
-        }
-        bytes.extend_from_slice(&chunk);
-    }
-    let body: Value = serde_json::from_slice(&bytes).ok()?;
-    let allow_any = body["allow_any"].as_bool()?;
-    let roots = body["roots"]
-        .as_array()?
-        .iter()
-        .map(|root| PathBuf::from(root.as_str().unwrap_or_default()))
-        .filter(|root| root.is_absolute())
-        .collect::<Vec<_>>();
-    let roots = tokio::task::spawn_blocking(move || {
-        roots
-            .iter()
-            .filter_map(|root| root.canonicalize().ok())
-            .collect()
-    })
-    .await
-    .ok()?;
-    let suffixes = body["suffixes"]
-        .as_array()?
-        .iter()
-        .filter_map(Value::as_str)
-        .map(str::to_owned)
+fn policy(state: &Path) -> Option<Policy> {
+    let settings = crate::index_batch::configuration::Settings::load(state).ok()?;
+    let allow_any = !["0", "false", "no", "off"].contains(
+        &settings
+            .get("LES_EXTERNAL_ALLOW_ANY", "1")
+            .to_lowercase()
+            .as_str(),
+    );
+    let roots = settings
+        .get("LES_EXTERNAL_SOURCE_ROOTS", "")
+        .split(',')
+        .filter_map(|raw| {
+            let raw = raw.trim();
+            let path = if let Ok(rest) = Path::new(raw).strip_prefix("~") {
+                PathBuf::from(std::env::var_os(if cfg!(windows) {
+                    "USERPROFILE"
+                } else {
+                    "HOME"
+                })?)
+                .join(rest)
+            } else {
+                PathBuf::from(raw)
+            };
+            if raw.is_empty() || !path.is_absolute() {
+                None
+            } else {
+                path.canonicalize().ok()
+            }
+        })
+        .collect();
+    let suffixes = settings
+        .get(
+            "RAG_UPLOAD_SUFFIXES",
+            ".pdf,.docx,.doc,.eml,.emlx,.msg,.xlsx,.xls,.csv,.json,.jsonl,.md,.txt",
+        )
+        .split(',')
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| !s.is_empty())
         .collect();
     Some(Policy {
         allow_any,
@@ -460,31 +455,123 @@ async fn record(context: &Context, id: &Value, action: &'static str, stop: Optio
     }
 }
 
-async fn start_indexing(context: &Context, service: &Service, job: &Value) -> Result<(), Stop> {
-    let response = context.client.post(format!("{}{START_INDEXING}", context.upstream))
-        .header(TOKEN, &service.token).header("content-type", "application/json")
-        .body(json!({"dataset_id":job["dataset_id"],"intake_id":job["id"],"batch_limit":job["parse_limit"]}).to_string())
-        .timeout(Duration::from_secs(600)).send().await;
-    match response.map(|response| response.status()) {
-        Ok(StatusCode::OK) => Ok(()),
-        Ok(StatusCode::PRECONDITION_FAILED) => Err(Stop {
-            code: "INDEX_NOT_CONFIGURED",
-            message: "Файлы зарегистрированы. Для индексации проверьте модель поиска в настройках.",
-        }),
-        Ok(StatusCode::TOO_MANY_REQUESTS) => Err(Stop {
-            code: "INDEX_MEMORY_GUARD",
-            message: "Файлы зарегистрированы. Для индексации освободите оперативную память.",
-        }),
-        Ok(StatusCode::CONFLICT | StatusCode::NO_CONTENT) => Err(Stop {
-            code: "INDEX_NO_PROGRESS",
-            message:
-                "Партия индексации пока не продвинулась. Лес повторит попытку через 30 секунд.",
-        }),
-        _ => Err(Stop {
-            code: "INDEX_SERVICE_UNAVAILABLE",
-            message: "Служба индексации недоступна. Лес повторит попытку через 30 секунд.",
-        }),
+fn index_stop(code: &str) -> Stop {
+    if let Some(code) = [
+        "INDEX_ADOPTION_REQUIRED",
+        "INDEX_ADOPTION_UNVERIFIED",
+        "INDEX_CONTRACT_INVALID",
+        "INDEX_CATALOG_MISMATCH",
+        "INDEX_SCHEMA_MIGRATION_REQUIRED",
+        "INDEX_SETUP_MODEL_CHANGED",
+        "INDEX_SETUP_PLAN_CHANGED",
+        "INDEX_SETUP_STORAGE_UNAVAILABLE",
+        "INDEX_CONTRACT_PUBLICATION_FAILED",
+        "INDEX_UPDATE_BUSY",
+        "INDEX_STORAGE_RESPONSE_INVALID",
+        "INDEX_POINT_COUNT_UNAVAILABLE",
+        "EMBEDDING_INDEX_DIMENSION_MISMATCH",
+        "EMBEDDING_RESPONSE_INVALID",
+        "UPSTREAM_HTTP_ERROR",
+        "UPSTREAM_RESPONSE_TOO_LARGE",
+        "MODEL_ENDPOINT_UNREACHABLE",
+        "MODEL_CONNECTION_FAILED",
+        "EMBEDDING_INFERENCE_FAILED",
+        "LEXICAL_SCHEMA_UNAVAILABLE",
+        "EDGE_STORAGE_UNAVAILABLE",
+        "EDGE_STORAGE_BUSY",
+        "EDGE_STORAGE_NOT_EMPTY",
+        "EDGE_INITIALIZATION_NOT_EMPTY",
+    ]
+    .into_iter()
+    .find(|item| *item == code)
+    {
+        return Stop {
+            code,
+            message: crate::index_bootstrap::message(code),
+        };
     }
+    let code = match code {
+        "INDEX_CONTRACT_MISMATCH" => "INDEX_CONTRACT_MISMATCH",
+        "INDEX_SETTINGS_INVALID" => "INDEX_SETTINGS_INVALID",
+        "DOCUMENT_TOKENIZER_UNAVAILABLE" => "DOCUMENT_TOKENIZER_UNAVAILABLE",
+        "DOCUMENT_TOKENIZER_CHANGED" => "DOCUMENT_TOKENIZER_CHANGED",
+        "EMBEDDING_MODEL_NOT_ASSIGNED" => "EMBEDDING_MODEL_NOT_ASSIGNED",
+        "EMBEDDING_MODEL_NOT_READY" => "EMBEDDING_MODEL_NOT_READY",
+        "EMBEDDING_INDEX_MODEL_MISMATCH" => "EMBEDDING_INDEX_MODEL_MISMATCH",
+        "DOCUMENT_NATIVE_DISPATCH_REQUIRED" => "DOCUMENT_NATIVE_DISPATCH_REQUIRED",
+        "INDEX_MEMORY_GUARD" => "INDEX_MEMORY_GUARD",
+        "INDEX_NO_PROGRESS" | "INDEX_BATCH_BUSY" => "INDEX_NO_PROGRESS",
+        "INDEX_NOT_CONFIGURED" => "INDEX_NOT_CONFIGURED",
+        _ => "INDEX_SERVICE_UNAVAILABLE",
+    };
+    let message = match code {
+        "INDEX_CONTRACT_MISMATCH" | "EMBEDDING_INDEX_MODEL_MISMATCH" => "Параметры поиска изменились и не совпадают с индексом. Верните прежние настройки или создайте новый индекс. Файлы сохранены.",
+        "INDEX_SETTINGS_INVALID" => "Не удалось прочитать параметры индексации. Проверьте настройки. Файлы сохранены.",
+        "DOCUMENT_TOKENIZER_UNAVAILABLE" | "DOCUMENT_TOKENIZER_CHANGED" => "Токенизатор поиска недоступен или изменён. Восстановите локальные файлы модели. Индекс не изменён.",
+        "EMBEDDING_MODEL_NOT_ASSIGNED" => "Файлы зарегистрированы. Назначьте модель поиска в настройках.",
+        "EMBEDDING_MODEL_NOT_READY" => "Файлы зарегистрированы. Проверьте подключение и доступность модели поиска.",
+        "DOCUMENT_NATIVE_DISPATCH_REQUIRED" => "В партии есть формат, для которого нативная обработка ещё недоступна. Файлы зарегистрированы, индексация не начата.",
+        "INDEX_NOT_CONFIGURED" => "Файлы зарегистрированы. Для индексации проверьте модель поиска в настройках.",
+        "INDEX_MEMORY_GUARD" => "Файлы зарегистрированы. Для индексации освободите оперативную память.",
+        "INDEX_NO_PROGRESS" => "Партия индексации пока не продвинулась. Лес повторит попытку через 30 секунд.",
+        _ => "Служба индексации недоступна. Лес повторит попытку через 30 секунд.",
+    };
+    Stop { code, message }
+}
+
+async fn start_indexing(context: Arc<Context>, job: &Value) -> Result<(), Stop> {
+    let result = start_indexing_inner(context, job).await;
+    if result.is_err() {
+        let _ = tokio::task::spawn_blocking(les_core::release_batch_workers).await;
+    }
+    result
+}
+async fn start_indexing_inner(context: Arc<Context>, job: &Value) -> Result<(), Stop> {
+    let database = context.database.clone();
+    let id = job["id"].clone();
+    let selected = tokio::task::spawn_blocking(move || {
+        call(&database, "intake_retry_due", json!({"id":id}))?;
+        call(&database, "intake_index_batch", json!({"id":id}))
+    })
+    .await
+    .map_err(|_| STORAGE)??;
+    if selected.as_array().is_none_or(|s| s.is_empty()) {
+        return Err(index_stop("INDEX_NO_PROGRESS"));
+    }
+    let owner = context.clone();
+    let input_job = job.clone();
+    // An explicit indexing request may initialize a genuinely new owned index.
+    // Existing collections without an identity still require explicit adoption.
+    crate::index_bootstrap::ensure(context.clone(), true, false, false, None, true)
+        .await
+        .map_err(|code| index_stop(code.split(':').next().unwrap_or(&code)))?;
+    let input = tokio::task::spawn_blocking(move || {
+        crate::index_batch::configuration::intake(&owner, &input_job, selected)
+    })
+    .await
+    .map_err(|_| STORAGE)?
+    .map_err(|code| index_stop(code))?;
+    let response = crate::index_batch::execute(context.clone(), input).await;
+    let status = response.status();
+    let body = to_bytes(response.into_body(), 4 * 1024 * 1024)
+        .await
+        .map_err(|_| index_stop("INDEX_SERVICE_UNAVAILABLE"))?;
+    let value: Value =
+        serde_json::from_slice(&body).map_err(|_| index_stop("INDEX_SERVICE_UNAVAILABLE"))?;
+    if !status.is_success() {
+        let code = value["detail"]
+            .as_str()
+            .unwrap_or("INDEX_SERVICE_UNAVAILABLE");
+        eprintln!(
+            "{}",
+            json!({"event":"intake_index_stopped","job_id":job["id"],"code":code})
+        );
+        return Err(index_stop(code));
+    }
+    if value["owner"] != "rust.index-batch" {
+        return Err(index_stop("INDEX_SERVICE_UNAVAILABLE"));
+    }
+    Ok(())
 }
 
 fn lease(state: &Path) -> Option<File> {
@@ -530,7 +617,7 @@ pub async fn run(context: Arc<Context>) {
                         "processed":job["processed"],"reason":"INTAKE_INTERRUPTED"})
                     );
                 }
-                process(&context, service, job).await;
+                process(context.clone(), job).await;
                 continue;
             }
         }
@@ -538,16 +625,21 @@ pub async fn run(context: Arc<Context>) {
     }
 }
 
-async fn process(context: &Context, service: &Service, job: Value) {
-    let Some(policy) = policy(context, service).await else {
+async fn process(context: Arc<Context>, job: Value) {
+    let state = context.state_root.clone();
+    let policy = tokio::task::spawn_blocking(move || policy(&state))
+        .await
+        .ok()
+        .flatten();
+    let Some(policy) = policy else {
         record(
-            context,
+            &context,
             &job["id"],
             "intake_wait",
             Some(Stop {
                 code: "INTAKE_POLICY_UNAVAILABLE",
                 message:
-                    "Служба источников ещё запускается. Лес повторит проверку через несколько секунд.",
+                    "Не удалось прочитать правила доступа к папкам. Проверьте настройки и доступ к каталогу данных Леса. Проверка будет повторена.",
             }),
         )
         .await;
@@ -561,12 +653,12 @@ async fn process(context: &Context, service: &Service, job: Value) {
     let id = &job["id"];
     match outcome {
         Ok(Ok(())) if job["parse_limit"].as_i64().unwrap_or_default() > 0 => {
-            let stop = start_indexing(context, service, &job).await.err();
-            record(context, id, "intake_index_checkpoint", stop).await;
+            let stop = start_indexing(context.clone(), &job).await.err();
+            record(&context, id, "intake_index_checkpoint", stop).await;
         }
         Ok(Ok(())) => eprintln!("{}", json!({"event":"intake_registered","job_id":id})),
-        Ok(Err(stop)) => record(context, id, "intake_fail", Some(stop)).await,
-        Err(_) => record(context, id, "intake_fail", Some(Stop {
+        Ok(Err(stop)) => record(&context, id, "intake_fail", Some(stop)).await,
+        Err(_) => record(&context, id, "intake_fail", Some(Stop {
             code:"INTAKE_WORKER_STOPPED", message:"Обработчик импорта остановился. Сохранённые документы доступны. Повторите подключение.",
         })).await,
     }

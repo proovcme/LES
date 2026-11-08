@@ -173,6 +173,17 @@ def search_web(
 ) -> dict[str, Any]:
     normalized = " ".join(str(query or "").split())
     selected = config or capture_web_research_config()
+    from proxy.services import local_model_http
+    if client_factory is None and local_model_http.web_ready():
+        try:
+            return local_model_http.web_request('search', {
+                'q': normalized, 'limit': max(1, min(12, int(limit))),
+                'mode': selected.mode, 'searxng_url': selected.searxng_url,
+            })
+        except (httpx.HTTPError, ValueError, RuntimeError):
+            return {'status': 'error', 'query': normalized, 'results': [], 'missing': [],
+                    'warnings': ['Служба интернет-поиска недоступна. Повторите запрос.'],
+                    'code': 'WEB_RUNTIME_UNAVAILABLE'}
     if len(normalized) < 3:
         return {
             "status": "missing",

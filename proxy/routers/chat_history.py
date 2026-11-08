@@ -6,7 +6,6 @@ import asyncio
 import logging
 import json
 import os
-import sqlite3
 from pathlib import Path
 from typing import Optional
 
@@ -51,83 +50,6 @@ def _json_list(raw: str | None) -> list:
         return []
 
 
-def _json_object(raw: str | None) -> dict:
-    try:
-        value = json.loads(raw or "{}")
-        return value if isinstance(value, dict) else {}
-    except Exception:
-        return {}
-
-
-def _history_source_map(retrieval_trace: dict) -> list[dict]:
-    direct = retrieval_trace.get("source_map")
-    if isinstance(direct, list):
-        return [dict(item) for item in direct if isinstance(item, dict)]
-    manifest = retrieval_trace.get("evidence_manifest")
-    visible = manifest.get("model_visible") if isinstance(manifest, dict) else None
-    if not isinstance(visible, list):
-        visible = []
-    restored: list[dict] = []
-    for index, raw in enumerate(visible, 1):
-        if not isinstance(raw, dict):
-            continue
-        locator = dict(raw.get("locator") or {}) if isinstance(raw.get("locator"), dict) else {}
-        restored.append({
-            "index": index,
-            "evidence_ref": str(raw.get("id") or f"S{index}"),
-            "doc_name": str(raw.get("doc_name") or ""),
-            "doc_id": str(raw.get("doc_id") or ""),
-            "dataset_id": str(raw.get("dataset_id") or ""),
-            "source_ref": str(locator.get("source_ref") or ""),
-            "snippet": str(locator.get("excerpt") or ""),
-            "locator": locator,
-        })
-    if restored:
-        return restored
-
-    tool_loop = retrieval_trace.get("tool_loop")
-    tool_results = tool_loop.get("results") if isinstance(tool_loop, dict) else None
-    if not isinstance(tool_results, list):
-        return []
-    web_by_url: dict[str, dict] = {}
-    for payload in tool_results:
-        if not isinstance(payload, dict) or str(payload.get("tool") or "") not in {"web_search", "web_read"}:
-            continue
-        result = payload.get("result") if isinstance(payload.get("result"), dict) else {}
-        rows = result.get("results") if isinstance(result.get("results"), list) else []
-        rows_by_url = {
-            str(row.get("url") or ""): row
-            for row in rows
-            if isinstance(row, dict) and str(row.get("url") or "")
-        }
-        for raw_source in payload.get("sources") or []:
-            if not isinstance(raw_source, dict):
-                continue
-            url = str(raw_source.get("url") or result.get("final_url") or "").strip()
-            if not url:
-                continue
-            row = rows_by_url.get(url, {})
-            title = str(raw_source.get("title") or result.get("title") or row.get("title") or "")
-            snippet = str(result.get("text") or row.get("snippet") or "")
-            web_by_url[url] = {
-                "doc_name": title,
-                "source_ref": url,
-                "snippet": snippet,
-                "locator": {
-                    "kind": "web_result",
-                    "url": url,
-                    "title": title,
-                    "provider": str(result.get("provider") or ""),
-                    "excerpt": snippet,
-                },
-            }
-    web_sources = list(web_by_url.values())
-    for index, item in enumerate(web_sources, 1):
-        item["index"] = index
-        item["label"] = f"Источник {index}"
-    return web_sources
-
-
 def _feedback_log_path() -> Path:
     return Path(os.getenv("CHAT_FEEDBACK_LOG_PATH", "logs/chat_feedback.jsonl"))
 
@@ -149,86 +71,8 @@ async def get_chat_history(limit: int = 40, session_id: Optional[str] = None, _u
     """Return recent chat messages, optionally scoped to a session."""
     try:
         await asyncio.to_thread(ensure_chat_history_schema, rag_meta_db_path())
-        with sqlite3.connect(rag_meta_db_path()) as conn:
-            if session_id:
-                rows = conn.execute(
-                    "SELECT id, timestamp, question, answer, sources, crag_status, query_route_json, "
-                    "retrieval_trace_json, artifact_json, cache_type, validation_enabled, feedback_status FROM chat_history "
-                    "WHERE session_id=? ORDER BY id ASC",
-                    (session_id,),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT id, timestamp, question, answer, sources, crag_status, query_route_json, "
-                    "retrieval_trace_json, artifact_json, cache_type, validation_enabled, feedback_status FROM chat_history "
-                    "ORDER BY id DESC LIMIT ?",
-                    (limit,),
-                ).fetchall()
-                rows = list(reversed(rows))
-        messages = []
-        for (
-            history_id,
-            timestamp,
-            question,
-            answer,
-            sources_text,
-            crag_status,
-            route,
-            trace,
-            artifact,
-            cache_type,
-            validation_enabled,
-            feedback_status,
-        ) in rows:
-            sources = [source for source in (sources_text or "").split(",") if source]
-            messages.append({
-                "role": "user",
-                "text": question,
-                "requested_at": timestamp,
-            })
-            retrieval_trace = _json_object(trace)
-            latency_phases = (
-                retrieval_trace.get("latency_phases")
-                if isinstance(retrieval_trace.get("latency_phases"), dict)
-                else {}
-            )
-            meta = {
-                "execution": retrieval_trace.get('execution') if isinstance(retrieval_trace.get('execution'), dict) else None,
-                "history_id": history_id,
-                "query_route": _json_object(route),
-                "retrieval_trace": retrieval_trace,
-                "cache": cache_type or "miss",
-                "validation": {"enabled": bool(validation_enabled)},
-                "requested_at": timestamp,
-                "latency_phases": latency_phases,
-                "elapsed_sec": latency_phases.get("wall_total"),
-                "model_think_sec": latency_phases.get("generation"),
-                "source_map": _history_source_map(retrieval_trace),
-                "source_counts": (
-                    retrieval_trace.get("source_counts")
-                    if isinstance(retrieval_trace.get("source_counts"), dict)
-                    else {}
-                ),
-            }
-            artifact_payload = _json_object(artifact)
-            if artifact_payload:
-                meta["artifact"] = artifact_payload
-            if crag_status in {'IN_PROGRESS', 'INTERRUPTED'}:
-                meta.update(partial=True, completion_status='interrupted' if crag_status == 'INTERRUPTED' else 'in_progress')
-                notice = 'Ответ прерван. Сохранён полученный текст; запрос можно повторить.' if crag_status == 'INTERRUPTED' else 'Ответ ещё формируется.'
-                answer = (answer or '') + '\n\n' + notice
-            if feedback_status:
-                meta["feedback"] = feedback_status
-            messages.append(
-                {
-                    "role": "ai",
-                    "text": answer,
-                    "srcs": sources,
-                    "crag": crag_status or "",
-                    "meta": meta,
-                }
-            )
-        return messages
+        return await asyncio.to_thread(catalog_call, rag_meta_db_path(), 'chat_history_messages',
+                                       session_id=session_id, limit=limit)
     except Exception as e:
         logger.warning("[HISTORY] %s", e)
         raise HTTPException(503, 'Не удалось прочитать историю диалога. Переписка не удалена; повторите загрузку или откройте диагностику.') from e
@@ -236,38 +80,12 @@ async def get_chat_history(limit: int = 40, session_id: Optional[str] = None, _u
 
 @router.get("/sessions")
 async def get_chat_sessions(limit: int = 50, _user=Depends(require_user)):
-    """Return chat sessions ordered by last activity."""
+    """Return persisted sessions through the native catalog owner."""
     try:
-        with sqlite3.connect(rag_meta_db_path()) as conn:
-            rows = conn.execute(
-                """
-                SELECT
-                    session_id,
-                    MIN(timestamp)   AS started_at,
-                    MAX(timestamp)   AS last_at,
-                    COUNT(*)         AS msg_count,
-                    MIN(question)    AS first_question
-                FROM chat_history
-                WHERE session_id IS NOT NULL
-                GROUP BY session_id
-                ORDER BY last_at DESC
-                LIMIT ?
-                """,
-                (limit,),
-            ).fetchall()
-        return [
-            {
-                "session_id": row[0],
-                "started_at": row[1],
-                "last_at": row[2],
-                "msg_count": row[3],
-                "first_question": (row[4] or "")[:120],
-            }
-            for row in rows
-        ]
+        return await asyncio.to_thread(catalog_call, rag_meta_db_path(), 'chat_history_sessions', limit=limit)
     except Exception as e:
-        logger.warning("[SESSIONS] %s", e)
-        return []
+        logger.warning('[SESSIONS] %s', e)
+        raise HTTPException(503, 'Не удалось прочитать список диалогов. Переписка не удалена; повторите загрузку.') from e
 
 
 @router.get("/memory/{session_id}")
@@ -356,52 +174,11 @@ async def get_learning_history(
     confirmed_only: bool = False,
     _user=Depends(require_user),
 ):
-    """Return successful/confirmed answers for routing and dataset heuristics."""
+    """Return confirmed/successful answers from the native catalog owner."""
     try:
         await asyncio.to_thread(ensure_chat_history_schema, rag_meta_db_path())
-        with sqlite3.connect(rag_meta_db_path()) as conn:
-            conn.row_factory = sqlite3.Row
-            if confirmed_only:
-                where = "feedback_status='correct'"
-            else:
-                where = "success=1 OR feedback_status IN ('correct', 'partial', 'bad_answer', 'incorrect', 'wrong_dataset', 'bad_source')"
-            rows = conn.execute(
-                f"""
-                SELECT
-                    id, timestamp, question, answer, crag_status, sources,
-                    requested_dataset_filter, effective_dataset_filter,
-                    resolved_dataset_names, source_dataset_names, source_dataset_mismatch,
-                    route_channel, route_reason, retrieval_quality,
-                    feedback_status, feedback_comment, feedback_correct_dataset_filter
-                FROM chat_history
-                WHERE {where}
-                ORDER BY id DESC
-                LIMIT ?
-                """,
-                (limit,),
-            ).fetchall()
-        return [
-            {
-                "id": row["id"],
-                "timestamp": row["timestamp"],
-                "question": row["question"],
-                "answer": row["answer"],
-                "crag_status": row["crag_status"],
-                "sources": [source for source in (row["sources"] or "").split(",") if source],
-                "requested_dataset_filter": row["requested_dataset_filter"] or "",
-                "effective_dataset_filter": row["effective_dataset_filter"] or "",
-                "resolved_dataset_names": _json_list(row["resolved_dataset_names"]),
-                "source_dataset_names": _json_list(row["source_dataset_names"]),
-                "source_dataset_mismatch": bool(row["source_dataset_mismatch"]),
-                "route_channel": row["route_channel"] or "",
-                "route_reason": row["route_reason"] or "",
-                "retrieval_quality": row["retrieval_quality"] or "",
-                "feedback_status": row["feedback_status"] or "",
-                "feedback_comment": row["feedback_comment"] or "",
-                "feedback_correct_dataset_filter": row["feedback_correct_dataset_filter"] or "",
-            }
-            for row in rows
-        ]
+        return await asyncio.to_thread(catalog_call, rag_meta_db_path(), 'chat_history_learning',
+                                       limit=limit, confirmed_only=confirmed_only)
     except Exception as e:
-        logger.warning("[LEARNING] %s", e)
-        return []
+        logger.warning('[LEARNING] %s', e)
+        raise HTTPException(503, 'Не удалось прочитать обратную связь. Данные сохранены; повторите загрузку.') from e

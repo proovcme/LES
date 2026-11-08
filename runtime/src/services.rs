@@ -208,8 +208,17 @@ impl Stack {
     }
     pub fn start(&mut self, journal: &Journal) -> Result<String> {
         self.probe = Probe::new()?;
+        if self.config.native_api && !self.config.read_only {
+            match les_core::index_cache::remove_abandoned(&self.config.state) {
+                Ok(0) => (),
+                Ok(count) => journal.event("index_spools_removed", json!({"count":count}))?,
+                Err(_) => journal.event("index_spool_cleanup_unavailable", json!({}))?,
+            }
+        }
         for attempt in 0..3 {
-            self.qdrant_start(journal)?;
+            if self.config.edge_storage.is_none() {
+                self.qdrant_start(journal)?;
+            }
             self.instance = control::random_id()?;
             if self.api == 0 || !port_free(self.api) {
                 self.api = free_port()?;
@@ -219,6 +228,14 @@ impl Stack {
             }
             while self.ui == self.api {
                 self.ui = free_port()?;
+            }
+            if self.config.edge_storage.is_some() {
+                self.qdrant_url = format!("http://127.0.0.1:{}", self.api);
+                self.key = control::random_id()?;
+                journal.event(
+                    "edge_opening",
+                    json!({"engine":"qdrant-edge","separate_database_process":false}),
+                )?;
             }
             let environment = config::child_environment(
                 &self.config,
@@ -256,6 +273,22 @@ impl Stack {
                     .env_clear()
                     .envs(environment.clone());
             }
+            if self.config.native_api {
+                api.env(
+                    "LES_NATIVE_FORMAT_WORKER",
+                    self.config.root.parent().unwrap().join(format!(
+                        "native/api/les-api{}",
+                        std::env::consts::EXE_SUFFIX
+                    )),
+                )
+                .env(
+                    "LES_NATIVE_TABLE_WORKER",
+                    self.config.root.parent().unwrap().join(format!(
+                        "native/api/les-api{}",
+                        std::env::consts::EXE_SUFFIX
+                    )),
+                );
+            }
             let private_tokens = if self.config.native_api {
                 let model_token = control::random_id()?;
                 let ingest_token = control::random_id()?;
@@ -268,6 +301,10 @@ impl Stack {
                         ),
                     )
                     .env("LES_INTERNAL_INGEST_TOKEN", &ingest_token)
+                    .env(
+                        "LES_INTERNAL_INFERENCE_URL",
+                        format!("http://127.0.0.1:{}/api/light/internal-inference", self.api),
+                    )
                     .env(
                         "LES_NATIVE_INDEX_URL",
                         format!(
@@ -328,6 +365,9 @@ impl Stack {
                     .env("LES_INTERNAL_INGEST_TOKEN", ingest_token);
                 if let Some(frontend) = self.config.native_frontend() {
                     native.arg("--frontend-assets").arg(frontend);
+                }
+                if let Some(storage) = &self.config.edge_storage {
+                    native.arg("--edge-storage").arg(storage);
                 }
                 commands.push(("api", native, "logs/api-native-console.txt"));
             }
@@ -409,7 +449,8 @@ impl Stack {
         };
         json!({"instance_id":self.instance,"ui_url":self.ui_url(),"api_url":format!("http://127.0.0.1:{}",self.api),
             "qdrant_pid":pid("qdrant"),"api_pid":pid("api"),"ui_pid":pid("ui"),
-            "legacy_api_pid":pid("legacy_api"),"api_native":self.config.native_api})
+            "legacy_api_pid":pid("legacy_api"),"api_native":self.config.native_api,
+            "vector_store":if self.config.edge_storage.is_some(){"edge"}else{"server"}})
     }
     fn exited(&mut self) -> Result<Option<Value>> {
         let mut dead = Vec::new();

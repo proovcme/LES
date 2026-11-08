@@ -3,7 +3,7 @@ use std::{fs::File, io::Read, path::Path};
 
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
 
-fn decode(bytes: &[u8]) -> Option<String> {
+pub(super) fn decode(bytes: &[u8]) -> Option<String> {
     let utf32 = bytes
         .strip_prefix(&[0xff, 0xfe, 0, 0])
         .map(|data| (data, true))

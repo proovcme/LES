@@ -2,7 +2,11 @@
   import type { Message, Source } from '../lib/contracts';
   import { renderAnswer, citations } from '../lib/markdown';
   import SourceButton from './SourceButton.svelte';
-  let { message, openSource, streaming = false }: { message: Message; openSource: (source: Source) => void; streaming?: boolean } = $props();
+  import RequestContext from './RequestContext.svelte';
+  let { message, openSource, streaming = false, sessionId, excluded, contextDisabled, toggleContext }: {
+    message: Message; openSource: (source: Source) => void; streaming?: boolean; sessionId?: string;
+    excluded?: boolean; contextDisabled?: boolean; toggleContext?: () => Promise<void>;
+  } = $props();
   const sources = $derived(message.meta?.source_map || []);
   const rendered = $derived(renderAnswer(message.text, sources));
   const quoted = $derived(sources.filter((source) => rendered.linked.has(source.index)));
@@ -14,7 +18,7 @@
   const execution = $derived(message.meta?.execution ?? message.meta?.retrieval_trace?.execution);
 </script>
 <article class:question={message.role === 'user'} class="message" aria-label={message.role === 'user' ? 'Ваш вопрос' : 'Ответ Леса'}>
-  <p class="message-byline">{message.role === 'user' ? 'Вы' : 'Лес'}</p>
+  <p class="message-byline">{message.role === 'user' ? 'Вы' : 'Лес'}{#if excluded}<span class="context-marker"> · Вне контекста</span>{/if}</p>
   {#if message.role === 'user'}
     <div class="question-text">{message.text}</div>
   {:else}
@@ -34,8 +38,9 @@
     {#if !missingAttribution && ['invalid_labels', 'error'].includes(citationStatus || '')}
       <p class="notice" role="status">Часть ссылок в ответе не подтверждена.</p>
     {/if}
-    {#if !message.text && !streaming}<p class="muted">Текст ответа не получен. Вопрос можно повторить.</p>{/if}
-    {#if message.meta?.partial}<p class="partial">Ответ прерван. Полученный текст сохранён; проверьте его перед использованием.</p>{/if}
+    {#if message.meta?.error}<p class="partial" role="alert">{message.meta.error.detail}</p>
+    {:else if message.meta?.partial}<p class="partial">{message.meta.completion_status === 'in_progress' ? 'Ответ ещё формируется.' : (message.text ? 'Ответ прерван. Полученный текст сохранён; проверьте его перед использованием.' : 'Ответ прерван до получения текста. Вопрос можно повторить.')}</p>
+    {:else if !message.text && !streaming}<p class="muted">Текст ответа не получен. Вопрос можно повторить.</p>{/if}
     {#if quoted.length}
       <section class="sources" aria-label="Цитаты в ответе">
         <p class="sources-title">Цитаты в ответе</p>
@@ -53,5 +58,22 @@
     {:else if !sources.length && message.srcs?.length}
       <p class="muted">У ответа нет привязки к фрагментам. Упоминания документов: {message.srcs.join(', ')}.</p>
     {/if}
+  {/if}
+  {#if message.history_id && !streaming && (sessionId && message.role === 'ai' || toggleContext)}
+    <footer class="message-tools">
+      {#if sessionId && message.role === 'ai'}
+        <RequestContext {sessionId} historyId={message.history_id} {openSource} />
+      {/if}
+      {#if toggleContext}
+        <details class="message-actions">
+          <summary>Действия<span class="sr-only"> · {message.role === 'user' ? 'вопрос' : 'ответ'}</span></summary>
+          <button class="quiet" disabled={contextDisabled} onclick={(event) => {
+            const menu = event.currentTarget.closest('details');
+            if (menu) { menu.open = false; menu.querySelector('summary')?.focus(); }
+            void toggleContext?.();
+          }}>{excluded ? 'Вернуть в контекст' : 'Исключить из контекста'}</button>
+        </details>
+      {/if}
+    </footer>
   {/if}
 </article>

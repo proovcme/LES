@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Mapping, Sequence
 
 
-PUBLIC_WEB_TOOLS = frozenset({"web_search"})
+PUBLIC_WEB_TOOLS = frozenset({"web_search", "web_read"})
 
 
 def filter_profile_tools(

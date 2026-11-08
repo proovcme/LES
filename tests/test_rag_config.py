@@ -1,4 +1,5 @@
 import sys
+import json
 from types import SimpleNamespace
 
 import backend.rag_config as rag_config_module
@@ -15,7 +16,6 @@ from backend.rag_config import (
     rag_vector_size,
     index_contract_payload,
     index_contract_status,
-    write_index_contract,
     token_length_fn,
 )
 
@@ -102,7 +102,7 @@ def test_index_contract_is_versioned_and_detects_runtime_drift(monkeypatch, tmp_
     assert payload["point_embedding_fingerprint"] == point_embedding_fingerprint()
     assert payload["hierarchy_schema"] == "les.rag.hierarchy.v1"
     assert payload["navigation_evidence_policy"] == "navigation_not_evidence"
-    write_index_contract()
+    contract_path.write_text(json.dumps(payload,ensure_ascii=False),encoding='utf-8')
     assert index_contract_status()["compatible"] is True
 
     monkeypatch.setenv("RAG_VECTOR_SIZE", "384")

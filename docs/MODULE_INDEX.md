@@ -1,5 +1,103 @@
 # Модули LES RAG
 
+835: [общий кандидат чата](modules/native-chat-turn.md) — `api/src/chat/`,
+`core/src/chat_request/`, `api/src/documents.rs`: единый JSON/SSE, квитанции,
+инструменты, физический PDF и оригиналы. Публичный чат ещё не переключён.
+
+834: [контекст чата](modules/native-chat-context.md) — `core/src/chat_context/`:
+упаковка, память/профиль, покрытие разделов, source visibility и delivery trace.
+
+833: [первый индекс](modules/native-index-setup.md) — `api/src/index_bootstrap.rs`,
+`core/src/index_bootstrap.rs`, `core/src/lexical_schema.rs`, `vector/src/initialize.rs`.
+
+832: [холодный допуск к API](modules/native-access-bootstrap.md) —
+`core/src/access_policy.rs`, `api/src/auth.rs`; прежние Python callbacks удалены.
+
+831: [модельный навигатор набора](modules/native-dataset-reader.md) —
+`core/src/catalog/dataset_reader/`, `api/src/dataset_reader.rs`, durable outbox
+партии и совместимый локальный caller без Python processing callbacks.
+
+830: [фоновое подключение и запуск партии](modules/native-intake-execution.md) —
+`api/src/intake.rs`, `api/src/index_batch/configuration.rs`,
+`core/src/index_configuration.rs`. Прежние внутренние FastAPI-адаптеры удалены.
+
+829: [таблицы и нативный HTTP-исполнитель целой партии](modules/native-table-dispatch.md) —
+`core/src/tables/`, форматный pipeline, `api/src/index_batch.rs`, атомарные ссылки
+Parquet. Проверяется изолированно; общий intake/API ещё не закрыт.
+
+828: [форматные извлекатели](modules/native-format-conversion.md) —
+`core/src/document/conversion/`, отдельный `worker_documents`,
+`backend/native_document_conversion.py` и привязка Rust launcher.
+
+827: [встроенные расчёты](modules/native-builtin-calculations.md) —
+`core/src/workbook_calculation/`; [комплект внешних навыков](modules/skill-runtime-package.md) —
+`core/src/skills/runtime.rs`, `tools/skill_python_asset.py` и binding launcher/API.
+
+826: [исходные PDF/Markdown-узлы](modules/native-source-nodes.md), потоковый мост,
+сохранение физических страниц, стабильные ID и короткие доказательства.
+
+825: [нативный JSON/JSONL](modules/native-json-sources.md), потоковый C ABI, отказ диагностическим фрагментам и сохранение полей/чисел.
+
+824: [подготовка сырых узлов в Rust](modules/native-node-preparation.md), бюджеты/ID/иерархия и prepared-spool внутри партии.
+
+823: [основной цикл чата в Rust](modules/native-chat-loop.md). Итерации, бюджеты, курсор PDF и финальные попытки; IO/промпты ещё через retained-адаптеры.
+
+822: `core/src/index_batch/` — [координатор партии](modules/native-index-batch.md),
+`backend/native_index_batch.py` — совместимый caller конфигурации/HTTP для ручного пути.
+[Приёмка](acceptance/native-index-batch-822.md).
+
+821: [автономный host навыков, библиотека и MCP-клиенты/настройки в Rust](modules/native-skills-mcp.md).
+Допуск, квитанции, идемпотентность и полные результаты: [нативный исполнитель](modules/native-tool-execution.md).
+Оригиналы внешних и загруженных файлов: `core/src/document_source.rs`, [контракт](modules/native-pdf-source.md).
+
+820: [профили, реестр инструментов и файловые инструменты в Rust](modules/native-profiles-files.md).
+
+Кандидат 820: [Edge, BM25, Unicode и локальные/внешние эмбеддинги](modules/native-edge-embeddings.md).
+`vector/`, `core/src/embedding_native.rs`, `api/src/embedding_inference.rs`;
+[проверка на копии реального корпуса](acceptance/native-edge-embeddings-820.md).
+
+Кандидат 819: [модельный транспорт и интернет-инструменты в Rust](modules/native-web-inference.md).
+Поиск и обычное чтение сайтов выполняются нативно; общий цикл чата и API
+пока используют адаптер Python. Рабочая установка не переключалась.
+
+Кандидат 818: [реестр моделей, чтение истории и доверенные сети в Rust](modules/native-model-registry.md).
+Пять дополнительных HTTP-пар работают без Python backend; холодный запуск
+проверяется с явно заданной политикой доступа. Общий runtime ещё нужен.
+[Приёмка и ограничения](acceptance/native-registry-history-818.md).
+
+Кандидат 817: [Rust продолжает длинные страницы и читает историю](modules/pdf-cursors-history.md).
+Причина ошибки сохраняется до SSE и остаётся после перезапуска.
+[Приёмка и незакрытая привязка цитат](acceptance/pdf-cursors-history-817.md).
+
+Кандидат 816: [физические страницы PDF через Rust](modules/native-pdf-source.md),
+точные идентификаторы источников и остановка чата при неудачном чтении.
+Рабочая установка и backend индекса этим шагом не менялись.
+
+Кандидат 815 сохраняет известный хеш PDF в
+`proxy/services/saferag_service.py` и передаёт его панели источника.
+[Испытание параллельного чтения и обновления](acceptance/edge-concurrent-pdf-815.md).
+
+Кандидат 814. `core/src/document/embedding_chunks.rs` проверяет финальный
+бюджет фрагментов. `core/src/chat_stream.rs` собирает потоковый ответ.
+[Граница переноса](modules/python-exit.md).
+
+Кандидат 813: `core/src/index_sources.rs` читает ручную очередь и находит
+зарегистрированные файлы; `core/src/files.rs` получает их отпечатки.
+[Контракт партии](modules/auto-parse-resume.md).
+
+Кандидат 812: `api/src/index_store/cache.rs` читает кеш векторов Qdrant,
+а `core/src/index_cache.rs` передаёт его сборщику точек без JSON в Python.
+[Контракт партии](modules/auto-parse-resume.md).
+
+Кандидат 811: `core/src/legacy_sparse.rs` сохраняет контракт TF-вектора Qdrant.
+Он вызывается напрямую сборщиком точек и через нативный адаптер запросов.
+BM25 с корпусной статистикой описан [отдельно](modules/bm25-index.md).
+
+Кандидат 810: `core/src/index_points.rs` управляет порциями эмбеддингов,
+проверяет векторы и собирает JSONL для Rust-публикации. Адаптер подключения
+и выдачи подготовленных фрагментов находится в `backend/native_core.py`.
+[Контракт партии](modules/auto-parse-resume.md).
+
 Кандидат 804: Rust заменяет лексическую копию файла, читает родительские
 разделы Qdrant и обрабатывает вход и результаты инструментов в харнессе.
 [Лексический индекс](modules/bm25-index.md), [чтение разделов](modules/chat-section-context.md),
@@ -99,7 +197,7 @@ fallback. [Контракт](modules/native-runtime.md), [приёмка](accept
 восстановление launcher: `desktop/light/src-tauri/src/supervisor.rs`, `lifecycle.rs`.
 [Контракт](modules/runtime-recovery.md), [приёмка 773](acceptance/runtime-recovery-773.md).
 
-Безопасный старт коллекции: `backend/collection_layout.py` (lease/exact count/
+Безопасный старт коллекции: [нативный bootstrap](modules/native-index-setup.md) (lease/exact count/
 сверка каталога). `execution_receipt_service.py` — состояние зафиксированных
 действий, `desktop/light/src-tauri/src/close_guard.rs` и frontend/native-close —
 протокол закрытия. [Приёмка 772](acceptance/safety-ui-772.md).
@@ -130,8 +228,8 @@ Rust-ядро документов: `core/src/lexical.rs`, `files.rs`, `jobs.rs`
 `word_evidence_service.py` возвращает адресные абзацы и строки таблиц DOCX.
 Сравнение полного и минимального поиска, модельного пакета и локальных судей:
 [стенд 764](modules/rag-pipeline-trial.md). `lexical_evidence_service.py` сверяет
-FTS ID с Qdrant; `section_coverage_service.py` формирует модельную метаинформацию
-о полноте реально переданных индексированных разделов.
+FTS ID с Qdrant; `core/src/chat_context/coverage.rs` формирует модельную
+метаинформацию о полноте реально переданных индексированных разделов.
 
 - backend: чтение документов, OCR, индекс Qdrant и политика ресурсов.
 - proxy: API, чат, доказательства, память и подключения.
@@ -157,8 +255,9 @@ PDF из цитаты: `proxy/routers/documents.py` и `proxy/services/pdf_viewe
 
 Восстановление диалога: `proxy/services/chat_durability_service.py`.
 Фоновая сводка: `proxy/services/background_summary_service.py`.
-Навыки и вычисления: `installed_skill_service.py`, `skill_compute_service.py`
-в `proxy/services`, worker `tools/skill_compute_worker.py`.
+Навыки и вычисления: `core/src/skills/`, протокол `les.skills.v1`;
+`installed_skill_service.py`, `skill_compute_service.py` — совместимые кодеки.
+MCP-клиенты/настройки: `api/src/mcp/`, SQLite: `core/src/mcp_registry.rs`.
 Компактный каталог выбранных расширений: `proxy/services/extension_tool_service.py`.
 Наблюдение за службами: `backend/light_health_monitor.py`.
 

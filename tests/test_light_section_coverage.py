@@ -4,8 +4,15 @@ import pytest
 
 from proxy.services.chat_evidence_context import govern_inference_messages, model_visible_source_map
 from proxy.services.context_governor_service import ContextKind, conservative_token_estimate
-from proxy.services.section_coverage_service import COVERAGE_ID, section_coverage
+from backend import native_core
 from tests.test_context_governor_service import _preset
+
+COVERAGE_ID = 'request:indexed-section-coverage'
+
+
+def section_coverage(sources, visible):
+    return native_core.required('chat_context', request={
+        'action': 'section_coverage', 'sources': sources, 'visible': visible})['value']
 
 
 def source(index, point, total=2, **extra):

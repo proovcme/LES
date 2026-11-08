@@ -1,24 +1,18 @@
-"""Convert canonical tool turns to native chat JSON without changing caller history."""
+"""Compatibility facade; canonical-to-native tool turns are constructed by Rust."""
 from collections.abc import Mapping
-import json
+from backend import native_core
+
+
+def _plain(value):
+    if isinstance(value, Mapping):return {key: _plain(item) for key,item in value.items()}
+    if isinstance(value, (list,tuple)):return [_plain(item) for item in value]
+    return value
 
 
 def native_tool_message(message):
-    result = dict(message)
-    if result.get('tool_calls') is not None:
-        calls = []
-        for call in result['tool_calls']:
-            function = dict(call['function'])
-            arguments = function.get('arguments', {})
-            if isinstance(arguments, str):
-                try:
-                    arguments = json.loads(arguments)
-                except ValueError as error:
-                    raise ValueError('INVALID_NATIVE_TOOL_ARGUMENTS') from error
-            if not isinstance(arguments, Mapping):
-                raise ValueError('INVALID_NATIVE_TOOL_ARGUMENTS')
-            calls.append({**call, 'function': {**function, 'arguments': dict(arguments)}})
-        result['tool_calls'] = calls
-    if result.get('role') == 'tool' and result.get('name'):
-        result['tool_name'] = result['name']
-    return result
+    try:
+        return native_core.required('model_request',request={
+            'schema':'les.model-request.v1','action':'native_message','message':_plain(message),
+        })['value']
+    except native_core.NativeCoreError as error:
+        raise ValueError(str(error)) from error

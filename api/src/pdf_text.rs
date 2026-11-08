@@ -128,6 +128,7 @@ fn scan_objects(
 fn read_pages(
     pdf: &dyn PdfiumLibraryBindings,
     document: FPDF_DOCUMENT,
+    ocr: Option<&crate::pdf_ocr::Ocr<'_>>,
 ) -> Result<Value, &'static str> {
     let count = unsafe { pdf.FPDF_GetPageCount(document) };
     if !(0..=10_000).contains(&count) {
@@ -142,9 +143,20 @@ fn read_pages(
             return Err("PDF_PAGE_UNAVAILABLE");
         }
         let result = (|| {
-            let text = page_text(pdf, page)?;
-            if text.chars().take(20).count() < 20 {
-                needs_ocr |= scan_objects(pdf, page, None, 0, text.is_empty())?;
+            let mut text = page_text(pdf, page)?;
+            let scan = text.chars().take(20).count() < 20
+                && scan_objects(pdf, page, None, 0, text.is_empty())?;
+            needs_ocr |= scan;
+            if let Some(ocr) = ocr.filter(|ocr| scan || ocr.reads_all_pages()) {
+                text = ocr
+                    .page(pdf, page)
+                    .inspect_err(|code| {
+                        eprintln!(
+                            "{}",
+                            json!({"event":"pdf_ocr_failed","page":index+1,"reason":code})
+                        );
+                    })?
+                    .unwrap_or_default();
             }
             if !text.is_empty() {
                 bytes += text.len() + 32;
@@ -158,7 +170,7 @@ fn read_pages(
         unsafe { pdf.FPDF_ClosePage(page) };
         result?;
     }
-    Ok(json!({"text":parts.join("\n\n"),"needs_ocr":needs_ocr,"pages":count}))
+    Ok(json!({"text":parts.join("\n\n"),"needs_ocr":needs_ocr,"pages":count,"ocr":ocr.is_some()}))
 }
 
 struct Input {
@@ -196,11 +208,32 @@ unsafe extern "C" fn read_at(
     )
 }
 
-fn read(library: &Library, path: &Path) -> Result<Value, &'static str> {
+fn read(library: &Library, path: &Path, options: &Value) -> Result<Value, &'static str> {
     if !path.is_absolute() {
         return Err("PDF_PATH_INVALID");
     }
-    let file = File::open(path).map_err(|_| "PDF_SOURCE_UNAVAILABLE")?;
+    let pdf = library.0.as_ref();
+    let ocr = (!options["ocr"].is_null())
+        .then(|| crate::pdf_ocr::Ocr::new(&options["ocr"]))
+        .transpose()?;
+    if options["kind"] == "image_ocr" {
+        if let Some(ocr) = ocr {
+            return Ok(json!({"ocr":true,"text":ocr.image(path)?}));
+        }
+        return Err("OCR_UNAVAILABLE");
+    }
+    let mut open = std::fs::OpenOptions::new();
+    open.read(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // Keep the same bytes alive while PDFium reads them. No write/delete sharing.
+        open.share_mode(1);
+    }
+    let mut file = open.open(path).map_err(|_| "PDF_SOURCE_UNAVAILABLE")?;
+    if let Some(hash) = options["source_sha256"].as_str() {
+        les_core::pdf_source::verify(&mut file, hash)?;
+    }
     let metadata = file.metadata().map_err(|_| "PDF_SOURCE_UNAVAILABLE")?;
     if !metadata.is_file() || metadata.len() > MAX_PDF_BYTES {
         return Err("PDF_SOURCE_LIMIT");
@@ -214,26 +247,114 @@ fn read(library: &Library, path: &Path) -> Result<Value, &'static str> {
         m_GetBlock: Some(read_at),
         m_Param: (&mut input as *mut Input).cast(),
     };
-    let pdf = library.0.as_ref();
     // Keep both access and input alive and stationary until the document is closed.
     let document = unsafe { pdf.FPDF_LoadCustomDocument(&mut access, None) };
     if document.is_null() {
         return Err("PDF_OPEN_FAILED");
     }
-    let result = read_pages(pdf, document);
+    let result = if options["kind"] == "source_page" {
+        read_page(pdf, document, options)
+    } else {
+        read_pages(pdf, document, ocr.as_ref())
+    };
     unsafe { pdf.FPDF_CloseDocument(document) };
+    if let Some(hash) = options["source_sha256"].as_str() {
+        les_core::pdf_source::verify(&mut input.file, hash)?;
+    }
     result
+}
+
+fn read_page(
+    pdf: &dyn PdfiumLibraryBindings,
+    document: FPDF_DOCUMENT,
+    options: &Value,
+) -> Result<Value, &'static str> {
+    let number = options["source"]["page"]
+        .as_u64()
+        .filter(|n| *n > 0)
+        .ok_or("PDF_PAGE_REQUIRED")?;
+    let count = unsafe { pdf.FPDF_GetPageCount(document) };
+    if !(0..=10_000).contains(&count) {
+        return Err("PDF_PAGE_LIMIT");
+    }
+    if number > count as u64 {
+        return Err("PDF_PAGE_OUT_OF_RANGE");
+    }
+    let offset = options["source"]
+        .get("offset")
+        .map_or(Some(0), Value::as_u64)
+        .ok_or("PDF_OFFSET_INVALID")?;
+    let limit = options["source"]
+        .get("max_chars")
+        .map_or(Some(6000), Value::as_u64)
+        .filter(|n| (1..=12000).contains(n))
+        .ok_or("PDF_TEXT_LIMIT")?;
+    let page = unsafe { pdf.FPDF_LoadPage(document, number as i32 - 1) };
+    if page.is_null() {
+        return Err("PDF_PAGE_UNAVAILABLE");
+    }
+    let result = (|| {
+        let text = page_text(pdf, page)?;
+        if text.chars().take(20).count() < 20 && scan_objects(pdf, page, None, 0, text.is_empty())?
+        {
+            return Err("PDF_OCR_REQUIRED");
+        }
+        if text.is_empty() {
+            return Err("PDF_PAGE_EMPTY");
+        }
+        let count_chars = text.chars().count() as u64;
+        if offset >= count_chars {
+            return Err("PDF_OFFSET_INVALID");
+        }
+        let query = options["source"]["q"].as_str().unwrap_or("").trim();
+        let (offset, end) = if query.is_empty() {
+            (offset, (offset + limit).min(count_chars))
+        } else {
+            let (start, end) = les_core::pdf_source::literal_window(&text, query, limit as usize)?;
+            (start as u64, end as u64)
+        };
+        let excerpt: String = text
+            .chars()
+            .skip(offset as usize)
+            .take((end - offset) as usize)
+            .collect();
+        let next = offset + excerpt.chars().count() as u64;
+        Ok(
+            json!({"text":excerpt,"page":number,"page_count":count,"offset":offset,
+            "next_offset":if query.is_empty() && next<count_chars {Some(next)} else {None},"complete":next==count_chars && offset==0,
+            "selection":if query.is_empty(){"page_range"}else{"literal_match"},"matched_query":query,
+            "total_chars":count_chars,"extractor":"les.pdfium.page.v1","source_sha256":options["source_sha256"]}),
+        )
+    })();
+    unsafe { pdf.FPDF_ClosePage(page) };
+    result
+}
+
+fn source_page(library: &Library, options: &Value) -> Result<Value, &'static str> {
+    let source = les_core::pdf_source::resolve(options)?;
+    let mut input = options.clone();
+    input["source_sha256"] = json!(source.sha256);
+    let mut value = read(library, &source.path, &input)?;
+    for (key, item) in source.identity.as_object().ok_or("PDF_IDENTITY_REQUIRED")? {
+        value[key] = item.clone();
+    }
+    Ok(value)
 }
 
 fn response(result: Result<Value, &'static str>) -> Value {
     match result {
         Ok(value) => json!({"status":"completed","value":value}),
+        Err(code) if code.starts_with("OCR_") => json!({"status":"failed","code":code}),
         Err(code) => json!({"status":"compatibility","code":code}),
     }
 }
 
 pub fn extract(asset: &Path, path: &Path) -> Value {
-    response(Library::open(asset).and_then(|library| read(&library, path)))
+    response(Library::open(asset).and_then(|library| read(&library, path, &Value::Null)))
+}
+
+pub(crate) fn convert(asset: &Path, path: &Path, options: &Value) -> Result<Value, &'static str> {
+    Library::open(asset).and_then(|library| read(&library, path, options))
 }
 
 pub fn serve(asset: &Path) -> Result<(), Box<dyn std::error::Error>> {
@@ -254,7 +375,14 @@ pub fn serve(asset: &Path) -> Result<(), Box<dyn std::error::Error>> {
             .as_str()
             .ok_or("PDF_PATH_INVALID")
             .map(Path::new);
-        let result = response(path.and_then(|path| read(&library, path)));
+        let result = if envelope["input"]["kind"] == "source_page" {
+            match source_page(&library, &envelope["input"]) {
+                Ok(value) => json!({"status":"completed","value":value}),
+                Err(code) => json!({"status":"failed","code":code}),
+            }
+        } else {
+            response(path.and_then(|path| read(&library, path, &envelope["input"])))
+        };
         serde_json::to_writer(
             &mut output,
             &json!({"request_id":envelope["request_id"],"result":result}),

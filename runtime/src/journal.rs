@@ -81,11 +81,64 @@ impl Journal {
                 )
             })?;
         drop(file);
-        fs::rename(temporary, self.state.join("launcher-status.json")).map_err(|_| {
-            Failure::new(
-                "STATUS_UNAVAILABLE",
-                "Не удалось опубликовать состояние запуска.",
-            )
-        })
+        let destination = self.state.join("launcher-status.json");
+        for attempt in 0..=16 {
+            match fs::rename(&temporary, &destination) {
+                Ok(()) => return Ok(()),
+                Err(error)
+                    if cfg!(windows)
+                        && attempt < 16
+                        && matches!(error.raw_os_error(), Some(5 | 32 | 33)) =>
+                {
+                    // A reader or scanner can briefly hold the old file without
+                    // FILE_SHARE_DELETE. Keep publishing atomically.
+                    std::thread::sleep(std::time::Duration::from_millis(25));
+                }
+                Err(_) => break,
+            }
+        }
+        let _ = fs::remove_file(temporary);
+        Err(Failure::new(
+            "STATUS_UNAVAILABLE",
+            "Не удалось опубликовать состояние запуска.",
+        ))
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+    use std::{os::windows::fs::OpenOptionsExt, time::Duration};
+
+    #[test]
+    fn status_survives_a_windows_reader_temporarily_holding_the_old_file() {
+        let path = std::env::temp_dir().join(format!(
+            "les-status-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&path).unwrap();
+        let journal = Journal::new(&path, "fixture".into());
+        journal.status("starting", "Starting", json!({})).unwrap();
+        let status = path.join("launcher-status.json");
+        let reader = OpenOptions::new()
+            .read(true)
+            .share_mode(1 | 2)
+            .open(&status)
+            .unwrap();
+        let reader = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            drop(reader);
+        });
+        let result = journal.status("ready", "Ready", json!({}));
+        reader.join().unwrap();
+        result.unwrap();
+        let saved: Value = serde_json::from_slice(&fs::read(&status).unwrap()).unwrap();
+        assert_eq!(saved["phase"], "ready");
+        fs::remove_file(status).unwrap();
+        fs::remove_dir(path).unwrap();
     }
 }

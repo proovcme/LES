@@ -54,10 +54,40 @@ def test_registration_replays_only_uncommitted_files_and_preserves_ready_documen
         assert connection.execute(
             "SELECT status,chunk_count FROM documents WHERE id='known'"
         ).fetchone() == ("INDEXED", 9)
+        connection.execute(
+            "INSERT INTO documents(id,dataset_id,file_name,status,file_size,source_path) "
+            "VALUES('other','ds','Другое задание.pdf','PENDING',1,'elsewhere')"
+        )
         connection.execute("UPDATE documents SET stage='EMBED' WHERE file_name='Файл 1.pdf'")
+    assert call("index_batch", id=job_id) == [
+        {"file_name": "Файл 1.pdf", "source_path": "source1"},
+        {"file_name": "Файл 2.pdf", "source_path": "source2"},
+    ]
     progress = call("get", id=job_id)
     assert (progress["current_stage"], progress["current_file"]) == ("EMBED", "Файл 1.pdf")
+    sources = [(f"Файл {i}.pdf", f"source{i}") for i in (1, 2)]
+    visits = []
+
+    def process(index, attempts):
+        visits.append((index, attempts))
+        if index == 0:
+            with sqlite3.connect(database) as connection:
+                # Simulate a source being rebound while the first one is processed.
+                connection.execute("UPDATE documents SET source_path='replacement' WHERE file_name='Файл 2.pdf'")
+        return 0
+
+    with pytest.raises(native_core.NativeCoreError, match="INDEX_BATCH_SELECTION_CHANGED"):
+        native_core.dispatch_index_batch(database, job_id, sources[::-1], process)
+    assert native_core.dispatch_index_batch(database, job_id, sources, process) == {"attempted": 1, "interrupted": False}
+    assert visits == [(0, 1), (1, 0)]
+    manual = []
+    assert native_core.dispatch_index_batch(database, None, [
+        ("Другое задание.pdf", "wrong"), ("Другое задание.pdf", "elsewhere"),
+    ], lambda index, attempts: manual.append((index, attempts)) or 0,
+        dataset_id="ds") == {"attempted": 1, "interrupted": False}
+    assert manual == [(0, 0), (1, 1)]
     with sqlite3.connect(database) as connection:
+        connection.execute("UPDATE documents SET source_path='source2' WHERE file_name='Файл 2.pdf'")
         connection.execute("UPDATE documents SET status='SKIPPED' WHERE file_name='Файл 1.pdf'")
         connection.execute("UPDATE documents SET status='INDEXED',chunk_count=0 WHERE file_name='Файл 2.pdf'")
     result = call("index_checkpoint", id=job_id, reason="", message="")

@@ -82,20 +82,29 @@ class ContextPacket:
     sections: tuple[ContextSection, ...]
     omissions: tuple[ContextOmission, ...]
 
+    def to_wire(self):
+        return dict(preset_id=self.preset_id, input_budget_tokens=self.input_budget_tokens,
+            generation_reserve_tokens=self.generation_reserve_tokens, safety_reserve_tokens=self.safety_reserve_tokens,
+            included_tokens=self.included_tokens,
+            sections=[dict(kind=s.kind.value, token_count=s.token_count,
+                objects=[dict(object_id=o.object_id,payload=o.payload,render=o.render()) for o in s.objects]) for s in self.sections],
+            omissions=[dict(kind=o.kind.value,total=o.total,omitted=o.omitted,object_ids=list(o.object_ids),cursor=o.cursor,reason=o.reason) for o in self.omissions])
+
+    @classmethod
+    def from_wire(cls, value):
+        if value.get('overflow'):
+            raise ContextRequiredSectionOverflow(object_ids=tuple(value['object_ids']),
+                budget=value['budget'],required_tokens=value['required_tokens'])
+        return cls(preset_id=value['preset_id'], input_budget_tokens=value['input_budget_tokens'],
+            generation_reserve_tokens=value['generation_reserve_tokens'], safety_reserve_tokens=value['safety_reserve_tokens'],
+            included_tokens=value['included_tokens'],
+            sections=tuple(ContextSection(ContextKind(s['kind']),tuple(ContextObject(o['object_id'],o['payload'])
+                for o in s['objects']),s['token_count']) for s in value['sections']),
+            omissions=tuple(ContextOmission(ContextKind(o['kind']),o['total'],o['omitted'],tuple(o['object_ids']),o['cursor'],o['reason']) for o in value['omissions']))
+
     def as_messages(self, *, request_last: bool = False) -> list[dict[str, Any]]:
-        sections = []
-        for section in self.sections:
-            row = dict(kind=section.kind.value, render=section.render())
-            if section.kind == ContextKind.NATIVE_TOOL_EXCHANGE:
-                row['native'] = [message for item in section.objects for message in item.payload]
-            if section.kind == ContextKind.DIALOGUE:
-                row['dialogue'] = [
-                    dict(role=item.payload['role'], content=str(item.payload.get('content') or ''))
-                    if isinstance(item.payload, dict) and item.payload.get('role') in {'user', 'assistant'}
-                    else dict(role='user', content=item.render()) for item in section.objects]
-            sections.append(row)
-        return native_core.required('context', request=dict(
-            action='messages', sections=sections, request_last=request_last))['messages']
+        return native_core.required('chat_context', request=dict(
+            action='messages', packet=self.to_wire(), request_last=request_last))['value']
 
 
 class ContextRequiredSectionOverflow(ValueError):

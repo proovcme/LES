@@ -146,7 +146,8 @@ def build_header(
                 info = _ver_state["info"] or {}
 
             with ui.dialog() as dlg, ui.card().style(
-                "background:var(--bg-panel);border:1px solid var(--border);min-width:440px;padding:18px;"
+                "background:var(--bg-panel);border:1px solid var(--border);"
+                "width:32rem;max-width:calc(100vw - 32px);min-width:0;padding:18px;"
             ):
                 ui.label("Версия и сборка ЛЕС").style("font-weight:900;font-size:.85rem;margin-bottom:6px;")
                 if not info:
@@ -157,13 +158,23 @@ def build_header(
                     if al.get("status") == "divergent":
                         ui.label("⚠ Runtime отличается от репозитория").style(
                             "color:var(--warn);font-size:.66rem;font-family:var(--font);margin-bottom:4px;")
-                    for k, v in _ver_rows(info):
-                        with ui.row().style("gap:8px;align-items:baseline;width:100%;"):
-                            ui.label(k).style("color:var(--dim);font-size:.62rem;min-width:140px;")
-                            ui.label(str(v)).style("font-size:.66rem;font-family:var(--font);")
-                    ui.button("Копировать диагностику", on_click=lambda: ui.run_javascript(
-                        f"navigator.clipboard.writeText({json.dumps(json.dumps(info, ensure_ascii=False, indent=2))})"
-                    )).props("flat dense no-caps").style("color:var(--accent);font-size:.62rem;margin-top:8px;")
+                    def version_details():
+                        for k, v in _ver_rows(info):
+                            with ui.row().style("gap:4px 12px;align-items:baseline;width:100%;"):
+                                ui.label(k).style("color:var(--dim);font-size:.72rem;min-width:9rem;")
+                                ui.label(str(v)).style("font-size:.75rem;overflow-wrap:anywhere;min-width:0;")
+                        ui.button("Копировать диагностику", on_click=lambda: ui.run_javascript(
+                            f"navigator.clipboard.writeText({json.dumps(json.dumps(info, ensure_ascii=False, indent=2))})"
+                        )).props("flat dense no-caps")
+
+                    if is_light():
+                        product = info.get("product_version") or info.get("app_version") or "Не определена"
+                        build = info.get("build_number")
+                        ui.label(f"{product} · сборка {build}" if build is not None else str(product))
+                        with ui.expansion("Технические сведения").classes("w-full"):
+                            version_details()
+                    else:
+                        version_details()
                 ui.button("Закрыть", on_click=dlg.close).props('flat no-caps')
             dlg.open()
 
@@ -177,7 +188,7 @@ def build_header(
                 # в диалоге по клику, а не съедают место основной навигации.
                 product = info.get("product_version") or info.get("app_version", "?")
                 build = info.get("build_number")
-                ver_badge.set_text(f"{product}" + (f" · {build}" if build is not None and not is_light() else ""))
+                ver_badge.set_text(f"{product}" + (f" · {build}" if build is not None else ""))
                 al = (info.get("runtime_alignment") or {}).get("status")
                 ds = (info.get("deploy_stamp") or {}).get("status")
                 if al == "divergent" or ds in ("stale", "deploy_stamp_missing"):
@@ -349,10 +360,11 @@ def build_header(
             ui.timer(3.0, _upd_proxy_dot)
 
             # Обновить данные текущего экрана (не обновление приложения).
-            ui.button("Обновить данные", icon="o_refresh", on_click=lambda: asyncio.create_task(_full_refresh())
-            ).props('flat dense no-caps aria-label="Обновить данные"').classes(
-                "sov-ui-header-utility"
-            )
+            if not compact_settings:
+                ui.button("Обновить данные", icon="o_refresh", on_click=lambda: asyncio.create_task(_full_refresh())
+                ).props('flat dense no-caps aria-label="Обновить данные"').classes(
+                    "sov-ui-header-utility"
+                )
 
             # Тема
             if app.storage.user.get("theme_default_migrated") != "0.24-light-2":

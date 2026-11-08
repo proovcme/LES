@@ -15,12 +15,13 @@ def stage_asset(output,source):
     return native_asset.stage_asset('api',output,source,source_digest())
 
 
-def build(output,*,offline=False):
-    return native_asset.build('api',output,offline=offline)
+def build(output,*,offline=False,edge=False):
+    return native_asset.build('api',output,offline=offline,features=('edge',) if edge else ())
 
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--offline',action='store_true')
-    args=parser.parse_args();print(build(args.output.resolve(),offline=args.offline))
+    parser.add_argument('--edge',action='store_true')
+    args=parser.parse_args();print(build(args.output.resolve(),offline=args.offline,edge=args.edge))

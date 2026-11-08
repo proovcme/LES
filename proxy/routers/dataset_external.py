@@ -9,14 +9,13 @@ import threading
 from datetime import datetime
 from pathlib import Path
 from backend.light_qdrant_connection import qdrant_http_headers
-from backend.native_index_store import accepts
 from typing import Any, Literal
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from backend.rag_config import rag_collection_name, rag_meta_db_path
 from backend.smart_index import is_temporary_source_name
-from proxy.config import external_allow_any, external_source_roots, rag_upload_suffixes
+from proxy.config import rag_upload_suffixes
 from proxy.security import require_admin
 from proxy.storage.file_storage import is_within_external_root, validate_external_source
 
@@ -29,60 +28,7 @@ import proxy.services.dataset_runtime as dataset_runtime
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/rag", tags=["rag"])
-native_router = APIRouter(prefix="/api/light", include_in_schema=False)
 _external_sync_lock = asyncio.Lock()
-
-
-def _require_native_intake(request: Request) -> None:
-    supplied = request.headers.get("x-les-intake-token", "")
-    if request.headers.get("origin") is not None or not accepts(supplied):
-        raise HTTPException(404, "Not Found")
-
-
-@native_router.get("/internal-intake-policy", dependencies=[Depends(_require_native_intake)])
-async def native_intake_policy():
-    roots = [] if external_allow_any() else await asyncio.to_thread(external_source_roots)
-    return {"roots": [str(path) for path in roots],
-            "allow_any": external_allow_any(), "suffixes": sorted(rag_upload_suffixes())}
-
-
-class NativeIntakeBatch(BaseModel):
-    dataset_id: str
-    intake_id: str = Field(pattern=r"^[0-9a-f]{32}$")
-    batch_limit: int = Field(ge=1, le=500)
-
-
-@native_router.post("/internal-intake-parse", dependencies=[Depends(_require_native_intake)])
-async def native_intake_parse(batch: NativeIntakeBatch):
-    """Compatibility adapter for one batch. Rust owns scheduling and progress."""
-    from backend.workspace_native import catalog_call
-
-    state = dataset_runtime.get_dataset_state()
-    async with state.parse_semaphore:
-        job = await asyncio.to_thread(catalog_call, rag_meta_db_path(), "intake_get", id=batch.intake_id)
-        if not job or job["dataset_id"] != batch.dataset_id or job["phase"] != "index" or job["status"] != "running":
-            raise HTTPException(404, "Задание индексации не найдено.")
-        progress = state.backend.db.dataset_parse_progress
-        pending = (await asyncio.to_thread(progress, batch.dataset_id))["pending"]
-        if not pending:
-            return Response(status_code=204)
-        try:
-            await dataset_scheduler.assert_parse_admission(state)
-        except HTTPException as error:
-            logger.info("[NATIVE-INDEX] job=%s admission_status=%s", batch.intake_id, error.status_code)
-            if error.status_code == 409:
-                raise HTTPException(412, "Проверьте модель поиска.") from error
-            raise
-        result = await state.backend.parse_dataset(batch.dataset_id, limit=batch.batch_limit)
-        dataset_scheduler._schedule_reader_after_parse(
-            batch.dataset_id, reason="native_intake", parse_result=result,
-        )
-        after = (await asyncio.to_thread(progress, batch.dataset_id))["pending"]
-        if after >= pending:
-            raise HTTPException(409, "Партия не продвинулась.")
-        return {"status": "processed"}
-
-
 
 
 def _project_name_from_dataset(dataset_name: str, explicit: str = "") -> str:

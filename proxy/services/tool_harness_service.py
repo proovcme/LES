@@ -42,23 +42,8 @@ from proxy.services.trusted_executor_service import (
 TOOL_RESULT_SCHEMA = "les_tool_result_v1"
 TOOL_REGISTRY_SCHEMA = "les_tool_registry_v1"
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_TEXT_EXT = {
-    ".txt", ".md", ".json", ".jsonl", ".csv", ".tsv", ".xml", ".yaml", ".yml",
-    ".html", ".svg", ".py", ".ini", ".cfg", ".sql", ".log",
-}
 _EXCEL_EXT = {".xlsx", ".xlsm", ".xls", ".csv", ".tsv"}
 _PDF_EXT = {".pdf"}
-_MAX_TEXT_BYTES = 1_000_000
-_FORBIDDEN_PARTS = {
-    ".env",
-    ".git",
-    ".venv",
-    "__pycache__",
-    "data",
-    "dist",
-    "logs",
-    "local_private_archive",
-}
 
 
 @dataclass(frozen=True)
@@ -152,7 +137,7 @@ def _canonical_input_schema(name: str, shorthand: dict[str, Any]) -> dict[str, A
             {"required": ["doc_id"]},
             {"required": ["dataset_id", "doc_name"]},
         ]
-    if name == "look_at_pdf_page":
+    if name in {"look_at_pdf_page", "read_pdf_source"}:
         schema["required"] = ["page"]
     if name == "search_project_tables":
         schema["required"] = ["dataset_id"]
@@ -397,7 +382,7 @@ class ToolHarness:
             timeout_seconds=120 if spec.name == "look_at_pdf_page" else 30,
             retry=RetryPolicy.SAFE,
             idempotency=IdempotencyPolicy.DERIVED,
-            result_budget=ResultBudget(max_chars=7000, max_items=20),
+            result_budget=ResultBudget(max_chars=60000 if spec.name == 'read_pdf_source' else 7000, max_items=20),
             model_owned_fields=(),
             provenance="source_refs_required",
             tags=tuple(
@@ -457,9 +442,9 @@ class ToolHarness:
                 name="read_pdf_source",
                 title="Read PDF source",
                 category="source",
-                summary="Read indexed text chunks for a PDF document and mark raw page/table extraction as missing when unavailable.",
-                args_schema={"doc_id": "str", "dataset_id": "str", "doc_name": "str", "q": "str", "limit": "int"},
-                returns="PDF indexed text chunks with warnings about raw extraction limits",
+                summary="Read a physical PDF page through Rust/PDFium, never the index. page is 1-based and REQUIRED. For a specific field set q to an EXACT literal word/phrase on the page (not the whole question): returns a verified excerpt around that match, not a full-page review. Without q, reads page text in portions; call this SAME tool with offset=next_offset until null. Use exact dataset_id+doc_name from sources; never invent ids or paths. source_sha256 pins the revision. Scans require OCR; errors are not evidence.",
+                args_schema={"doc_id": "str", "dataset_id": "str", "doc_name": "str", "page": "int", "source_sha256": "str", "offset": "int", "q": "str", "max_chars": "int"},
+                returns="physical page text, verified catalog identity and SHA-256, completeness and next_offset",
                 tags=("pdf", "read", "document", "source"),
             ),
             _tool_read_pdf_source,
@@ -732,19 +717,24 @@ async def _tool_read_source(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _tool_read_pdf_source(args: dict[str, Any]) -> dict[str, Any]:
-    payload = _read_source_payload("read_pdf_source", args)
-    doc_name = _result_doc_name(payload)
-    warnings = list(payload.get("warnings") or [])
-    if doc_name and Path(doc_name).suffix.casefold() not in _PDF_EXT:
-        warnings.append("source extension is not pdf")
-    warnings.append("raw PDF page/table extraction is not part of this first tool pass; using indexed chunks")
-    payload["warnings"] = list(dict.fromkeys(warnings))
-    payload["trace"] = str(payload.get("trace") or "") + "; pdf indexed-chunk read"
-    if isinstance(payload.get("tool_trace"), dict):
-        payload["tool_trace"]["warnings"] = payload["warnings"]
-        payload["tool_trace"]["trace"] = payload["trace"]
-    payload["contract_check"] = validate_tool_result(payload)
-    return payload
+    from backend.pdf_reader import read_source_page
+    from backend.native_core import NativeCoreError
+    source = {key: args[key] for key in ('doc_id', 'dataset_id', 'doc_name', 'page', 'source_sha256', 'offset', 'max_chars', 'q') if key in args}
+    try:
+        response = read_source_page(str(explorer().path), source)
+    except (OSError, NativeCoreError):
+        response = {'status': 'failed', 'code': 'PDF_WORKER_UNAVAILABLE'}
+    if response.get('status') != 'completed':
+        return _result(tool='read_pdf_source', operation='physical_page', inputs=[source], status='error',
+                       result={'code': response.get('code') or 'PDF_READ_FAILED'},
+                       missing=[response.get('code') or 'PDF_READ_FAILED'], trace='Rust PDF page read failed; no evidence admitted')
+    value = response['value']
+    provenance = {key: value[key] for key in ('doc_id', 'dataset_id', 'doc_name', 'page', 'source_sha256', 'offset')}
+    return _result(tool='read_pdf_source', operation='physical_page', inputs=[source], status='ok',
+                   result=value, sources=[{'kind': 'pdf_page', **provenance}],
+                   warnings=['PAGE_EXCERPT_ONLY: supports this passage, not a full page review'] if value.get('selection')=='literal_match' else
+                       (['PAGE_PARTIAL: follow next_offset before claiming full page coverage'] if not value['complete'] else []),
+                   trace='Rust catalog lookup + same-handle SHA-256 verification + physical PDFium page read')
 
 
 def _tool_look_at_pdf_page(args: dict[str, Any]) -> dict[str, Any]:
@@ -1038,17 +1028,25 @@ def _read_source_payload(tool: str, args: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _native_filesystem(action, args):
+    from backend import native_core
+    result = native_core.required('filesystem', request={
+        'schema':'les.filesystem.v1','action':action,'arguments':args,
+        'roots':{key:str(path.absolute()) for key,path in _allowed_roots().items()}})
+    if result.get('status') != 'completed':
+        return _result(tool='filesystem_'+action, operation=action, inputs=[_redact_args(args)],
+            status='error', result={'code':result.get('code') or 'FILESYSTEM_UNAVAILABLE',
+                                    'message':result.get('detail') or 'Не удалось прочитать файл.'},
+            missing=[result.get('detail') or 'Не удалось прочитать файл.'], trace='Rust filesystem operation stopped')
+    payload = result['value']
+    return _result(tool='filesystem_'+action, operation=payload['operation'],
+        inputs=[{}] if action=='roots' else [_redact_args(args)], status=payload['status'],
+        result=payload['result'], sources=payload.get('sources'), missing=payload.get('missing'),
+        warnings=payload.get('warnings'), trace='Rust read-only filesystem')
+
+
 def _tool_filesystem_roots(args: dict[str, Any]) -> dict[str, Any]:
-    roots = _allowed_roots()
-    result = {
-        "roots": [
-            {"key": key, "path": str(path), "exists": path.exists(), "read_only": True}
-            for key, path in roots.items()
-        ],
-        "forbidden_parts": sorted(_FORBIDDEN_PARTS),
-    }
-    return _result(tool="filesystem_roots", operation="list_roots", inputs=[{}], status="ok",
-                   result=result, trace="listed whitelist filesystem roots")
+    return _native_filesystem('roots', args)
 
 
 def _tool_web_search(args: dict[str, Any], *, config: Any) -> dict[str, Any]:
@@ -1078,10 +1076,12 @@ def _tool_web_search(args: dict[str, Any], *, config: Any) -> dict[str, Any]:
             "provider": payload.get("provider") or "duckduckgo",
             "degraded": bool(payload.get("degraded")),
             "fallback_reason": payload.get("fallback_reason") or "",
+            "retrieved_at": payload.get("retrieved_at") or "",
+            "code": payload.get("code") or "",
         },
         sources=sources,
         missing=list(payload.get("missing") or []),
-        warnings=(
+        warnings=list(payload.get("warnings") or []) + (
             [str(payload.get("fallback_reason"))]
             if payload.get("fallback_reason")
             else []
@@ -1117,83 +1117,23 @@ def _tool_web_read(args: dict[str, Any], *, config: Any) -> dict[str, Any]:
 
 
 def _tool_filesystem_list(args: dict[str, Any]) -> dict[str, Any]:
-    root_key = str(args.get("root") or "docs")
-    target = _safe_path(root_key, str(args.get("path") or ""))
-    if not target.exists():
-        return _result(tool="filesystem_list", operation="list", inputs=[_redact_args(args)], status="missing",
-                       result={}, missing=[f"path not found: {args.get('path') or ''}"], trace="filesystem path not found")
-    depth = _int_arg(args.get("depth"), 1, min_value=0, max_value=4)
-    result = _fs_node(root_key, target, depth=depth)
-    return _result(tool="filesystem_list", operation="list", inputs=[_redact_args(args)], status="ok",
-                   result=result, sources=[_fs_source(root_key, target)], trace="listed whitelisted filesystem path")
+    return _native_filesystem('list', args)
 
 
 def _tool_filesystem_stat(args: dict[str, Any]) -> dict[str, Any]:
-    root_key = str(args.get("root") or "docs")
-    target = _safe_path(root_key, str(args.get("path") or ""))
-    if not target.exists():
-        return _result(tool="filesystem_stat", operation="stat", inputs=[_redact_args(args)], status="missing",
-                       result={}, missing=[f"path not found: {args.get('path') or ''}"], trace="filesystem path not found")
-    return _result(tool="filesystem_stat", operation="stat", inputs=[_redact_args(args)], status="ok",
-                   result=_fs_metadata(root_key, target), sources=[_fs_source(root_key, target)],
-                   trace="read filesystem metadata")
+    return _native_filesystem('stat', args)
 
 
 def _tool_filesystem_read_text(args: dict[str, Any]) -> dict[str, Any]:
-    root_key = str(args.get("root") or "docs")
-    target = _safe_path(root_key, str(args.get("path") or ""))
-    if not target.is_file():
-        return _result(tool="filesystem_read_text", operation="read_text", inputs=[_redact_args(args)], status="missing",
-                       result={}, missing=["file not found"], trace="filesystem file not found")
-    if target.suffix.casefold() not in _TEXT_EXT:
-        return _result(tool="filesystem_read_text", operation="read_text", inputs=[_redact_args(args)], status="missing",
-                       result={}, missing=["not a supported text file"], trace="binary or unsupported text extension")
-    size = target.stat().st_size
-    if size > _MAX_TEXT_BYTES:
-        return _result(tool="filesystem_read_text", operation="read_text", inputs=[_redact_args(args)], status="missing",
-                       result={}, missing=["file too large for text tool"], trace="text file exceeds safety limit")
-    max_chars = _int_arg(args.get("max_chars"), 20000, min_value=200, max_value=100000)
-    text = target.read_text(encoding="utf-8", errors="replace")
-    result = _fs_metadata(root_key, target) | {"text": text[:max_chars], "text_truncated": len(text) > max_chars}
-    return _result(tool="filesystem_read_text", operation="read_text", inputs=[_redact_args(args)], status="ok",
-                   result=result, sources=[_fs_source(root_key, target)], trace="read whitelisted text file")
+    return _native_filesystem('read_text', args)
 
 
 def _tool_filesystem_search(args: dict[str, Any]) -> dict[str, Any]:
-    q = str(args.get("q") or "").strip()
-    if not q:
-        return _result(tool="filesystem_search", operation="search", inputs=[_redact_args(args)], status="missing",
-                       result={}, missing=["q"], trace="query is required")
-    root_key = str(args.get("root") or "docs")
-    base = _safe_path(root_key, str(args.get("path") or ""))
-    if not base.exists():
-        return _result(tool="filesystem_search", operation="search", inputs=[_redact_args(args)], status="missing",
-                       result={}, missing=["path not found"], trace="filesystem search base not found")
-    limit = _int_arg(args.get("limit"), 50, min_value=1, max_value=200)
-    include_content = bool(args.get("content"))
-    hits = _fs_search(root_key, base, q=q, include_content=include_content, limit=limit)
-    return _result(
-        tool="filesystem_search",
-        operation="search",
-        inputs=[_redact_args(args)],
-        status="ok" if hits else "missing",
-        result={"query": q, "hits": hits, "count": len(hits), "content": include_content},
-        sources=[_fs_source(root_key, base)],
-        missing=[] if hits else ["no files matched query"],
-        trace="searched whitelisted filesystem path",
-    )
+    return _native_filesystem('search', args)
 
 
 def _tool_filesystem_hash(args: dict[str, Any]) -> dict[str, Any]:
-    root_key = str(args.get("root") or "docs")
-    target = _safe_path(root_key, str(args.get("path") or ""))
-    if not target.is_file():
-        return _result(tool="filesystem_hash", operation="hash", inputs=[_redact_args(args)], status="missing",
-                       result={}, missing=["file not found"], trace="hash target is not a file")
-    digest = hashlib.sha256(target.read_bytes()).hexdigest()
-    result = _fs_metadata(root_key, target) | {"sha256": digest}
-    return _result(tool="filesystem_hash", operation="hash", inputs=[_redact_args(args)], status="ok",
-                   result=result, sources=[_fs_source(root_key, target)], trace="calculated sha256 for whitelisted file")
+    return _native_filesystem('hash', args)
 
 
 def _allowed_roots() -> dict[str, Path]:
@@ -1217,96 +1157,12 @@ def _allowed_roots() -> dict[str, Path]:
     return roots
 
 
-def _safe_path(root_key: str, rel_path: str) -> Path:
-    roots = _allowed_roots()
-    if root_key not in roots:
-        raise ValueError(f"unknown filesystem root: {root_key}")
-    clean_parts = [part for part in Path(rel_path or "").parts if part not in ("", ".")]
-    if any(part == ".." or part.startswith(".") or part in _FORBIDDEN_PARTS for part in clean_parts):
-        raise ValueError("filesystem path contains a forbidden segment")
-    root = roots[root_key]
-    target = (root / Path(*clean_parts)).resolve() if clean_parts else root
-    if target != root and root not in target.parents:
-        raise ValueError("filesystem path escapes allowed root")
-    if any(part in _FORBIDDEN_PARTS for part in target.parts):
-        raise ValueError("filesystem path crosses a forbidden directory")
-    return target
 
 
-def _fs_node(root_key: str, path: Path, *, depth: int) -> dict[str, Any]:
-    meta = _fs_metadata(root_key, path)
-    if path.is_dir() and depth > 0:
-        children: list[dict[str, Any]] = []
-        try:
-            entries = sorted(path.iterdir(), key=lambda p: (not p.is_dir(), p.name.casefold()))
-        except OSError:
-            entries = []
-        for child in entries:
-            if child.name.startswith(".") or child.name in _FORBIDDEN_PARTS:
-                continue
-            children.append(_fs_node(root_key, child, depth=depth - 1))
-            if len(children) >= 500:
-                break
-        meta["children"] = children
-    return meta
 
 
-def _fs_metadata(root_key: str, path: Path) -> dict[str, Any]:
-    root = _allowed_roots()[root_key]
-    rel = "" if path == root else str(path.relative_to(root))
-    stat = path.stat()
-    return {
-        "root": root_key,
-        "path": rel,
-        "name": path.name or root_key,
-        "is_dir": path.is_dir(),
-        "is_file": path.is_file(),
-        "suffix": path.suffix,
-        "size": stat.st_size,
-        "mtime": stat.st_mtime,
-    }
 
 
-def _fs_search(root_key: str, base: Path, *, q: str, include_content: bool, limit: int) -> list[dict[str, Any]]:
-    needle = q.casefold()
-    hits: list[dict[str, Any]] = []
-    stack = [base]
-    visited = 0
-    while stack and len(hits) < limit and visited < 5000:
-        current = stack.pop()
-        visited += 1
-        try:
-            meta = _fs_metadata(root_key, current)
-        except OSError:
-            continue
-        name_hit = needle in current.name.casefold()
-        content_snippet = ""
-        if include_content and current.is_file() and current.suffix.casefold() in _TEXT_EXT:
-            try:
-                if current.stat().st_size <= 200_000:
-                    text = current.read_text(encoding="utf-8", errors="replace")
-                    pos = text.casefold().find(needle)
-                    if pos >= 0:
-                        start = max(0, pos - 120)
-                        end = min(len(text), pos + len(q) + 120)
-                        content_snippet = text[start:end].strip()
-            except OSError:
-                content_snippet = ""
-        if name_hit or content_snippet:
-            hit = meta | {"match": "content" if content_snippet else "name"}
-            if content_snippet:
-                hit["snippet"] = content_snippet
-            hits.append(hit)
-        if current.is_dir():
-            try:
-                children = sorted(current.iterdir(), key=lambda p: p.name.casefold(), reverse=True)
-            except OSError:
-                children = []
-            for child in children:
-                if child.name.startswith(".") or child.name in _FORBIDDEN_PARTS:
-                    continue
-                stack.append(child)
-    return hits
 
 
 def _result(
@@ -1381,9 +1237,6 @@ def _result_doc_name(payload: dict[str, Any]) -> str:
     return str(document.get("file_name") or result.get("doc_name") or "")
 
 
-def _fs_source(root_key: str, path: Path) -> dict[str, Any]:
-    meta = _fs_metadata(root_key, path)
-    return {"kind": "filesystem", "root": root_key, "path": meta["path"], "name": meta["name"]}
 
 
 def _list_arg(value: Any) -> list[str]:

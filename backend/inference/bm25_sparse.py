@@ -69,5 +69,20 @@ def tokenize(text: str) -> list[str]:
 
 def encode_bm25(text: str) -> dict[int, float]:
     """Текст → {term_id: term_frequency}. IDF применит Qdrant (modifier=Idf)."""
+    from backend import native_core
+
+    source = str(text or "")
+    if native_core.supports("legacy_sparse"):
+        try:
+            vector = native_core.required("legacy_sparse", request={"text": source})["vector"]
+        except native_core.NativeCoreError as error:
+            if str(error) != "CORE_INPUT_LIMIT":
+                raise
+        else:
+            return {index: float(value) for index, value in zip(vector["indices"], vector["values"])} if vector else {}
+    return _encode_python(source)
+
+
+def _encode_python(text: str) -> dict[int, float]:
     counts = Counter(_term_id(tok) for tok in tokenize(text))
     return {tid: float(tf) for tid, tf in counts.items()}

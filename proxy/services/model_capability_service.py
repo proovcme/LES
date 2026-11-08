@@ -425,14 +425,16 @@ def require_capabilities(
     *,
     now: datetime | None = None,
 ) -> None:
-    checked_at = now or _utc_now()
-    if checked_at >= snapshot.expires_at:
-        raise CapabilityRequirementError("CAPABILITY_SNAPSHOT_STALE")
-    for capability in frozenset(CapabilityName(item) for item in required):
-        observation = snapshot.observation(capability)
-        if observation.state is not CapabilityState.SUPPORTED:
-            raise CapabilityRequirementError(f"CAPABILITY_REQUIRED: {capability.value}")
-        if observation.evidence_source in {"template_default", "unavailable"}:
-            raise CapabilityRequirementError(
-                f"CAPABILITY_EVIDENCE_INSUFFICIENT: {capability.value}"
-            )
+    from backend import native_core
+    value = native_core.required('model_capabilities', request={
+        'schema': 'les.model-capabilities.v1',
+        'snapshot': {
+            'expires_at': snapshot.expires_at.isoformat(),
+            'observations': [{'capability': v.capability.value, 'state': v.state.value,
+                              'evidence_source': v.evidence_source} for v in snapshot.observations],
+        },
+        'required': sorted({CapabilityName(v).value for v in required}),
+        'now': (now or _utc_now()).isoformat(),
+    })
+    if value['status'] != 'allowed':
+        raise CapabilityRequirementError(value['code'])

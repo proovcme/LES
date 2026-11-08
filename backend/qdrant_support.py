@@ -36,20 +36,10 @@ from .interface import Chunk, DatasetInfo, EmbeddingContractError, RAGBackend
 from .mail_profile import build_mail_vector_profile, deterministic_mail_node_id
 from .parquet_writer import TableNormalizer
 from proxy.services.dataset_memory_service import chunk_payload_typing, current_dataset_revision_id
-from .rag_config import chunking_config, index_contract_status, rag_chunk_overlap, rag_chunk_size, rag_collection_name, rag_vector_size, point_embedding_descriptor, point_embedding_fingerprint, write_index_contract
+from .rag_config import chunking_config, index_contract_status, rag_chunk_overlap, rag_chunk_size, rag_collection_name, rag_vector_size, point_embedding_descriptor, point_embedding_fingerprint
 
 logger = logging.getLogger(__name__)
 
-
-def payload_index_ensure_enabled() -> bool:
-    """Whether startup may submit idempotent Qdrant payload-index mutations."""
-    if os.getenv("LES_STARTUP_BACKGROUND_MUTATIONS", "true").lower() not in {
-        "1", "true", "yes", "on"
-    }:
-        return False
-    return os.getenv("LES_RAG_PAYLOAD_INDEX_ENSURE", "true").lower() in {
-        "1", "true", "yes", "on"
-    }
 
 
 RAW_CAD_BIM_SUFFIXES = {".dwg", ".dxf", ".rvt", ".rfa", ".ifc", ".ifczip", ".nwc"}
@@ -132,6 +122,8 @@ def _classify_parse_failure(error: Exception, *, attempts: int) -> ParseFailureD
         'FORMAT_READ_FAILED', 'FORMAT_WORKER_UNAVAILABLE',
         'OCR_DISABLED', 'OCR_READ_FAILED', 'DOC_ENCRYPTED', 'DOC_VERSION_UNSUPPORTED',
         'NO_SEARCHABLE_TEXT',
+        'INDEX_SOURCE_MISSING', 'INDEX_SOURCE_AMBIGUOUS', 'INDEX_SOURCE_ALIAS_CONFLICT',
+        'INDEX_SOURCE_PLAN_INVALID', 'INDEX_SOURCE_UNAVAILABLE',
         'DOC_TRUNCATED', 'DOC_CONTAINER_UNREADABLE', 'DOC_STREAM_MISSING',
         'DOC_STREAM_UNREADABLE', 'DOC_PIECES_MISSING', 'DOC_PIECES_INVALID',
         'DOC_UTF16_INVALID', 'DOC_LIMIT',
@@ -149,16 +141,27 @@ def _classify_parse_failure(error: Exception, *, attempts: int) -> ParseFailureD
     transient_codes = (
         ("missing prevalidated sparse vector", "SPARSE_VECTOR_PREVALIDATION_MISSING"),
         ("qdrant point count mismatch", "QDRANT_POINT_COUNT_MISMATCH"),
+        ("qdrant_point_count_mismatch", "QDRANT_POINT_COUNT_MISMATCH"),
         ("index_storage_write_failed", "INDEX_STORAGE_WRITE_FAILED"),
+        ("index_catalog_write_failed", "INDEX_CATALOG_WRITE_FAILED"),
+        ("index_update_busy", "INDEX_UPDATE_BUSY"),
+        ("source_changed_during_indexing", "SOURCE_CHANGED_DURING_INDEXING"),
         ("embedding count mismatch", "EMBEDDING_COUNT_MISMATCH"),
+        ("embedding_count_mismatch", "EMBEDDING_COUNT_MISMATCH"),
+        ("index_spool_write_failed", "INDEX_SPOOL_WRITE_FAILED"),
         ("timed out", "PARSE_TIMEOUT"),
         ("timeout", "PARSE_TIMEOUT"),
         ("temporarily unavailable", "DEPENDENCY_UNAVAILABLE"),
         ("all connection attempts failed", "DEPENDENCY_UNAVAILABLE"),
         ("connection", "DEPENDENCY_UNAVAILABLE"),
     )
-    error_code = next((code for marker, code in transient_codes if marker in message), "PARSE_FAILED")
-    transient = error_code != "PARSE_FAILED"
+    error_code = next((code for marker, code in transient_codes if marker in message), None)
+    transient = error_code is not None
+    if not transient:
+        code = message.upper()
+        error_code = code if code in {"EMBEDDING_VECTOR_INVALID", "INDEX_FILE_CHUNK_LIMIT",
+                                     "INDEX_POINT_SIZE_LIMIT", "INDEX_POINT_BATCH_LIMIT", "INDEX_POINTS_INVALID",
+                                     "INDEX_POINT_ID_UNAVAILABLE", "INDEX_POINTS_ADAPTER_FAILED"} else "PARSE_FAILED"
     retryable = transient and attempts < max_attempts
     delay = min(300.0, 5.0 * (2 ** max(0, attempts - 1))) if retryable else 0.0
     return ParseFailureDisposition(
@@ -312,26 +315,6 @@ def _field(value: Any, name: str, default: Any = None) -> Any:
     if isinstance(value, Mapping):
         return value.get(name, default)
     return getattr(value, name, default)
-
-
-def _named_collection_layout(info: Any, *, vector_size: int) -> tuple[bool, int]:
-    """Return named dense+sparse compatibility and point count for a collection."""
-    config = _field(info, "config", {})
-    params = _field(config, "params", {})
-    vectors = _field(params, "vectors", {})
-    sparse_vectors = _field(params, "sparse_vectors", {})
-    points_count = int(_field(info, "points_count", 0) or 0)
-    if not isinstance(vectors, Mapping) or not isinstance(sparse_vectors, Mapping):
-        return False, points_count
-    dense = vectors.get(_dense_vector_name())
-    dense_size = int(_field(dense, "size", 0) or 0) if dense is not None else 0
-    compatible = dense_size == vector_size and _sparse_vector_name() in sparse_vectors
-    return compatible, points_count
-
-
-def _can_adopt_missing_contract(*, points_count: int, matching_fingerprint_count: int) -> bool:
-    """A missing sidecar is safe to recreate only from a provably canonical collection."""
-    return points_count == 0 or matching_fingerprint_count == points_count
 
 
 _MD_HEADING_RE = re.compile(r"^(#{1,6})\s+(.{2,160})$")

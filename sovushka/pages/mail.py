@@ -542,12 +542,12 @@ def build_mail_settings() -> None:
                 with ui.row().classes("sov-mail-settings-head"):
                     with ui.column().classes("sov-mail-settings-identity"):
                         acronym_identity(
-                            "Е.Ж.И.К.",
-                            "Единый Журнал Импорта Корреспонденции",
+                            "Почта",
+                            "Подключения и синхронизация",
                             icon="o_mark_email_read",
                         )
                         ui.label(
-                            "Подключения и ручная синхронизация. Читать письма и задавать вопросы — в рабочей вкладке «Почта»."
+                            "Читать письма и задавать вопросы можно в разделе «Почта»."
                         ).classes("sov-mail-settings-subtitle")
                     action_button(
                         "Подключить IMAP",
@@ -558,15 +558,15 @@ def build_mail_settings() -> None:
                     )
             with panel(variant="plain", classes="sov-mail-settings-section"):
                 section_heading(
-                    "Сборщики",
-                    "Оба контура read-only: они только читают письма и складывают локальные снимки в отдельные датасеты.",
+                    "Загрузка писем",
+                    "Лес читает письма и сохраняет локальную копию для поиска.",
                 )
                 with ui.element("section").classes("sov-mail-collector-card"):
                     ui.icon("o_desktop_windows").classes("sov-mail-collector-card__icon")
                     with ui.column().classes("sov-mail-collector-card__copy"):
-                        ui.label("Classic Outlook").classes("sov-mail-settings-card-title")
+                        ui.label("Outlook (классический)").classes("sov-mail-settings-card-title")
                         ui.label(
-                            "Локальный ручной сборщик · read-only · при первом запуске сам зарегистрирует видимые ящики."
+                            "При первой загрузке Лес найдёт ящики, доступные в Outlook."
                         ).classes("sov-mail-settings-note")
                     action_button(
                         "Забрать новые письма",
@@ -588,7 +588,7 @@ def build_mail_settings() -> None:
                 if not state["accounts"]:
                     render_feedback_state(
                         "empty",
-                        detail="IMAP-ящики пока не подключены. Запустите сбор Classic Outlook — найденные ящики появятся автоматически.",
+                        detail="Ящики ещё не подключены. Подключите IMAP или загрузите письма из Outlook.",
                     )
                     return
                 for account in state["accounts"]:

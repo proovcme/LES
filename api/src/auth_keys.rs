@@ -182,9 +182,8 @@ async fn run(
 
 pub async fn handle(context: Arc<Context>, request: Request, route: Route) -> Response {
     let clean = transport::clean(request.headers(), true);
-    let policy = match auth::local_policy(&context, &clean).await {
-        Ok(Some(policy)) => policy,
-        Ok(None) => return transport::forward(context, request).await,
+    let policy = match auth::local_policy(&context).await {
+        Ok(policy) => policy,
         Err(response) => return response,
     };
     let cors = auth::cors(policy, request.headers());
@@ -193,7 +192,7 @@ pub async fn handle(context: Arc<Context>, request: Request, route: Route) -> Re
         request,
         route,
         auth::key_from(&clean),
-        policy.trusted_role.clone(),
+        policy.trusted(&clean).map(str::to_owned),
     )
     .await;
     response.headers_mut().extend(cors);

@@ -17,12 +17,14 @@ SPECS={
 def source_digest(component,root=ROOT):
     SPECS[component]
     paths=[root/'config/version.json']
+    paths.extend(root/'config'/name for name in ('execution-presets.json','chat-profile-defaults.json','builtin-tools.json','lexical-v2.json',
+        'model-connection-templates.json','table-row-schema.json','extraction-errors.json','unicode/15.1.0.json') if (root/'config'/name).is_file())
     if component == 'api':
         paths.extend(root/'qdrant_visualizer'/name for name in (
             'index.html', 'forest.css', 'forest.js', 'forest-model.js', 'forest-scene.js',
             'navigation.js', 'forest-mist.svg', 'search.html', 'search.js',
         ) if (root/'qdrant_visualizer'/name).is_file())
-    for folder in ('core',component):
+    for folder in ('core',component, *(['vector'] if component == 'api' else [])):
         paths.extend(root.joinpath(folder,'src').rglob('*.rs'))
         paths.extend(root.joinpath(folder,'src').rglob('*.sql'))
         paths.extend(root/folder/name for name in ('Cargo.toml','Cargo.lock'))
@@ -46,10 +48,12 @@ def stage_asset(component,output,source,expected_source):
     return output/source.name
 
 
-def build(component,output,*,offline=False):
+def build(component,output,*,offline=False,features=()):
     if output.exists():
         raise FileExistsError('Use a fresh output directory to preserve rollback assets')
     name,schema,receipt_name=SPECS[component]
+    if set(features) - ({'edge'} if component == 'api' else set()):
+        raise ValueError('Unsupported native build feature')
     environment=os.environ.copy()
     flags=(environment['CARGO_ENCODED_RUSTFLAGS'].split('\x1f') if environment.get('CARGO_ENCODED_RUSTFLAGS')
            else environment.get('RUSTFLAGS','').split())
@@ -60,9 +64,12 @@ def build(component,output,*,offline=False):
     command=['cargo','build','--locked','--release','--manifest-path',str(ROOT/component/'Cargo.toml')]
     if offline:
         command.append('--offline')
+    if features:
+        command.extend(['--features', ','.join(sorted(set(features)))])
     subprocess.run(command,env=environment,check=True)
     file=name+('.exe' if sys.platform=='win32' else '')
-    source=ROOT/component/'target/release'/file
+    target=Path(environment.get('CARGO_TARGET_DIR', str(ROOT/component/'target')))
+    source=target/'release'/file
     if not source.is_file():
         raise FileNotFoundError('Native build did not produce its executable')
     output.mkdir(parents=True);shutil.copy2(source,output/file)
@@ -70,5 +77,7 @@ def build(component,output,*,offline=False):
     receipt={'schema':schema,'file':file,'build_number':version['build_number'],
              'sha256':hashlib.sha256(source.read_bytes()).hexdigest(),
              'source_sha256':source_digest(component),'remapped_paths':True}
+    if features:
+        receipt['features']=sorted(set(features))
     (output/receipt_name).write_text(json.dumps(receipt,indent=2),encoding='utf-8')
     return output/file

@@ -63,7 +63,7 @@ def test_package_follows_transitive_tool_imports_without_private_state(tmp_path,
     destination = tmp_path / "package"
     runtime = package.stage_code(destination)
     assert (runtime / "tools/second.py").is_file()
-    assert (runtime / "tools/skill_compute_worker.py").is_file()
+    assert not (runtime / "tools/skill_compute_worker.py").exists()
     assert not (runtime / "tools/private.py").exists()
     assert not (runtime / "data").exists()
     assert (destination / "assets/les-light.svg").is_file()

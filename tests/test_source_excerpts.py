@@ -111,3 +111,21 @@ def test_local_generation_budget_does_not_cap_broad_forms(monkeypatch):
     assert _generation_token_budget(max_tokens=1024, local_big=True, attempt=1, intent="brief") == 1024
     assert _generation_token_budget(max_tokens=8192, local_big=False, attempt=1, intent="default") == 8192
     assert _generation_token_budget(max_tokens=8192, local_big=True, attempt=2, intent="default") == 2048
+
+
+def test_pdf_source_map_preserves_revision_for_guarded_page_link():
+    sha = "a" * 64
+    chunk = N(content="Текст с физической страницы PDF", doc_name="Раздел ЭОМ.pdf",
+              doc_id="document-1", score=0.8,
+              meta={"dataset_id": "ds1", "page": 5, "source_ref": "Раздел ЭОМ.pdf#page=5",
+                    "source_sha256": sha, "atomic_evidence": True, "qdrant_point_id": "point-1"})
+    source = source_map_for_context([chunk], max_chars=2000, include_metadata=True)[0]
+    assert source["source_sha256"] == sha
+    assert source["locator"]["source_sha256"] == sha
+    assert source["locator"]["page"] == 5
+    assert source["quote"] == chunk.content
+
+    chunk.meta.pop("source_sha256")
+    unknown_revision = source_map_for_context([chunk], max_chars=2000, include_metadata=True)[0]
+    assert "source_sha256" not in unknown_revision
+    assert "locator" not in unknown_revision

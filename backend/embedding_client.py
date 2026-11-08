@@ -132,6 +132,15 @@ class EmbedClient:
         if not texts:
             return []
         connection = connection or self._resolve_embedding_connection()
+        from backend import native_embedding
+        from proxy.services import local_model_http
+        if native_embedding.configured() and not local_model_http.inference_ready():
+            vectors = await asyncio.to_thread(native_embedding.encode, connection.model_id, texts,
+                getattr(self, '_index_vector_size', None), release_after=release_after,
+                connection_revision_id=connection.revision_id)
+            from types import SimpleNamespace
+            return self._vectors_from_connection_response(
+                SimpleNamespace(model_id=connection.model_id, vectors=vectors), len(texts))
         from backend.embedding_residency import remember
         remember(connection)
         if self.connection_transport is not None:
@@ -312,6 +321,9 @@ class EmbedClient:
         """Синхронный parse-клиент с bounded retry и изоляцией плохого фрагмента."""
         if not texts:
             return []
+        from backend import native_embedding
+        if self.connection_mode == 'legacy' and self.backend == 'sentence_transformers' and native_embedding.configured():
+            return native_embedding.encode(self.model, texts, getattr(self, '_index_vector_size', None))
         if self.connection_mode == "active":
             return self._encode_connection_sync(texts)
         if self.connection_mode == "shadow":
@@ -321,6 +333,11 @@ class EmbedClient:
     async def encode_async(self, texts: List[str], *, query: bool = False) -> List[List[float]]:
         """Асинхронный вариант для retrieve; query contract never touches documents."""
         payload_texts = [prepare_query_for_embedding(text) for text in texts] if query else texts
+        from backend import native_embedding
+        if self.connection_mode == 'legacy' and self.backend == 'sentence_transformers' and native_embedding.configured():
+            import asyncio
+            return await asyncio.to_thread(native_embedding.encode, self.model, payload_texts,
+                                           getattr(self, '_index_vector_size', None), release_after=query)
         if self.connection_mode == "active":
             # Resolve before lookup so disabled/expired bindings still fail.
             connection = self._resolve_embedding_connection()

@@ -3,6 +3,17 @@ use super::{first, text, Args, Failure, Result};
 use rusqlite::Connection;
 use serde_json::{json, Value};
 
+pub(super) fn roles(conn: &Connection) -> Result<Value> {
+    let mut values = serde_json::Map::new();
+    for role in ["answer", "embeddings", "local_fallback"] {
+        values.insert(
+            role.into(),
+            snapshot(conn, json!({"role":role}).as_object().unwrap())?,
+        );
+    }
+    Ok(json!(values))
+}
+
 pub(super) fn snapshot(conn: &Connection, args: &Args) -> Result<Value> {
     let bound;
     let revision_id = match (args.get("role"), args.get("revision_id")) {

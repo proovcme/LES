@@ -1,5 +1,5 @@
 //! File generation replacement against the existing FTS5 projection.
-use rusqlite::{params, types::Value as SqlValue, Connection, TransactionBehavior};
+use rusqlite::{params, types::Value as SqlValue, Connection, Transaction, TransactionBehavior};
 use serde_json::{json, Value};
 use std::{
     fs::File,
@@ -88,22 +88,33 @@ fn with_rows(
 }
 
 pub fn replace(request: &Value) -> Result<Value, &'static str> {
+    let mut conn = open(request)?;
+    let tx = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|_| STORAGE)?;
+    let count = replace_in(&tx, request)?;
+    tx.commit().map_err(|_| STORAGE)?;
+    Ok(json!({"replaced":count}))
+}
+
+pub(crate) fn open(request: &Value) -> Result<Connection, &'static str> {
     let path = Path::new(required(request, "database")?);
     if !path.is_absolute() {
         return Err(INVALID);
     }
-    let collection = required(request, "collection")?;
-    let dataset = required(request, "dataset_id")?;
-    let name = required(request, "doc_name")?;
-    let mut conn = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)
+    let conn = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)
         .map_err(|_| STORAGE)?;
     conn.busy_timeout(std::time::Duration::from_secs(10))
         .map_err(|_| STORAGE)?;
     conn.pragma_update(None, "synchronous", "FULL")
         .map_err(|_| STORAGE)?;
-    let tx = conn
-        .transaction_with_behavior(TransactionBehavior::Immediate)
-        .map_err(|_| STORAGE)?;
+    Ok(conn)
+}
+
+pub(crate) fn replace_in(tx: &Transaction<'_>, request: &Value) -> Result<usize, &'static str> {
+    let collection = required(request, "collection")?;
+    let dataset = required(request, "dataset_id")?;
+    let name = required(request, "doc_name")?;
     tx.execute(
         "DELETE FROM lexical_chunks WHERE collection=?1 AND dataset_id=?2 AND doc_name=?3",
         params![collection, dataset, name],
@@ -144,6 +155,5 @@ pub fn replace(request: &Value) -> Result<Value, &'static str> {
             Ok(())
         })?
     };
-    tx.commit().map_err(|_| STORAGE)?;
-    Ok(json!({"replaced":count}))
+    Ok(count)
 }

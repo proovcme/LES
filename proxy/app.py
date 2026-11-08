@@ -687,8 +687,6 @@ def create_app():
     fastapi_app.include_router(_without_full_les_paths(runtime_router, _FULL_LES_RUNTIME_PATHS) if is_light() else runtime_router)
     fastapi_app.include_router(diagnostics_router)
     fastapi_app.include_router(jobs_router)
-    from proxy.routers.dataset_external import native_router as native_intake_router
-    fastapi_app.include_router(native_intake_router)
     fastapi_app.include_router(logs_router)
     fastapi_app.include_router(mail_router)
     fastapi_app.include_router(rerank_router)

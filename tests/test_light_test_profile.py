@@ -1,6 +1,7 @@
 """The release gate follows the standalone Light product boundary."""
 
 import shutil
+import os
 import subprocess
 from pathlib import Path
 
@@ -12,7 +13,9 @@ def test_light_gate_keeps_chat_rag_memory_and_packaging_without_estimate_suites(
     root = Path(__file__).resolve().parents[1]
     for target in ("verify", "test"):
         output = subprocess.run(["make", "-n", target], cwd=root, check=True,
-                                capture_output=True, text=True).stdout
+                                capture_output=True, text=True,
+                                env={key:value for key,value in os.environ.items()
+                                     if key not in {'MAKEFLAGS','MFLAGS','MAKEOVERRIDES','PYTEST_BASETEMP'}}).stdout
         for required in ("test_light_package.py", "test_light_router_boundary.py",
                          "test_light_chat_evidence.py", "test_retrieval_service.py",
                          "test_memory_core.py", "test_model_connection_chat_integration.py"):

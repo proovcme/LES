@@ -1,0 +1,102 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "corpus_kind",
+    "reader_summary",
+    "where_to_look",
+    "file_roles",
+    "known_gaps",
+    "answer_guidance",
+    "confidence"
+  ],
+  "properties": {
+    "schema": {
+      "type": "string",
+      "enum": [
+        "dataset_reader_map_v1"
+      ]
+    },
+    "corpus_kind": {
+      "type": "string",
+      "maxLength": 120
+    },
+    "reader_summary": {
+      "type": "string"
+    },
+    "where_to_look": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "question_type",
+          "target_files",
+          "reason"
+        ],
+        "properties": {
+          "question_type": {
+            "type": "string"
+          },
+          "target_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 12
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
+      "maxItems": 16
+    },
+    "file_roles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "file_name",
+          "role",
+          "what_inside",
+          "confidence"
+        ],
+        "properties": {
+          "file_name": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "what_inside": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        }
+      },
+      "maxItems": 40
+    },
+    "known_gaps": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 20
+    },
+    "answer_guidance": {
+      "type": "string"
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    }
+  }
+}

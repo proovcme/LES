@@ -11,7 +11,7 @@ fn tool(
     properties: Value,
 ) -> Value {
     json!({"name":name,"description":description,
-        "annotations":{"readOnlyHint":read,"destructiveHint":destructive,"idempotentHint":read,"openWorldHint":false},
+        "annotations":{"readOnlyHint":read,"destructiveHint":destructive,"idempotentHint":read,"openWorldHint":matches!(name,"web_search"|"web_read")},
         "inputSchema":{"type":"object","required":required,"properties":properties,"additionalProperties":false}})
 }
 
@@ -24,6 +24,8 @@ pub fn list() -> Value {
     let scope = json!({"type":"integer","minimum":0,"default":0});
     let path = json!({"type":"string","maxLength":240,"description":"Относительный путь файла в рабочем каталоге Леса"});
     json!({"tools":[
+        tool("web_search","Найти публичные веб-источники. Возвращает названия, выдержки и прямые ссылки; выдержка поиска не заменяет чтение страницы.",true,false,&["q"],json!({"q":{"type":"string","minLength":3,"maxLength":500},"limit":{"type":"integer","minimum":1,"maximum":4}})),
+        tool("web_read","Прочитать выбранную публичную веб-страницу. Возвращает текст, название и ссылку на первоисточник.",true,false,&["url"],json!({"url":{"type":"string","maxLength":8192},"max_chars":{"type":"integer","minimum":1,"maximum":4000}})),
         tool("list_datasets","Показать пользовательские наборы Леса и число готовых фрагментов.",true,false,&[],json!({})),
         tool("list_documents","Показать файлы набора, статусы обработки, размеры и ссылки на оригиналы.",true,false,&["dataset_id"],
             json!({"dataset_id":dataset,"q":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":100},"offset":{"type":"integer","minimum":0}})),
@@ -188,6 +190,30 @@ fn chat(api: &Api, args: &Value) -> Result<Value> {
 pub fn call(name: &str, args: &Value) -> Result<Value> {
     let api = Api::connect()?;
     match name {
+        "web_search" | "web_read" => {
+            let (field, max) = if name == "web_search" {
+                ("q", 500)
+            } else {
+                ("url", 8192)
+            };
+            let value = required(args, field)?;
+            if value.chars().count() > max
+                || (name == "web_search" && value.trim().chars().count() < 3)
+            {
+                return Err("Неверная длина запроса или адреса.".into());
+            }
+            let payload=api.post("/api/tools/call",json!({"tool":name,"args":Value::Object(pick(args,if name=="web_search"{&["q","limit"]}else{&["url","max_chars"]}))}),40)?;
+            if payload["status"] == "error" || payload["status"] == "failed" {
+                let message = payload["warnings"]
+                    .as_array()
+                    .and_then(|v| v.first())
+                    .and_then(Value::as_str)
+                    .or_else(|| payload["message"].as_str())
+                    .unwrap_or("Не удалось получить данные из интернета. Повторите запрос.");
+                return Err(message.to_string());
+            }
+            Ok(payload)
+        }
         "list_datasets" => api.library(),
         "list_documents" => {
             required(args, "dataset_id")?;

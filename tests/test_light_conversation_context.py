@@ -16,7 +16,7 @@ def test_extractive_summary_cannot_rewrite_plans_dates_or_languages():
 
 
 @pytest.fixture
-def conversation(tmp_path, monkeypatch, catalog_engine):
+def seeded_conversation(tmp_path, monkeypatch):
     path = tmp_path / 'meta.db'
     for module in (service, chat_session_service, memory_service):
         monkeypatch.setattr(module, 'rag_meta_db_path', lambda: str(path))
@@ -27,6 +27,11 @@ def conversation(tmp_path, monkeypatch, catalog_engine):
         conn.executemany('INSERT INTO chat_history VALUES (?,?,?,?,?,?)', [
             (i, sid, f'Требование {i}: сохранить библиотеку', f'Обсудили шаг {i}', 1, '{"evidence_manifest": {"source": "test"}}') for i in range(1, 9)])
     return sid, path
+
+
+@pytest.fixture
+def conversation(catalog_engine, seeded_conversation):
+    return seeded_conversation
 
 
 @pytest.mark.asyncio
@@ -63,6 +68,42 @@ def test_forget_blocks_every_old_recall_but_preserves_history_and_other_chats(co
     with sqlite3.connect(path) as conn:
         conn.execute('INSERT INTO chat_history VALUES (9,?,?,?,1,?)', (sid, 'Новая цель', 'Продолжим', '{}'))
     assert memory_service.session_user_questions(sid) == ['Новая цель']
+
+
+def test_message_isolation_applies_to_every_projection_and_restores_original(seeded_conversation):
+    sid, path = seeded_conversation
+    with sqlite3.connect(path) as conn:
+        conn.execute("ALTER TABLE chat_history ADD COLUMN attachment_context TEXT DEFAULT 'Файл'")
+        conn.execute("ALTER TABLE chat_history ADD COLUMN feedback_status TEXT DEFAULT 'correct'")
+        conn.execute("ALTER TABLE chat_history ADD COLUMN crag_status TEXT DEFAULT 'VERIFIED'")
+    service.update_context(sid, expected_revision=0, summary='Копия старого ответа', through_id=7)
+
+    def isolate(role, excluded=True):
+        return service.catalog_call(str(path), 'context_isolate', session_id=sid, history_id=7,
+                                    role=role, excluded=excluded)
+
+    assert isolate('assistant') == [{'history_id': 7, 'role': 'assistant'}]
+    assert service.summary_record(sid) is None
+    with pytest.raises(service.ContextConflict):
+        service.update_context(sid, expected_revision=1, summary='Устаревший результат модели')
+    item = memory_service.session_memory_items(sid)[-2]
+    assert item['turn_id'] == 'chat:7' and item['question'] and item['answer'] == ''
+    assert item['attachment_context'] == 'Файл'
+    assert 'Обсудили шаг 7' not in str(memory_service.session_dialogue_messages(sid))
+    assert 'Обсудили шаг 7' not in str(service.history_turns(sid))
+    assert len(memory_service.session_recent_retrieval_traces(sid, max_turns=8)) == 7
+    assert 7 not in [row['id'] for row in service.catalog_call(str(path), 'history_recall', question='Другое')]
+
+    isolate('user')
+    assert not any('Требование 7' in question for question in memory_service.session_user_questions(sid, max_turns=8))
+    assert not any(row['id'] == 7 for row in service.history_turns(sid))
+    assert isolate('assistant', False) == [{'history_id': 7, 'role': 'user'}]
+    item = memory_service.session_memory_items(sid)[-2]
+    assert item['question'] == item['attachment_context'] == '' and item['answer'] == 'Обсудили шаг 7'
+    assert isolate('user', False) == []
+    with sqlite3.connect(path) as conn:
+        assert conn.execute('SELECT question,answer FROM chat_history WHERE id=7').fetchone() == (
+            'Требование 7: сохранить библиотеку', 'Обсудили шаг 7')
 
 
 @pytest.mark.asyncio

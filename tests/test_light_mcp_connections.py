@@ -112,6 +112,8 @@ def test_real_stdio_process_and_disabled_handler(isolated_db, tmp_path):
     script = tmp_path / "сервер с пробелами.py"
     script.write_text('from mcp.server.fastmcp import FastMCP\nfrom mcp.types import ToolAnnotations\nm = FastMCP("stdio acceptance")\n@m.tool(annotations=ToolAnnotations(readOnlyHint=True))\ndef echo(text: str) -> str:\n    return "Прочитано: " + text\nm.run()\n', encoding="utf-8")
     item = service.save("Локальный", transport="stdio", command=sys.executable, args=[str(script)])
+    import hashlib,json
+    assert item['url']=='stdio:'+hashlib.sha256(json.dumps({'transport':'stdio','command':item['command'],'args':item['args']},sort_keys=True).encode()).hexdigest()
     found = asyncio.run(service.discover(item["id"]))
     assert [tool["name"] for tool in found] == ["echo"]
     asyncio.run(service.enable(item["id"], ["echo"]))
@@ -132,12 +134,19 @@ def test_stdio_requires_existing_absolute_executable(isolated_db):
     assert service.connections() == []
 
 
-def test_missing_sdk_has_repair_message(isolated_db, monkeypatch):
-    import sys
-    monkeypatch.setitem(sys.modules, "mcp", None)
+def test_missing_native_component_has_repair_message(isolated_db, monkeypatch, tmp_path):
     item = service.save("Проверка", "https://example.org/mcp")
+    monkeypatch.setenv('LES_NATIVE_MCP_WORKER', str(tmp_path/'missing-mcp.exe'))
     with pytest.raises(ValueError, match="Восстановите установку"):
         asyncio.run(service.discover(item["id"]))
+
+
+def test_native_client_does_not_depend_on_python_mcp_sdk(isolated_db, server, monkeypatch):
+    import sys
+    with monkeypatch.context() as patch:
+        patch.setitem(sys.modules, 'mcp', None)
+        item = service.save('Нативный MCP', server[0])
+        assert {tool['name'] for tool in asyncio.run(service.discover(item['id']))} == {'echo', 'change'}
 
 
 def test_http_connection_survives_stdio_schema_migration(tmp_path, monkeypatch):

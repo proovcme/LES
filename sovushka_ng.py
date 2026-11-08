@@ -383,6 +383,7 @@ async def classic_chat_page(request: Request):
 @ui.page("/les/classic/")
 async def classic_admin_page(request: Request):
     from sovushka.components.header import build_header
+    from sovushka.components.navigation import bind_route_tabs, navigation_link, svelte_chat_url
     from sovushka.pages.diag import build_diag
     from sovushka.pages.instrumenty import build_instrumenty
     from sovushka.pages.model_connections import build_model_connections
@@ -397,6 +398,22 @@ async def classic_admin_page(request: Request):
 
     if not is_admin:
         return RedirectResponse("/")
+
+    _requested_admin_tab = (request.query_params.get("tab") or "").strip().casefold()
+    app_url = svelte_chat_url() if is_light() else None
+    status_url = f"{app_url}?view=status" if app_url else None
+    show_details = request.query_params.get("details") == "1"
+    if status_url and _requested_admin_tab == "state" and not show_details:
+        return RedirectResponse(status_url)
+
+    def build_state():
+        if status_url and not show_details:
+            navigation_link("Открыть состояние", status_url, "o_health_and_safety")
+            ui.navigate.to(status_url)
+        else:
+            if status_url:
+                navigation_link("К сводке состояния", status_url, "o_arrow_back")
+            build_diag()
 
     _apply_theme()
 
@@ -431,13 +448,12 @@ async def classic_admin_page(request: Request):
         def _save_tab(e):
             try:
                 val = e.args if isinstance(e.args, str) else (e.args[0] if isinstance(e.args, (list, tuple)) and e.args else None)
-                if val:
+                if val and (not status_url or show_details or val != "Состояние"):
                     app.storage.user["last_tab"] = str(val)
             except Exception:
                 pass
         tabs.on("update:model-value", _save_tab)
 
-        _requested_admin_tab = (request.query_params.get("tab") or "").strip().casefold()
         _last_tab = {"state": "Состояние", "models": "Модели", "tools": "Инструменты",
                      "profiles": "Профили", "mail": "Почта"}.get(
                          _requested_admin_tab, app.storage.user.get("last_tab", "Модели"))
@@ -451,8 +467,7 @@ async def classic_admin_page(request: Request):
             "Доступ": tab_volk,
         }
         _target = _tab_map.get(_last_tab) or tab_model_connections
-        from sovushka.components.navigation import bind_route_tabs
-        bind_route_tabs(tabs, {"state": tab_diag, "models": tab_model_connections,
+        bind_route_tabs(tabs, {"state": tab_diag if not status_url or show_details else None, "models": tab_model_connections,
                               "tools": tab_instrumenty, "profiles": tab_profiles,
                               "mail": tab_mail_settings}, "/les/classic")
 
@@ -460,7 +475,7 @@ async def classic_admin_page(request: Request):
         lazy_tab_panels(
             tabs,
             [
-                (tab_diag, lambda: build_diag()),
+                (tab_diag, build_state),
                 *([(tab_instrumenty, lambda: build_instrumenty())] if tab_instrumenty else []),
                 (tab_model_connections, lambda: build_model_connections()),
                 (tab_profiles, lambda: build_profiles()),

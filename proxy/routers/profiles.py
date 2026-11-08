@@ -98,16 +98,13 @@ async def create_text_revision(req: TextRevisionRequest, _admin=Depends(require_
 
 @router.get("/revisions/{revision_id}/instructions")
 async def read_profile_instructions(revision_id: str, _user=Depends(require_user)):
-    from proxy.services.chat_profile_service import _connect, _profile_snapshot
+    from proxy.services.chat_profile_service import profile_snapshot
     from proxy.services.chat_evidence_application_service import profile_system_prompt
-    conn = _connect(_profiles_db_path())
     try:
-        snapshot = _profile_snapshot(conn, revision_id)
+        snapshot = profile_snapshot(revision_id, db_path=_profiles_db_path())
         return {"revision_id": revision_id, "text": profile_system_prompt(snapshot, strict=False)}
     except ValueError as error:
         raise _conflict(error) from error
-    finally:
-        conn.close()
 
 
 @router.post("/revisions")

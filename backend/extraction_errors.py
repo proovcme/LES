@@ -1,15 +1,14 @@
 """Stable extraction failures, never searchable substitute document text."""
-MESSAGES = {
-    'NO_SEARCHABLE_TEXT':'В документе не найден текст для поиска. Проверьте содержимое файла и распознавание сканов.',
-    'OCR_DISABLED':'В документе есть страницы без текста. Включите локальное распознавание и повторите обработку.',
-    'OCR_READ_FAILED':'Не удалось распознать страницы. Проверьте язык распознавания Windows и исходный документ.',
-    'DOC_ENCRYPTED':'Документ Word защищён паролем. Добавьте незашифрованную копию.',
-    'DOC_VERSION_UNSUPPORTED':'Эта версия старого формата Word не поддерживается. Сохраните копию в DOCX.',
-    'DOC_TRUNCATED':'Структура документа Word повреждена или обрезана. Проверьте исходный файл.',
-}
+import json
+from pathlib import Path
+
+MESSAGES = json.loads((Path(__file__).resolve().parents[1] / 'config/extraction-errors.json').read_text(encoding='utf-8'))
 
 
 class DocumentExtractionError(RuntimeError):
-    def __init__(self, code):
+    def __init__(self, code, *, line=None, column=None):
         self.code = code
-        super().__init__(MESSAGES.get(code, 'Не удалось прочитать структуру документа. Проверьте исходный файл.'))
+        message = MESSAGES.get(code, 'Не удалось прочитать структуру документа. Проверьте исходный файл.')
+        if isinstance(line, int) and line>0 and isinstance(column, int) and column>0:
+            message += f' Строка {line}, позиция {column}.'
+        super().__init__(message)

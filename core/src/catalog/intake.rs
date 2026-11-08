@@ -270,6 +270,7 @@ fn checkpoint(conn: &Connection, id: &str, args: &Args, now: &str) -> Result<Val
          LEFT JOIN documents d ON d.id=(SELECT candidate.id FROM documents candidate
              WHERE candidate.dataset_id=j.dataset_id AND candidate.file_name=f.file_name
              ORDER BY candidate.rowid LIMIT 1)
+             AND d.source_path=f.source_path
          WHERE j.id=?1 AND j.phase='index'", [id])?;
     let indexed = counts["indexed"].as_i64().unwrap_or_default();
     let errors = counts["errors"].as_i64().unwrap_or_default();
@@ -304,6 +305,14 @@ fn checkpoint(conn: &Connection, id: &str, args: &Args, now: &str) -> Result<Val
          WHERE id=?1 AND phase='index' AND status='running'",
         params![id, indexed, errors, pending, status, reason, message, retry_at, now, skipped],
     )?;
+    if status == "completed" && indexed > 0 {
+        let dataset: String = conn.query_row(
+            "SELECT dataset_id FROM native_intakes WHERE id=?1",
+            [id],
+            |row| row.get(0),
+        )?;
+        crate::index_events::completed(conn, &format!("intake:{id}"), &dataset, seconds())?;
+    }
     if matches!(status, "completed" | "failed") {
         conn.execute("DELETE FROM native_intake_files WHERE job_id=?1", [id])?;
     }
@@ -400,7 +409,46 @@ pub(super) fn execute(conn: &Connection, action: &str, args: &Args) -> Result<Va
              ORDER BY f.ordinal LIMIT 25",
             [id]
         )?)),
+        "intake_index_batch" => Ok(json!(rows(
+            conn,
+            "SELECT d.file_name,d.source_path FROM native_intakes j
+             JOIN native_intake_files f ON f.job_id=j.id
+             JOIN documents d ON d.id=(SELECT candidate.id FROM documents candidate
+                 WHERE candidate.dataset_id=j.dataset_id AND candidate.file_name=f.file_name
+                 ORDER BY candidate.rowid LIMIT 1) AND d.source_path=f.source_path
+             WHERE j.id=?1 AND j.phase='index' AND j.status='running' AND d.status='PENDING'
+             ORDER BY CASE WHEN d.complexity='needs_ocr' OR d.pipeline='markdown_needs_ocr' THEN 1 ELSE 0 END,
+                      coalesce(nullif(d.file_size,0),9223372036854775807),d.file_name
+             LIMIT (SELECT max(0, min(parse_limit, 500)) FROM native_intakes WHERE id=?1)",
+            [id]
+        )?)),
         "intake_register" => register(conn, id, args, &now),
+        "intake_retry_due" => {
+            let changed = conn.execute(
+                "UPDATE documents SET status='PENDING',stage='' WHERE status='ERROR' AND retryable=1 AND retry_after<=?2
+                 AND EXISTS(SELECT 1 FROM native_intakes j JOIN native_intake_files f ON f.job_id=j.id
+                    WHERE j.id=?1 AND j.status='running' AND j.phase='index'
+                    AND documents.dataset_id=j.dataset_id AND documents.file_name=f.file_name
+                    AND documents.source_path=f.source_path)", params![id,seconds()])?;
+            Ok(json!({"retried":changed}))
+        }
+        "intake_index_attempt" => {
+            let file = text(args, "file_name")?;
+            let source = text(args, "source_path")?;
+            let attempts: Option<i64> = conn.query_row(
+                "UPDATE documents SET parse_attempts=coalesce(parse_attempts,0)+1,
+                    last_attempt_at=?4,retryable=0,retry_after=0,error_code='',last_error='',stage='CONVERT'
+                 WHERE status='PENDING' AND id=(SELECT d.id FROM native_intakes j
+                    JOIN native_intake_files f ON f.job_id=j.id
+                    JOIN documents d ON d.dataset_id=j.dataset_id AND d.file_name=f.file_name
+                    WHERE j.id=?1 AND j.phase='index' AND j.status='running'
+                      AND f.file_name=?2 AND f.source_path=?3 AND d.source_path=f.source_path
+                    ORDER BY d.rowid LIMIT 1)
+                 RETURNING parse_attempts",
+                params![id, file, source, seconds()], |row| row.get(0),
+            ).optional()?;
+            Ok(json!(attempts.unwrap_or(0)))
+        }
         "intake_index_checkpoint" => checkpoint(conn, id, args, &now),
         "intake_wait" => {
             conn.execute(

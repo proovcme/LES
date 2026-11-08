@@ -90,6 +90,9 @@ def embed_profile() -> EmbeddingProfile:
 def embedding_model_id() -> str:
     if os.getenv("EMBEDDING_MODEL"):
         return os.environ["EMBEDDING_MODEL"]
+    stored = read_index_contract() or {}
+    if stored.get('native_embedding_revision'):
+        return str(stored['embedding_model'])
     profile = embed_profile()
     if profile.name != "legacy":
         return profile.model
@@ -97,6 +100,9 @@ def embedding_model_id() -> str:
 
 
 def embedding_api_model() -> str:
+    stored = read_index_contract() or {}
+    if stored.get('native_embedding_revision') and not os.getenv('EMBED_MODEL'):
+        return str(stored['embedding_api_model'])
     profile = embed_profile()
     if profile.name != "legacy":
         api_model = os.getenv("EMBED_MODEL", "")
@@ -142,7 +148,15 @@ def rag_meta_db_path() -> str:
 
 
 def rag_vector_size() -> int:
-    return int(os.getenv("RAG_VECTOR_SIZE", str(embed_profile().vector_size)))
+    stored = read_index_contract() or {}
+    default = stored.get('vector_size', embed_profile().vector_size) if stored.get('native_embedding_revision') else embed_profile().vector_size
+    return int(os.getenv("RAG_VECTOR_SIZE", str(default)))
+
+
+def embedding_backend() -> str:
+    stored = read_index_contract() or {}
+    default = stored.get('embedding_backend', 'sentence_transformers') if stored.get('native_embedding_revision') else 'sentence_transformers'
+    return os.getenv('EMBED_BACKEND', default).strip().lower()
 
 
 def rag_chunk_size() -> int:
@@ -159,6 +173,7 @@ def rag_chunk_overlap() -> int:
 # старое поведение (символы) без реиндекса.
 
 _token_len_fn_cache: object = None
+_token_len_fn_key: tuple | None = None
 
 
 def rag_chunk_unit() -> str:
@@ -179,15 +194,50 @@ def embed_seq_len() -> int:
     return int(os.getenv("COREML_EMBED_SEQ_LEN", "512"))
 
 
+def _local_tokenizer_asset(model_id: str) -> Path | None:
+    explicit = os.getenv('RAG_TOKENIZER_FILE', '').strip()
+    if explicit:
+        return Path(explicit).expanduser().resolve()
+    if not re.fullmatch(r'[\w.-]+(?:/[\w.-]+)?', model_id) or '..' in model_id:
+        return None
+    hf_home = Path(os.getenv('HF_HOME') or Path.home() / '.cache/huggingface').expanduser()
+    hub = Path(os.getenv('HF_HUB_CACHE') or os.getenv('HUGGINGFACE_HUB_CACHE') or hf_home / 'hub').expanduser()
+    repository = hub / ('models--' + model_id.replace('/', '--'))
+    try:
+        revision = (repository / 'refs/main').read_text(encoding='ascii').strip()
+    except (OSError, UnicodeError):
+        revision = ''
+    if re.fullmatch(r'[a-f0-9]{40,64}', revision):
+        file = repository / 'snapshots' / revision / 'tokenizer.json'
+        return file if file.is_file() else None
+    candidates = [file for file in (repository / 'snapshots').glob('*/tokenizer.json') if file.is_file()]
+    return candidates[0] if len(candidates) == 1 else None
+
+
 def token_length_fn():
     """Счётчик токенов токенизатором модели эмбеддингов (лениво, кэшируется).
 
     None — если transformers/токенизатор недоступны: вызывающий код обязан
     откатиться на символьный режим с громким предупреждением.
     """
-    global _token_len_fn_cache
-    if _token_len_fn_cache is not None:
+    global _token_len_fn_cache, _token_len_fn_key
+    model_id = embedding_model_id()
+    explicit = os.getenv('RAG_TOKENIZER_FILE', '').strip()
+    key = (model_id, explicit, os.getenv('HF_HUB_CACHE'), os.getenv('HF_HOME'))
+    if _token_len_fn_key == key and _token_len_fn_cache is not None:
         return _token_len_fn_cache if callable(_token_len_fn_cache) else None
+    _token_len_fn_key = key
+    _token_len_fn_cache = None
+    from backend import native_core
+    asset = _local_tokenizer_asset(model_id)
+    if asset is not None and native_core.supports('document_tokenizer'):
+        try:
+            _token_len_fn_cache = native_core.LocalTokenizer(asset)
+            return _token_len_fn_cache
+        except native_core.NativeCoreError:
+            if explicit:
+                raise
+            logging.getLogger(__name__).warning('[CHUNK] локальный токенизатор %s не удалось прочитать', model_id)
     try:
         from transformers import AutoTokenizer
 
@@ -197,7 +247,7 @@ def token_length_fn():
             "1", "true", "yes", "on"
         }
         tokenizer = AutoTokenizer.from_pretrained(
-            embedding_model_id(),
+            model_id,
             local_files_only=local_only,
         )
 
@@ -217,7 +267,9 @@ def token_length_fn():
 
 def chunking_config() -> dict:
     """Итоговая конфигурация чанкера: unit/size/overlap/len_fn + страховка ADR-7."""
-    if rag_chunk_unit() == "tokens":
+    stored = read_index_contract() or {}
+    explicit = bool(os.getenv('RAG_TOKENIZER_FILE', '').strip())
+    if rag_chunk_unit() == "tokens" and (stored.get('chunk_unit') != 'chars' or explicit):
         len_fn = token_length_fn()
         if len_fn is not None:
             size = rag_chunk_tokens()
@@ -249,7 +301,7 @@ def index_contract_payload() -> dict[str, Any]:
         "collection": rag_collection_name(),
         "embedding_model": embedding_model_id(),
         "embedding_api_model": embedding_api_model(),
-        "embedding_backend": os.getenv("EMBED_BACKEND", "sentence_transformers").strip().lower(),
+        "embedding_backend": embedding_backend(),
         "vector_size": rag_vector_size(),
         "document_embedding_mode": DOCUMENT_EMBEDDING_MODE,
         "chunk_unit": chunking["unit"],
@@ -276,6 +328,12 @@ def index_contract_payload() -> dict[str, Any]:
                 "embedding_fallback": os.getenv("COREML_EMBED_FALLBACK", ""),
             }
         )
+    asset = getattr(chunking['len_fn'], 'asset', None)
+    stored = read_index_contract()
+    if stored and stored.get('native_embedding_revision'):
+        payload['native_embedding_revision'] = stored['native_embedding_revision']
+    if asset is not None and (stored is None or 'chunk_tokenizer_sha256' in stored or os.getenv('RAG_TOKENIZER_FILE')):
+        payload['chunk_tokenizer_sha256'] = asset['sha256']
     stable = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     payload["fingerprint"] = hashlib.sha256(stable.encode("utf-8")).hexdigest()
     return payload
@@ -283,7 +341,7 @@ def index_contract_payload() -> dict[str, Any]:
 
 def point_embedding_descriptor() -> dict[str, str]:
     """Canonical point-level embedding identity shared by ingestion and manifest."""
-    backend = os.getenv("EMBED_BACKEND", "sentence_transformers").strip().lower()
+    backend = embedding_backend()
     descriptor = {
         "backend": backend,
         "model_id": embedding_model_id(),
@@ -336,21 +394,6 @@ def index_contract_status() -> dict[str, Any]:
         "actual_fingerprint": actual.get("fingerprint", ""),
         "actual": actual,
     }
-
-
-def write_index_contract(*, replace: bool = False) -> Path:
-    """Persist the contract for a newly created or explicitly adopted collection."""
-    path = index_contract_path()
-    if path.exists() and not replace:
-        raise FileExistsError(f"index contract already exists: {path}")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(
-        json.dumps(index_contract_payload(), ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    tmp.replace(path)
-    return path
 
 
 def rag_runtime_config() -> dict[str, str | int]:
