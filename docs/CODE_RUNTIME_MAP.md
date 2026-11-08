@@ -19,13 +19,13 @@
 
 | Метрика | Значение |
 | --- | --- |
-| Python-файлов под git | 716 |
-| Строк Python | 173570 |
+| Python-файлов под git | 710 |
+| Строк Python | 170916 |
 | PRODUCT_REACHABLE | 421 |
 | RUNTIME_SUPPORT | 5 |
-| TEST_OR_TOOL_ONLY | 256 |
-| DORMANT_CANDIDATE | 34 |
-| Зарегистрированных API-маршрутов | 300 |
+| TEST_OR_TOOL_ONLY | 257 |
+| DORMANT_CANDIDATE | 27 |
+| Зарегистрированных API-маршрутов | 298 |
 | Ошибок разбора | 0 |
 
 ## Крупнейшие продуктовые модули
@@ -48,7 +48,7 @@
 | sovushka/pages/samovar.py | 1143 | 3 |
 | backend/document_router.py | 1118 | 10 |
 | tools/build_rag_contract_sibling.py | 1114 | 2 |
-| backend/document_catalog.py | 1068 | 16 |
+| backend/document_catalog.py | 1068 | 17 |
 | tools/reindex_datasets_guarded.py | 1016 | 1 |
 | proxy/services/drawing_manifest_service.py | 1012 | 3 |
 | sovushka/components/header.py | 1003 | 2 |
@@ -97,29 +97,22 @@
 | proxy/services/candidate_selection_service.py | 136 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/checklist_template_importer.py | 450 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/clarification_service.py | 225 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
-| proxy/services/construction_harness_service.py | 477 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/document_object_model.py | 79 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/document_outline_service.py | 108 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
-| proxy/services/fsem_machinist_service.py | 175 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/glossary_chat_service.py | 90 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/harvest_service.py | 213 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/help_chat_service.py | 97 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/kac_web_service.py | 180 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/les_md_chat_service.py | 66 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
-| proxy/services/nr_sp_service.py | 93 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/office_passport_service.py | 175 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/parent_card_hydration_service.py | 172 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/preset_chat_service.py | 64 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
-| proxy/services/quantity_trace_service.py | 145 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/reconcile_chat_service.py | 150 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
-| proxy/services/resource_cost_service.py | 801 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/scoped_rag_builder.py | 111 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/sovushka_tone.py | 49 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/spreadsheet_object_model.py | 153 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
-| proxy/services/stesnennost_service.py | 116 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/table_detect.py | 86 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/tool_provider_projection_service.py | 23 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
-| proxy/services/unified_construction_harness_service.py | 959 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/update_service.py | 1082 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 
 ## Ограничения

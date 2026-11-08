@@ -9,14 +9,13 @@ import threading
 from datetime import datetime
 from pathlib import Path
 from backend.light_qdrant_connection import qdrant_http_headers
-from backend.native_index_store import accepts
 from typing import Any, Literal
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from backend.rag_config import rag_collection_name, rag_meta_db_path
 from backend.smart_index import is_temporary_source_name
-from proxy.config import external_allow_any, external_source_roots, rag_upload_suffixes
+from proxy.config import rag_upload_suffixes
 from proxy.security import require_admin
 from proxy.storage.file_storage import is_within_external_root, validate_external_source
 
@@ -29,66 +28,7 @@ import proxy.services.dataset_runtime as dataset_runtime
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/rag", tags=["rag"])
-native_router = APIRouter(prefix="/api/light", include_in_schema=False)
 _external_sync_lock = asyncio.Lock()
-
-
-def _require_native_intake(request: Request) -> None:
-    supplied = request.headers.get("x-les-intake-token", "")
-    if request.headers.get("origin") is not None or not accepts(supplied):
-        raise HTTPException(404, "Not Found")
-
-
-@native_router.get("/internal-intake-policy", dependencies=[Depends(_require_native_intake)])
-async def native_intake_policy():
-    roots = [] if external_allow_any() else await asyncio.to_thread(external_source_roots)
-    return {"roots": [str(path) for path in roots],
-            "allow_any": external_allow_any(), "suffixes": sorted(rag_upload_suffixes())}
-
-
-class NativeIntakeBatch(BaseModel):
-    dataset_id: str
-    intake_id: str = Field(pattern=r"^[0-9a-f]{32}$")
-
-
-@native_router.post("/internal-intake-parse", dependencies=[Depends(_require_native_intake)])
-async def native_intake_parse(batch: NativeIntakeBatch):
-    """Compatibility adapter for one batch. Rust owns scheduling and progress."""
-    from backend.workspace_native import catalog_call
-
-    state = dataset_runtime.get_dataset_state()
-    async with state.parse_semaphore:
-        database = rag_meta_db_path()
-        job = await asyncio.to_thread(catalog_call, database, "intake_get", id=batch.intake_id)
-        if not job or job["dataset_id"] != batch.dataset_id or job["phase"] != "index" or job["status"] != "running":
-            raise HTTPException(404, "Задание индексации не найдено.")
-        selected = await asyncio.to_thread(catalog_call, database, "intake_index_batch", id=batch.intake_id)
-        if not selected:
-            # The last catalog transaction may have committed before the journal was cleared.
-            from backend.index_replacement import recover_adapter
-            await asyncio.to_thread(recover_adapter, state.backend)
-            selected = await asyncio.to_thread(catalog_call, database, "intake_index_batch", id=batch.intake_id)
-            if not selected:
-                return Response(status_code=204)
-        sources = [(source["file_name"], source["source_path"]) for source in selected]
-        try:
-            await dataset_scheduler.assert_parse_admission(state)
-        except HTTPException as error:
-            logger.info("[NATIVE-INDEX] job=%s admission_status=%s", batch.intake_id, error.status_code)
-            if error.status_code == 409:
-                raise HTTPException(412, "Проверьте модель поиска.") from error
-            raise
-        result = await state.backend.parse_dataset(batch.dataset_id, limit=len(sources), sources=sources,
-                                                   intake_id=batch.intake_id)
-        dataset_scheduler._schedule_reader_after_parse(
-            batch.dataset_id, reason="native_intake", parse_result=result,
-        )
-        after = await asyncio.to_thread(catalog_call, database, "intake_index_batch", id=batch.intake_id)
-        if after == selected:
-            raise HTTPException(409, "Партия не продвинулась.")
-        return {"status": "processed"}
-
-
 
 
 def _project_name_from_dataset(dataset_name: str, explicit: str = "") -> str:

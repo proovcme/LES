@@ -1,5 +1,9 @@
 # Rust HTTP API
 
+830: [фоновый intake](native-intake-execution.md) больше не вызывает Python
+за политикой источников или запуском партии. Старые закрытые FastAPI endpoints
+удалены; их прежние адреса на native front door по-прежнему не доступны клиенту.
+
 829: внутренний `/api/light/internal-index-batch` исполняет целую партию в Rust,
 соединяя конвертацию, inference и публикацию без Python callbacks. Проверяет
 token/Origin, свои пути/worker, RAM, frozen-модель и поддержку выбранных форматов

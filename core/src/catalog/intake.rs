@@ -415,6 +415,15 @@ pub(super) fn execute(conn: &Connection, action: &str, args: &Args) -> Result<Va
             [id]
         )?)),
         "intake_register" => register(conn, id, args, &now),
+        "intake_retry_due" => {
+            let changed = conn.execute(
+                "UPDATE documents SET status='PENDING',stage='' WHERE status='ERROR' AND retryable=1 AND retry_after<=?2
+                 AND EXISTS(SELECT 1 FROM native_intakes j JOIN native_intake_files f ON f.job_id=j.id
+                    WHERE j.id=?1 AND j.status='running' AND j.phase='index'
+                    AND documents.dataset_id=j.dataset_id AND documents.file_name=f.file_name
+                    AND documents.source_path=f.source_path)", params![id,seconds()])?;
+            Ok(json!({"retried":changed}))
+        }
         "intake_index_attempt" => {
             let file = text(args, "file_name")?;
             let source = text(args, "source_path")?;

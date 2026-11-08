@@ -3,6 +3,7 @@ use crate::{error, json_response, Context};
 use axum::{body::to_bytes, extract::Request, http::StatusCode, response::Response};
 use serde_json::{json, Value};
 use std::{path::Path, sync::Arc};
+pub(crate) mod configuration;
 pub const PATH: &str = "/api/light/internal-index-batch";
 
 fn failure(code: &str) -> Value {
@@ -102,13 +103,23 @@ pub async fn handle(context: Arc<Context>, request: Request) -> Response {
         Ok(v) => v,
         Err(_) => return error(StatusCode::PAYLOAD_TOO_LARGE, "INDEX_BATCH_TOO_LARGE"),
     };
-    let mut input: Value = match serde_json::from_slice(&bytes) {
+    let input: Value = match serde_json::from_slice(&bytes) {
         Ok(Value::Object(v)) => Value::Object(v),
         _ => return error(StatusCode::UNPROCESSABLE_ENTITY, "INDEX_BATCH_INVALID"),
     };
+    execute(context, input).await
+}
+
+pub(crate) async fn execute(context: Arc<Context>, mut input: Value) -> Response {
+    let Some(store) = context.index_store.as_ref() else {
+        return error(StatusCode::SERVICE_UNAVAILABLE, "INDEX_STORAGE_UNAVAILABLE");
+    };
+    if let Some(code) = store.recovery_error() {
+        return error(StatusCode::SERVICE_UNAVAILABLE, code);
+    }
     // All filesystem/worker authority comes from the owned native service.
     // A retained caller may supply a frozen algorithm/model descriptor, never a process to run.
-    let root = context.index_store.as_ref().unwrap().content_root(&context);
+    let root = store.content_root(&context);
     let source_root = context.state_root.join("storage/datasets");
     let spool = context.state_root.join("data/index-publish");
     for (key, expected) in [

@@ -273,7 +273,7 @@ fn configuration() -> Result<(std::net::SocketAddr, Context), &'static str> {
     };
     let intake = ingest_token
         .filter(|_| std::env::var("LES_STARTUP_BACKGROUND_MUTATIONS").as_deref() == Ok("true"))
-        .map(intake::Service::new);
+        .map(|_| intake::Service::new());
     let client = reqwest::Client::builder()
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())

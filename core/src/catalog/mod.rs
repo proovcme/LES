@@ -147,6 +147,7 @@ fn dispatch(request: &Value) -> Result<Value> {
         | "intake_register"
         | "intake_index_checkpoint"
         | "intake_index_attempt"
+        | "intake_retry_due"
         | "index_attempt"
         | "intake_wait"
         | "intake_fail"

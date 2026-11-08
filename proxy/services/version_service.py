@@ -29,7 +29,6 @@ APP_VERSION = PRODUCT_VERSION
 LES_VERSION = PRODUCT_VERSION
 EVIDENCE_SCHEMA_VERSION = "1.0"
 EXTRACTION_SCHEMA_VERSION = "1.0"
-RESOURCE_CALC_VERSION = "0.6"
 
 # Корни для проверки divergence. Без env безопаснее считать корнем фактический
 # code tree, чем публиковать чужой platform-specific путь.
@@ -48,12 +47,9 @@ _CRITICAL_FILES = (
     "proxy/app.py",
     "proxy/routers/external_radar.py",
     "proxy/routers/datasets.py",
-    "proxy/routers/lsr.py",
     "proxy/routers/chat.py",
-    "proxy/routers/speckle.py",
     "proxy/routers/tools.py",
     "proxy/routers/runtime.py",
-    "proxy/routers/service_sources.py",
     "proxy/routers/notebooks.py",
     "proxy/services/doc_extract_service.py",
     "proxy/services/evidence_packet_service.py",
@@ -62,10 +58,6 @@ _CRITICAL_FILES = (
     "proxy/services/lexical_index_service.py",
     "proxy/services/retrieval_quality_service.py",
     "proxy/services/retrieval_service.py",
-    "proxy/smeta_core/contracts.py",
-    "proxy/smeta_core/integrity.py",
-    "proxy/smeta_core/norm_browser.py",
-    "proxy/smeta_core/workflow.py",
     "proxy/services/cad_bim_graph.py",
     "proxy/services/clause_lookup_service.py",
     "proxy/services/notebook_service.py",
@@ -79,28 +71,17 @@ _CRITICAL_FILES = (
     "proxy/services/document_explorer_service.py",
     "proxy/services/tool_harness_service.py",
     "proxy/services/candidate_selection_service.py",
-    "proxy/services/estimate_harness_service.py",
-    "proxy/services/estimate_math_service.py",
-    "proxy/services/quantity_trace_service.py",
     "proxy/services/active_state_service.py",
     "proxy/services/les_module_service.py",
     "proxy/services/scoped_rag_builder.py",
     "proxy/services/skill_snippet_registry.py",
     "proxy/services/tool_trace_policy.py",
-    "proxy/services/smeta_artifact_service.py",
-    "proxy/services/smeta_norm_store.py",
-    "proxy/services/rim_lsr_trace_service.py",
-    "proxy/services/rim_trace_xlsx_service.py",
     "proxy/services/sidecar_ops_service.py",
     "proxy/services/answer_form_service.py",
     "proxy/services/deterministic_policy_service.py",
     "proxy/services/glossary_chat_service.py",
     "proxy/services/memory_service.py",
     "proxy/services/notebook_study_service.py",
-    "proxy/services/smeta_chat_service.py",
-    "proxy/services/gesn_service.py",
-    "proxy/services/gesn_update_service.py",
-    "proxy/services/service_source_registry.py",
     "proxy/services/scope_service.py",
     "proxy/services/title_block_extract_service.py",
     "proxy/services/drawing_manifest_service.py",
@@ -113,24 +94,6 @@ _CRITICAL_FILES = (
     "proxy/services/version_service.py",
     "proxy/services/workflow_plan_service.py",
     "proxy/routers/chat_history.py",
-    "config/prompts/smeta_estimator_role.json",
-    "config/domain/nr_sp.yaml",
-    "config/domain/pricebook_manifest.json",
-    "config/domain/electrical_schema_terms.yaml",
-    "skills/smeta/SKILL.md",
-    "tools/smetnoedelo_rag_import.py",
-    "tools/les_tool_harness.py",
-    "tools/drawing_manifest.py",
-    "tools/pd_rd_manifest.py",
-    "tools/electrical_schematic.py",
-    "tools/electrical_materials.py",
-    "tools/electrical_evidence_summary.py",
-    "tools/smeta_ru_norm_download.py",
-    "tools/smeta_ru_norm_rag_ingest.py",
-    "tools/build_smeta_structured_base.py",
-    "tools/build_smeta_service_rag.py",
-    "tools/gesn_unify_base.py",
-    "tools/gesn_update_from_fgis.py",
     "sovushka/pages/chat.py",
     "sovushka/pages/documents.py",
     "sovushka/pages/instrumenty.py",
@@ -139,16 +102,9 @@ _CRITICAL_FILES = (
     "sovushka/styles.py",
     "sovushka_ng.py",
     "mlx_host.py",
-    "config/service_sources.yaml",
 )
-# файлы, которых в рантайме намеренно НЕТ (flag-OFF, dev-only) — их отсутствие НЕ divergence
-_DEV_ONLY = frozenset({
-    "proxy/services/unified_construction_harness_service.py",
-})
-
 # безопасные флаги (булевы, без секретов)
 _SAFE_FLAGS = (
-    "LES_UNIFIED_CONSTRUCTION_HARNESS_ENABLED",
     "LES_ALLOW_RUNTIME_SIDECAR_WRITE",
     "LES_ROUTER_PRIMARY",
     "LES_AGENT_LOOP",
@@ -221,15 +177,14 @@ def runtime_alignment() -> dict[str, Any]:
                 "changed_files": [], "missing_files": []}
     changed: list[str] = []
     missing: list[str] = []
-    dev_only_absent: list[str] = []
     checked = 0
-    for rel in tuple(_CRITICAL_FILES) + tuple(_DEV_ONLY):
+    for rel in _CRITICAL_FILES:
         rp, xp = _REPO_ROOT / rel, _RUNTIME_ROOT / rel
         rh, xh = _sha(rp), _sha(xp)
         if rh is None and xh is None:
             continue
         if xh is None:
-            (dev_only_absent if rel in _DEV_ONLY else missing).append(rel)
+            missing.append(rel)
             continue
         checked += 1
         if rh is not None and rh != xh:
@@ -239,10 +194,10 @@ def runtime_alignment() -> dict[str, Any]:
     elif changed or missing:          # реальное расхождение по деплоящимся файлам
         status = "divergent"
     else:
-        status = "aligned"            # dev-only-отсутствие не считается расхождением
+        status = "aligned"
     return {"status": status, "repo_root": str(_REPO_ROOT), "runtime_root": str(_RUNTIME_ROOT),
             "changed_files": changed, "missing_files": missing,
-            "dev_only_absent": dev_only_absent, "checked": checked}
+            "dev_only_absent": [], "checked": checked}
 
 
 def feature_flags() -> dict[str, bool]:
@@ -345,7 +300,6 @@ def version_info() -> dict[str, Any]:
         "deploy_stamp": ds,
         "evidence_schema_version": EVIDENCE_SCHEMA_VERSION,
         "extraction_schema_version": EXTRACTION_SCHEMA_VERSION,
-        "resource_calc_version": RESOURCE_CALC_VERSION,
         "git_commit": gi["git_commit"],
         "git_commit_full": gi["git_commit_full"],
         "git_branch": gi["git_branch"],
@@ -360,7 +314,6 @@ def version_info() -> dict[str, Any]:
             "proxy": APP_VERSION,
             "harness": HARNESS_VERSION,
             "extractor": str(extractor),
-            "resource_calc": RESOURCE_CALC_VERSION,
             "evidence": EVIDENCE_SCHEMA_VERSION,
         },
     }

@@ -1,5 +1,9 @@
 # Модули LES RAG
 
+830: [фоновое подключение и запуск партии](modules/native-intake-execution.md) —
+`api/src/intake.rs`, `api/src/index_batch/configuration.rs`,
+`core/src/index_configuration.rs`. Прежние внутренние FastAPI-адаптеры удалены.
+
 829: [таблицы и нативный HTTP-исполнитель целой партии](modules/native-table-dispatch.md) —
 `core/src/tables/`, форматный pipeline, `api/src/index_batch.rs`, атомарные ссылки
 Parquet. Проверяется изолированно; общий intake/API ещё не закрыт.
@@ -22,7 +26,7 @@ Parquet. Проверяется изолированно; общий intake/API 
 823: [основной цикл чата в Rust](modules/native-chat-loop.md). Итерации, бюджеты, курсор PDF и финальные попытки; IO/промпты ещё через retained-адаптеры.
 
 822: `core/src/index_batch/` — [координатор партии](modules/native-index-batch.md),
-`backend/native_index_batch.py` — оставшиеся IO/форматные привязки.
+`backend/native_index_batch.py` — совместимый caller конфигурации/HTTP для ручного пути.
 [Приёмка](acceptance/native-index-batch-822.md).
 
 821: [автономный host навыков, библиотека и MCP-клиенты/настройки в Rust](modules/native-skills-mcp.md).
