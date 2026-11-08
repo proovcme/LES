@@ -102,11 +102,11 @@ impl Config {
         let edge_storage = values.remove("--edge-storage").map(PathBuf::from);
         if edge_storage
             .as_ref()
-            .is_some_and(|p| !p.is_absolute() || !p.join("les-vector.sqlite").is_file())
+            .is_some_and(|p| !p.is_absolute() || p.is_file())
         {
             return Err(Failure::new(
                 "EDGE_STORAGE_INVALID",
-                "Не найден подготовленный индекс Edge. Завершите перенос индекса.",
+                "Нужен полный путь к отдельной папке индекса Edge.",
             ));
         }
         let frontend = values

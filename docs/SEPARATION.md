@@ -1,5 +1,10 @@
 # Самостоятельный LES RAG
 
+Кандидат 833: [первый индекс в Rust](modules/native-index-setup.md), включая
+новый пустой Edge, измерение размерности, план/восстановление и лексическую схему.
+Прежний Python layout и FTS-миграция удалены. Чат/специальные форматы/classic
+ещё требуют переноса. [Приёмка](acceptance/native-index-setup-833.md); установка прежняя.
+
 Кандидат 832: [политика доступа к API в Rust](modules/native-access-bootstrap.md).
 Обычный холодный допуск и proxy/CORS больше не спрашивают Python. Старые callback-
 обработчики удалены. Общий launcher/backend, первый индекс и classic ещё остаются.

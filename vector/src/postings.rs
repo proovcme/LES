@@ -29,6 +29,14 @@ impl Shard {
     }
     pub fn refresh_postings(&self, full: bool, mut progress: impl FnMut(Value)) -> Result<Value> {
         let writer = Writer::acquire(&self.content_root(), self.collection())?;
+        self.refresh_postings_held(full, &mut progress, &writer)
+    }
+    pub fn refresh_postings_held(
+        &self,
+        full: bool,
+        mut progress: impl FnMut(Value),
+        writer: &Writer,
+    ) -> Result<Value> {
         let state = writer.journal("read", json!({}))?;
         let phase = state["phase"].as_str().unwrap_or("idle");
         if !matches!(phase, "idle" | "sparse_refresh" | "sparse_dirty") {
@@ -49,9 +57,12 @@ impl Shard {
             || scopes
                 .as_array()
                 .is_none_or(|v| v.is_empty() || v.iter().any(Value::is_null));
-        let revision = state["revision"]
-            .as_str()
-            .unwrap_or_else(|| self.metadata["source_sha256"].as_str().unwrap_or(""));
+        let revision = state["revision"].as_str().unwrap_or_else(|| {
+            self.metadata["source_sha256"]
+                .as_str()
+                .or_else(|| self.metadata["contract_fingerprint"].as_str())
+                .unwrap_or("")
+        });
         if revision.is_empty() {
             return Err("INDEX_SPARSE_STALE");
         }

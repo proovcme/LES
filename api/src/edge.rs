@@ -17,7 +17,7 @@ pub async fn handle(context: Arc<Context>, request: Request) -> Response {
     if let Some(code) = store.recovery_error() {
         return error(StatusCode::SERVICE_UNAVAILABLE, code);
     }
-    let Some(shard) = store.edge.clone() else {
+    let Some(shard) = store.edge.get().cloned() else {
         return error(StatusCode::NOT_FOUND, "Not Found");
     };
     let Ok(permit) = context.workspace_slots.clone().try_acquire_owned() else {

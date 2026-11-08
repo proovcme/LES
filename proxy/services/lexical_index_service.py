@@ -23,15 +23,6 @@ from backend.inference.lexical_tokens import (
     NO_STEM_WORDS, TOKEN_RE, stem_russian_word, compact_query_terms,
 )
 
-CONTEXT_COLUMNS = {
-    "parent_id": "parent_id TEXT DEFAULT ''",
-    "parent_ord": "parent_ord INTEGER",
-    "child_ord": "child_ord INTEGER",
-    "parent_heading": "parent_heading TEXT DEFAULT ''",
-    "context_before": "context_before TEXT DEFAULT ''",
-    "context_after": "context_after TEXT DEFAULT ''",
-    "context_kind": "context_kind TEXT DEFAULT ''",
-}
 
 
 @dataclass
@@ -214,65 +205,13 @@ class LexicalIndex:
 
     @staticmethod
     def ensure_schema(conn: sqlite3.Connection) -> None:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS lexical_chunks (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                collection TEXT NOT NULL,
-                point_id TEXT NOT NULL,
-                dataset_id TEXT DEFAULT '',
-                doc_id TEXT DEFAULT '',
-                doc_name TEXT DEFAULT '',
-                text TEXT NOT NULL,
-                content_hash TEXT NOT NULL,
-                chunk_ord INTEGER,
-                section_heading TEXT DEFAULT '',
-                parent_id TEXT DEFAULT '',
-                parent_ord INTEGER,
-                child_ord INTEGER,
-                parent_heading TEXT DEFAULT '',
-                context_before TEXT DEFAULT '',
-                context_after TEXT DEFAULT '',
-                context_kind TEXT DEFAULT '',
-                updated_at REAL NOT NULL,
-                UNIQUE(collection, point_id)
-            );
-            CREATE VIRTUAL TABLE IF NOT EXISTS lexical_chunks_fts
-            USING fts5(text, doc_name, content='lexical_chunks', content_rowid='id', tokenize='unicode61');
-            CREATE TRIGGER IF NOT EXISTS lexical_chunks_ai AFTER INSERT ON lexical_chunks BEGIN
-                INSERT INTO lexical_chunks_fts(rowid, text, doc_name) VALUES (new.id, new.text, new.doc_name);
-            END;
-            CREATE TRIGGER IF NOT EXISTS lexical_chunks_ad AFTER DELETE ON lexical_chunks BEGIN
-                INSERT INTO lexical_chunks_fts(lexical_chunks_fts, rowid, text, doc_name)
-                VALUES ('delete', old.id, old.text, old.doc_name);
-            END;
-            CREATE TRIGGER IF NOT EXISTS lexical_chunks_au AFTER UPDATE ON lexical_chunks BEGIN
-                INSERT INTO lexical_chunks_fts(lexical_chunks_fts, rowid, text, doc_name)
-                VALUES ('delete', old.id, old.text, old.doc_name);
-                INSERT INTO lexical_chunks_fts(rowid, text, doc_name) VALUES (new.id, new.text, new.doc_name);
-            END;
-            CREATE TABLE IF NOT EXISTS lexical_index_meta (
-                collection TEXT PRIMARY KEY,
-                point_count INTEGER DEFAULT 0,
-                indexed_count INTEGER DEFAULT 0,
-                cursor_json TEXT DEFAULT '',
-                updated_at REAL NOT NULL
-            );
-            -- Индексы под context_window (добор соседей/родителя): без них SELECT шёл ПОЛНЫМ
-            -- сканом таблицы на КАЖДЫЙ чанк → context-фаза 3-4с. С индексом — seek, ~мс.
-            CREATE INDEX IF NOT EXISTS idx_lexical_neighbors
-                ON lexical_chunks(collection, dataset_id, doc_name, chunk_ord);
-            CREATE INDEX IF NOT EXISTS idx_lexical_parent
-                ON lexical_chunks(collection, parent_id);
-            """
-        )
-        existing = {
-            row["name"]
-            for row in conn.execute("PRAGMA table_info(lexical_chunks)").fetchall()
-        }
-        for name, ddl in CONTEXT_COLUMNS.items():
-            if name not in existing:
-                conn.execute(f"ALTER TABLE lexical_chunks ADD COLUMN {ddl}")
+        # Keep the previous executescript commit boundary for retained callers.
+        path = next((row[2] for row in conn.execute("PRAGMA database_list") if row[1] == 'main'), '')
+        if not path:
+            raise native_core.NativeCoreError('LEXICAL_SCHEMA_FILE_REQUIRED')
+        if conn.in_transaction:
+            conn.commit()
+        native_core.required('lexical_initialize', request={'database': str(Path(path).resolve())})
 
     def clear_collection(self, collection: str) -> None:
         with self.connect() as conn:

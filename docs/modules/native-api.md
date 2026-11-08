@@ -1,5 +1,8 @@
 # Rust HTTP API
 
+833: [первый индекс](native-index-setup.md) — GET/POST `/api/rag/index/setup`,
+сохранённый план, новая Edge-папка и автоматическая подготовка перед первым intake.
+
 832: [холодная политика доступа](native-access-bootstrap.md) загружается самим
 Rust API. Нет обращения к Python за политикой/авторизацией, в том числе для proxy-
 запросов и CORS preflight. Старые callback endpoints и native HTTP fallback удалены.

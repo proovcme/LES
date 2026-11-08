@@ -36,7 +36,7 @@ pub(super) async fn request(
     body: Value,
 ) -> Result<Value, &'static str> {
     #[cfg(feature = "edge")]
-    if let Some(edge) = &store.edge {
+    if let Some(edge) = store.edge.get() {
         if edge.collection() != collection {
             return Err(SCOPE);
         }

@@ -46,7 +46,6 @@ from backend.qdrant_support import (
     _TRUE_ENV_VALUES,
     _apply_collection_count_health,
     _apply_context_metadata_to_nodes,
-    _can_adopt_missing_contract,
     _classify_parse_failure,
     _compact_text,
     _content_hash,
@@ -57,7 +56,6 @@ from backend.qdrant_support import (
     _is_raw_cad_bim_source,
     _largest_budget_prefix,
     _legacy_navigation_count_candidate,
-    _named_collection_layout,
     _parse_failure_policy,
     _pdf_page_node_max_chars,
     _pdf_page_node_overlap_chars,
@@ -88,7 +86,6 @@ from backend.qdrant_support import (
     models,
     mutable_path,
     os,
-    payload_index_ensure_enabled,
     point_embedding_descriptor,
     point_embedding_fingerprint,
     qdrant_client,
@@ -103,7 +100,6 @@ from backend.qdrant_support import (
     sys,
     time,
     uuid,
-    write_index_contract,
 )
 from backend.qdrant_collection import QdrantCollection
 from backend.qdrant_ingestion import QdrantIngestion
@@ -180,7 +176,6 @@ class QdrantLlamaIndexAdapter(QdrantCollection, QdrantIngestion, QdrantIntegrity
         self.vector_size     = support.rag_vector_size()
         self._collection_ready = False
         self._collection_lock  = support.asyncio.Lock()
-        self._payload_index_task: support.asyncio.Task | None = None
 
     async def list_datasets(self) -> support.List[support.DatasetInfo]:
         return self.db.list_datasets()

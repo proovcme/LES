@@ -52,12 +52,24 @@ fn read(path: &Path) -> Result<String, &'static str> {
     }
 }
 pub fn file_values(path: &Path) -> Result<BTreeMap<String, String>, &'static str> {
+    values(path, true)
+}
+/// Configuration follows dotenv's last-definition-wins ordering. Secret reads
+/// retain their established first-match contract; rotating a secret removes duplicates.
+pub fn settings_values(path: &Path) -> Result<BTreeMap<String, String>, &'static str> {
+    values(path, false)
+}
+fn values(path: &Path, first: bool) -> Result<BTreeMap<String, String>, &'static str> {
     let mut values = BTreeMap::new();
     for line in read(path)?.lines() {
         if let Some((name, value)) = line.split_once('=') {
-            values
-                .entry(name.trim().into())
-                .or_insert_with(|| value.trim().into());
+            if first {
+                values
+                    .entry(name.trim().into())
+                    .or_insert_with(|| value.trim().into());
+            } else {
+                values.insert(name.trim().into(), value.trim().into());
+            }
         }
     }
     Ok(values)

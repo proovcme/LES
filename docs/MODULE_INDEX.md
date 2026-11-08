@@ -1,5 +1,8 @@
 # Модули LES RAG
 
+833: [первый индекс](modules/native-index-setup.md) — `api/src/index_bootstrap.rs`,
+`core/src/index_bootstrap.rs`, `core/src/lexical_schema.rs`, `vector/src/initialize.rs`.
+
 832: [холодный допуск к API](modules/native-access-bootstrap.md) —
 `core/src/access_policy.rs`, `api/src/auth.rs`; прежние Python callbacks удалены.
 
@@ -187,7 +190,7 @@ fallback. [Контракт](modules/native-runtime.md), [приёмка](accept
 восстановление launcher: `desktop/light/src-tauri/src/supervisor.rs`, `lifecycle.rs`.
 [Контракт](modules/runtime-recovery.md), [приёмка 773](acceptance/runtime-recovery-773.md).
 
-Безопасный старт коллекции: `backend/collection_layout.py` (lease/exact count/
+Безопасный старт коллекции: [нативный bootstrap](modules/native-index-setup.md) (lease/exact count/
 сверка каталога). `execution_receipt_service.py` — состояние зафиксированных
 действий, `desktop/light/src-tauri/src/close_guard.rs` и frontend/native-close —
 протокол закрытия. [Приёмка 772](acceptance/safety-ui-772.md).

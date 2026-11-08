@@ -1,6 +1,26 @@
 use crate::{Result, Shard};
 use qdrant_edge::*;
 use serde_json::{Value, json};
+// Server clients used by remaining adapters predate Edge's memory placement
+// field. Preserve the effective legacy disk flag without leaking SDK-only keys.
+fn server_memory(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            if let Some(memory) = object.remove("memory").filter(|value| !value.is_null()) {
+                object.insert("on_disk".into(), json!(memory == "cold"));
+            }
+            for child in object.values_mut() {
+                server_memory(child);
+            }
+        }
+        Value::Array(values) => {
+            for child in values {
+                server_memory(child);
+            }
+        }
+        _ => {}
+    }
+}
 fn persisted_vector(value: &Value) -> Result<VectorPersisted> {
     if value.is_object() {
         return serde_json::from_value(value.clone())
@@ -182,8 +202,20 @@ impl Shard {
                 let mut value = self
                     .metadata
                     .get("server_info")
+                    .filter(|value| value.is_object())
                     .cloned()
-                    .ok_or("EDGE_COLLECTION_METADATA_MISSING")?;
+                    .unwrap_or_else(|| json!({}));
+                let config = self.edge.config();
+                let mut optimizers = serde_json::to_value(config.optimizers())
+                    .map_err(|_| "EDGE_VECTOR_CONFIG_INVALID")?;
+                optimizers["default_segment_number"] =
+                    json!(config.optimizers().default_segment_number.unwrap_or(0));
+                // Edge has no periodic flush timer; expose that explicitly in
+                // the temporary server-shaped compatibility response.
+                optimizers["flush_interval_sec"] = json!(0);
+                value["config"] = json!({"params":{"vectors":config.vectors,"sparse_vectors":config.sparse_vectors},
+                    "hnsw_config":config.hnsw_config(),"optimizer_config":optimizers});
+                server_memory(&mut value["config"]);
                 let info = self.info()?;
                 for key in [
                     "points_count",

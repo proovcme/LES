@@ -34,6 +34,28 @@ def enabled():
     return _bridge is not None
 
 
+def ensure_collection(adapter):
+    """Owned transport only: Rust selects the model, probes, recovers and creates."""
+    state = os.getenv('LES_STATE_ROOT')
+    if _bridge is None or not state:
+        raise EmbeddingContractError('INDEX_NATIVE_SERVICE_REQUIRED')
+    root = Path(state).resolve()
+    if (Path(adapter.db.db_path).resolve() != root/'data/meta.db'
+            or adapter.content_dir.resolve() != root/'storage/datasets'
+            or adapter.qdrant_url.rstrip('/') != os.getenv('LES_LIGHT_QDRANT_URL', '').rstrip('/')):
+        raise EmbeddingContractError('INDEX_SETUP_SCOPE_MISMATCH')
+    endpoint, token = _bridge
+    with httpx.Client(timeout=120, trust_env=False) as client:
+        response = client.post(endpoint.rsplit('/', 1)[0]+'/internal-index-setup',
+            headers={'x-les-index-token': token}, json={'collection':adapter.collection_name})
+    if not response.is_success:
+        raise EmbeddingContractError(response.json().get('code', 'INDEX_SETUP_UNAVAILABLE'))
+    value = response.json()
+    if response.headers.get('x-les-handler') != 'rust.index-setup' or value.get('status') != 'ready':
+        raise EmbeddingContractError('INDEX_SETUP_RESPONSE_INVALID')
+    return value
+
+
 def read_dataset_memory(dataset_id, *, background=False, force=False, max_attempts=2):
     """Local JSON transport; the native reader owns scheduling and model execution."""
     if _bridge is None:

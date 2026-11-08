@@ -906,7 +906,6 @@ def main(argv: list[str] | None = None) -> int:
         index_contract_payload,
         index_contract_status,
         rag_vector_size,
-        write_index_contract,
     )
     from qdrant_client import QdrantClient, models
 
@@ -927,7 +926,10 @@ def main(argv: list[str] | None = None) -> int:
     client = QdrantClient(url=args.qdrant_url, timeout=180.0, check_compatibility=False)
     created = _ensure_destination(client, args)
     if created:
-        write_index_contract(replace=False)
+        from backend import native_core
+        native_core.required('index_contract_publish',request={
+            'path':str(args.contract_path.resolve()),'contract':expected_contract,
+        })
         if args.with_colbert:
             contract_payload = _read_json(args.contract_path)
             contract_payload.update({

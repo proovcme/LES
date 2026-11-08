@@ -90,6 +90,9 @@ def embed_profile() -> EmbeddingProfile:
 def embedding_model_id() -> str:
     if os.getenv("EMBEDDING_MODEL"):
         return os.environ["EMBEDDING_MODEL"]
+    stored = read_index_contract() or {}
+    if stored.get('native_embedding_revision'):
+        return str(stored['embedding_model'])
     profile = embed_profile()
     if profile.name != "legacy":
         return profile.model
@@ -97,6 +100,9 @@ def embedding_model_id() -> str:
 
 
 def embedding_api_model() -> str:
+    stored = read_index_contract() or {}
+    if stored.get('native_embedding_revision') and not os.getenv('EMBED_MODEL'):
+        return str(stored['embedding_api_model'])
     profile = embed_profile()
     if profile.name != "legacy":
         api_model = os.getenv("EMBED_MODEL", "")
@@ -142,7 +148,15 @@ def rag_meta_db_path() -> str:
 
 
 def rag_vector_size() -> int:
-    return int(os.getenv("RAG_VECTOR_SIZE", str(embed_profile().vector_size)))
+    stored = read_index_contract() or {}
+    default = stored.get('vector_size', embed_profile().vector_size) if stored.get('native_embedding_revision') else embed_profile().vector_size
+    return int(os.getenv("RAG_VECTOR_SIZE", str(default)))
+
+
+def embedding_backend() -> str:
+    stored = read_index_contract() or {}
+    default = stored.get('embedding_backend', 'sentence_transformers') if stored.get('native_embedding_revision') else 'sentence_transformers'
+    return os.getenv('EMBED_BACKEND', default).strip().lower()
 
 
 def rag_chunk_size() -> int:
@@ -287,7 +301,7 @@ def index_contract_payload() -> dict[str, Any]:
         "collection": rag_collection_name(),
         "embedding_model": embedding_model_id(),
         "embedding_api_model": embedding_api_model(),
-        "embedding_backend": os.getenv("EMBED_BACKEND", "sentence_transformers").strip().lower(),
+        "embedding_backend": embedding_backend(),
         "vector_size": rag_vector_size(),
         "document_embedding_mode": DOCUMENT_EMBEDDING_MODE,
         "chunk_unit": chunking["unit"],
@@ -316,6 +330,8 @@ def index_contract_payload() -> dict[str, Any]:
         )
     asset = getattr(chunking['len_fn'], 'asset', None)
     stored = read_index_contract()
+    if stored and stored.get('native_embedding_revision'):
+        payload['native_embedding_revision'] = stored['native_embedding_revision']
     if asset is not None and (stored is None or 'chunk_tokenizer_sha256' in stored or os.getenv('RAG_TOKENIZER_FILE')):
         payload['chunk_tokenizer_sha256'] = asset['sha256']
     stable = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -325,7 +341,7 @@ def index_contract_payload() -> dict[str, Any]:
 
 def point_embedding_descriptor() -> dict[str, str]:
     """Canonical point-level embedding identity shared by ingestion and manifest."""
-    backend = os.getenv("EMBED_BACKEND", "sentence_transformers").strip().lower()
+    backend = embedding_backend()
     descriptor = {
         "backend": backend,
         "model_id": embedding_model_id(),
@@ -378,21 +394,6 @@ def index_contract_status() -> dict[str, Any]:
         "actual_fingerprint": actual.get("fingerprint", ""),
         "actual": actual,
     }
-
-
-def write_index_contract(*, replace: bool = False) -> Path:
-    """Persist the contract for a newly created or explicitly adopted collection."""
-    path = index_contract_path()
-    if path.exists() and not replace:
-        raise FileExistsError(f"index contract already exists: {path}")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(
-        json.dumps(index_contract_payload(), ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    tmp.replace(path)
-    return path
 
 
 def rag_runtime_config() -> dict[str, str | int]:

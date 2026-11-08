@@ -1,4 +1,5 @@
 //! Access to the Qdrant instance owned by this launcher.
+mod bootstrap;
 mod cache;
 mod publication;
 mod sections;
@@ -14,7 +15,9 @@ pub struct Store {
     key: String,
     token: String,
     #[cfg(feature = "edge")]
-    pub(crate) edge: Option<Arc<les_vector::Shard>>,
+    pub(crate) edge: tokio::sync::OnceCell<Arc<les_vector::Shard>>,
+    #[cfg(feature = "edge")]
+    pub(crate) edge_root: Option<std::path::PathBuf>,
     #[cfg(feature = "edge")]
     recovery: tokio::sync::OnceCell<Result<(), &'static str>>,
 }
@@ -56,14 +59,14 @@ impl Store {
     }
     pub(crate) fn content_root(&self, context: &Context) -> std::path::PathBuf {
         #[cfg(feature = "edge")]
-        if let Some(edge) = &self.edge {
-            return edge.content_root();
+        if let Some(root) = &self.edge_root {
+            return root.join("content");
         }
         context.state_root.join("storage/datasets")
     }
     pub(crate) async fn refresh_postings(&self) -> Result<(), &'static str> {
         #[cfg(feature = "edge")]
-        if let Some(edge) = &self.edge {
+        if let Some(edge) = self.edge.get() {
             let edge = edge.clone();
             tokio::task::spawn_blocking(move || {
                 edge.refresh_postings(false, |event| {
@@ -104,14 +107,16 @@ impl Store {
             key,
             token,
             #[cfg(feature = "edge")]
-            edge: None,
+            edge: tokio::sync::OnceCell::new(),
+            #[cfg(feature = "edge")]
+            edge_root: None,
             #[cfg(feature = "edge")]
             recovery: tokio::sync::OnceCell::new(),
         }))
     }
     #[cfg(feature = "edge")]
     pub fn embedded(
-        edge: Arc<les_vector::Shard>,
+        root: &std::path::Path,
         port: u16,
         key: String,
         token: String,
@@ -119,8 +124,17 @@ impl Store {
         if key.is_empty() || key.chars().any(char::is_control) {
             return Err("Invalid Edge storage key");
         }
+        if !root.is_absolute() {
+            return Err("EDGE_PATH_INVALID");
+        }
+        let edge = tokio::sync::OnceCell::new();
+        if root.join("les-vector.sqlite").exists() && !les_vector::initialize::pending(root) {
+            edge.set(Arc::new(les_vector::Shard::open(root)?))
+                .map_err(|_| "EDGE_STORAGE_BUSY")?;
+        }
         Ok(Self {
-            edge: Some(edge),
+            edge,
+            edge_root: Some(root.into()),
             recovery: tokio::sync::OnceCell::new(),
             target: reqwest::Url::parse(&format!("http://127.0.0.1:{port}/"))
                 .map_err(|_| "Invalid Edge address")?,
@@ -130,7 +144,10 @@ impl Store {
     }
     pub(crate) fn recovery_error(&self) -> Option<&'static str> {
         #[cfg(feature = "edge")]
-        if self.edge.is_some() {
+        if self.edge_root.is_some() {
+            if self.edge.get().is_none() {
+                return Some("INDEX_NOT_CONFIGURED");
+            }
             return match self.recovery.get() {
                 Some(Ok(())) => None,
                 Some(Err(code)) => Some(*code),
@@ -160,7 +177,7 @@ pub(crate) async fn start_recovery(context: Arc<Context>) -> Result<(), &'static
         if !context
             .index_store
             .as_ref()
-            .is_some_and(|store| store.edge.is_some())
+            .is_some_and(|store| store.edge.get().is_some())
         {
             return Ok(());
         }
@@ -170,7 +187,7 @@ pub(crate) async fn start_recovery(context: Arc<Context>) -> Result<(), &'static
         let result = tokio::task::spawn_blocking(move || {
             let context = worker_context;
             let store = context.index_store.as_ref().expect("owned Edge store");
-            let collection = store.edge.as_ref().expect("owned Edge shard").collection();
+            let collection = store.edge.get().expect("owned Edge shard").collection();
             runtime
                 .block_on(publication::recover_file(
                     &context,
@@ -334,7 +351,7 @@ pub(crate) async fn execute(context: Arc<Context>, body: Value) -> Response {
     #[cfg(feature = "edge")]
     if body["action"] == "hybrid_search" {
         let mut body = body;
-        let Some(edge) = &store.edge else {
+        let Some(edge) = store.edge.get() else {
             return error(StatusCode::NOT_IMPLEMENTED, "EDGE_STORAGE_REQUIRED");
         };
         if collection_name(&body) != Some(edge.collection()) {
@@ -429,7 +446,7 @@ async fn write(
     expected_count: Option<usize>,
 ) -> Result<(), &'static str> {
     #[cfg(feature = "edge")]
-    if let Some(edge) = &store.edge {
+    if let Some(edge) = store.edge.get() {
         if edge.collection() != collection {
             return Err("INDEX_COLLECTION_MISMATCH");
         }

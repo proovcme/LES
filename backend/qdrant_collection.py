@@ -1,7 +1,6 @@
 """Collection lifecycle and health contract."""
 from __future__ import annotations
 from backend import qdrant_support as support
-from backend.index_replacement import recover_adapter
 
 
 class QdrantCollection:
@@ -27,43 +26,10 @@ class QdrantCollection:
         async with self._collection_lock:
             if self._collection_ready:
                 return
-            from backend.collection_layout import ensure_layout
-            await ensure_layout(self)
-            # Payload-индексы под фильтрованный поиск (retrieve фильтрует по dataset_id и
-            # file_name). БЕЗ индекса query_points с фильтром проверяет фильтр по ВСЕМ точкам
-            # (~1.6с на 179k) — с индексом ~30мс. create_payload_index идемпотентен (повторный
-            # вызов — no-op/обновление). Best-effort: сбой не должен блокировать старт.
-            if (
-                support.payload_index_ensure_enabled()
-                and (self._payload_index_task is None or self._payload_index_task.done())
-            ):
-                self._payload_index_task = support.asyncio.create_task(self._ensure_payload_indexes())
-            await support.asyncio.to_thread(recover_adapter, self)
+            from backend.native_index_store import ensure_collection
+            result = await support.asyncio.to_thread(ensure_collection, self)
+            self.vector_size = result['vector_size']
             self._collection_ready = True
-
-    async def _ensure_payload_indexes(self) -> None:
-        """Create filter indexes without holding FastAPI application startup."""
-        for _field in (
-            "dataset_id",
-            "file_name",
-            "embedding_fingerprint",
-            "mail_account_id",
-            "mail_thread_key",
-            "mail_registry_message_id",
-        ):
-            try:
-                await self.aclient.create_payload_index(
-                    collection_name=self.collection_name,
-                    field_name=_field,
-                    field_schema=support.models.PayloadSchemaType.KEYWORD,
-                    # Qdrant may serialize collection mutations immediately
-                    # after a clean collection was created.  Waiting for
-                    # every payload index made FastAPI startup look dead for
-                    # minutes even though the operation was safely queued.
-                    wait=False,
-                )
-            except Exception as _idx_err:  # noqa: BLE001
-                support.logger.warning("[INIT] payload-индекс %s: %s", _field, _idx_err)
 
     @staticmethod
     def _assert_dense_index_contract() -> None:

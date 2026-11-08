@@ -18,6 +18,7 @@ pub mod filesystem;
 mod harness;
 mod harness_evidence;
 pub mod index_batch;
+pub mod index_bootstrap;
 pub mod index_cache;
 pub mod index_configuration;
 mod index_dispatch;
@@ -29,6 +30,7 @@ mod index_sources;
 mod jobs;
 mod legacy_sparse;
 pub mod lexical;
+pub mod lexical_schema;
 mod lexical_write;
 pub mod mcp_registry;
 mod memory;
@@ -88,10 +90,12 @@ fn dispatch(bytes: &[u8]) -> Result<Value, &'static str> {
         Some("legacy_sparse") => legacy_sparse::execute(&request["request"]),
         Some("bm25") => bm25::execute(&request["request"]),
         Some("lexical_replace") => lexical_write::replace(&request["request"]),
+        Some("lexical_initialize") => lexical_schema::execute(&request["request"]),
         Some("context") => context::execute(&request["request"]),
         Some("memory") => memory::execute(&request["request"]),
         Some("document") => document::execute(&request["request"]),
         Some("index_configuration") => index_configuration::execute(&request["request"]),
+        Some("index_contract_publish") => index_bootstrap::execute(&request["request"]),
         Some("tables") => tables::execute(&request["request"]),
         Some("document_source") => Ok(document_source::execute(&request["request"])),
         Some("table_snapshot") => document::workbook::snapshot(&request["request"]),
@@ -125,7 +129,7 @@ fn dispatch(bytes: &[u8]) -> Result<Value, &'static str> {
         Some("model_secret") => model_secrets::execute(&request["request"]),
         Some("agent_files") => Ok(agent_files::execute(&request["request"])),
         Some("health") => Ok(
-            json!({"abi": 1, "operations":["prepare_terms","unicode","lexical_tokens","legacy_sparse","bm25","lexical_replace","context","memory","document","document_source","document_chunks","document_docx","document_tokenizer","document_nodes","document_json","document_json_stream","document_source_nodes","document_conversion","document_dispatch","embedding_chunks","table_snapshot","tables","workbook_calculation","workbook_index","citations","harness","harness_evidence","chat_stream","chat_profile","tool_registry","tool_execution","filesystem","skills","skill_runtime","index_journal","index_points","index_run","index_configuration","chat_research","index_sources","retrieval_quality","fingerprint","job_patch","job_recovery","scan_sources","worker_run","worker_pdf","worker_documents","worker_tables","worker_embeddings","worker_mcp","worker_release_idle","worker_stop","workspace","catalog","trust","model_profile","model_request","model_capabilities","model_secret","agent_files"], "tokenizer":"les.lexical.v2"}),
+            json!({"abi": 1, "operations":["prepare_terms","unicode","lexical_tokens","legacy_sparse","bm25","lexical_replace","lexical_initialize","context","memory","document","document_source","document_chunks","document_docx","document_tokenizer","document_nodes","document_json","document_json_stream","document_source_nodes","document_conversion","document_dispatch","embedding_chunks","table_snapshot","tables","workbook_calculation","workbook_index","citations","harness","harness_evidence","chat_stream","chat_profile","tool_registry","tool_execution","filesystem","skills","skill_runtime","index_journal","index_points","index_run","index_configuration","index_contract_publish","chat_research","index_sources","retrieval_quality","fingerprint","job_patch","job_recovery","scan_sources","worker_run","worker_pdf","worker_documents","worker_tables","worker_embeddings","worker_mcp","worker_release_idle","worker_stop","workspace","catalog","trust","model_profile","model_request","model_capabilities","model_secret","agent_files"], "tokenizer":"les.lexical.v2"}),
         ),
         _ => Err("CORE_UNKNOWN_OPERATION"),
     }

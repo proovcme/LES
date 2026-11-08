@@ -19,9 +19,9 @@
 
 | Метрика | Значение |
 | --- | --- |
-| Python-файлов под git | 711 |
-| Строк Python | 170843 |
-| PRODUCT_REACHABLE | 421 |
+| Python-файлов под git | 710 |
+| Строк Python | 170783 |
+| PRODUCT_REACHABLE | 420 |
 | RUNTIME_SUPPORT | 5 |
 | TEST_OR_TOOL_ONLY | 258 |
 | DORMANT_CANDIDATE | 27 |
@@ -47,7 +47,7 @@
 | proxy/services/context_memory_service.py | 1175 | 8 |
 | sovushka/pages/samovar.py | 1143 | 3 |
 | backend/document_router.py | 1118 | 10 |
-| tools/build_rag_contract_sibling.py | 1114 | 2 |
+| tools/build_rag_contract_sibling.py | 1116 | 2 |
 | backend/document_catalog.py | 1068 | 18 |
 | tools/reindex_datasets_guarded.py | 1016 | 1 |
 | proxy/services/drawing_manifest_service.py | 1012 | 3 |

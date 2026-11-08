@@ -456,6 +456,40 @@ async fn record(context: &Context, id: &Value, action: &'static str, stop: Optio
 }
 
 fn index_stop(code: &str) -> Stop {
+    if let Some(code) = [
+        "INDEX_ADOPTION_REQUIRED",
+        "INDEX_ADOPTION_UNVERIFIED",
+        "INDEX_CONTRACT_INVALID",
+        "INDEX_CATALOG_MISMATCH",
+        "INDEX_SCHEMA_MIGRATION_REQUIRED",
+        "INDEX_SETUP_MODEL_CHANGED",
+        "INDEX_SETUP_PLAN_CHANGED",
+        "INDEX_SETUP_STORAGE_UNAVAILABLE",
+        "INDEX_CONTRACT_PUBLICATION_FAILED",
+        "INDEX_UPDATE_BUSY",
+        "INDEX_STORAGE_RESPONSE_INVALID",
+        "INDEX_POINT_COUNT_UNAVAILABLE",
+        "EMBEDDING_INDEX_DIMENSION_MISMATCH",
+        "EMBEDDING_RESPONSE_INVALID",
+        "UPSTREAM_HTTP_ERROR",
+        "UPSTREAM_RESPONSE_TOO_LARGE",
+        "MODEL_ENDPOINT_UNREACHABLE",
+        "MODEL_CONNECTION_FAILED",
+        "EMBEDDING_INFERENCE_FAILED",
+        "LEXICAL_SCHEMA_UNAVAILABLE",
+        "EDGE_STORAGE_UNAVAILABLE",
+        "EDGE_STORAGE_BUSY",
+        "EDGE_STORAGE_NOT_EMPTY",
+        "EDGE_INITIALIZATION_NOT_EMPTY",
+    ]
+    .into_iter()
+    .find(|item| *item == code)
+    {
+        return Stop {
+            code,
+            message: crate::index_bootstrap::message(code),
+        };
+    }
     let code = match code {
         "INDEX_CONTRACT_MISMATCH" => "INDEX_CONTRACT_MISMATCH",
         "INDEX_SETTINGS_INVALID" => "INDEX_SETTINGS_INVALID",
@@ -486,6 +520,13 @@ fn index_stop(code: &str) -> Stop {
 }
 
 async fn start_indexing(context: Arc<Context>, job: &Value) -> Result<(), Stop> {
+    let result = start_indexing_inner(context, job).await;
+    if result.is_err() {
+        let _ = tokio::task::spawn_blocking(les_core::release_batch_workers).await;
+    }
+    result
+}
+async fn start_indexing_inner(context: Arc<Context>, job: &Value) -> Result<(), Stop> {
     let database = context.database.clone();
     let id = job["id"].clone();
     let selected = tokio::task::spawn_blocking(move || {
@@ -499,6 +540,11 @@ async fn start_indexing(context: Arc<Context>, job: &Value) -> Result<(), Stop> 
     }
     let owner = context.clone();
     let input_job = job.clone();
+    // An explicit indexing request may initialize a genuinely new owned index.
+    // Existing collections without an identity still require explicit adoption.
+    crate::index_bootstrap::ensure(context.clone(), true, false, false, None, true)
+        .await
+        .map_err(|code| index_stop(code.split(':').next().unwrap_or(&code)))?;
     let input = tokio::task::spawn_blocking(move || {
         crate::index_batch::configuration::intake(&owner, &input_job, selected)
     })

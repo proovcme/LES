@@ -12,6 +12,7 @@ mod external_embed;
 mod frontend;
 mod history;
 mod index_batch;
+mod index_bootstrap;
 mod index_store;
 mod inference;
 mod intake;
@@ -81,7 +82,7 @@ async fn dispatch(State(context): State<Arc<Context>>, request: Request) -> Resp
         && context
             .index_store
             .as_ref()
-            .is_some_and(|s| s.edge.is_some())
+            .is_some_and(|s| s.edge_root.is_some())
     {
         return edge::handle(context, request).await;
     }
@@ -108,6 +109,12 @@ async fn dispatch(State(context): State<Arc<Context>>, request: Request) -> Resp
     }
     if request.uri().path() == index_batch::PATH {
         return index_batch::handle(context, request).await;
+    }
+    if matches!(
+        request.uri().path(),
+        index_bootstrap::PATH | index_bootstrap::PRIVATE
+    ) {
+        return index_bootstrap::handle(context, request).await;
     }
     if request.uri().path() == dataset_reader::PRIVATE
         || dataset_reader::route(request.uri().path()).is_some()
@@ -281,9 +288,8 @@ fn configuration() -> Result<(std::net::SocketAddr, Context), &'static str> {
                 .ok_or("Edge requires an owned ingestion token")?;
             let key = std::env::var("LES_LIGHT_QDRANT_API_KEY")
                 .map_err(|_| "Edge requires an owned storage key")?;
-            let shard = les_vector::Shard::open(std::path::Path::new(path))?;
             Some(index_store::Store::embedded(
-                Arc::new(shard),
+                std::path::Path::new(path),
                 listen.port(),
                 key,
                 token,
@@ -406,6 +412,7 @@ fn main() {
             "mcp_client":"rust.http-stdio","tool_execution_policy":"rust",
             "document_conversion":"rust.supervised","document_conversion_formats":["xlsx","xlsm","xls","csv","pptx","docx","doc","txt","md","json","jsonl","pdf"],
             "dataset_reader":"rust.durable-revision-pinned","dataset_reader_python_callbacks":false,
+            "index_setup":"rust.durable-probe-plan","index_setup_python_callbacks":false,"lexical_schema":"rust",
             "index_batch_api":"rust.complete-or-refuse","index_batch_python_callbacks":false,
             "native_format_dispatch":true,"parquet":"rust.snappy","table_prepare":"rust"})
         );

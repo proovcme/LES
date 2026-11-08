@@ -128,29 +128,31 @@ def test_intake_retries_only_due_failures_in_its_own_manifest(tmp_path):
 
 
 @pytest.mark.parametrize('storage',['server','edge'])
-def test_cold_native_intake_model_guard_pdf_and_owner_death(tmp_path,storage):
+@pytest.mark.parametrize('fresh',[False,True])
+def test_cold_native_intake_model_guard_pdf_and_owner_death(tmp_path,storage,fresh):
     program=os.getenv('LES_TEST_NATIVE_API');qdrant=os.getenv('LES_TEST_NATIVE_QDRANT')
     if not program or not qdrant or not os.getenv('LES_CORE_LIBRARY'):pytest.skip('Build native intake assets')
-    if storage=='edge' and not os.getenv('LES_TEST_EDGE_VECTOR'):pytest.skip('Build native vector importer')
+    if storage=='edge' and not fresh and not os.getenv('LES_TEST_EDGE_VECTOR'):pytest.skip('Build native vector importer')
     import pypdfium2_raw
     state=tmp_path/'state';database=state/'data/meta.db';database.parent.mkdir(parents=True)
     MetaDB(str(database))
     with sqlite3.connect(database) as db:db.execute("INSERT INTO datasets(id,name) VALUES('ds','Native folder')")
-    with closing(LexicalIndex(str(database)).connect()):pass
+    if not fresh:
+        with closing(LexicalIndex(str(database)).connect()):pass
     folder=tmp_path/'Документы с пробелами 東京';folder.mkdir()
     text=folder/'Общее описание.txt';text.write_text('Project source evidence. '*40,encoding='utf-8')
     pdf=write_pdf(folder/'Две страницы.pdf',['First physical page with source evidence. '*20,'Second physical page with independent evidence. '*20])
     baseline={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in folder.iterdir()}
     (state/'.env').write_text('\n'.join(f"{key}='{value}'" for key,value in settings().items())+
         f'\nLES_EXTERNAL_ALLOW_ANY=false\nLES_EXTERNAL_SOURCE_ROOTS="{folder}"\nRAG_UPLOAD_SUFFIXES=.TXT,.PDF\n',encoding='utf-8')
-    database.with_name(database.name+'.docs.index-contract.json').write_text(json.dumps(signed_contract()),encoding='utf-8')
+    if not fresh:database.with_name(database.name+'.docs.index-contract.json').write_text(json.dumps(signed_contract()),encoding='utf-8')
     auth=tmp_path/'policy.json';auth.write_text(json.dumps({'schema':'les.native-auth-policy.v1','compatible':True,
         'trusted_role':'admin','proxy_header':'x-les-role','cors_origins':[],'cors_loopback':True}),encoding='utf-8')
     embeddings=NativeBatchEmbeddings(database);api=None
     revision=embeddings.embedder._resolve_embedding_connection().revision_id
     with sqlite3.connect(database) as db:db.execute("DELETE FROM les_model_role_bindings WHERE role='embeddings'")
     runtime=LightQdrantRuntime(Path(qdrant),state);port=free_port();upstream=free_port();token='8'*64;edge=tmp_path/'edge'
-    if storage=='edge':
+    if storage=='edge' and not fresh:
         from tests.test_light_edge_migration import source as edge_source, complete
         data,manifest,rows=edge_source(tmp_path,count=1)
         rows[0]['vector']['dense']=[1.,0.];data.write_text(json.dumps(rows[0])+'\n',encoding='utf-8')
@@ -177,7 +179,7 @@ def test_cold_native_intake_model_guard_pdf_and_owner_death(tmp_path,storage):
         if storage=='server':runtime.start()
         url=runtime.url if storage=='server' else f'http://127.0.0.1:{port}'
         key=runtime.api_key if storage=='server' else 'intake-edge-key'
-        if storage=='server':
+        if storage=='server' and not fresh:
             with closing(QdrantClient(url=url,api_key=key,check_compatibility=False)) as vectors:
                 vectors.create_collection('docs',vectors_config={'dense':models.VectorParams(size=2,distance=models.Distance.COSINE)},sparse_vectors_config={'bm25_sparse':models.SparseVectorParams()})
         api=launch()
@@ -196,6 +198,7 @@ def test_cold_native_intake_model_guard_pdf_and_owner_death(tmp_path,storage):
             with sqlite3.connect(database) as db:db.execute('UPDATE native_intakes SET retry_at=0 WHERE id=?',[job])
             wait_for(lambda:progress(job)['status']=='completed',timeout=40)
             with closing(QdrantClient(url=url,api_key=key,check_compatibility=False)) as vectors:
+                assert vectors.get_collection('docs').config.params.vectors['dense'].size==2
                 points,_=vectors.scroll('docs',limit=100,with_payload=True)
             pdf_points=[p.payload for p in points if p.payload.get('dataset_id')=='ds' and p.payload.get('file_name','').endswith('.pdf')]
             assert {p['page'] for p in pdf_points if p.get('page') is not None}=={1,2}

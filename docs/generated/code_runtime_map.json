@@ -69,7 +69,6 @@
         "backend/bm25_hybrid.py",
         "backend/bm25_store.py",
         "backend/colbert_late_interaction.py",
-        "backend/collection_layout.py",
         "backend/converter.py",
         "backend/document_catalog.py",
         "backend/document_router.py",
@@ -231,21 +230,6 @@
         "backend/__init__.py"
       ],
       "path": "backend/colbert_late_interaction.py",
-      "status": "PRODUCT_REACHABLE",
-      "windows_runtime_explicit": false
-    },
-    {
-      "inbound": [
-        "backend/qdrant_collection.py"
-      ],
-      "lines": 92,
-      "module": "backend.collection_layout",
-      "outbound": [
-        "backend/__init__.py",
-        "backend/index_replacement.py",
-        "backend/qdrant_support.py"
-      ],
-      "path": "backend/collection_layout.py",
       "status": "PRODUCT_REACHABLE",
       "windows_runtime_explicit": false
     },
@@ -536,7 +520,6 @@
     },
     {
       "inbound": [
-        "backend/collection_layout.py",
         "backend/qdrant_collection.py",
         "backend/qdrant_ingestion.py",
         "backend/qdrant_integrity.py",
@@ -753,7 +736,6 @@
         "tests/test_light_bm25_index.py",
         "tests/test_light_chat_sections.py",
         "tests/test_light_code_review.py",
-        "tests/test_light_collection_safety.py",
         "tests/test_light_document_review.py",
         "tests/test_light_grounding_760.py",
         "tests/test_light_index_recovery.py",
@@ -1120,6 +1102,7 @@
         "tests/conftest.py",
         "tests/oracles/job_policy.py",
         "tests/test_datasets_router.py",
+        "tests/test_light_collection_safety.py",
         "tests/test_light_core_jobs_files.py",
         "tests/test_light_format_worker.py",
         "tests/test_light_model_registry_native.py",
@@ -1147,7 +1130,8 @@
         "tests/test_light_native_unicode.py",
         "tests/test_light_native_workbook.py",
         "tests/test_light_pdf_source_tool.py",
-        "tests/test_light_resource_memory.py"
+        "tests/test_light_resource_memory.py",
+        "tools/build_rag_contract_sibling.py"
       ],
       "lines": 357,
       "module": "backend.native_core",
@@ -1216,6 +1200,7 @@
       "inbound": [
         "backend/index_replacement.py",
         "backend/native_index_batch.py",
+        "backend/qdrant_collection.py",
         "backend/qdrant_ingestion.py",
         "backend/qdrant_retrieval.py",
         "proxy/app.py",
@@ -1227,7 +1212,7 @@
         "tests/test_light_native_index_batch.py",
         "tests/test_light_native_table_publication.py"
       ],
-      "lines": 233,
+      "lines": 255,
       "module": "backend.native_index_store",
       "outbound": [
         "backend/__init__.py",
@@ -1465,7 +1450,7 @@
         "tools/build_rag_contract_sibling.py",
         "tools/rag_rrf_readiness.py"
       ],
-      "lines": 248,
+      "lines": 243,
       "module": "backend.qdrant_adapter",
       "outbound": [
         "backend/__init__.py",
@@ -1484,16 +1469,15 @@
     },
     {
       "inbound": [
-        "backend/qdrant_adapter.py",
-        "tests/test_light_collection_safety.py"
+        "backend/qdrant_adapter.py"
       ],
-      "lines": 246,
+      "lines": 212,
       "module": "backend.qdrant_collection",
       "outbound": [
         "backend/__init__.py",
         "backend/bm25_store.py",
-        "backend/collection_layout.py",
         "backend/index_replacement.py",
+        "backend/native_index_store.py",
         "backend/qdrant_support.py",
         "backend/sparse_index.py",
         "proxy/services/rag_catalog_guard_service.py",
@@ -1619,7 +1603,6 @@
     },
     {
       "inbound": [
-        "backend/collection_layout.py",
         "backend/index_replacement.py",
         "backend/native_document_conversion.py",
         "backend/native_index_batch.py",
@@ -1631,7 +1614,6 @@
         "backend/qdrant_retrieval.py",
         "proxy/routers/documents.py",
         "tests/test_light_audit_regressions.py",
-        "tests/test_light_collection_safety.py",
         "tests/test_light_format_worker.py",
         "tests/test_light_grounding_760.py",
         "tests/test_light_import_responsiveness.py",
@@ -1649,7 +1631,7 @@
         "tests/test_qdrant_adapter_parse.py",
         "tools/light_document_worker.py"
       ],
-      "lines": 598,
+      "lines": 568,
       "module": "backend.qdrant_support",
       "outbound": [
         "backend/__init__.py",
@@ -1739,6 +1721,7 @@
         "tests/oracles/project_python.py",
         "tests/test_chunking_w2.py",
         "tests/test_forest_visualizer.py",
+        "tests/test_light_collection_safety.py",
         "tests/test_light_native_intake_execution.py",
         "tests/test_light_native_preparation.py",
         "tests/test_rag_config.py",
@@ -1749,7 +1732,7 @@
         "tools/rag_rrf_readiness.py",
         "tools/reindex_datasets_guarded.py"
       ],
-      "lines": 418,
+      "lines": 419,
       "module": "backend.rag_config",
       "outbound": [
         "backend/__init__.py",
@@ -6369,7 +6352,7 @@
         "tools/evaluate_rag_pipeline.py",
         "tools/rag_rrf_readiness.py"
       ],
-      "lines": 692,
+      "lines": 631,
       "module": "proxy.services.lexical_index_service",
       "outbound": [
         "backend/inference/lexical_tokens.py",
@@ -10305,6 +10288,7 @@
     },
     {
       "inbound": [
+        "tests/test_light_collection_safety.py",
         "tests/test_light_native_index_batch.py",
         "tests/test_light_native_intake_execution.py",
         "tests/test_light_native_table_publication.py"
@@ -11041,14 +11025,16 @@
     },
     {
       "inbound": [],
-      "lines": 149,
+      "lines": 283,
       "module": "tests.test_light_collection_safety",
       "outbound": [
         "backend/document_catalog.py",
         "backend/index_replacement.py",
-        "backend/interface.py",
-        "backend/qdrant_collection.py",
-        "backend/qdrant_support.py"
+        "backend/native_core.py",
+        "backend/rag_config.py",
+        "tests/native_batch_fixtures.py",
+        "tests/test_light_native_api.py",
+        "tests/test_light_native_batch_api.py"
       ],
       "path": "tests/test_light_collection_safety.py",
       "status": "TEST_OR_TOOL_ONLY",
@@ -11598,6 +11584,7 @@
     },
     {
       "inbound": [
+        "tests/test_light_collection_safety.py",
         "tests/test_light_native_batch_api.py",
         "tests/test_light_native_dataset_reader.py",
         "tests/test_light_native_index_batch.py",
@@ -11634,6 +11621,7 @@
     },
     {
       "inbound": [
+        "tests/test_light_collection_safety.py",
         "tests/test_light_native_dataset_reader.py",
         "tests/test_light_native_intake_execution.py"
       ],
@@ -11934,7 +11922,7 @@
     },
     {
       "inbound": [],
-      "lines": 222,
+      "lines": 225,
       "module": "tests.test_light_native_intake_execution",
       "outbound": [
         "backend/document_catalog.py",
@@ -13514,11 +13502,12 @@
         "proxy/services/colbert_generation_service.py",
         "tools/rag_rrf_readiness.py"
       ],
-      "lines": 1114,
+      "lines": 1116,
       "module": "tools.build_rag_contract_sibling",
       "outbound": [
         "backend/colbert_late_interaction.py",
         "backend/inference/bm25_sparse.py",
+        "backend/native_core.py",
         "backend/qdrant_adapter.py",
         "backend/rag_config.py",
         "proxy/services/system_dataset_service.py",
@@ -15946,12 +15935,12 @@
   "summary": {
     "dormant_candidates": 27,
     "parse_warnings": 0,
-    "product_reachable": 421,
+    "product_reachable": 420,
     "registered_api_routes": 298,
     "runtime_support": 5,
     "test_or_tool_only": 258,
-    "tracked_python_files": 711,
-    "tracked_python_lines": 170843
+    "tracked_python_files": 710,
+    "tracked_python_lines": 170783
   },
   "warnings": []
 }

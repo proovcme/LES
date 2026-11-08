@@ -96,9 +96,16 @@ pub fn execute(input: &Value) -> Result<Value, &'static str> {
         _ => return Err(INVALID),
     };
     let model = text(contract, "embedding_model")?;
-    if !settings["EMBEDDING_MODEL"]
-        .as_str()
-        .is_some_and(|v| !v.is_empty())
+    if contract
+        .get("native_embedding_revision")
+        .is_some_and(|v| v.as_str().is_none_or(|s| s.is_empty() || s.len() > 256))
+    {
+        return Err(MISMATCH);
+    }
+    if contract.get("native_embedding_revision").is_none()
+        && !settings["EMBEDDING_MODEL"]
+            .as_str()
+            .is_some_and(|v| !v.is_empty())
     {
         let expected = if profile == "legacy" {
             setting(settings, "BGE_MODEL", default_model)

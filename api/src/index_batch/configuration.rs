@@ -28,8 +28,8 @@ impl Settings {
         let file = std::env::var_os("LES_ENV_PATH")
             .map(PathBuf::from)
             .unwrap_or_else(|| state.join(".env"));
-        let mut values =
-            les_core::model_secrets::file_values(&file).map_err(|_| "INDEX_SETTINGS_INVALID")?;
+        let mut values = les_core::model_secrets::settings_values(&file)
+            .map_err(|_| "INDEX_SETTINGS_INVALID")?;
         values.extend(std::env::vars());
         for value in values.values_mut() {
             let v = value.trim();
@@ -47,7 +47,7 @@ impl Settings {
     pub(crate) fn get<'a>(&'a self, key: &str, default: &'a str) -> &'a str {
         self.values.get(key).map(String::as_str).unwrap_or(default)
     }
-    fn core_values(&self) -> Value {
+    pub(crate) fn core_values(&self) -> Value {
         // Credential values are never passed into a batch or its durable result.
         Value::Object(
             self.values
@@ -111,7 +111,7 @@ fn expand(raw: &str) -> Result<PathBuf, &'static str> {
     }
 }
 
-fn tokenizer(settings: &Settings, contract: &Value) -> Result<Value, &'static str> {
+pub(crate) fn tokenizer(settings: &Settings, contract: &Value) -> Result<Value, &'static str> {
     if contract["chunk_unit"] != "tokens" {
         return Ok(Value::Null);
     }
@@ -179,12 +179,10 @@ fn tokenizer(settings: &Settings, contract: &Value) -> Result<Value, &'static st
     Ok(json!({"path":candidates[0]}))
 }
 
-pub(crate) fn intake(
+pub(crate) fn identity(
     context: &Context,
-    job: &Value,
-    sources: Value,
-) -> Result<Value, &'static str> {
-    let settings = Settings::load(&context.state_root)?;
+    settings: &Settings,
+) -> Result<(String, PathBuf), &'static str> {
     let collection = settings.get(
         "RAG_COLLECTION_NAME",
         match settings.get("LES_EMBED_PROFILE", "legacy") {
@@ -218,6 +216,16 @@ pub(crate) fn intake(
     } else {
         expand(settings.get("RAG_INDEX_CONTRACT_PATH", ""))?
     };
+    Ok((collection.into(), path))
+}
+
+pub(crate) fn intake(
+    context: &Context,
+    job: &Value,
+    sources: Value,
+) -> Result<Value, &'static str> {
+    let settings = Settings::load(&context.state_root)?;
+    let (_, path) = identity(context, &settings)?;
     let contract = read(&path)?;
     let mut input = les_core::index_configuration::execute(
         &json!({"contract":contract,"settings":settings.core_values(),"tokenizer":tokenizer(&settings,&contract)?}),
