@@ -117,7 +117,6 @@
         "backend/olm_reader.py",
         "backend/parquet_writer.py",
         "backend/parse_admission.py",
-        "backend/pdf_layout.py",
         "backend/pdf_reader.py",
         "backend/product_edition.py",
         "backend/pst_reader.py",
@@ -136,7 +135,6 @@
         "backend/raptor_tree.py",
         "backend/reranker.py",
         "backend/retrieval_candidate.py",
-        "backend/rules_extractor.py",
         "backend/runtime_events.py",
         "backend/runtime_memory.py",
         "backend/runtime_paths.py",
@@ -1334,17 +1332,6 @@
       "windows_runtime_explicit": false
     },
     {
-      "inbound": [],
-      "lines": 254,
-      "module": "backend.pdf_layout",
-      "outbound": [
-        "backend/__init__.py"
-      ],
-      "path": "backend/pdf_layout.py",
-      "status": "DORMANT_CANDIDATE",
-      "windows_runtime_explicit": false
-    },
-    {
       "inbound": [
         "backend/converter.py",
         "backend/document_router.py",
@@ -1853,17 +1840,6 @@
       "windows_runtime_explicit": false
     },
     {
-      "inbound": [],
-      "lines": 127,
-      "module": "backend.rules_extractor",
-      "outbound": [
-        "backend/__init__.py"
-      ],
-      "path": "backend/rules_extractor.py",
-      "status": "DORMANT_CANDIDATE",
-      "windows_runtime_explicit": false
-    },
-    {
       "inbound": [
         "tests/test_light_lifecycle.py",
         "tools/light_launcher.py"
@@ -2300,7 +2276,6 @@
         "proxy/services/cad_bim_graph.py",
         "proxy/services/cad_bim_highlight.py",
         "proxy/services/candidate_acceptance_service.py",
-        "proxy/services/candidate_selection_service.py",
         "proxy/services/canonical_promotion_service.py",
         "proxy/services/canonical_route_service.py",
         "proxy/services/capability_broker_service.py",
@@ -3862,7 +3837,6 @@
         "proxy/services/cad_bim_graph.py",
         "proxy/services/cad_bim_highlight.py",
         "proxy/services/candidate_acceptance_service.py",
-        "proxy/services/candidate_selection_service.py",
         "proxy/services/canonical_promotion_service.py",
         "proxy/services/canonical_route_service.py",
         "proxy/services/capability_broker_service.py",
@@ -4384,18 +4358,6 @@
       ],
       "path": "proxy/services/candidate_acceptance_service.py",
       "status": "PRODUCT_REACHABLE",
-      "windows_runtime_explicit": false
-    },
-    {
-      "inbound": [],
-      "lines": 136,
-      "module": "proxy.services.candidate_selection_service",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py"
-      ],
-      "path": "proxy/services/candidate_selection_service.py",
-      "status": "DORMANT_CANDIDATE",
       "windows_runtime_explicit": false
     },
     {
@@ -6747,6 +6709,7 @@
         "tests/test_light_model_registry_native.py",
         "tests/test_light_native_api.py",
         "tests/test_light_native_batch_api.py",
+        "tests/test_light_native_chat_turn.py",
         "tests/test_light_native_dataset_reader.py",
         "tests/test_light_native_embedding_inference.py",
         "tests/test_light_native_intake_execution.py",
@@ -6791,6 +6754,7 @@
         "tests/test_light_model_registry_native.py",
         "tests/test_light_native_api.py",
         "tests/test_light_native_batch_api.py",
+        "tests/test_light_native_chat_turn.py",
         "tests/test_light_native_dataset_reader.py",
         "tests/test_light_native_embedding_inference.py",
         "tests/test_light_native_intake_execution.py",
@@ -8750,7 +8714,7 @@
         "tests/test_software_versions.py",
         "tools/build_tauri_app.py"
       ],
-      "lines": 343,
+      "lines": 342,
       "module": "proxy.services.version_service",
       "outbound": [
         "proxy/__init__.py",
@@ -10506,6 +10470,7 @@
       "inbound": [
         "tests/test_light_chat_sections.py",
         "tests/test_light_format_worker.py",
+        "tests/test_light_native_chat_turn.py",
         "tests/test_light_native_dispatch_sources.py",
         "tests/test_light_native_document.py",
         "tests/test_light_native_index_batch.py",
@@ -11569,6 +11534,7 @@
       "inbound": [
         "tests/test_light_collection_safety.py",
         "tests/test_light_native_batch_api.py",
+        "tests/test_light_native_chat_turn.py",
         "tests/test_light_native_dataset_reader.py",
         "tests/test_light_native_index_batch.py",
         "tests/test_light_native_intake_execution.py",
@@ -11670,6 +11636,20 @@
       "module": "tests.test_light_native_chat_profiles",
       "outbound": [],
       "path": "tests/test_light_native_chat_profiles.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
+      "lines": 210,
+      "module": "tests.test_light_native_chat_turn",
+      "outbound": [
+        "proxy/services/model_connection_contracts.py",
+        "proxy/services/model_connection_registry_service.py",
+        "tests/pdf_fixtures.py",
+        "tests/test_light_native_api.py"
+      ],
+      "path": "tests/test_light_native_chat_turn.py",
       "status": "TEST_OR_TOOL_ONLY",
       "windows_runtime_explicit": false
     },
@@ -15928,14 +15908,14 @@
   ],
   "schema": "les.code-runtime-map.v1",
   "summary": {
-    "dormant_candidates": 27,
+    "dormant_candidates": 24,
     "parse_warnings": 0,
     "product_reachable": 419,
     "registered_api_routes": 298,
     "runtime_support": 5,
-    "test_or_tool_only": 259,
-    "tracked_python_files": 710,
-    "tracked_python_lines": 170584
+    "test_or_tool_only": 260,
+    "tracked_python_files": 708,
+    "tracked_python_lines": 170276
   },
   "warnings": []
 }

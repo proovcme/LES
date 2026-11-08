@@ -352,6 +352,10 @@ pub async fn handle(context: Arc<Context>, request: Request) -> Response {
     {
         return crate::error(StatusCode::BAD_REQUEST, "WEB_REQUEST_INVALID");
     }
+    let payload = execute(&value).await;
+    json_response(StatusCode::OK, payload, "rust.web")
+}
+pub(crate) async fn execute(value: &Value) -> Value {
     let result = tokio::time::timeout(Duration::from_secs(30), async {
         if value["operation"] == "search" {
             search(&value).await
@@ -369,7 +373,7 @@ pub async fn handle(context: Arc<Context>, request: Request) -> Response {
             json!({"status":"error","code":code,"query":value["q"],"requested_url":value["url"],"results":[],"sources":[],"text":"","title":"","final_url":"","missing":[],"warnings":[message]})
         }
     };
-    json_response(StatusCode::OK, payload, "rust.web")
+    payload
 }
 #[cfg(test)]
 mod tests {

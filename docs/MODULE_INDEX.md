@@ -1,5 +1,9 @@
 # Модули LES RAG
 
+835: [общий кандидат чата](modules/native-chat-turn.md) — `api/src/chat/`,
+`core/src/chat_request/`, `api/src/documents.rs`: единый JSON/SSE, квитанции,
+инструменты, физический PDF и оригиналы. Публичный чат ещё не переключён.
+
 834: [контекст чата](modules/native-chat-context.md) — `core/src/chat_context/`:
 упаковка, память/профиль, покрытие разделов, source visibility и delivery trace.
 

@@ -87,7 +87,11 @@ pub(super) async fn request(
     Ok(value["result"].clone())
 }
 
-async fn read(context: &Context, store: &Store, body: &Value) -> Result<Value, &'static str> {
+pub(crate) async fn read(
+    context: &Context,
+    store: &Store,
+    body: &Value,
+) -> Result<Value, &'static str> {
     let collection = collection_name(body).ok_or(SCOPE)?;
     let revision = store.revision(context, collection).await?;
     if body.get("revision").is_some_and(|v| v != &revision) {

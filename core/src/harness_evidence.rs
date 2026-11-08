@@ -113,6 +113,21 @@ pub fn execute(request: &Value) -> Result<Value, &'static str> {
     }
 }
 
+fn source_result(mut value: &Value) -> &Value {
+    // Only the trusted extension-call envelope can contain another tool result.
+    // Ordinary document text/result objects never gain control-flow authority.
+    for _ in 0..2 {
+        if text(&value["tool"]).starts_with("use_extensions_")
+            && value["operation"] == "call"
+            && value["result"]["schema"] == "les_tool_result_v1"
+        {
+            value = &value["result"];
+        } else {
+            break;
+        }
+    }
+    value
+}
 fn pdf_read_coverage(request: &Value) -> Result<Value, &'static str> {
     let results = request["results"]
         .as_array()
@@ -122,6 +137,7 @@ fn pdf_read_coverage(request: &Value) -> Result<Value, &'static str> {
     let mut revisions = std::collections::BTreeMap::new();
     for result in results
         .iter()
+        .map(source_result)
         .filter(|v| v["tool"] == "read_pdf_source" && v["status"] == "ok")
     {
         let v = &result["result"];
@@ -175,10 +191,11 @@ fn pdf_read_coverage(request: &Value) -> Result<Value, &'static str> {
 }
 
 fn source_read_outcome(request: &Value) -> Result<Value, &'static str> {
-    let result = &request["result"];
+    let result = source_result(&request["result"]);
     let read = matches!(
         text(&result["tool"]),
-        "read_source"
+        "search_sources"
+            | "read_source"
             | "read_pdf_source"
             | "read_excel_source"
             | "look_at_pdf_page"
@@ -189,13 +206,29 @@ fn source_read_outcome(request: &Value) -> Result<Value, &'static str> {
     let allowed = !read || result["status"] == "ok";
     let code = text(&result["result"]["code"]);
     Ok(
-        json!({"allowed":allowed,"code":if code.starts_with("PDF_")||code.starts_with("FILESYSTEM_"){code}else{"SOURCE_READ_FAILED"}}),
+        json!({"allowed":allowed,"code":if !code.is_empty() && code.len() <= 100 && code.bytes().all(|c|c.is_ascii_uppercase()||c.is_ascii_digit()||c==b'_'){code}else{"SOURCE_READ_FAILED"}}),
     )
 }
 
 #[cfg(test)]
 mod source_tests {
     use super::*;
+    #[test]
+    fn extension_calls_preserve_read_failures_and_pdf_cursor_coverage() {
+        let wrap = |result| json!({"schema":"les_tool_result_v1","tool":"use_extensions_abc","operation":"call","status":"ok","result":result});
+        let error = wrap(
+            json!({"schema":"les_tool_result_v1","tool":"read_pdf_source","status":"error","result":{"code":"PDF_REVISION_CHANGED"}}),
+        );
+        assert_eq!(
+            execute(&json!({"action":"source_read_outcome","result":error})).unwrap(),
+            json!({"allowed":false,"code":"PDF_REVISION_CHANGED"})
+        );
+        let part = wrap(
+            json!({"schema":"les_tool_result_v1","tool":"read_pdf_source","status":"ok","result":{"doc_id":"d","dataset_id":"a","doc_name":"x.pdf","source_sha256":"a".repeat(64),"page":2,"offset":0,"total_chars":6,"text":"абв"}}),
+        );
+        let coverage = execute(&json!({"action":"pdf_read_coverage","results":[part]})).unwrap();
+        assert_eq!(coverage["continuation"]["args"]["offset"], 3);
+    }
     #[test]
     fn continuation_is_the_first_gap_in_the_same_document_and_revision() {
         let part = |start, text| {

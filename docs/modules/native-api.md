@@ -1,5 +1,10 @@
 # Rust HTTP API
 
+835: [общий кандидат чата](native-chat-turn.md) доступен на двух внутренних,
+защищённых токеном адресах JSON/SSE. Публичный чат до паритета не переключён.
+GET/HEAD `/api/documents/by-id/{id}/raw` уже обслуживает Rust с проверкой оригинала
+и byte-range; совместимый classic-путь пока сохранён.
+
 833: [первый индекс](native-index-setup.md) — GET/POST `/api/rag/index/setup`,
 сохранённый план, новая Edge-папка и автоматическая подготовка перед первым intake.
 

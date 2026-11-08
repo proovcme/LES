@@ -19,12 +19,12 @@
 
 | Метрика | Значение |
 | --- | --- |
-| Python-файлов под git | 710 |
-| Строк Python | 170584 |
+| Python-файлов под git | 708 |
+| Строк Python | 170276 |
 | PRODUCT_REACHABLE | 419 |
 | RUNTIME_SUPPORT | 5 |
-| TEST_OR_TOOL_ONLY | 259 |
-| DORMANT_CANDIDATE | 27 |
+| TEST_OR_TOOL_ONLY | 260 |
+| DORMANT_CANDIDATE | 24 |
 | Зарегистрированных API-маршрутов | 298 |
 | Ошибок разбора | 0 |
 
@@ -87,14 +87,11 @@
 
 | Файл | Строк | Почему только кандидат |
 | --- | --- | --- |
-| backend/pdf_layout.py | 254 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
-| backend/rules_extractor.py | 127 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/active_state_service.py | 129 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/agent_router_service.py | 467 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/asbuilt_chat_service.py | 122 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/asbuilt_intake_service.py | 424 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/asbuilt_ocr.py | 159 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
-| proxy/services/candidate_selection_service.py | 136 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/checklist_template_importer.py | 450 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/clarification_service.py | 225 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/document_object_model.py | 79 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |

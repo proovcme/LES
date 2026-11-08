@@ -137,6 +137,22 @@ pub(super) fn execute(conn: &Connection, action: &str, args: &Args) -> Result<Va
     })?;
     match action {
         "library_datasets" => Ok(json!({"datasets":datasets(conn)?})),
+        "library_document" => {
+            let id = args.get("doc_id").and_then(Value::as_str).unwrap_or("");
+            let dataset = args.get("dataset_id").and_then(Value::as_str).unwrap_or("");
+            let name = args.get("file_name").and_then(Value::as_str).unwrap_or("");
+            if id.is_empty() && (dataset.is_empty() || name.is_empty()) {
+                return Err(Failure::invalid("Document identity required"));
+            }
+            let records=rows(conn,"SELECT doc.* FROM documents doc JOIN datasets d ON doc.dataset_id=d.id WHERE (?1='' OR doc.id=?1) AND (?2='' OR doc.dataset_id=?2) AND (?3='' OR doc.file_name=?3) AND COALESCE(d.dataset_scope,'user') <> 'system' AND les_visible_document(doc.file_name) LIMIT 2",params![id,dataset,name])?;
+            if records.len() > 1 {
+                return Err(Failure::new(
+                    "DOCUMENT_IDENTITY_AMBIGUOUS",
+                    "Найдено несколько редакций документа. Выберите точный источник.",
+                ));
+            }
+            Ok(records.into_iter().next().unwrap_or(Value::Null))
+        }
         "library_dataset" => {
             let id = text(args, "dataset_id")?;
             check_dataset(conn, id)?;

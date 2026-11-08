@@ -119,6 +119,13 @@ pub fn resolve(request: &Value) -> Result<Source, &'static str> {
 }
 
 pub fn verify(file: &mut File, expected: &str) -> Result<(), &'static str> {
+    if fingerprint(file)? != expected {
+        return Err("PDF_REVISION_CHANGED");
+    }
+    Ok(())
+}
+/// Stable SHA on the same open handle. Also used for originals not indexed yet.
+pub fn fingerprint(file: &mut File) -> Result<String, &'static str> {
     let before = file.metadata().map_err(|_| "PDF_SOURCE_UNAVAILABLE")?;
     if !before.is_file() || before.len() > 512 * 1024 * 1024 {
         return Err("PDF_SOURCE_LIMIT");
@@ -145,11 +152,10 @@ pub fn verify(file: &mut File, expected: &str) -> Result<(), &'static str> {
     if total != before.len()
         || before.len() != after.len()
         || before.modified().ok() != after.modified().ok()
-        || format!("{:x}", hash.finalize()) != expected
     {
         return Err("PDF_REVISION_CHANGED");
     }
-    Ok(())
+    Ok(format!("{:x}", hash.finalize()))
 }
 
 #[cfg(test)]

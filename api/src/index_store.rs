@@ -2,7 +2,8 @@
 mod bootstrap;
 mod cache;
 mod publication;
-mod sections;
+mod search;
+pub(crate) mod sections;
 use crate::{error, json_response, Context};
 use axum::{body::to_bytes, extract::Request, http::StatusCode, response::Response};
 use serde_json::{json, Value};

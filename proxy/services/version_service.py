@@ -70,7 +70,6 @@ _CRITICAL_FILES = (
     "proxy/services/doc_review_retrieval_service.py",
     "proxy/services/document_explorer_service.py",
     "proxy/services/tool_harness_service.py",
-    "proxy/services/candidate_selection_service.py",
     "proxy/services/active_state_service.py",
     "proxy/services/les_module_service.py",
     "proxy/services/scoped_rag_builder.py",

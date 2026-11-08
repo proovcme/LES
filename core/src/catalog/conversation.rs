@@ -80,6 +80,10 @@ fn history(conn: &Connection, action: &str, args: &Args, filtered: bool) -> Resu
     let question = redact("question", &user);
     let answer = redact("answer", &assistant);
     if action == "context_history" {
+        if args.contains_key("limit") {
+            let limit = integer(args, "limit", 40)?.clamp(1, 500);
+            return Ok(json!(rows(conn,&format!("SELECT * FROM (SELECT id,{question},{answer} FROM chat_history WHERE session_id=? AND id>?{success} AND NOT ({user} AND {assistant}) ORDER BY id DESC LIMIT ?) ORDER BY id"),params![sid,after,limit])?));
+        }
         return Ok(json!(rows(conn,&format!("SELECT id,{question},{answer} FROM chat_history WHERE session_id=? AND id>?{success} AND NOT ({user} AND {assistant}) ORDER BY id"),params![sid,after])?));
     }
     let fields = match action {

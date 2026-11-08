@@ -2,8 +2,10 @@ mod agent_state;
 mod auth;
 mod auth_keys;
 mod catalog;
+mod chat;
 mod dataset_reader;
 mod document_dispatch;
+mod documents;
 #[cfg(feature = "edge")]
 mod edge;
 mod embedding_inference;
@@ -55,6 +57,7 @@ pub struct Context {
     pub intake: Option<intake::Service>,
     pub reader: Option<dataset_reader::Service>,
     pub index_store: Option<index_store::Store>,
+    pub chat: tokio::sync::OnceCell<chat::Service>,
 }
 
 pub fn json_response(status: StatusCode, value: Value, engine: &str) -> Response {
@@ -100,6 +103,9 @@ async fn dispatch(State(context): State<Arc<Context>>, request: Request) -> Resp
     }
     if request.uri().path() == inference::PATH {
         return inference::handle(context, request).await;
+    }
+    if chat::http::handles(request.uri().path()) {
+        return chat::http::handle(context, request).await;
     }
     if request.uri().path() == embedding_inference::PATH {
         return embedding_inference::handle(context, request).await;
@@ -164,6 +170,11 @@ async fn dispatch(State(context): State<Arc<Context>>, request: Request) -> Resp
     }
     if history::handles(request.method().as_str(), request.uri().path()) {
         return history::handle(context, request).await;
+    }
+    if matches!(request.method().as_str(), "GET" | "HEAD")
+        && documents::route(request.uri().path()).is_some()
+    {
+        return documents::handle(context, request).await;
     }
     if library::handles(request.method().as_str(), request.uri().path()) {
         return library::handle(context, request).await;
@@ -330,6 +341,7 @@ fn configuration() -> Result<(std::net::SocketAddr, Context), &'static str> {
             intake,
             reader,
             index_store,
+            chat: tokio::sync::OnceCell::new(),
         },
     ))
 }

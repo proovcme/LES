@@ -102,7 +102,7 @@ fn sql_value(value: &Value) -> Result<SqlValue> {
     }
 }
 
-fn save(conn: &Connection, args: &Args) -> Result<Value> {
+pub(super) fn save(conn: &Connection, args: &Args) -> Result<Value> {
     let values = args
         .get("row")
         .and_then(Value::as_object)
@@ -140,7 +140,7 @@ fn save(conn: &Connection, args: &Args) -> Result<Value> {
                 .collect::<Vec<_>>()
                 .join(",");
             if conn.execute(
-                &format!("UPDATE chat_history SET {assignments} WHERE id=? AND session_id=? AND crag_status!='FAILED'"),
+                &format!("UPDATE chat_history SET {assignments} WHERE id=? AND session_id IS ? AND crag_status!='FAILED'"),
                 params_from_iter(params),
             )? != 1
             {
@@ -223,7 +223,7 @@ pub(super) fn execute(conn: &Connection, action: &str, args: &Args) -> Result<Va
             conn.execute(
                 "INSERT INTO chat_history (session_id,question,answer,crag_status,success,validation_enabled,attachment_context)
                  VALUES (?,?,'','IN_PROGRESS',0,0,?)",
-                params![text(args,"session_id")?, text(args,"question")?, text(args,"attachment_context")?],
+                params![args.get("session_id").and_then(Value::as_str), text(args,"question")?, text(args,"attachment_context")?],
             )?;
             Ok(json!(conn.last_insert_rowid()))
         }

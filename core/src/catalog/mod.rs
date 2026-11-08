@@ -116,6 +116,15 @@ pub fn execute(request: &Value) -> Value {
         }
     }
 }
+pub(crate) fn save_chat_row(conn: &Connection, history: i64, row: &Value) -> Result<Value> {
+    let arguments = json!({"id":history,"row":row});
+    history::save(
+        conn,
+        arguments
+            .as_object()
+            .ok_or_else(|| Failure::invalid("Invalid chat completion"))?,
+    )
+}
 fn dispatch(request: &Value) -> Result<Value> {
     if request["schema"] != "les.catalog.v1" {
         return Err(Failure::invalid("Invalid catalog schema"));
@@ -204,6 +213,7 @@ fn dispatch(request: &Value) -> Result<Value> {
         | "intake_active_index"
         | "intake_has_work"
         | "library_dataset"
+        | "library_document"
         | "library_documents"
         | "library_forest"
         | "project_list"
