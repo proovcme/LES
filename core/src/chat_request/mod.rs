@@ -1,4 +1,5 @@
 //! Public chat request normalization. Model choice and source scope never come from prose.
+pub mod egress;
 pub mod journal;
 mod scope;
 #[cfg(test)]

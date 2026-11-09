@@ -14,6 +14,13 @@ pub(crate) async fn configuration(
     context: Arc<Context>,
     embedding: bool,
 ) -> Result<(Value, Value, String, bool)> {
+    scoped_configuration(context, embedding, None).await
+}
+async fn scoped_configuration(
+    context: Arc<Context>,
+    embedding: bool,
+    remote_scope: Option<Value>,
+) -> Result<(Value, Value, String, bool)> {
     tokio::task::spawn_blocking(move||->Result<_>{
         let settings=Settings::load(&context.state_root)?;
         let (_,path)=identity(&context,&settings)?;
@@ -24,7 +31,10 @@ pub(crate) async fn configuration(
         if !embedding {return Ok((frozen,Value::Null,String::new(),false));}
         let execution=super::super::super::unwrap(crate::library::catalog(&context.database,"model_execution_snapshot",json!({"role":"embeddings"})))?;
         if execution.is_null(){return Err("EMBEDDING_MODEL_NOT_ASSIGNED".into());}
-        if context.public_chat_rust&&execution["revision"]["locality"]=="remote"{return Err("NATIVE_CLOUD_POLICY_PENDING".into());}
+        if context.public_chat_rust&&execution["revision"]["locality"]=="remote"{
+            let scope=remote_scope.as_ref().ok_or("CLOUD_EMBEDDING_SCOPE_UNVERIFIED")?;
+            super::super::super::egress::check(&context,scope)?;
+        }
         let env=std::env::var_os("LES_ENV_PATH").map(PathBuf::from).unwrap_or_else(||context.state_root.join(".env"));
         let binding=crate::model_runtime::resolve(&execution,"embeddings",&env)?;
         if les_core::index_bootstrap::model_key(binding.revision["model_id"].as_str().unwrap_or(""))!=les_core::index_bootstrap::model_key(contract["embedding_model"].as_str().unwrap_or("")){
@@ -60,7 +70,12 @@ pub(super) async fn search(context: Arc<Context>, turn: &Prepared, args: Value) 
         .as_str()
         .filter(|s| !s.trim().is_empty() && s.chars().count() <= 20000)
         .ok_or("INDEX_QUERY_INVALID")?;
-    let (config, revision, prefix, allow_remote) = configuration(context.clone(), true).await?;
+    let remote_scope = turn
+        .egress_tag
+        .as_ref()
+        .map(|_| turn.scope["resolved_dataset_ids"].clone());
+    let (config, revision, prefix, allow_remote) =
+        scoped_configuration(context.clone(), true, remote_scope).await?;
     let raw=crate::embedding_inference::execute(context.clone(),&json!({"schema":"les.embedding-inference.v1","revision_id":revision,"inputs":[format!("{prefix}{query}")],
         "dimension":config["embedding"]["vector_size"].as_str().and_then(|s|s.parse::<u64>().ok()),"timeout_seconds":120,"allow_remote":allow_remote,"response_limit":1048576,"release_after":true})).await?;
     let end = raw

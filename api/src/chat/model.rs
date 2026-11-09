@@ -5,7 +5,7 @@ use futures_util::StreamExt;
 use serde_json::{json, Value};
 use std::time::Duration;
 pub async fn complete(
-    context: &Context,
+    context: &std::sync::Arc<Context>,
     turn: &Prepared,
     mut messages: Value,
     tools: Vec<Value>,
@@ -13,6 +13,13 @@ pub async fn complete(
     sink: &Sink,
     publish_text: bool,
 ) -> Result<Value> {
+    if turn.egress_tag.is_some() {
+        let owner = context.clone();
+        let ids = turn.scope["resolved_dataset_ids"].clone();
+        tokio::task::spawn_blocking(move || super::egress::check(&owner, &ids))
+            .await
+            .map_err(|_| "CLOUD_SCOPE_UNVERIFIED")??;
+    }
     let profile = &turn.connection.profile;
     let maximum = profile["generation_reserve_tokens"]
         .as_u64()

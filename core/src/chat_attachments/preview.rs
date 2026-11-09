@@ -105,7 +105,22 @@ pub fn convert(req: &Value, external: &impl Fn(&Value) -> Result<Value>) -> Resu
     if text.is_empty() {
         return Err("ATTACHMENT_NO_TEXT");
     }
-    let max = req["max_chars"].as_u64().unwrap_or(18000).min(20000) as usize;
+    let max = req["max_chars"].as_u64().unwrap_or(18000).min(
+        if req["full_snapshot"] == true
+            && req["path"]
+                .as_str()
+                .map(Path::new)
+                .and_then(Path::extension)
+                .is_some_and(|e| e == "md")
+        {
+            48000
+        } else {
+            20000
+        },
+    ) as usize;
+    if req["full_snapshot"] == true && text.chars().count() > max {
+        return Err("ATTACHMENT_FOLDER_LIMIT");
+    }
     Ok(
         json!({"text":text.chars().take(max).collect::<String>(),"chars":text.chars().count(),"truncated":text.chars().count()>max,"media_type":"document","source_sha256":value["source_sha256"]}),
     )

@@ -112,7 +112,9 @@ impl Journal {
             let mut row=json!({"question":request["question"],"answer":response["answer"],"sources":response["sources"].as_array().into_iter().flatten().filter_map(Value::as_str).collect::<Vec<_>>().join(","),
                 "crag_status":response["crag_status"].as_str().unwrap_or("UNVALIDATED"),"latency_sec":response["latency_sec"],"tokens":response["tokens"],"session_id":request["session_id"],
                 "route_channel":"generic","route_reason":"native_chat","requested_dataset_filter":request["dataset_filter"].as_str().unwrap_or(""),"effective_dataset_filter":"",
-                "source_dataset_mismatch":0,"cache_type":"","validation_enabled":0,"success":1,"retrieval_quality":"","attachment_context":request["attachment_context"].as_str().unwrap_or("")});
+                "source_dataset_mismatch":0,"cache_type":"","validation_enabled":0,"success":1,"retrieval_quality":"",
+                "allow_background_summary":!response["artifact"]["egress_tag"].is_string(),
+                "attachment_context":request["attachment_context"].as_str().unwrap_or("")});
             for (field,value) in [("resolved_dataset_ids",response["source_scope"]["resolved"].clone()),("resolved_dataset_names",json!([])),
                 ("source_dataset_ids",response["source_scope"]["used"].clone()),("source_dataset_names",json!([])),("query_route_json",response["query_route"].clone()),
                 ("retrieval_trace_json",response["retrieval_trace"].clone()),("artifact_json",response.get("artifact").cloned().unwrap_or(json!({}))) ] {row[field]=json!(value.to_string());}

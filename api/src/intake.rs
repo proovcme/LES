@@ -440,6 +440,15 @@ fn policy(state: &Path) -> Option<Policy> {
         suffixes,
     })
 }
+pub(crate) fn attachment_folder(state: &Path, raw: &str) -> Result<PathBuf, &'static str> {
+    if !Path::new(raw).is_absolute() && !Path::new(raw).starts_with("~") {
+        return Err("ATTACHMENT_PATH_UNSAFE");
+    }
+    policy(state)
+        .ok_or("ATTACHMENT_POLICY_INVALID")?
+        .root(raw)
+        .map_err(|stop| stop.code)
+}
 
 async fn record(context: &Context, id: &Value, action: &'static str, stop: Option<Stop>) {
     let (reason, message) = stop.map_or(("", ""), |stop| (stop.code, stop.message));

@@ -120,7 +120,12 @@ fn forest(conn: &Connection) -> Result<Value> {
 }
 
 pub(super) fn execute(conn: &Connection, action: &str, args: &Args) -> Result<Value> {
-    if !table(conn, "datasets")? || !table(conn, "documents")? {
+    let has_datasets = table(conn, "datasets")?;
+    let has_documents = table(conn, "documents")?;
+    if action == "library_datasets" && !has_datasets && !has_documents {
+        return Ok(json!({"datasets":[]}));
+    }
+    if !has_datasets || !has_documents {
         return Err(Failure::new(
             "WORKSPACE_UNAVAILABLE",
             "Каталог документов ещё запускается.",

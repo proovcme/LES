@@ -3,7 +3,77 @@ use super::*;
 use multer::{Constraints, SizeLimit};
 use tokio::io::AsyncWriteExt;
 pub const PATH: &str = "/api/light/internal-attachments/upload";
-struct Temporary(PathBuf);
+const PUBLIC: &str = "/api/chat/attachments";
+const LEGACY: &str = "/api/rag/attach";
+const FOLDER: &str = "/api/rag/attach-folder";
+pub fn public_path(path: &str) -> bool {
+    matches!(path, PUBLIC | LEGACY | FOLDER)
+}
+pub(super) async fn scratch(context: &Context) -> Result<PathBuf> {
+    let directory = context.state_root.join("storage/upload-tmp");
+    let path = directory.clone();
+    context
+        .upload_owner
+        .get_or_try_init(|| async move {
+            tokio::task::spawn_blocking(move || -> Result<std::fs::File> {
+                std::fs::create_dir_all(&path).map_err(|_| "ATTACHMENT_STORE_UNAVAILABLE")?;
+                let storage = path.parent().ok_or("ATTACHMENT_PATH_UNSAFE")?;
+                if super::folder::reparse(
+                    &std::fs::symlink_metadata(&path)
+                        .map_err(|_| "ATTACHMENT_STORE_UNAVAILABLE")?,
+                ) || super::folder::reparse(
+                    &std::fs::symlink_metadata(storage)
+                        .map_err(|_| "ATTACHMENT_STORE_UNAVAILABLE")?,
+                ) {
+                    return Err("ATTACHMENT_PATH_UNSAFE".into());
+                }
+                let lock = storage.join(".les-native-upload.lock");
+                if std::fs::symlink_metadata(&lock)
+                    .is_ok_and(|m| super::folder::reparse(&m) || !m.is_file())
+                {
+                    return Err("ATTACHMENT_PATH_UNSAFE".into());
+                }
+                let lease = std::fs::OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .create(true)
+                    .truncate(false)
+                    .open(lock)
+                    .map_err(|_| "ATTACHMENT_STORE_UNAVAILABLE")?;
+                lease.try_lock().map_err(|_| "ATTACHMENT_QUEUE_BUSY")?;
+                for entry in std::fs::read_dir(&path).map_err(|_| "ATTACHMENT_STORE_UNAVAILABLE")? {
+                    let entry = entry.map_err(|_| "ATTACHMENT_STORE_UNAVAILABLE")?;
+                    let file = entry.file_name();
+                    let Some((id, extension)) = file
+                        .to_str()
+                        .and_then(|n| n.strip_prefix("native-read_"))
+                        .and_then(|n| n.split_once('.'))
+                    else {
+                        continue;
+                    };
+                    if id.len() == 12
+                        && id.bytes().all(|b| b.is_ascii_hexdigit())
+                        && extension.len() <= 12
+                        && !extension.is_empty()
+                        && extension.bytes().all(|b| b.is_ascii_alphanumeric())
+                    {
+                        let meta = std::fs::symlink_metadata(entry.path())
+                            .map_err(|_| "ATTACHMENT_STORE_UNAVAILABLE")?;
+                        if meta.is_file() && !super::folder::reparse(&meta) {
+                            std::fs::remove_file(entry.path())
+                                .map_err(|_| "ATTACHMENT_STORE_UNAVAILABLE")?;
+                        }
+                    }
+                }
+                Ok(lease)
+            })
+            .await
+            .map_err(|_| "ATTACHMENT_STORE_UNAVAILABLE".to_owned())?
+        })
+        .await?;
+    Ok(directory)
+}
+pub(super) struct Temporary(pub PathBuf);
 impl Drop for Temporary {
     fn drop(&mut self) {
         if std::fs::remove_file(&self.0).is_err() {
@@ -43,7 +113,7 @@ fn name(raw: &str) -> Result<String> {
     }
     Ok(raw.to_owned())
 }
-async fn receive(context: Arc<Context>, request: Request) -> Result<Value> {
+async fn receive(context: &Context, request: Request) -> Result<(Temporary, String)> {
     let settings = Settings::load(&context.state_root)?;
     let limit = settings
         .get("MAX_UPLOAD_MB", "100")
@@ -74,10 +144,7 @@ async fn receive(context: Arc<Context>, request: Request) -> Result<Value> {
         boundary,
         constraints,
     );
-    let directory = context.state_root.join("storage/upload-tmp");
-    tokio::fs::create_dir_all(&directory)
-        .await
-        .map_err(|_| "ATTACHMENT_STORE_UNAVAILABLE")?;
+    let directory = scratch(context).await?;
     let mut temporary = None;
     let mut original = None;
     let mut acceptance = false;
@@ -91,7 +158,10 @@ async fn receive(context: Arc<Context>, request: Request) -> Result<Value> {
                 return Err("ATTACHMENT_MULTIPART_INVALID".into());
             }
             let value = field.text().await.map_err(|e| multipart_error(&e))?;
-            if value != "false" {
+            if !matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "false" | "0" | "off" | "no" | "f" | "n"
+            ) {
                 return Err("CANDIDATE_ACCEPTANCE_REQUIRED".into());
             }
             acceptance = true;
@@ -119,18 +189,18 @@ async fn receive(context: Arc<Context>, request: Request) -> Result<Value> {
         {
             return Err("ATTACHMENT_FORMAT_UNSUPPORTED".into());
         }
-        let temp = Temporary(directory.join(format!(
-            "{}.{}",
+        let path = directory.join(format!(
+            "native-{}.{}",
             les_core::chat_attachments::new_id()?,
             suffix
-        )));
-        // The handle is declared after its cleanup guard, so cancellation closes it first.
+        ));
         let mut output = tokio::fs::OpenOptions::new()
             .create_new(true)
             .write(true)
-            .open(&temp.0)
+            .open(&path)
             .await
             .map_err(|_| "ATTACHMENT_STORE_UNAVAILABLE")?;
+        let temp = Temporary(path);
         let mut size = 0u64;
         while let Some(bytes) = field.chunk().await.map_err(|e| multipart_error(&e))? {
             size += bytes.len() as u64;
@@ -154,13 +224,7 @@ async fn receive(context: Arc<Context>, request: Request) -> Result<Value> {
         original = Some(filename);
     }
     let temp = temporary.ok_or("ATTACHMENT_MULTIPART_INVALID")?;
-    super::prepare(
-        context,
-        temp.0.clone(),
-        original.ok_or("ATTACHMENT_MULTIPART_INVALID")?,
-        None,
-    )
-    .await
+    Ok((temp, original.ok_or("ATTACHMENT_MULTIPART_INVALID")?))
 }
 fn multipart_error(error: &multer::Error) -> String {
     match error {
@@ -172,9 +236,120 @@ fn multipart_error(error: &multer::Error) -> String {
     .into()
 }
 pub async fn handle(context: Arc<Context>, request: Request) -> Response {
-    match tokio::time::timeout(Duration::from_secs(180), receive(context, request)).await {
-        Ok(Ok(value)) => crate::json_response(StatusCode::OK, value, "rust.attachments"),
+    perform(context, request, None, StatusCode::OK).await
+}
+async fn perform(
+    context: Arc<Context>,
+    request: Request,
+    caller: Option<String>,
+    status: StatusCode,
+) -> Response {
+    let result = async {
+        let _slot = context
+            .upload_slots
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| "ATTACHMENT_QUEUE_BUSY")?;
+        let key = if caller.is_some() {
+            if request.headers().get_all("idempotency-key").iter().count() > 1 {
+                return Err("ATTACHMENT_KEY_INVALID".into());
+            }
+            request
+                .headers()
+                .get("idempotency-key")
+                .map(|v| v.to_str().map(str::to_owned))
+                .transpose()
+                .map_err(|_| "ATTACHMENT_KEY_INVALID")?
+        } else {
+            None
+        };
+        if request.uri().path() == FOLDER {
+            return super::folder::receive(
+                context,
+                request,
+                caller.ok_or("ATTACHMENT_REQUEST_INVALID")?,
+                key,
+            )
+            .await;
+        }
+        let (temp, name) = receive(&context, request).await?;
+        publish(context, &temp, name, caller, key).await
+    };
+    match tokio::time::timeout(Duration::from_secs(180), result).await {
+        Ok(Ok(value)) => crate::json_response(status, value, "rust.attachments"),
         Ok(Err(code)) => failure(&code),
         Err(_) => failure("ATTACHMENT_UPLOAD_TIMEOUT"),
     }
+}
+pub(super) async fn publish(
+    context: Arc<Context>,
+    temp: &Temporary,
+    name: String,
+    caller: Option<String>,
+    key: Option<String>,
+) -> Result<Value> {
+    if let Some(caller) = caller {
+        let path = temp.0.clone();
+        let label = name.clone();
+        let claim = tokio::task::spawn_blocking(move || {
+            les_core::chat_attachments::claim(&path, &label, &caller, key.as_deref(), "file")
+        })
+        .await
+        .map_err(|_| "ATTACHMENT_STORE_UNAVAILABLE")??;
+        let id = claim.ident.clone();
+        super::prepare_asset(context, temp.0.clone(), name, Some(id), Some(claim)).await
+    } else {
+        super::prepare(context, temp.0.clone(), name, None).await
+    }
+}
+pub async fn handle_public(context: Arc<Context>, request: Request) -> Response {
+    let public = request.uri().path() == PUBLIC;
+    let legacy = request.uri().path() == LEGACY;
+    let (cors, caller) =
+        match crate::auth::authorize_caller(&context, request.headers(), !public).await {
+            Ok(v) => v,
+            Err(r) => return r,
+        };
+    let mut result = if !crate::auth::origin_allowed(request.headers(), &cors) {
+        crate::error(StatusCode::FORBIDDEN, "Источник загрузки не разрешён.")
+    } else if request.method() != "POST" {
+        let mut r = crate::error(
+            StatusCode::METHOD_NOT_ALLOWED,
+            "Для загрузки используйте POST.",
+        );
+        r.headers_mut().insert("allow", "POST".parse().unwrap());
+        r
+    } else {
+        let mode = if legacy {
+            reqwest::Url::parse(&format!("http://localhost{}", request.uri()))
+                .ok()
+                .and_then(|u| {
+                    u.query_pairs()
+                        .find(|(k, _)| k == "mode")
+                        .map(|(_, v)| v.into_owned())
+                })
+                .unwrap_or_else(|| "read".into())
+        } else {
+            "read".into()
+        };
+        match mode.as_str() {
+            "read" | "quick" => {
+                perform(
+                    context,
+                    request,
+                    Some(caller),
+                    if public {
+                        StatusCode::CREATED
+                    } else {
+                        StatusCode::OK
+                    },
+                )
+                .await
+            }
+            "index" => failure("ATTACHMENT_INDEX_PENDING"),
+            _ => failure("ATTACHMENT_MODE_INVALID"),
+        }
+    };
+    result.headers_mut().extend(cors);
+    result
 }

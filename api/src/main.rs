@@ -54,6 +54,8 @@ pub struct Context {
     pub client: reqwest::Client,
     pub workspace_slots: Arc<tokio::sync::Semaphore>,
     pub attachment_slots: Arc<tokio::sync::Semaphore>,
+    pub upload_slots: Arc<tokio::sync::Semaphore>,
+    pub upload_owner: tokio::sync::OnceCell<std::fs::File>,
     pub auth_policy: tokio::sync::OnceCell<auth::Policy>,
     pub frontend: Option<frontend::Frontend>,
     pub legacy_ui_url: Option<String>,
@@ -159,6 +161,9 @@ async fn dispatch(State(context): State<Arc<Context>>, request: Request) -> Resp
     }
     if context.public_chat_rust && chat::http::public_path(request.uri().path()) {
         return chat::http::handle_public(context, request).await;
+    }
+    if context.public_chat_rust && attachments::public_path(request.uri().path()) {
+        return attachments::handle_public(context, request).await;
     }
     if let Some(frontend) = &context.frontend {
         if let Some(response) = frontend
@@ -373,6 +378,8 @@ fn configuration() -> Result<(std::net::SocketAddr, Context), &'static str> {
             client,
             workspace_slots: Arc::new(tokio::sync::Semaphore::new(16)),
             attachment_slots: Arc::new(tokio::sync::Semaphore::new(1)),
+            upload_slots: Arc::new(tokio::sync::Semaphore::new(2)),
+            upload_owner: tokio::sync::OnceCell::new(),
             auth_policy,
             frontend,
             legacy_ui_url,

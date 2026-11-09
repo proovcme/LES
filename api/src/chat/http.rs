@@ -67,6 +67,7 @@ async fn execute(
     mut request: Value,
     saved: Value,
     sink: Sink,
+    caller: Option<String>,
 ) -> Result<Value> {
     if saved["created"] != true {
         if saved["status"] == "completed" {
@@ -80,7 +81,7 @@ async fn execute(
     let result = {
         let run = Box::pin(tokio::time::timeout(
             Duration::from_secs(660),
-            runner::run(context, &mut request, &mut journal, &sink),
+            runner::run(context, &mut request, &mut journal, &sink, caller),
         ));
         match select(run, Box::pin(sender.closed())).await {
             Either::Left((Ok(value), _)) => value,
@@ -131,13 +132,7 @@ pub async fn handle_public(context: Arc<Context>, request: Request) -> Response 
             Err(response) => return response,
         };
     let headers = request.headers();
-    let allowed_origin = headers.get(header::ORIGIN).is_none_or(|origin| {
-        cors.contains_key(header::ACCESS_CONTROL_ALLOW_ORIGIN)
-            || headers
-                .get(header::HOST)
-                .and_then(|h| h.to_str().ok())
-                .is_some_and(|host| origin.as_bytes() == format!("http://{host}").as_bytes())
-    });
+    let allowed_origin = crate::auth::origin_allowed(headers, &cors);
     let mut response = if !allowed_origin {
         crate::error(
             StatusCode::FORBIDDEN,
@@ -195,7 +190,7 @@ async fn handle_turn(context: Arc<Context>, request: Request, caller: Option<Str
     if let Err(error) = super::prepare::admit(&request) {
         return failed(error);
     }
-    let saved = match receipt(context.clone(), request.clone(), key, caller).await {
+    let saved = match receipt(context.clone(), request.clone(), key, caller.clone()).await {
         Ok(v) => v,
         Err(e) => return failed(e),
     };
@@ -204,7 +199,7 @@ async fn handle_turn(context: Arc<Context>, request: Request, caller: Option<Str
     if !streaming {
         // Poll execution and drain progress together. JSON uses exactly the same
         // backpressure, persistence and provider path as streaming.
-        let run = Box::pin(execute(context, request, saved, sink));
+        let run = Box::pin(execute(context, request, saved, sink, caller));
         let drain = Box::pin(async move { while receiver.recv().await.is_some() {} });
         let value = match select(run, drain).await {
             Either::Left((value, _)) => value,
@@ -216,7 +211,7 @@ async fn handle_turn(context: Arc<Context>, request: Request, caller: Option<Str
         };
     }
     tokio::spawn(async move {
-        match execute(context, request, saved, sink.clone()).await {
+        match execute(context, request, saved, sink.clone(), caller).await {
             Ok(value) => {
                 let _ = sink.emit("final", value).await;
             }

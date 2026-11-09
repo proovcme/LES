@@ -1,4 +1,5 @@
 //! Opaque originals and bounded parsing in a supervised child.
+mod folder;
 mod upload;
 use crate::{index_batch::configuration::Settings, Context};
 use axum::{body::to_bytes, extract::Request, http::StatusCode, response::Response};
@@ -8,6 +9,7 @@ use std::{
     sync::Arc,
     time::Duration,
 };
+pub use upload::{handle_public, public_path};
 pub const PRIVATE: &str = "/api/light/internal-attachments";
 pub fn handles(path: &str) -> bool {
     path == PRIVATE || path == upload::PATH
@@ -66,6 +68,15 @@ pub async fn prepare(
     name: String,
     ident: Option<String>,
 ) -> Result<Value> {
+    prepare_asset(context, path, name, ident, None).await
+}
+async fn prepare_asset(
+    context: Arc<Context>,
+    path: PathBuf,
+    name: String,
+    ident: Option<String>,
+    claim: Option<les_core::chat_attachments::UploadClaim>,
+) -> Result<Value> {
     if !path.is_absolute() {
         return Err("ATTACHMENT_PATH_UNSAFE".into());
     }
@@ -77,7 +88,26 @@ pub async fn prepare(
     .map_err(|_| "ATTACHMENT_QUEUE_TIMEOUT")?
     .map_err(|_| "ATTACHMENT_QUEUE_TIMEOUT")?;
     let settings = policy(&context).await?;
-    let mut preview=worker(json!({"action":"prepare","path":path,"name":name,"max_chars":settings.max_chars,"owned_state":context.state_root})).await?;
+    let root = settings.root.clone();
+    let age = settings.age;
+    let (claim, replay) = tokio::task::spawn_blocking(move || {
+        let replay = claim
+            .as_ref()
+            .map(|claim| les_core::chat_attachments::replay_upload(&root, claim, age))
+            .transpose()?
+            .flatten();
+        Ok::<_, &'static str>((claim, replay))
+    })
+    .await
+    .map_err(|_| "ATTACHMENT_STORE_UNAVAILABLE")??;
+    if let Some(replay) = replay {
+        return Ok(replay);
+    }
+    let mut input = json!({"action":"prepare","path":path,"name":name,"max_chars":settings.max_chars,"owned_state":context.state_root});
+    if let Some(claim) = &claim {
+        input["source_sha256"] = json!(claim.digest());
+    }
+    let preview = worker(input).await?;
     let asset = ident
         .map(Ok)
         .unwrap_or_else(les_core::chat_attachments::new_id)
@@ -86,6 +116,16 @@ pub async fn prepare(
     let id = asset.clone();
     let age = settings.age;
     let original = name.clone();
+    let result = json!({"attachment_id":asset,"mode":"read","name":name,"chars":preview["chars"].as_u64().unwrap_or(0),"text":preview["text"].as_str().unwrap_or(""),"truncated":preview["truncated"].as_bool().unwrap_or(false),"media_type":preview["media_type"].as_str().unwrap_or("document")});
+    if let Some(claim) = claim {
+        return tokio::task::spawn_blocking(move || {
+            les_core::chat_attachments::cleanup(&root, age)?;
+            les_core::chat_attachments::save_upload(&root, &path, &original, &claim, &result)
+        })
+        .await
+        .map_err(|_| "ATTACHMENT_STORE_UNAVAILABLE")?
+        .map_err(str::to_owned);
+    }
     let metadata = tokio::task::spawn_blocking(move || {
         les_core::chat_attachments::cleanup(&root, age)?;
         les_core::chat_attachments::preserve(&root, &path, &id, &original)
@@ -101,29 +141,26 @@ pub async fn prepare(
         .await;
         return Err("ATTACHMENT_HASH_CHANGED".into());
     }
-    preview
-        .as_object_mut()
-        .ok_or("ATTACHMENT_READ_FAILED")?
-        .remove("data_url");
-    Ok(
-        json!({"attachment_id":asset,"mode":"read","name":name,"chars":preview["chars"].as_u64().unwrap_or(0),"text":preview["text"].as_str().unwrap_or(""),"truncated":preview["truncated"].as_bool().unwrap_or(false),"media_type":preview["media_type"].as_str().unwrap_or("document")}),
-    )
+    Ok(result)
 }
-pub async fn bound(context: Arc<Context>, ident: String) -> Result<Value> {
+pub async fn bound(context: Arc<Context>, ident: String, owner: Option<String>) -> Result<Value> {
     let policy = policy(&context).await?;
     let root = policy.root.clone();
     let id = ident.clone();
     let age = policy.age;
-    let asset =
-        tokio::task::spawn_blocking(move || les_core::chat_attachments::resolve(&root, &id, age))
-            .await
-            .map_err(|_| "ATTACHMENT_READ_FAILED")?
-            .map_err(str::to_owned)?;
+    let gate = owner.clone();
+    let asset = tokio::task::spawn_blocking(move || {
+        les_core::chat_attachments::resolve_for(&root, &id, age, gate.as_deref())
+    })
+    .await
+    .map_err(|_| "ATTACHMENT_READ_FAILED")?
+    .map_err(str::to_owned)?;
     let name = asset.metadata["original_name"].clone();
     let hash = asset.metadata["sha256"].clone();
     let image = asset.metadata["suffix"]
         .as_str()
         .is_some_and(|s| matches!(s, ".png" | ".jpg" | ".jpeg" | ".webp"));
+    let folder = asset.metadata["upload_response"]["kind"] == "folder";
     let _slot = tokio::time::timeout(
         Duration::from_secs(30),
         context.attachment_slots.clone().acquire_owned(),
@@ -132,12 +169,16 @@ pub async fn bound(context: Arc<Context>, ident: String) -> Result<Value> {
     .map_err(|_| "ATTACHMENT_QUEUE_TIMEOUT")?
     .map_err(|_| "ATTACHMENT_QUEUE_TIMEOUT")?;
     let input = if image {
-        json!({"schema":"les.chat-attachments.v1","action":"resolve_image","root":policy.root,"attachment_id":ident,"max_age_sec":age})
+        json!({"schema":"les.chat-attachments.v1","action":"resolve_image","root":policy.root,"attachment_id":ident,"max_age_sec":age,"upload_owner":owner})
     } else {
-        json!({"action":"prepare","path":asset.path,"name":name,"source_sha256":hash,"max_chars":policy.max_chars,"owned_state":context.state_root})
+        json!({"action":"prepare","path":asset.path,"name":name,"source_sha256":hash,
+            "max_chars":if folder{48000}else{policy.max_chars},"full_snapshot":folder,"owned_state":context.state_root})
     };
     drop(asset);
     let mut result = worker(input).await?;
+    if result["source_sha256"].is_string() && result["source_sha256"] != hash {
+        return Err("ATTACHMENT_HASH_CHANGED".into());
+    }
     result["name"] = name;
     result["source_sha256"] = hash;
     result["attachment_id"] = json!(ident);
@@ -187,6 +228,17 @@ pub async fn handle(context: Arc<Context>, request: Request) -> Response {
 pub fn failure(code: &str) -> Response {
     let status = if code == "ATTACHMENT_NOT_FOUND" || code == "ATTACHMENT_EXPIRED" {
         StatusCode::NOT_FOUND
+    } else if matches!(
+        code,
+        "ATTACHMENT_KEY_REUSED" | "ATTACHMENT_KEY_INVALID" | "ATTACHMENT_ID_CONFLICT"
+    ) {
+        StatusCode::CONFLICT
+    } else if code == "ATTACHMENT_INDEX_PENDING" {
+        StatusCode::NOT_IMPLEMENTED
+    } else if code == "INTAKE_OUTSIDE_ALLOWED_ROOT" {
+        StatusCode::FORBIDDEN
+    } else if code == "ATTACHMENT_QUEUE_BUSY" {
+        StatusCode::TOO_MANY_REQUESTS
     } else if code.contains("UNAVAILABLE") || code.contains("TIMEOUT") {
         StatusCode::SERVICE_UNAVAILABLE
     } else {
@@ -211,6 +263,14 @@ pub(crate) fn detail(code: &str) -> &'static str {
         "ATTACHMENT_IMAGE_LIMIT"=>"Изображение больше 10 МиБ. Выберите меньший файл.",
         "ATTACHMENT_IMAGE_FORMAT"|"ATTACHMENT_IMAGE_INVALID"=>"Изображение повреждено или имеет неподдерживаемый формат. Выберите PNG, JPEG или WebP.",
         "ATTACHMENT_HASH_CHANGED"|"ATTACHMENT_SIZE_CHANGED"=>"Вложение изменилось. Прикрепите файл заново.",
+        "ATTACHMENT_KEY_REUSED"|"ATTACHMENT_ID_CONFLICT"=>"С этим ключом уже загружено другое вложение. Отправьте новый запрос с новым ключом.",
+        "ATTACHMENT_KEY_INVALID"=>"Ключ повторной загрузки некорректен. Отправьте один ключ до 256 байт.",
+        "ATTACHMENT_QUEUE_BUSY"=>"Лес уже принимает файлы. Дождитесь завершения текущей загрузки и повторите.",
+        "ATTACHMENT_INDEX_PENDING"=>"В испытательном Rust-чате индексация из скрепки ещё недоступна. Выберите чтение файла или добавьте папку как набор.",
+        "ATTACHMENT_FOLDER_LIMIT"=>"Папка превышает лимит одного вложения. Добавьте её как набор документов.",
+        "ATTACHMENT_FOLDER_EMPTY"=>"В папке нет поддерживаемых документов.",
+        "ATTACHMENT_FOLDER_INCOMPLETE"=>"Не удалось прочитать весь комплект. Вложение не создано; проверьте файлы или добавьте папку как набор.",
+        "INTAKE_OUTSIDE_ALLOWED_ROOT"=>"Папка находится вне разрешённых источников Леса.",
         "ATTACHMENT_NO_TEXT"=>"Текст не найден. Для скана включите OCR или добавьте файл в набор документов.",
         "WORKBOOK_COMPATIBILITY"=>"Для этой книги ещё нужен совместимый обработчик. Нативное чтение остановлено; проверка таблицы не выполнена.",
         _=>"Не удалось прочитать вложение. Проверьте формат файла и журнал Леса; действие не завершено."

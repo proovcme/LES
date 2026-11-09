@@ -1,6 +1,9 @@
 //! Opaque, expiring attachments. A display name or model argument never grants a path.
+mod folder;
 mod picture;
 mod preview;
+mod upload;
+pub use upload::{claim, replay_upload, save_upload, UploadClaim};
 #[cfg(test)]
 mod tests;
 pub use preview::convert as preview_with;
@@ -11,6 +14,8 @@ pub fn serve_with(external: &impl Fn(&Value) -> Result<Value>) -> Result<()> {
             Ok(crate::document_tasks::execute(&req["request"]))
         } else if req["action"] == "prepare" {
             preview_with(req, external)
+        } else if req["action"] == "folder" {
+            folder::snapshot(req, external)
         } else {
             execute(req)
         }
@@ -26,7 +31,7 @@ use std::{
 };
 pub type Result<T> = std::result::Result<T, &'static str>;
 const MAX_FILE: u64 = 512 * 1024 * 1024;
-const MAX_CARD: u64 = 65536;
+const MAX_CARD: u64 = 512 * 1024;
 pub const MAX_AGE: u64 = 7 * 24 * 3600;
 pub struct Asset {
     pub path: PathBuf,
@@ -180,10 +185,21 @@ fn digest(file: &mut File) -> Result<(u64, String)> {
     Ok((size, format!("{:x}", hash.finalize())))
 }
 pub fn resolve(base: &Path, ident: &str, age: u64) -> Result<Asset> {
+    resolve_for(base, ident, age, None)
+}
+pub fn resolve_for(base: &Path, ident: &str, age: u64, caller: Option<&str>) -> Result<Asset> {
     use std::io::{Seek, SeekFrom};
     let ident = id(ident)?;
     let base = root(base, false)?;
     let card = read_card(&base.join(format!("{ident}.json")))?;
+    if let (Some(owner), Some(caller)) = (card["upload_owner"].as_str(), caller) {
+        if owner != caller {
+            return Err("ATTACHMENT_NOT_FOUND");
+        }
+    }
+    if card["upload_expired"] == true {
+        return Err("ATTACHMENT_EXPIRED");
+    }
     let created = number(&card["created_at_epoch"])?;
     if created <= 0. || now() - created > age as f64 {
         consume(&base, ident)?;
@@ -236,6 +252,15 @@ fn lease(base: &Path, ident: &str) -> Result<File> {
     Ok(f)
 }
 pub fn preserve(base: &Path, path: &Path, ident: &str, name: &str) -> Result<Value> {
+    preserve_inner(base, path, ident, name, None)
+}
+fn preserve_inner(
+    base: &Path,
+    path: &Path,
+    ident: &str,
+    name: &str,
+    upload: Option<(&UploadClaim, &Value)>,
+) -> Result<Value> {
     let ident = id(ident)?;
     let base = root(base, true)?;
     let _lease = lease(&base, ident)?;
@@ -259,8 +284,21 @@ pub fn preserve(base: &Path, path: &Path, ident: &str, name: &str) -> Result<Val
     );
     let target = base.join(&stored);
     let metadata_path = base.join(format!("{ident}.json"));
-    if regular(&target)? || regular(&metadata_path)? {
+    if regular(&metadata_path)? {
+        if let Some((claim, _)) = upload {
+            if let Some(card) = upload::existing(&base, ident, claim)? {
+                return Ok(card);
+            }
+        }
         return Err("ATTACHMENT_ID_CONFLICT");
+    }
+    if regular(&target)? {
+        // Only an exact key-derived path without a published card can be
+        // reclaimed. The same lease guards this rename in every writer.
+        if upload.is_none_or(|(claim, _)| claim.key.is_empty()) || !target.is_file() {
+            return Err("ATTACHMENT_ID_CONFLICT");
+        }
+        fs::remove_file(&target).map_err(|_| "ATTACHMENT_STORE_UNAVAILABLE")?;
     }
     let mut original = File::open(path).map_err(|_| "ATTACHMENT_READ_FAILED")?;
     if !original
@@ -294,7 +332,20 @@ pub fn preserve(base: &Path, path: &Path, ident: &str, name: &str) -> Result<Val
         .sync_all()
         .map_err(|_| "ATTACHMENT_STORE_UNAVAILABLE")?;
     drop(output);
-    let card = json!({"schema":"chat_read_attachment_v1","attachment_id":ident,"original_name":name,"stored_name":stored,"suffix":if suffix.is_empty(){String::new()}else{format!(".{suffix}")},"size":size,"sha256":format!("{:x}",hash.finalize()),"created_at_epoch":now()});
+    let digest = format!("{:x}", hash.finalize());
+    let mut card = json!({"schema":"chat_read_attachment_v1","attachment_id":ident,"original_name":name,"stored_name":stored,"suffix":if suffix.is_empty(){String::new()}else{format!(".{suffix}")},"size":size,"sha256":digest,"created_at_epoch":now()});
+    if let Some((claim, response)) = upload {
+        if claim.sha256 != digest || claim.size != size {
+            return Err("ATTACHMENT_HASH_CHANGED");
+        }
+        card["upload_owner"] = json!(claim.owner);
+        card["upload_key"] = json!(claim.key);
+        card["upload_fingerprint"] = json!(claim.fingerprint);
+        card["upload_response"] = response.clone();
+        if card.to_string().len() > MAX_CARD as usize {
+            return Err("ATTACHMENT_CARD_INVALID");
+        }
+    }
     let (tmpcard, mut file) = temporary(&base, ident)?;
     file.write_all(card.to_string().as_bytes())
         .map_err(|_| "ATTACHMENT_STORE_UNAVAILABLE")?;
@@ -316,13 +367,33 @@ pub fn consume(base: &Path, ident: &str) -> Result<()> {
     };
     let _lease = lease(&base, ident)?;
     let card_path = base.join(format!("{ident}.json"));
-    if let Ok(card) = read_card(&card_path) {
+    if let Ok(mut card) = read_card(&card_path) {
+        if card["upload_expired"] == true {
+            return Ok(());
+        }
         if let Ok(path) = source(&base, ident, &card) {
             match fs::remove_file(path) {
                 Ok(()) => {}
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                 Err(_) => return Err("ATTACHMENT_STORE_UNAVAILABLE"),
             };
+        }
+        if card["upload_key"]
+            .as_str()
+            .is_some_and(|key| !key.is_empty())
+        {
+            // Keep only the reservation. Reusing a published ID with new
+            // bytes could make an old draft open a different original.
+            card = json!({"schema":"chat_read_attachment_v1","attachment_id":ident,
+                "upload_key":card["upload_key"],"upload_owner":card["upload_owner"],
+                "upload_fingerprint":card["upload_fingerprint"],"upload_expired":true});
+            let (temp, mut file) = temporary(&base, ident)?;
+            file.write_all(card.to_string().as_bytes())
+                .map_err(|_| "ATTACHMENT_STORE_UNAVAILABLE")?;
+            file.sync_all()
+                .map_err(|_| "ATTACHMENT_STORE_UNAVAILABLE")?;
+            drop(file);
+            return fs::rename(&temp.0, &card_path).map_err(|_| "ATTACHMENT_STORE_UNAVAILABLE");
         }
     }
     match fs::remove_file(card_path) {
@@ -353,11 +424,14 @@ fn cleanup_cards(base: &Path, age: u64, limit: usize) -> Result<usize> {
         if path.extension().and_then(|s| s.to_str()) != Some("json") {
             continue;
         }
-        cards += 1;
-        if cards > limit {
-            break;
-        }
         if let Ok(card) = read_card(&path) {
+            if card["upload_expired"] == true {
+                continue;
+            }
+            cards += 1;
+            if cards > limit {
+                break;
+            }
             if number(&card["created_at_epoch"]).is_ok_and(|n| n <= 0. || now() - n > age as f64) {
                 consume(&base, ident)?;
                 removed += 1;
@@ -394,7 +468,9 @@ pub fn execute(req: &Value) -> Result<Value> {
         Some("image") => picture::file(Path::new(
             req["path"].as_str().ok_or("ATTACHMENT_PATH_UNSAFE")?,
         )),
-        Some("resolve_image") => picture::asset(resolve(base, ident, age)?),
+        Some("resolve_image") => {
+            picture::asset(resolve_for(base, ident, age, req["upload_owner"].as_str())?)
+        }
         Some("preview") => preview::execute(req),
         _ => Err("ATTACHMENT_ACTION_INVALID"),
     }

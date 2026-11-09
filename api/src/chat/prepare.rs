@@ -11,19 +11,27 @@ pub struct Prepared {
     pub dialogue: Vec<Value>,
     pub memory: Vec<Value>,
     pub attachment: Value,
+    pub attachment_owner: Option<String>,
+    pub egress_tag: Option<String>,
 }
 fn catalog(database: &Path, action: &str, args: Value) -> Result<Value> {
     unwrap(crate::library::catalog(database, action, args))
 }
-pub async fn prepare(context: Arc<Context>, input: Value) -> Result<Prepared> {
+pub async fn prepare(
+    context: Arc<Context>,
+    input: Value,
+    caller: Option<String>,
+) -> Result<Prepared> {
     let owner = context.clone();
-    let mut turn = tokio::task::spawn_blocking(move || prepare_sync(&owner, input))
-        .await
-        .map_err(|_| "CHAT_PREPARATION_FAILED")??;
-    if let Some(id) = turn.request["attachment_id"].as_str() {
-        let attachment = crate::attachments::bound(context, id.to_owned())
+    let mut turn =
+        tokio::task::spawn_blocking(move || prepare_sync(&owner, input, caller.as_deref()))
             .await
-            .map_err(|code| super::error::Failure::new(&code))?;
+            .map_err(|_| "CHAT_PREPARATION_FAILED")??;
+    if let Some(id) = turn.request["attachment_id"].as_str() {
+        let attachment =
+            crate::attachments::bound(context, id.to_owned(), turn.attachment_owner.clone())
+                .await
+                .map_err(|code| super::error::Failure::new(&code))?;
         turn.request["attachment_context"] = if attachment["media_type"] == "image" {
             json!(format!(
                 "Прикреплено изображение: {} ({} × {}).",
@@ -39,6 +47,13 @@ pub async fn prepare(context: Arc<Context>, input: Value) -> Result<Prepared> {
     Ok(turn)
 }
 pub(crate) fn answer(context: &Context) -> Result<model_runtime::Resolved> {
+    let execution = answer_execution(context)?;
+    if context.public_chat_rust && execution["revision"]["locality"] == "remote" {
+        return Err("CLOUD_SUMMARY_LOCAL_ONLY".into());
+    }
+    resolve_answer(context, &execution)
+}
+fn answer_execution(context: &Context) -> Result<Value> {
     let database = &context.database;
     catalog(database, "model_registry_init", json!({}))?;
     let execution = catalog(
@@ -49,25 +64,17 @@ pub(crate) fn answer(context: &Context) -> Result<model_runtime::Resolved> {
     if execution.is_null() {
         return Err("ANSWER_MODEL_NOT_ASSIGNED".into());
     }
-    if context.public_chat_rust && execution["revision"]["locality"] == "remote" {
-        return Err("NATIVE_CLOUD_POLICY_PENDING".into());
-    }
+    Ok(execution)
+}
+fn resolve_answer(context: &Context, execution: &Value) -> Result<model_runtime::Resolved> {
     let settings = crate::index_batch::configuration::Settings::load(&context.state_root)?;
     let env = std::env::var_os("LES_ENV_PATH")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| context.state_root.join(".env"));
-    let connection = model_runtime::resolve(&execution, "answer", &env)?;
-    if connection.endpoint.locality == "remote"
-        && !matches!(
-            settings
-                .get("LES_CLOUD_CONSENT", "false")
-                .to_ascii_lowercase()
-                .as_str(),
-            "1" | "true" | "yes" | "on"
-        )
-    {
+    if execution["revision"]["locality"] == "remote" && !super::egress::consent(&settings) {
         return Err("CLOUD_CONSENT_REQUIRED".into());
     }
+    let connection = model_runtime::resolve(execution, "answer", &env)?;
     if connection.endpoint.locality != "remote"
         && les_core::system_memory::available()? < 4 * 1024 * 1024 * 1024
     {
@@ -95,9 +102,10 @@ pub(super) fn admit(request: &Value) -> Result<()> {
     }
     Ok(())
 }
-fn prepare_sync(context: &Context, request: Value) -> Result<Prepared> {
+fn prepare_sync(context: &Context, request: Value, caller: Option<&str>) -> Result<Prepared> {
     let database = &context.database;
-    let connection = answer(context)?;
+    let execution = answer_execution(context)?;
+    let attachment_owner = caller.map(|v| les_core::sha256_hex(v.as_bytes()));
     let sid = request["session_id"].as_str().unwrap_or("");
     let session = if sid.is_empty() {
         Value::Null
@@ -168,6 +176,17 @@ fn prepare_sync(context: &Context, request: Value) -> Result<Prepared> {
     {
         return Err("CHAT_SCOPE_EMPTY".into());
     }
+    let egress_tag = if context.public_chat_rust && execution["revision"]["locality"] == "remote" {
+        Some(super::egress::admit(
+            context,
+            &request,
+            &scope,
+            &execution["revision"],
+            attachment_owner.as_deref(),
+        )?)
+    } else {
+        None
+    };
     let context_state = catalog(database, "context_get", json!({"session_id":sid}))?;
     let history = if context_state["enabled"] != false && !sid.is_empty() {
         catalog(
@@ -178,6 +197,9 @@ fn prepare_sync(context: &Context, request: Value) -> Result<Prepared> {
     } else {
         json!([])
     };
+    if let Some(tag) = &egress_tag {
+        les_core::chat_request::egress::history(database, sid, &history, tag)?;
+    }
     let mut dialogue = Vec::new();
     for row in history.as_array().into_iter().flatten() {
         for (field, role) in [("question", "user"), ("answer", "assistant")] {
@@ -199,8 +221,19 @@ fn prepare_sync(context: &Context, request: Value) -> Result<Prepared> {
             &json!({"schema":"les.agent-files.v1","database":database,"state_root":context.state_root,
             "action":"projection","arguments":{"project_id":session["project_id"].as_i64().unwrap_or(0)}}),
         ));
-        memory.push(json!({"object_id":"agent-file:context","payload":projection?}));
+        let projection = projection?;
+        if egress_tag.is_none()
+            || projection["records"]
+                .as_array()
+                .is_some_and(|v| !v.is_empty())
+        {
+            memory.push(json!({"object_id":"agent-file:context","payload":projection}));
+        }
     }
+    if egress_tag.is_some() && !memory.is_empty() {
+        return Err("CLOUD_MEMORY_LOCAL_ONLY".into());
+    }
+    let connection = resolve_answer(context, &execution)?;
     Ok(Prepared {
         request,
         scope,
@@ -210,5 +243,7 @@ fn prepare_sync(context: &Context, request: Value) -> Result<Prepared> {
         dialogue,
         memory,
         attachment: Value::Null,
+        attachment_owner,
+        egress_tag,
     })
 }

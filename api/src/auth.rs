@@ -372,3 +372,13 @@ pub async fn authorize_caller(
         }
     }
 }
+
+pub fn origin_allowed(headers: &HeaderMap, cors: &HeaderMap) -> bool {
+    headers.get(header::ORIGIN).is_none_or(|origin| {
+        cors.contains_key(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            || headers
+                .get(header::HOST)
+                .and_then(|h| h.to_str().ok())
+                .is_some_and(|host| origin.as_bytes() == format!("http://{host}").as_bytes())
+    })
+}

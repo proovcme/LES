@@ -142,5 +142,18 @@ def test_public_candidate_blocks_remote_binding_before_dns_or_credentials(native
     t.registry.bind_role(ConnectionRole.ANSWER, remote.revision_id,
                          expected_binding_revision=binding.binding_revision, actor='admin:test')
     response = t.client.post(PUBLIC, json={'question': 'Приватный тестовый текст'})
-    assert response.status_code == 503 and response.json()['code'] == 'NATIVE_CLOUD_POLICY_PENDING'
+    assert response.status_code == 503 and response.json()['code'] == 'CLOUD_CONSENT_REQUIRED'
+    assert not t.seen
+    # Allowing the provider does not authorize sending local-only material.
+    with (t.state/'.env').open('a',encoding='utf-8') as file:file.write('LES_CLOUD_CONSENT=true\n')
+    source_pdf(t)
+    with sqlite3.connect(t.database) as db:
+        db.execute("ALTER TABLE datasets ADD sensitivity TEXT DEFAULT 'P0'")
+    body={'question':'Проверка чувствительности','dataset_ids':['ds']}
+    assert t.client.post(PUBLIC,json=body).json()['code']=='CLOUD_SOURCE_LOCAL_ONLY'
+    assert t.client.post(PUBLIC,json={**body,'attachment_context':'PRIVATE'}).json()['code']=='CLOUD_ATTACHMENT_LOCAL_ONLY'
+    with sqlite3.connect(t.database) as db:db.execute("UPDATE datasets SET sensitivity='P1'")
+    # The invalid synthetic reference proves we reached credential
+    # resolution without reading a real key or opening a connection.
+    assert t.client.post(PUBLIC,json=body).json()['code']=='SECRET_REF_NOT_ALLOWED'
     assert not t.seen

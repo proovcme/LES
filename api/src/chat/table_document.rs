@@ -32,7 +32,10 @@ impl TableTool {
             .filter(|s| !s.is_empty())
             .map(str::to_owned)
             .unwrap_or(les_core::chat_attachments::new_id()?);
-        let scope = json!({"session":session,"project":turn.request["project_id"],"datasets":datasets,"scope":turn.request["scope"],"profile":turn.profile["revision_id"],"model":turn.connection.revision["revision_id"]});
+        let mut scope = json!({"session":session,"project":turn.request["project_id"],"datasets":datasets,"scope":turn.request["scope"],"profile":turn.profile["revision_id"],"model":turn.connection.revision["revision_id"]});
+        if let Some(owner) = &turn.attachment_owner {
+            scope["caller"] = json!(owner);
+        }
         let key =
             les_core::sha256_hex(les_core::tool_execution::canonical_json(&scope)?.as_bytes());
         let database = context.state_root.join("data/document-tasks.sqlite3");
@@ -41,8 +44,14 @@ impl TableTool {
                 .await
                 .map_err(|e| super::error::Failure::new(&e))?;
             let ident = id.to_owned();
+            let owner = turn.attachment_owner.clone();
             let asset = tokio::task::spawn_blocking(move || {
-                les_core::chat_attachments::resolve(&policy.root, &ident, policy.age)
+                les_core::chat_attachments::resolve_for(
+                    &policy.root,
+                    &ident,
+                    policy.age,
+                    owner.as_deref(),
+                )
             })
             .await
             .map_err(|_| "ATTACHMENT_READ_FAILED")??;

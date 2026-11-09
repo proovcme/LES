@@ -1,6 +1,7 @@
 //! Request-owned native chat. No request or model/tool callback is delegated to Python.
 pub mod commands;
 mod document_review;
+mod egress;
 mod error;
 mod evidence;
 pub mod http;

@@ -36,19 +36,21 @@ impl Tools {
         let registered = turn.session["registered"] == true && turn.profile["mode"] == "agent";
         let grounded = turn.scope["document_grounding_enabled"] == true;
         let selected_only = turn.request["selected_sources_only"] == true;
+        let remote = turn.egress_tag.is_some();
         tokio::task::spawn_blocking(move||->Result<Self>{
             let result=super::unwrap(les_core::tool_registry::execute(&json!({"schema":"les.tool-registry.v1","database":database,"action":"registry"})))?;
             let allowed=profile["tools"].as_array().cloned().unwrap_or_default();
             let mut contracts:Vec<_>=result["tools"].as_array().ok_or("TOOL_REGISTRY_INVALID")?.iter()
                 .filter(|t|allowed.contains(&t["name"])&&(grounded||!["dataset","source"].iter().any(|c|t["category"]==*c))
-                    && (!selected_only || (t["name"]!="web_search"&&t["name"]!="web_read"))).cloned().collect();
+                    && (!selected_only || (t["name"]!="web_search"&&t["name"]!="web_read"))
+                    && (!remote || ["search_sources","read_source","read_pdf_source","read_excel_source"].iter().any(|n|t["name"]==*n))).cloned().collect();
             for contract in &mut contracts {
                 if contract["name"]=="search_sources"{contract["timeout_seconds"]=json!(150);}
                 if contract["name"]=="search_sources"||contract["name"]=="read_source"||contract["name"]=="read_excel_source"{
                     contract["result_budget"]=json!({"max_chars":24000,"max_items":32});
                 }
             }
-            if registered {
+            if registered && !remote {
                 let mut tool=super::unwrap(les_core::agent_files::execute(&json!({"schema":"les.agent-files.v1","action":"tool_contract","database":database,"state_root":"/","arguments":{}})))?;
                 let object=tool.as_object_mut().ok_or("TOOL_REGISTRY_INVALID")?;
                 object.extend(json!({"name":"agent_workspace","version":"1.0.0","title":"Память и рабочие файлы","category":"agent","result_schema":"les_tool_result_v1",

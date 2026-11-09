@@ -18,6 +18,7 @@ pub async fn run(
     request: &mut Value,
     journal: &mut Journal,
     sink: &Sink,
+    caller: Option<String>,
 ) -> Result<Value> {
     let started = Instant::now();
     sink.progress("prepare", "Подготавливаю запрос").await?;
@@ -34,7 +35,7 @@ pub async fn run(
             "artifact":{"completion_status":"completed","validation":"not_performed","tool_results":[]},"validation":{"enabled":false,"reason":"deterministic_command"}}),
         );
     }
-    let mut turn = prepare::prepare(context.clone(), request.clone()).await?;
+    let mut turn = prepare::prepare(context.clone(), request.clone(), caller).await?;
     request["attachment_context"] = turn.request["attachment_context"].clone();
     if !turn.attachment.is_null() {
         journal
@@ -53,7 +54,9 @@ pub async fn run(
         .map_err(|_| "MODEL_QUEUE_TIMEOUT")?
         .map_err(|_| "MODEL_QUEUE_TIMEOUT")?;
     let mut tools = tools::Tools::new(&context, &turn).await?;
-    tools.bind_table(super::table_document::TableTool::bind(&context, &turn).await?);
+    if turn.egress_tag.is_none() {
+        tools.bind_table(super::table_document::TableTool::bind(&context, &turn).await?);
+    }
     let available = turn.connection.profile["normal_tool_count"]
         .as_u64()
         .unwrap_or(3)
@@ -62,7 +65,11 @@ pub async fn run(
             v.iter()
                 .any(|n| n == "search_sources" || n == "read_source" || n == "document_review")
         });
-    tools.bind_review(super::document_review::ReviewTool::bind(&context, &turn, available).await?);
+    if turn.egress_tag.is_none() {
+        tools.bind_review(
+            super::document_review::ReviewTool::bind(&context, &turn, available).await?,
+        );
+    }
     if let Some(table) = &tools.table {
         turn.request["attachment_context"] = json!(table.manifest().to_string());
         request["attachment_context"] = turn.request["attachment_context"].clone();
@@ -381,7 +388,7 @@ pub async fn run(
                     "history_id":journal.history,"latency_sec":started.elapsed().as_secs_f64(),"tokens":terminal["usage"]["completion_tokens"].as_u64().unwrap_or(0),"crag_status":"UNVALIDATED","success":true,
                     "source_scope":{"resolved":turn.scope["resolved_dataset_ids"],"used":evidence.sources.iter().map(|s|s["dataset_id"].clone()).collect::<Vec<_>>()},
                     "query_route":{"channel":"generic","reason":"native_chat"},"retrieval_trace":{"engine":"rust.chat","rounds":agent.rounds,"contexts":contexts,"citation_syntax":citations},
-                    "artifact":{"completion_status":if !summary.is_null()&&summary["status"]!="recorded"{"incomplete"}else{"completed"},"execution_receipt":receipt,"execution_summary":summary,"validation":"not_performed","tool_results":agent.results(),"attachment":{
+                    "artifact":{"completion_status":if !summary.is_null()&&summary["status"]!="recorded"{"incomplete"}else{"completed"},"execution_receipt":receipt,"execution_summary":summary,"validation":"not_performed","tool_results":agent.results(),"egress_tag":turn.egress_tag,"attachment":{
                         "attachment_id":turn.attachment["attachment_id"],"name":turn.attachment["name"],"source_sha256":turn.attachment["source_sha256"],"media_type":turn.attachment["media_type"],"truncated":turn.attachment["truncated"]}},"model":turn.connection.public()}),
                 );
             }

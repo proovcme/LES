@@ -1,5 +1,9 @@
 # Модули LES RAG
 
+840: [публичные вложения и внешние модели](modules/native-public-attachments.md) —
+`api/src/attachments/`, `core/src/chat_attachments/`, `api/src/chat/egress.rs`:
+загрузка, восстановление, чтение папок и допуск данных к внешней модели.
+
 839: [публичный вход Rust-чата](modules/native-public-chat.md) —
 `api/src/chat/http.rs`, `api/src/chat/view.rs`, `core/src/chat_request/journal.rs`:
 допуск, JSON/SSE, ключи повторов по авторизованному клиенту и ссылки в истории.

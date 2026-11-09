@@ -8,12 +8,6 @@ from fastapi import HTTPException
 logger = logging.getLogger(__name__)
 _READ_ATTACH_MAX_CHARS = int(os.getenv("RAG_ATTACH_READ_MAX_CHARS", "18000"))
 
-def _compact_cell(value: Any, *, max_len: int = 240) -> str:
-    text = " ".join(str("" if value is None else value).replace("\u00a0", " ").split())
-    if len(text) > max_len:
-        return text[: max_len - 1].rstrip() + "…"
-    return text
-
 def _format_tabular_attachment_context(path: Path, original_name: str, *, max_chars: int) -> tuple[str, bool] | None:
     """Literal coordinates and whole-row preview; no lossy cell compaction."""
     from proxy.services.tabular_document_service import TABLE_SUFFIXES, read_table, preview

@@ -149,9 +149,10 @@ pub(super) fn save(conn: &Connection, args: &Args) -> Result<Value> {
             id
         }
     };
-    if values
-        .get("success")
-        .is_some_and(|v| v.as_i64() == Some(1) || v == true)
+    if values.get("allow_background_summary") != Some(&Value::Bool(false))
+        && values
+            .get("success")
+            .is_some_and(|v| v.as_i64() == Some(1) || v == true)
     {
         if let Some(sid) = values.get("session_id").and_then(Value::as_str) {
             if crate::workspace::records::get(conn, sid)?.is_some_and(|s| s["registered"] == true) {
