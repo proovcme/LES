@@ -22,6 +22,7 @@ mod inference;
 mod intake;
 mod library;
 mod local_model;
+mod mail;
 mod mcp;
 mod model_answer;
 mod model_http;
@@ -161,6 +162,12 @@ async fn dispatch(State(context): State<Arc<Context>>, request: Request) -> Resp
     }
     if context.public_chat_rust && chat::http::public_path(request.uri().path()) {
         return chat::http::handle_public(context, request).await;
+    }
+    if context.public_chat_rust
+        && context.upstream.is_none()
+        && mail::handles(request.method().as_str(), request.uri().path())
+    {
+        return mail::handle(context, request).await;
     }
     if context.public_chat_rust && attachments::public_path(request.uri().path()) {
         return attachments::handle_public(context, request).await;
@@ -503,6 +510,9 @@ fn main() {
             .build()?;
         runtime.block_on(async {
             let listener = tokio::net::TcpListener::bind(listen).await?;
+            if context.public_chat_rust && context.upstream.is_none() {
+                mail::recover(&context.state_root);
+            }
             let context = Arc::new(context);
             tokio::spawn(conversation::resume(context.clone()));
             let background = context.clone();

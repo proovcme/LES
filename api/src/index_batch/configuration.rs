@@ -242,7 +242,8 @@ pub(crate) fn intake(
     if binding["value"].is_null() {
         return Err("EMBEDDING_MODEL_NOT_ASSIGNED");
     }
-    let attachment = job["root"] == les_core::catalog::INDEXED_ATTACHMENT_ROOT;
+    let attachment = job["root"] == les_core::catalog::INDEXED_ATTACHMENT_ROOT
+        || job["root"] == les_core::catalog::mail::INDEX_ROOT;
     if attachment && binding["value"]["revision"]["locality"] == "remote" {
         return Err("ATTACHMENT_INDEX_LOCAL_MODEL_REQUIRED");
     }

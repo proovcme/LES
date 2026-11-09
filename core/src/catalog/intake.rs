@@ -21,8 +21,9 @@ pub(super) fn init(conn: &Connection) -> Result<()> {
             updated_at TEXT NOT NULL, finished_at TEXT
          );
          DROP INDEX IF EXISTS native_intakes_active_dataset;
-         CREATE UNIQUE INDEX IF NOT EXISTS native_intakes_active_folder_dataset
-         ON native_intakes(dataset_id) WHERE finished_at IS NULL AND root<>'les:chat-index:v1';
+         DROP INDEX IF EXISTS native_intakes_active_folder_dataset;
+         CREATE UNIQUE INDEX IF NOT EXISTS native_intakes_active_directory_dataset
+         ON native_intakes(dataset_id) WHERE finished_at IS NULL AND root NOT IN ('les:chat-index:v1','les:mail-index:v1');
          CREATE TABLE IF NOT EXISTS les_indexed_attachments(
             id TEXT PRIMARY KEY, owner TEXT NOT NULL, key_hash TEXT NOT NULL,
             fingerprint TEXT NOT NULL, dataset_id TEXT NOT NULL, doc_id TEXT NOT NULL,
@@ -91,7 +92,10 @@ fn enqueue(conn: &Connection, args: &Args) -> Result<Value> {
     ).optional()?;
     let name = name.ok_or_else(|| Failure::missing("Набор документов не найден."))?;
     let root = text(args, "root")?;
-    if root == super::INDEXED_ATTACHMENT_ROOT {
+    if matches!(
+        root,
+        super::INDEXED_ATTACHMENT_ROOT | super::mail::INDEX_ROOT
+    ) {
         return Err(Failure::invalid("Укажите путь к папке."));
     }
     let parse_limit = integer(args, "parse_limit", 0)?;
@@ -146,6 +150,14 @@ fn claim(conn: &Connection, now: &str) -> Result<Value> {
         claimed["attachment_sha256"] = first(
             conn,
             "SELECT sha256 FROM les_indexed_attachments WHERE job_id=?1",
+            [id],
+        )?["sha256"]
+            .clone();
+    }
+    if claimed["root"] == super::mail::INDEX_ROOT {
+        claimed["attachment_sha256"] = first(
+            conn,
+            "SELECT sha256 FROM les_mail_index_jobs WHERE job_id=?1",
             [id],
         )?["sha256"]
             .clone();

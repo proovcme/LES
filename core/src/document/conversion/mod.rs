@@ -1,5 +1,6 @@
 //! Read-only, bounded format conversion. The worker owns parsing; callers own indexing.
-mod mail;
+pub(crate) mod mail;
+pub(crate) mod msg;
 mod pipeline;
 mod presentation;
 mod spreadsheet;
@@ -16,6 +17,12 @@ pub(crate) fn csv_snapshot(path: &Path) -> Result<Value> {
 }
 const MAX_FILE: u64 = 64 * 1024 * 1024;
 const MAX_TEXT: usize = 24 * 1024 * 1024;
+pub(crate) fn supports_mail(path: &Path) -> bool {
+    path.extension().and_then(|s| s.to_str()).is_some_and(|s| {
+        matches!(s.to_ascii_lowercase().as_str(), "eml" | "emlx")
+            || s.eq_ignore_ascii_case("msg") && msg::available()
+    })
+}
 pub(crate) fn supports(path: &Path) -> bool {
     path.extension().and_then(|s| s.to_str()).is_some_and(|s| {
         matches!(
@@ -135,11 +142,11 @@ pub fn execute_with(request: &Value, external: &impl Fn(&Value) -> Result<Value>
         .unwrap_or("")
         .to_ascii_lowercase();
     // Refuse unknown formats before opening them, without a second hidden parser.
-    let mail = matches!(suffix.as_str(), "eml" | "emlx");
+    let mail = supports_mail(path);
     if !supports(path) && !mail {
         return Err("DOCUMENT_CONVERT_UNSUPPORTED");
     }
-    if mail && request["pipeline"] == "nodes" {
+    if mail && request["pipeline"] == "nodes" && request["mail_index"] != true {
         // Generic folder publication does not yet enforce the mailbox egress policy.
         return Err("DOCUMENT_NATIVE_DISPATCH_REQUIRED");
     }
@@ -154,6 +161,7 @@ pub fn execute_with(request: &Value, external: &impl Fn(&Value) -> Result<Value>
     let table = matches!(suffix.as_str(), "xlsx" | "xlsm" | "xls" | "csv");
     let mut result = match suffix.as_str() {
         "eml" | "emlx" => mail::read(&bytes, suffix == "emlx")?,
+        "msg" => msg::read(&bytes)?,
         "pptx" if request["pipeline"] != "nodes" => presentation::read(&bytes)?,
         "pptx" => Value::Null,
         "docx" => {

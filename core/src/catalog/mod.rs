@@ -9,6 +9,7 @@ mod intake;
 pub use indexed_attachment::{queue_indexed_attachment, INDEXED_ATTACHMENT_ROOT};
 mod job_store;
 pub(crate) mod library;
+pub mod mail;
 mod model_connection;
 mod model_registry;
 pub use model_registry::{manage, record_probe};

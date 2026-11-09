@@ -104,7 +104,7 @@ def test_mail_ui_is_read_only_and_scopes_chat_to_the_mailbox_dataset():
     )[0]
     assert "subprocess.Popen" in collector_run
     assert "schtasks" not in collector_run
-    assert "появятся автоматически" in page
+    assert "/api/mail/accounts/{account_id}/sync" in page or "/sync" in page
 
 
 @pytest.mark.asyncio

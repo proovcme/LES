@@ -59,7 +59,9 @@ fn convert_document(
 ) -> std::result::Result<Value, Value> {
     let path = Path::new(input["path"].as_str().ok_or_else(|| error(INVALID))?);
     let worker = &request["format_worker"];
-    if !worker.is_object() || !crate::document::conversion::supports(path) {
+    let mail_index =
+        request["mail_index"] == true && crate::document::conversion::supports_mail(path);
+    if !worker.is_object() || !(crate::document::conversion::supports(path) || mail_index) {
         return exchange(bridge, 0, input);
     }
     let mut chunking = request["chunking"].clone();
@@ -73,7 +75,7 @@ fn convert_document(
     .join(dataset);
     let response=crate::worker_host::run_documents(&json!({"schema":"les.worker-host.v1","program":worker["program"],"directory":worker["directory"],
         "args":["--serve-document-formats"],"context":"les.format-dispatch.v1","timeout_ms":worker["timeout_ms"],
-        "input":{"schema":"les.document-convert.v1","pipeline":"nodes","path":path,"data_dir":data_dir,"dataset_id":dataset,"file_key":input["file_name"],
+        "input":{"schema":"les.document-convert.v1","pipeline":"nodes","mail_index":mail_index,"path":path,"data_dir":data_dir,"dataset_id":dataset,"file_key":input["file_name"],
             "node_spool":input["node_spool"],"source_sha256":input["source_sha256"],"chunking":chunking,
             "minimum":worker["minimum"],"final_minimum":worker["final_minimum"],"table_row_limit":worker["table_row_limit"],"ocr":worker["ocr"],"ocr_unavailable":worker["ocr_unavailable"],
             "pdf_page_size":worker["pdf_page_size"].as_u64().unwrap_or(1800),"pdf_page_overlap":worker["pdf_page_overlap"].as_u64().unwrap_or(150)}})).map_err(error)?;

@@ -176,6 +176,13 @@ pub(crate) async fn execute(context: Arc<Context>, mut input: Value) -> Response
         let _permit=permit;
         crate::document_dispatch::freeze_ocr(&mut input["format_worker"],&context.state_root);
         let dimension=input["embedding"]["vector_size"].as_u64().or_else(||input["embedding"]["vector_size"].as_str()?.parse().ok()).filter(|v|(1..=65536).contains(v)).ok_or("EMBEDDING_DESCRIPTOR_INVALID")? as usize;
+        let dataset=input["dataset_id"].as_str().ok_or("INDEX_BATCH_INVALID")?;
+        let private_mail=les_core::catalog::mail::is_private_dataset(&context.database,dataset)?;
+        let mail_index=if let (true,Some(job),Some(hash))=(private_mail,input["intake_id"].as_str(),input["expected_source_sha256"].as_str()){
+            les_core::catalog::mail::index_authorized(&context.database,dataset,job,hash)?
+        }else{false};
+        if private_mail && input["embedding_execution"]["allow_remote"]==true{return Err("ATTACHMENT_INDEX_LOCAL_MODEL_REQUIRED");}
+        input["mail_index"]=json!(mail_index);
         let model=input["embedding"]["model_id"].as_str().ok_or("EMBEDDING_DESCRIPTOR_INVALID")?;
         let planned=les_core::plan_index_sources(&json!({"database":context.database,
             "root":source_root.join(input["dataset_id"].as_str().ok_or("INDEX_BATCH_INVALID")?),
@@ -185,7 +192,8 @@ pub(crate) async fn execute(context: Arc<Context>, mut input: Value) -> Response
                 if !selected.iter().any(|s|s["file_name"]==file["db_key"] && s["source_path"]==file["source_path"]){continue;}
             }
             if let Some(path)=file["path"].as_str() {
-                if !les_core::supports_native_document_dispatch(Path::new(path)){return Err("DOCUMENT_NATIVE_DISPATCH_REQUIRED");}
+                if !(les_core::supports_native_document_dispatch(Path::new(path)) ||
+                    mail_index && les_core::supports_native_mail_dispatch(Path::new(path))){return Err("DOCUMENT_NATIVE_DISPATCH_REQUIRED");}
             }
         }
         if let Some(revision)=input["embedding_execution"]["revision_id"].as_str() {

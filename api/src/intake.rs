@@ -34,6 +34,12 @@ impl Service {
     }
 }
 
+pub(crate) fn wake(context: &Context) {
+    if let Some(service) = &context.intake {
+        service.wake.notify_one();
+    }
+}
+
 pub(crate) async fn queue_attachment(
     context: Arc<Context>,
     temp: crate::attachments::Temporary,
@@ -586,7 +592,8 @@ async fn start_indexing_inner(context: Arc<Context>, job: &Value) -> Result<(), 
     let input_job = job.clone();
     // An explicit indexing request may initialize a genuinely new owned index.
     // Existing collections without an identity still require explicit adoption.
-    let attachment = job["root"] == les_core::catalog::INDEXED_ATTACHMENT_ROOT;
+    let attachment = job["root"] == les_core::catalog::INDEXED_ATTACHMENT_ROOT
+        || job["root"] == les_core::catalog::mail::INDEX_ROOT;
     if attachment && !job["attachment_sha256"].is_string() {
         return Err(STORAGE);
     }
@@ -648,7 +655,16 @@ pub async fn run(context: Arc<Context>) {
     };
     loop {
         let database = context.database.clone();
+        let mail_state = context.public_chat_rust.then(|| context.state_root.clone());
         let claimed = tokio::task::spawn_blocking(move || {
+            if let Some(state) = mail_state {
+                if let Err(code) = les_core::catalog::mail::publish_pending(&state, &database) {
+                    eprintln!(
+                        "{}",
+                        json!({"event":"mail_index_queue_unavailable","code":code})
+                    );
+                }
+            }
             if call(&database, "intake_has_work", json!({}))? == true {
                 call(&database, "intake_claim", json!({}))
             } else {
@@ -674,7 +690,9 @@ pub async fn run(context: Arc<Context>) {
 }
 
 async fn process(context: Arc<Context>, job: Value) {
-    if job["root"] == les_core::catalog::INDEXED_ATTACHMENT_ROOT {
+    if job["root"] == les_core::catalog::INDEXED_ATTACHMENT_ROOT
+        || job["root"] == les_core::catalog::mail::INDEX_ROOT
+    {
         let stop = start_indexing(context.clone(), &job).await.err();
         record(&context, &job["id"], "intake_index_checkpoint", stop).await;
         return;

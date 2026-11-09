@@ -25,6 +25,9 @@ pub fn datasets(path: &Path, ids: &Value) -> Result<()> {
             .as_str()
             .filter(|v| !v.is_empty())
             .ok_or("CLOUD_SCOPE_UNVERIFIED")?;
+        if crate::catalog::mail::private_dataset(&tx, id).map_err(|_| "CLOUD_SCOPE_UNVERIFIED")? {
+            return Err("CLOUD_SOURCE_LOCAL_ONLY");
+        }
         let value = query
             .query_row([id], |r| r.get::<_, Option<String>>(0))
             .optional()

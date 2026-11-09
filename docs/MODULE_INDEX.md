@@ -1,5 +1,8 @@
 # Модули LES RAG
 
+843: [почта и её индекс](modules/native-mail.md) —
+`api/src/mail`, `core/src/catalog/mail` и нативная очередь индексации.
+
 842: [скрепка, настройки и чтение писем](modules/native-settings-attachments.md) —
 `api/src/model_registry/`, `core/src/catalog/model_registry.rs`,
 `desktop/light/frontend/src/components/ModelSettings.svelte`,

@@ -68,6 +68,9 @@ pub use document::conversion::{
 };
 pub use files::sha256_hex;
 pub use index_sources::plan as plan_index_sources;
+pub fn supports_native_mail_dispatch(path: &std::path::Path) -> bool {
+    document::conversion::supports_mail(path)
+}
 pub fn supports_native_document_dispatch(path: &std::path::Path) -> bool {
     document::conversion::supports(path)
 }
