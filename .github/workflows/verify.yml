@@ -71,6 +71,8 @@ jobs:
         run: |
           make verify
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          make public-check
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
           make test
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           make test-mail

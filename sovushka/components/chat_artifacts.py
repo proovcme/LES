@@ -387,8 +387,7 @@ class ChatArtifacts:
                 if table_query:
                     _render_table_query(table_query)
                 elif mode == "text":
-                    # Если в ответе есть таблица — артефакт = ТОЛЬКО таблица + CSV (прозу
-                    # видно в чате; Олег: «артефакт только таблицу, текст я и так вижу»).
+                    # Таблица и CSV идут в артефакт, пояснение остаётся в чате.
                     auto = _parse_table_from_ai(ans) or _parse_markdown_table(ans)
                     if isinstance(auto, list) and auto and isinstance(auto[0], dict):
                         _render_table(auto)

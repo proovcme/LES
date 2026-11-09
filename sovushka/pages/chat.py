@@ -275,8 +275,6 @@ def build_chat(is_admin: bool, tabs=None, tab_mermaid=None, tab_documents=None):
                 )
             sessions_col = ui.column().classes("w-full gap-2 sov-history-list")
 
-        # «Задачи и объёмы» убраны из чата (Олег): ввод — командами, просмотр — в админ-вкладках.
-
         # W18.1: файл-вьювер — дерево RAG_Content + просмотр (текст/код/картинка/PDF).
         files_drawer = ui.element("aside").classes("sov-history-drawer")
         files_drawer.set_visibility(False)
@@ -1175,8 +1173,6 @@ def build_chat(is_admin: bool, tabs=None, tab_mermaid=None, tab_documents=None):
         history_drawer.set_visibility(not history_drawer.visible)
         if history_drawer.visible:
             asyncio.create_task(_load_sessions())
-
-    # «Задачи и объёмы» убраны из чата (Олег) — toggle/refresh-панель не нужны.
 
     async def _resolve_scope_dataset_ids() -> tuple[list[str], list[str]]:
         ids = [str(x) for x in (scope_state.get("dataset_ids") or []) if str(x)]
