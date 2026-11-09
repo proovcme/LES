@@ -1920,7 +1920,6 @@
         "proxy/services/project_table_registry_service.py",
         "proxy/services/rag_advanced_policy_service.py",
         "proxy/services/raptor_publication_service.py",
-        "proxy/services/reconcile_chat_service.py",
         "proxy/services/reconcile_service.py",
         "proxy/services/runtime_config_registry_service.py",
         "proxy/services/skill_compute_service.py",
@@ -2443,7 +2442,6 @@
         "proxy/services/rag_pipeline_status_service.py",
         "proxy/services/rag_readiness_service.py",
         "proxy/services/raptor_publication_service.py",
-        "proxy/services/reconcile_chat_service.py",
         "proxy/services/reconcile_service.py",
         "proxy/services/request_idempotency_service.py",
         "proxy/services/request_memory_service.py",
@@ -4001,7 +3999,6 @@
         "proxy/services/rag_pipeline_status_service.py",
         "proxy/services/rag_readiness_service.py",
         "proxy/services/raptor_publication_service.py",
-        "proxy/services/reconcile_chat_service.py",
         "proxy/services/reconcile_service.py",
         "proxy/services/request_idempotency_service.py",
         "proxy/services/request_memory_service.py",
@@ -7748,23 +7745,8 @@
       "windows_runtime_explicit": false
     },
     {
-      "inbound": [],
-      "lines": 150,
-      "module": "proxy.services.reconcile_chat_service",
-      "outbound": [
-        "backend/runtime_paths.py",
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/reconcile_service.py"
-      ],
-      "path": "proxy/services/reconcile_chat_service.py",
-      "status": "DORMANT_CANDIDATE",
-      "windows_runtime_explicit": false
-    },
-    {
       "inbound": [
-        "proxy/services/project_summary_service.py",
-        "proxy/services/reconcile_chat_service.py"
+        "proxy/services/project_summary_service.py"
       ],
       "lines": 361,
       "module": "proxy.services.reconcile_service",
@@ -9135,7 +9117,7 @@
       "inbound": [
         "sovushka/pages/chat.py"
       ],
-      "lines": 440,
+      "lines": 439,
       "module": "sovushka.components.chat_artifacts",
       "outbound": [
         "backend/product_edition.py",
@@ -9268,7 +9250,7 @@
         "sovushka/pages/chat.py",
         "tests/test_light_ui_handlers.py"
       ],
-      "lines": 670,
+      "lines": 669,
       "module": "sovushka.components.chat_rendering",
       "outbound": [
         "sovushka/__init__.py",
@@ -9687,7 +9669,7 @@
         "sovushka_ng.py",
         "tests/test_light_rerank_audit.py"
       ],
-      "lines": 2200,
+      "lines": 2196,
       "module": "sovushka.pages.chat",
       "outbound": [
         "backend/product_edition.py",
@@ -10827,7 +10809,7 @@
     },
     {
       "inbound": [],
-      "lines": 113,
+      "lines": 149,
       "module": "tests.test_light_bootstrap",
       "outbound": [],
       "path": "tests/test_light_bootstrap.py",
@@ -11988,7 +11970,7 @@
     },
     {
       "inbound": [],
-      "lines": 342,
+      "lines": 423,
       "module": "tests.test_light_native_mail",
       "outbound": [
         "tests/native_batch_fixtures.py",
@@ -12001,7 +11983,7 @@
     },
     {
       "inbound": [],
-      "lines": 112,
+      "lines": 119,
       "module": "tests.test_light_native_mcp",
       "outbound": [
         "proxy/services/mcp_connection_service.py",
@@ -12167,7 +12149,7 @@
     },
     {
       "inbound": [],
-      "lines": 269,
+      "lines": 323,
       "module": "tests.test_light_native_runtime",
       "outbound": [
         "backend/light_processes.py",
@@ -12351,7 +12333,7 @@
     },
     {
       "inbound": [],
-      "lines": 147,
+      "lines": 145,
       "module": "tests.test_light_package",
       "outbound": [
         "tools/build_light_package.py"
@@ -12803,7 +12785,7 @@
     },
     {
       "inbound": [],
-      "lines": 33,
+      "lines": 32,
       "module": "tests.test_light_user_guide",
       "outbound": [
         "sovushka/components/light_guide.py",
@@ -13485,7 +13467,7 @@
     },
     {
       "inbound": [],
-      "lines": 90,
+      "lines": 88,
       "module": "tools.build_light_installers",
       "outbound": [
         "tools/__init__.py"
@@ -13499,13 +13481,12 @@
         "tests/test_light_package.py",
         "tools/install_light_macos.py"
       ],
-      "lines": 314,
+      "lines": 327,
       "module": "tools.build_light_package",
       "outbound": [
         "tools/__init__.py",
         "tools/build_light_frontend.py",
         "tools/build_native_api.py",
-        "tools/build_native_core.py",
         "tools/build_native_runtime.py",
         "tools/build_release_artifacts.py",
         "tools/build_tauri_app.py",
@@ -13563,7 +13544,6 @@
     {
       "inbound": [
         "tests/test_light_core_package.py",
-        "tools/build_light_package.py",
         "tools/install_light_macos.py"
       ],
       "lines": 60,
@@ -13947,7 +13927,7 @@
       "inbound": [
         "tools/build_light_package.py"
       ],
-      "lines": 93,
+      "lines": 94,
       "module": "tools.light_license_audit",
       "outbound": [
         "tools/__init__.py"
@@ -13998,7 +13978,7 @@
       "inbound": [
         "tests/test_light_user_guide.py"
       ],
-      "lines": 43,
+      "lines": 46,
       "module": "tools.light_public_docs",
       "outbound": [
         "sovushka/components/light_guide.py",
@@ -14095,7 +14075,7 @@
     },
     {
       "inbound": [],
-      "lines": 146,
+      "lines": 156,
       "module": "tools.publication_check",
       "outbound": [
         "tools/__init__.py"
@@ -14173,7 +14153,7 @@
         "tests/test_light_skill_python_asset.py",
         "tools/build_light_package.py"
       ],
-      "lines": 116,
+      "lines": 121,
       "module": "tools.skill_python_asset",
       "outbound": [
         "tools/__init__.py"
@@ -16026,14 +16006,14 @@
   ],
   "schema": "les.code-runtime-map.v1",
   "summary": {
-    "dormant_candidates": 24,
+    "dormant_candidates": 23,
     "parse_warnings": 0,
     "product_reachable": 417,
     "registered_api_routes": 298,
     "runtime_support": 5,
     "test_or_tool_only": 271,
-    "tracked_python_files": 717,
-    "tracked_python_lines": 170846
+    "tracked_python_files": 716,
+    "tracked_python_lines": 170895
   },
   "warnings": []
 }

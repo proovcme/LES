@@ -4,7 +4,7 @@ use std::{env, path::PathBuf};
 pub struct Config {
     pub root: PathBuf,
     pub state: PathBuf,
-    pub python: PathBuf,
+    pub python: Option<PathBuf>,
     pub skill_python: PathBuf,
     pub qdrant: PathBuf,
     pub frontend: String,
@@ -12,6 +12,7 @@ pub struct Config {
     pub parent_pipe: bool,
     pub browser: bool,
     pub native_api: bool,
+    pub native_only: bool,
     pub edge_storage: Option<PathBuf>,
 }
 
@@ -44,7 +45,7 @@ impl Config {
         while let Some(key) = args.next() {
             if matches!(
                 key.as_str(),
-                "--read-only" | "--parent-pipe" | "--browser" | "--native-api"
+                "--read-only" | "--parent-pipe" | "--browser" | "--native-api" | "--native-only"
             ) {
                 if !flags.insert(key) {
                     return Err(Failure::new(
@@ -97,8 +98,19 @@ impl Config {
         };
         let root = path("--root")?;
         let state = path("--state")?;
-        let python = path("--python")?;
+        let native_only = flags.contains("--native-only");
+        let python = if native_only {
+            None
+        } else {
+            Some(path("--python")?)
+        };
         let qdrant = path("--qdrant")?;
+        if native_only && values.contains_key("--python") {
+            return Err(Failure::new(
+                "NATIVE_ONLY_PYTHON_ARGUMENT",
+                "Для внешних навыков укажите --skill-python.",
+            ));
+        }
         let edge_storage = values.remove("--edge-storage").map(PathBuf::from);
         if edge_storage
             .as_ref()
@@ -109,19 +121,29 @@ impl Config {
                 "Нужен полный путь к отдельной папке индекса Edge.",
             ));
         }
-        let frontend = values
-            .remove("--frontend")
-            .unwrap_or_else(|| "classic".into());
+        let frontend = values.remove("--frontend").unwrap_or_else(|| {
+            if native_only {
+                "svelte".into()
+            } else {
+                "classic".into()
+            }
+        });
         if !matches!(frontend.as_str(), "classic" | "svelte") {
             return Err(Failure::new(
                 "FRONTEND_INVALID",
                 "Неизвестный интерфейс Леса.",
             ));
         }
+        if native_only && frontend != "svelte" {
+            return Err(Failure::new(
+                "NATIVE_ONLY_FRONTEND_REQUIRED",
+                "Нативному запуску нужен интерфейс Svelte.",
+            ));
+        }
         if !root.is_dir()
-            || !python.is_file()
+            || python.as_ref().is_some_and(|p| !p.is_file())
             || (edge_storage.is_none() && !qdrant.is_file())
-            || !root.join("proxy/app.py").is_file()
+            || (!native_only && !root.join("proxy/app.py").is_file())
         {
             return Err(Failure::new(
                 "RUNTIME_MISSING",
@@ -138,7 +160,7 @@ impl Config {
                 "В установке отсутствует новый интерфейс. Восстановите приложение.",
             ));
         }
-        let native_api = flags.contains("--native-api");
+        let native_api = native_only || flags.contains("--native-api");
         if edge_storage.is_some() && !native_api {
             return Err(Failure::new(
                 "EDGE_NATIVE_API_REQUIRED",
@@ -162,9 +184,15 @@ impl Config {
         }
         let skill_python = crate::skill_runtime::select(
             &root,
-            &python,
+            python.as_deref().unwrap_or(std::path::Path::new("")),
             values.remove("--skill-python").map(PathBuf::from),
         )?;
+        if native_only && !skill_python.is_file() {
+            return Err(Failure::new(
+                "SKILL_RUNTIME_MISSING",
+                "Не найден отдельный исполнитель внешних навыков.",
+            ));
+        }
         Ok(Self {
             root,
             state,
@@ -176,6 +204,7 @@ impl Config {
             parent_pipe: flags.contains("--parent-pipe"),
             browser: flags.contains("--browser"),
             native_api,
+            native_only,
             edge_storage,
         })
     }
@@ -270,6 +299,20 @@ pub fn child_environment(
         ),
         ("LES_FORMAT_WORKER_MODE", "native".into()),
     ] {
+        if config.native_only
+            && matches!(
+                name,
+                "PYTHONPATH"
+                    | "PYTHONUTF8"
+                    | "PYTHONNOUSERSITE"
+                    | "LES_LIGHT_LEGACY_UI_URL"
+                    | "SOVUSHKA_UI_PORT"
+                    | "SOVUSHKA_UI_HOST"
+                    | "NICEGUI_STORAGE_PATH"
+            )
+        {
+            continue;
+        }
         result.push((name.into(), value));
     }
     if let Some(storage) = &config.edge_storage {
@@ -284,7 +327,8 @@ pub fn child_environment(
         let native = config.root.parent().unwrap().join("native/pdf/pdfium.dll");
         let compatible = config
             .python
-            .parent()
+            .as_deref()
+            .and_then(std::path::Path::parent)
             .map(|p| p.join("Lib/site-packages/pypdfium2_raw/pdfium.dll"));
         if let Some(asset) = std::iter::once(native)
             .chain(compatible)

@@ -1,6 +1,6 @@
 //! Existing MCP connection catalog. Network and executable validation belongs to the native MCP controller.
 use crate::workspace::{Failure, Result};
-use rusqlite::{params, Connection, TransactionBehavior};
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde_json::{json, Value};
 use std::path::Path;
 
@@ -117,7 +117,45 @@ pub fn remove(database: &Path, id: &str) -> Result<()> {
     open(database)?.execute("DELETE FROM les_mcp_connections WHERE id=?1", [id])?;
     Ok(())
 }
-pub fn enable(database: &Path, id: &str, tools: &[Value]) -> Result<Value> {
+fn endpoint_matches(saved_url: &str, saved: &Value, url: &str, config: &Value) -> bool {
+    saved_url == url
+        && saved["transport"].as_str().unwrap_or("http")
+            == config["transport"].as_str().unwrap_or("http")
+        && saved["command"] == config["command"]
+        && saved["args"] == config["args"]
+}
+
+pub fn update(database: &Path, id: &str, name: &str, url: &str, config: &Value) -> Result<Value> {
+    let mut conn = open(database)?;
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    if tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM les_mcp_connections WHERE url=?1 AND id<>?2)",
+        params![url, id],
+        |r| r.get::<_, i64>(0),
+    )? != 0
+    {
+        return Err(Failure::new(
+            "MCP_CONNECTION_DUPLICATE",
+            "Этот адрес уже добавлен",
+        ));
+    }
+    let (saved_url, saved_config): (String, String) = tx
+        .query_row(
+            "SELECT url,config FROM les_mcp_connections WHERE id=?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?
+        .ok_or_else(|| Failure::new("MCP_CONNECTION_MISSING", "Подключение удалено"))?;
+    let saved = serde_json::from_str(&saved_config).map_err(|_| invalid())?;
+    let keep = endpoint_matches(&saved_url, &saved, url, config);
+    tx.execute("UPDATE les_mcp_connections SET name=?1,url=?2,config=?3,tools=CASE WHEN ?4 THEN tools ELSE '[]' END WHERE id=?5",
+        params![name,url,config.to_string(),keep,id])?;
+    tx.commit()?;
+    get(database, id)
+}
+
+pub fn enable(database: &Path, id: &str, tools: &[Value], expected: &Value) -> Result<Value> {
     if tools.len() > 32 {
         return Err(invalid());
     }
@@ -130,7 +168,29 @@ pub fn enable(database: &Path, id: &str, tools: &[Value]) -> Result<Value> {
         }
         crate::tool_registry::local_schema(&tool["inputSchema"])?;
     }
-    if open(database)?.execute(
+    let mut conn = open(database)?;
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let (url, config): (String, String) = tx
+        .query_row(
+            "SELECT url,config FROM les_mcp_connections WHERE id=?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?
+        .ok_or_else(|| Failure::new("MCP_CONNECTION_MISSING", "Подключение удалено"))?;
+    let saved = serde_json::from_str(&config).map_err(|_| invalid())?;
+    if !endpoint_matches(
+        &url,
+        &saved,
+        expected["url"].as_str().unwrap_or_default(),
+        expected,
+    ) {
+        return Err(Failure::new(
+            "MCP_CONNECTION_CHANGED",
+            "Подключение изменилось. Проверьте его снова.",
+        ));
+    }
+    if tx.execute(
         "UPDATE les_mcp_connections SET tools=?1 WHERE id=?2",
         params![serde_json::to_string(tools).map_err(|_| invalid())?, id],
     )? != 1
@@ -140,6 +200,7 @@ pub fn enable(database: &Path, id: &str, tools: &[Value]) -> Result<Value> {
             "Подключение удалено",
         ));
     }
+    tx.commit()?;
     get(database, id)
 }
 

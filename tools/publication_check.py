@@ -22,8 +22,13 @@ FORBIDDEN_PREFIXES = (
     "storage/",
 )
 FORBIDDEN_EXACT = {".env"}
+PRIVATE_DATA_SUFFIXES = {".db", ".sqlite", ".sqlite3", ".pst", ".ost", ".olm", ".pfx", ".key"}
+PERSONAL_PATH = re.compile(
+    r"(?i)\b[A-Z]:(?:[/\\]+)Users(?:[/\\]+)[\w.-]+(?:[/\\]+)"
+)
 REQUIRED_PUBLIC_FILES = (
     "README.md",
+    "README.en.md",
     "LICENSE",
     "SECURITY.md",
     "docs/PUBLICATION_CHECKLIST.md",
@@ -55,21 +60,23 @@ SKIP_SCAN_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".ico", ".pdf", ".xlsx", 
 
 def tracked_files(root: Path) -> list[str]:
     out = subprocess.run(
-        ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
+        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
         cwd=root,
-        text=True,
+        encoding="utf-8",
         capture_output=True,
         timeout=10,
     )
     if out.returncode != 0:
         raise RuntimeError(out.stderr.strip() or "git ls-files failed")
-    return [line.strip() for line in out.stdout.splitlines() if line.strip()]
+    return [path for path in out.stdout.split("\0") if path]
 
 
 def forbidden_tracked(paths: list[str]) -> list[str]:
     bad: list[str] = []
     for rel in paths:
-        if rel in FORBIDDEN_EXACT or any(rel.startswith(prefix) for prefix in FORBIDDEN_PREFIXES):
+        name = Path(rel).name.lower()
+        if (name in FORBIDDEN_EXACT or Path(rel).suffix.lower() in PRIVATE_DATA_SUFFIXES
+                or any(rel.startswith(prefix) for prefix in FORBIDDEN_PREFIXES)):
             bad.append(rel)
     return bad
 
@@ -78,7 +85,7 @@ def missing_required(root: Path) -> list[str]:
     return [rel for rel in REQUIRED_PUBLIC_FILES if not (root / rel).is_file()]
 
 
-def secret_hits(root: Path, paths: list[str]) -> list[tuple[str, int, str]]:
+def sensitive_text_hits(root: Path, paths: list[str]) -> list[tuple[str, int, str]]:
     hits: list[tuple[str, int, str]] = []
     for rel in paths:
         p = root / rel
@@ -93,9 +100,12 @@ def secret_hits(root: Path, paths: list[str]) -> list[tuple[str, int, str]]:
         except OSError:
             continue
         for lineno, line in enumerate(text.splitlines(), start=1):
+            if PERSONAL_PATH.search(line):
+                hits.append((rel, lineno, "local user path"))
+                continue
             for pat in HIGH_SIGNAL_SECRET_PATTERNS:
                 if pat.search(line):
-                    hits.append((rel, lineno, line.strip()[:160]))
+                    hits.append((rel, lineno, "potential credential"))
                     break
             else:
                 if rel.startswith(ASSIGNMENT_SKIP_PREFIXES):
@@ -107,7 +117,7 @@ def secret_hits(root: Path, paths: list[str]) -> list[tuple[str, int, str]]:
                     continue
                 for pat in ASSIGNMENT_SECRET_PATTERNS:
                     if pat.search(line):
-                        hits.append((rel, lineno, line.strip()[:160]))
+                        hits.append((rel, lineno, "potential credential"))
                         break
     return hits
 
@@ -117,24 +127,24 @@ def run(root: Path) -> tuple[bool, list[str]]:
     paths = tracked_files(root)
     bad_paths = forbidden_tracked(paths)
     missing = missing_required(root)
-    secrets = secret_hits(root, paths)
+    sensitive = sensitive_text_hits(root, paths)
     if bad_paths:
         messages.append("Forbidden tracked paths:\n" + "\n".join(f"  - {p}" for p in bad_paths[:80]))
     if missing:
         messages.append("Missing public files:\n" + "\n".join(f"  - {p}" for p in missing))
-    if secrets:
+    if sensitive:
         messages.append(
-            "Potential secrets in tracked files:\n"
-            + "\n".join(f"  - {p}:{n}: potential credential (value redacted)" for p, n, line in secrets[:80])
+            "Sensitive text in Git-visible files:\n"
+            + "\n".join(f"  - {p}:{n}: {kind} (value redacted)" for p, n, kind in sensitive[:80])
         )
-    return not (bad_paths or missing or secrets), messages
+    return not (bad_paths or missing or sensitive), messages
 
 
 def main() -> int:
     root = Path(__file__).resolve().parents[1]
     ok, messages = run(root)
     if ok:
-        print("public-check OK: git-visible files contain no forbidden runtime paths or high-signal secrets.")
+        print("public-check OK: no forbidden data files, local user paths or high-signal credentials detected.")
         return 0
     print("public-check FAIL", file=sys.stderr)
     for msg in messages:

@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import tempfile
 import zipfile
 
 from tools.build_release_artifacts import iter_files
@@ -129,7 +130,7 @@ def hash_file(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def stage_code(payload, *, native_cli=False):
+def stage_code(payload):
     runtime = payload / "runtime"
     tracked = set(iter_files())
     tracked.update(_local_untracked_candidate_files())
@@ -169,47 +170,68 @@ def stage_code(payload, *, native_cli=False):
     (payload / "assets").mkdir(exist_ok=True)
     shutil.copy2(ROOT / "docs/public/les-light/assets/les-light.svg", payload / "assets/les-light.svg")
     shutil.copy2(payload / "README.md", runtime / "README.md")
-    command = 'les-native.cmd' if native_cli else 'les-light.cmd'
-    shutil.copy2(ROOT / 'tools' / command, payload / 'les.cmd')
-    if native_cli:
-        for entrypoint in ('light_cli.py', 'light_mcp_server.py'):
-            shutil.copy2(ROOT / 'tools/light_native_cli_compat.py', runtime / 'tools' / entrypoint)
+    shutil.copy2(ROOT / 'tools/les-light.cmd', payload / 'les.cmd')
     from tools.build_light_frontend import stage as stage_frontend
     stage_frontend(ROOT, runtime)
     return runtime
 
 
-def remove_build_assets(payload, archive_name):
-    bundled_tools = payload / "runtime/installers/windows/tools"
-    for name in ("uv.exe", archive_name):
-        (bundled_tools / name).unlink()
+def stage_native_code(payload):
+    runtime = payload / "runtime"
+    for name in ("tools/light_windows_ocr.ps1", "config/version.json"):
+        target = runtime / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / name, target)
+    shutil.copy2(ROOT / "installers/windows/light/install-les.ps1", runtime / "tools/install-les.ps1")
+    public = ROOT / "docs/public/les-light"
+    for name in ("LICENSE", "README.md", "USER_GUIDE.md", "BACKLOG.md"):
+        shutil.copy2(public / name, payload / name)
+    (payload / "assets").mkdir()
+    shutil.copy2(public / "assets/les-light.svg", payload / "assets/les-light.svg")
+    shutil.copy2(ROOT / "tools/les-native.cmd", payload / "les.cmd")
+    from tools.build_light_frontend import stage as stage_frontend
+    stage_frontend(ROOT, runtime)
 
 
-def stage_dependencies(payload, runtime):
-    stage_windows_python(runtime)
-    stage_windows_uv(runtime)
-    bundled_tools = runtime / "installers/windows/tools"
-    python_dir = payload / "python"
-    python_dir.mkdir(exist_ok=True)
-    contract = windows_python_contract()
-    with zipfile.ZipFile(bundled_tools / contract["archive_name"]) as archive:
-        # Archive is pinned and verified by stage_windows_python.
-        for name in archive.namelist():
-            if Path(name).is_absolute() or ".." in Path(name).parts:
-                raise ValueError("Unsafe Python archive member")
-        archive.extractall(python_dir)
-    uv = bundled_tools / "uv.exe"
-    requirements = payload / "locked-requirements.txt"
-    subprocess.run([str(uv), "export", "--frozen", "--extra", "mcp", "--no-dev", "--no-emit-project", "--format", "requirements-txt", "--output-file", str(requirements)], cwd=ROOT, check=True, stdout=subprocess.DEVNULL)
-    subprocess.run([str(uv), "pip", "sync", str(requirements), "--python", str(python_dir / "python.exe"),
-        "--target", str(python_dir / "Lib/site-packages"), "--no-python-downloads", "--require-hashes"], check=True)
-    for pth in python_dir.glob("python*._pth"):
-        pth.write_text("python313.zip\n.\nLib/site-packages\n../runtime\nimport site\n", encoding="utf-8")
-    subprocess.run([str(python_dir / "python.exe"), "-B", "-c", "import fastapi, nicegui, qdrant_client, pandas, numpy, sqlite3; from backend.light_processes import InstanceLock; print('bundled runtime import check passed')"], cwd=payload, check=True)
-    # These pinned assets build the embedded environment. The installed app
-    # runs python/python.exe directly and must not ship a second Python archive
-    # or the build machine's dependency installer.
-    remove_build_assets(payload, contract["archive_name"])
+def stage_skill_dependencies(destination, source=None):
+    from tools.skill_python_asset import seal, stage
+    lock_hash = hash_file(ROOT / "uv.lock")
+    if source is not None:
+        receipt = stage(destination, source, lock_sha256=lock_hash)
+    else:
+        with tempfile.TemporaryDirectory(prefix="les-build-tools-") as scratch:
+            scratch = Path(scratch)
+            stage_windows_python(scratch)
+            stage_windows_uv(scratch)
+            bundled = scratch / "installers/windows/tools"
+            contract = windows_python_contract()
+            with zipfile.ZipFile(bundled / contract["archive_name"]) as archive:
+                for name in archive.namelist():
+                    if Path(name).is_absolute() or ".." in Path(name).parts:
+                        raise ValueError("Unsafe Python archive member")
+                archive.extractall(destination)
+            uv = bundled / "uv.exe"
+            requirements = scratch / "locked-requirements.txt"
+            subprocess.run([str(uv), "export", "--frozen", "--extra", "mcp", "--no-dev",
+                "--no-emit-project", "--no-emit-package", "nicegui", "--format", "requirements-txt",
+                "--output-file", str(requirements)], cwd=ROOT, check=True, stdout=subprocess.DEVNULL)
+            subprocess.run([str(uv), "pip", "sync", str(requirements), "--python", str(destination / "python.exe"),
+                "--target", str(destination / "Lib/site-packages"), "--no-python-downloads", "--require-hashes",
+                "--no-compile-bytecode"], check=True)
+        receipt = seal(destination, next(destination.glob("python*.zip")).stem, lock_sha256=lock_hash)
+    if any(item["name"].lower() == "nicegui" for item in receipt["distributions"]):
+        raise ValueError("The skill runtime must not contain NiceGUI")
+    if (destination / "Lib/site-packages/nicegui").exists():
+        raise ValueError("The skill runtime must not contain NiceGUI sources")
+    return receipt
+
+
+def stage_pdfium(payload, source):
+    if not source.is_file():
+        raise FileNotFoundError("Provide the PDFium DLL from the locked pypdfium2 wheel")
+    target = payload / "native/pdf/pdfium.dll"
+    target.parent.mkdir(parents=True)
+    shutil.copy2(source, target)
 
 
 def write_manifest(payload):
@@ -223,7 +245,7 @@ def write_manifest(payload):
                 path.unlink()
                 continue
             files.append({"path": relative, "sha256": hash_file(path)})
-    result = {"schema": "les.light-package.v1", "application_id": "me.ovc.les-light", "version": version["product_version"],
+    result = {"schema": "les.light-package.v1", "application_id": "me.ovc.les-light", "runtime_mode": "rust", "version": version["product_version"],
               "build_number": version["build_number"], "uv_lock_sha256": hash_file(ROOT / "uv.lock"), "files": files}
     (payload / "light-package.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     return result
@@ -246,21 +268,18 @@ def stage_mail_collector(payload):
     return target
 
 
-def build(destination, executable, qdrant=None, native_core=None, native_runtime=None, native_api=None, skill_python=None):
+def build(destination, executable, qdrant=None, native_runtime=None, native_api=None, skill_python=None):
     destination = destination.resolve()
-    if native_api is not None and native_runtime is None:
-        raise ValueError('A native API asset requires its native service owner')
     if destination.exists():
         raise FileExistsError("Use a new empty output directory; existing artifacts are never removed by this builder")
     if not executable.is_file():
         raise FileNotFoundError("Build the dedicated desktop/light shell first")
     destination.mkdir(parents=True)
     shutil.copy2(executable, destination / "les-light.exe")
-    runtime = stage_code(destination, native_cli=native_runtime is not None)
-    stage_dependencies(destination, runtime)
-    from tools.skill_python_asset import stage as stage_skill_python
-    stage_skill_python(destination/'native/skill-python',skill_python or destination/'python',
-                      lock_sha256=hash_file(ROOT/'uv.lock'))
+    stage_native_code(destination)
+    skill_root = destination / 'native/skill-python'
+    stage_skill_dependencies(skill_root, skill_python)
+    stage_pdfium(destination, skill_root / "Lib/site-packages/pypdfium2_raw/pdfium.dll")
     (destination/'native/skill-python-required.json').write_text(
         json.dumps({'schema':'les.skill-python-required.v1','required':True}),encoding='utf-8')
     native = destination / "native/qdrant"
@@ -275,19 +294,15 @@ def build(destination, executable, qdrant=None, native_core=None, native_runtime
         shutil.copy2(receipt, native / "asset-receipt.json")
     else:
         stage_qdrant(native)
-    from tools.build_native_core import build as build_core, stage_asset
-    if native_core is None:
-        build_core(destination/'native/core')
+    from tools.build_native_runtime import build as build_runtime, stage_asset as stage_runtime
+    if native_runtime is None:
+        build_runtime(destination/'native/runtime')
     else:
-        stage_asset(destination/'native/core', native_core)
-    if native_runtime is not None:
-        from tools.build_native_runtime import stage_asset as stage_runtime
         stage_runtime(destination/'native/runtime', native_runtime)
     if native_api is not None:
         from tools.build_native_api import stage_asset as stage_api
         stage_api(destination/'native/api', native_api)
     else:
-        # The native MCP client is required even when the compatibility API/UI is selected.
         from tools.build_native_api import build as build_api
         build_api(destination/'native/api')
     stage_mail_collector(destination)
@@ -301,13 +316,11 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--desktop-exe", type=Path, required=True)
     parser.add_argument("--qdrant", type=Path)
-    parser.add_argument("--native-core", type=Path)
     parser.add_argument("--native-runtime", type=Path)
     parser.add_argument("--native-api", type=Path)
     parser.add_argument("--skill-python", type=Path, help="Prepared portable skill runtime; defaults to the locked bundled dependency set")
     args = parser.parse_args()
     result = build(args.output, args.desktop_exe.resolve(), args.qdrant.resolve() if args.qdrant else None,
-                   args.native_core.resolve() if args.native_core else None,
                    args.native_runtime.resolve() if args.native_runtime else None,
                    args.native_api.resolve() if args.native_api else None,
                    args.skill_python.resolve() if args.skill_python else None)

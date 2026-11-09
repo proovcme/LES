@@ -12,7 +12,10 @@ PUBLIC = ROOT / "docs/public/les-light"
 
 def outputs():
     version = json.loads((ROOT / "config/version.json").read_text(encoding="utf-8"))["product_version"]
-    guide = [f"# LES RAG {version} — руководство пользователя", "", "Первый выпуск LES RAG для Windows. Установщики и результаты проверки доступны в официальном GitHub Releases.", "", "Это тот же текст, который доступен внутри приложения через **Руководство**.", ""]
+    guide = [
+        f"# LES RAG {version} — руководство пользователя", "",
+        "Установщики для Windows доступны в [GitHub Releases](https://github.com/proovcme/LES/releases/latest).", "",
+    ]
     previous = None
     for _, category, title, body in ARTICLES:
         if category != previous:

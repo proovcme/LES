@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import time
@@ -106,6 +107,59 @@ def test_contract_admits_remaining_python_core(executable):
     result=subprocess.run([str(executable),'--contract'],check=True,capture_output=True,text=True,timeout=5)
     contract=json.loads(result.stdout)
     assert contract['engine']=='rust' and contract['python_core_remaining'] is True
+
+
+def test_native_only_start_uses_rust_ui_without_application_python(executable,tmp_path):
+    api=os.getenv('LES_TEST_EDGE_API')
+    skills=os.getenv('LES_TEST_SKILL_PYTHON')
+    if not api or not skills:
+        pytest.skip('Build the Edge API and the separate external-skill Python')
+    root=tmp_path/'application'
+    frontend=root/'desktop/light/frontend/dist'
+    frontend.mkdir(parents=True)
+    page=b'<!doctype html><title>LES native fixture</title>'
+    (frontend/'index.html').write_bytes(page)
+    (frontend/'build-receipt.json').write_text(json.dumps({
+        'schema':'les.frontend.v1','files':{'index.html':hashlib.sha256(page).hexdigest()},
+    }),encoding='utf-8')
+    binary=tmp_path/'native/api/les-api.exe'
+    binary.parent.mkdir(parents=True)
+    try:
+        os.link(api,binary)
+    except OSError:
+        shutil.copyfile(api,binary)
+    state=tmp_path/'state'
+    state.mkdir()
+    (state/'.env').write_text('MAIL_IMAP_POLL_SEC=0\n',encoding='utf-8')
+    args=[str(executable),'--root',str(root),'--state',str(state),
+          '--qdrant',str(tmp_path/'unused-qdrant.exe'),'--edge-storage',str(state/'edge'),
+          '--native-only','--skill-python',str(Path(skills).resolve()),'--parent-pipe']
+    owner=subprocess.Popen(args,stdin=subprocess.PIPE,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
+                           creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+    try:
+        marker=state/'launcher-status.json'
+        ready=wait_for(lambda: value if (value:=status(marker)).get('phase')=='ready' else None)
+        assert ready['native_only'] is True
+        assert ready['ui_pid'] is None and ready['legacy_api_pid'] is None
+        with httpx.Client(base_url=ready['api_url'],trust_env=False,timeout=5) as client:
+            assert client.get('/app/').raise_for_status().content==page
+            assert client.get('/api/light/instance').raise_for_status().json()=={'instance_id':ready['instance_id']}
+            options=client.get('/api/light/frontend').raise_for_status().json()
+            assert options['native_mail'] is True and options['legacy_url'] is None
+            assert client.get('/api/mail/accounts').raise_for_status().json()['accounts']==[]
+            runtime=client.get('/api/status').raise_for_status().json()
+            assert runtime['engine']=='rust' and runtime['chat_admission']['code']=='ANSWER_MODEL_NOT_ASSIGNED'
+            assert client.get('/api/health').raise_for_status().json()['rag']['status']=='empty'
+            assert client.get('/api/jobs/summary').raise_for_status().json()['jobs']==[]
+        children=psutil.Process(owner.pid).children(recursive=True)
+        assert {p.pid:p.name() for p in children if p.name().lower()!='conhost.exe'}=={ready['api_pid']:binary.name}
+    finally:
+        owner.stdin.close()
+        try:
+            owner.wait(timeout=12)
+        except subprocess.TimeoutExpired:
+            owner.terminate()
+            owner.wait(timeout=5)
 
 
 def test_native_and_previous_python_owner_locks_exclude_each_other(executable,fixture_root,tmp_path):

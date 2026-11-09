@@ -1,6 +1,9 @@
 //! Local, authenticated mail routes owned by the native candidate.
+mod archive;
 mod imap;
 mod outlook;
+mod pst;
+mod push;
 use crate::{auth, json_response, transport, Context};
 use axum::{
     body::to_bytes,
@@ -30,6 +33,14 @@ enum Route<'a> {
     Message(&'a str),
     Open(&'a str),
     Thread(&'a str),
+    Threads,
+    RebuildThreads,
+    ImportArchive,
+    ImportLocal,
+    ImportApple,
+    ImportImap,
+    Push,
+    Migrate(&'a str),
 }
 fn route<'a>(method: &str, path: &'a str) -> Option<Route<'a>> {
     use Route::*;
@@ -48,6 +59,7 @@ fn route<'a>(method: &str, path: &'a str) -> Option<Route<'a>> {
         ("PATCH", "accounts", Some(id), None) => Update(id),
         ("POST", "accounts", Some(id), Some("test")) => Test(id),
         ("POST", "accounts", Some(id), Some("sync")) => Sync(id),
+        ("POST", "accounts", Some(id), Some("migrate-legacy")) => Migrate(id),
         ("POST", "collector", Some("register-store"), None) => Register,
         ("POST", "collector", Some("import"), None) => Import,
         ("POST", "collector", Some("run"), None) => Run,
@@ -55,6 +67,13 @@ fn route<'a>(method: &str, path: &'a str) -> Option<Route<'a>> {
         ("GET", "messages", Some(id), None) => Message(id),
         ("POST", "messages", Some(id), Some("open")) => Open(id),
         ("GET", "threads", Some(id), None) => Thread(id),
+        ("GET", "threads", None, None) => Threads,
+        ("POST", "rebuild-threads", None, None) => RebuildThreads,
+        ("POST", "import-archive", None, None) => ImportArchive,
+        ("POST", "import-local", None, None) => ImportLocal,
+        ("POST", "import-apple-mail", None, None) => ImportApple,
+        ("POST", "import-imap", None, None) => ImportImap,
+        ("POST", "push", None, None) => Push,
         _ => return None,
     })
 }
@@ -148,6 +167,18 @@ fn failure(code: &str) -> Response {
         "MAIL_FORMAT_UNSUPPORTED" => (
             StatusCode::UNSUPPORTED_MEDIA_TYPE,
             "Этот формат почтового файла пока недоступен в новом Лесе.",
+        ),
+        "MAIL_PST_VERSION_UNSUPPORTED" => (
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "Эта версия PST не поддерживается. Экспортируйте письма в обычный PST или EML.",
+        ),
+        "MAIL_SOURCE_UNAVAILABLE" => (StatusCode::NOT_FOUND, "Источник почты не найден или недоступен."),
+        "INTAKE_OUTSIDE_ALLOWED_ROOT" => (StatusCode::FORBIDDEN, "Источник находится вне разрешённых папок."),
+        "MAIL_SOURCE_PATH_INVALID" | "MAIL_ARCHIVE_INVALID" => (
+            StatusCode::BAD_REQUEST, "Проверьте путь и формат почтового архива.",
+        ),
+        "MAIL_ARCHIVE_EMPTY" | "MAIL_ARCHIVE_LIMIT" => (
+            StatusCode::UNPROCESSABLE_ENTITY, "В источнике нет читаемых писем или он превышает лимиты импорта.",
         ),
         "MAIL_ORIGINAL_CHANGED" | "MAIL_ORIGINAL_UNAVAILABLE" => (
             StatusCode::CONFLICT,
@@ -314,7 +345,7 @@ pub async fn handle(context: Arc<Context>, request: Request) -> Response {
         let cors = match auth::authorize(
             &context,
             request.headers(),
-            method != "GET" && !matches!(route, Open(_)),
+            method != "GET" && !matches!(route, Open(_) | RebuildThreads | Push),
         )
         .await
         {
@@ -327,8 +358,12 @@ pub async fn handle(context: Arc<Context>, request: Request) -> Response {
         cors
     };
     let query = fields(request.uri().query().unwrap_or(""));
+    let timeout = match route {
+        ImportArchive | ImportLocal | ImportApple | ImportImap | Migrate(_) => 240,
+        _ => 30,
+    };
     let mut response = match tokio::time::timeout(
-        Duration::from_secs(30),
+        Duration::from_secs(timeout),
         receive(context, request, route, query),
     )
     .await
@@ -352,7 +387,25 @@ async fn receive(
     use Route::*;
     let query = query?;
     let input = match route {
-        Create | Update(_) | Sync(_) => parse_json(request).await?,
+        Create | Update(_) | Sync(_) | ImportArchive | ImportLocal | ImportApple | ImportImap
+        | Migrate(_) => parse_json(request).await?,
+        Push => {
+            let slot = context
+                .upload_slots
+                .clone()
+                .try_acquire_owned()
+                .map_err(|_| "MAIL_SYNC_BUSY")?;
+            let raw = to_bytes(request.into_body(), mail::MAX_MESSAGE)
+                .await
+                .map_err(|_| BAD)?;
+            let value = tokio::task::spawn_blocking(move || {
+                let _slot = slot;
+                push::register(&context, &raw)
+            })
+            .await
+            .map_err(|_| "MAIL_REGISTRY_UNAVAILABLE")??;
+            return Ok((StatusCode::OK, value));
+        }
         Register => {
             let bytes = to_bytes(request.into_body(), 32768)
                 .await
@@ -394,7 +447,14 @@ async fn receive(
         Message(id) => ("message", id),
         Open(id) => ("open", id),
         Thread(id) => ("thread", id),
-        Import => return Err(BAD),
+        Threads => ("threads", ""),
+        RebuildThreads => ("rebuild_threads", ""),
+        ImportArchive => ("import_archive", ""),
+        ImportLocal => ("import_local", ""),
+        ImportApple => ("import_apple", ""),
+        ImportImap => ("import_imap", ""),
+        Migrate(id) => ("migrate", id),
+        Import | Push => return Err(BAD),
     };
     let id = id.to_owned();
     let value=tokio::task::spawn_blocking(move||{
@@ -412,6 +472,18 @@ async fn receive(
             "list"=>mail::list(state,query["account_id"].as_str(),None,query["limit"].as_str().and_then(|v|v.parse().ok()).unwrap_or(50)),
             "message"=>mail::read(state,database,&id),
             "thread"=>mail::list(state,None,Some(&id),100),
+            "threads"=>mail::threads(state,&query),
+            "rebuild_threads"=>mail::rebuild_threads(state,query["account_id"].as_str().filter(|s|!s.is_empty())),
+            "import_imap"=>imap::import_once(context.clone(),input),
+            "import_archive" | "import_local" | "import_apple" | "migrate" => {
+                let _slot = context.upload_slots.try_acquire().map_err(|_| "MAIL_SYNC_BUSY")?;
+                match op {
+                    "import_archive"=>archive::import(&context,&input),
+                    "import_local"=>archive::local(&context,None,&input,false),
+                    "import_apple"=>archive::local(&context,None,&input,true),
+                    _=>archive::local(&context,Some(&id),&input,false),
+                }
+            }
             "open"=>{
                 let m=mail::message(state,database,&id)?;
                 if m["source_kind"]!="outlook_classic"{return Err("MAIL_OUTLOOK_MESSAGE_REQUIRED");}

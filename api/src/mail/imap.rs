@@ -435,11 +435,16 @@ pub(super) fn update_account(state: &Path, id: &str, input: &Value) -> Result<Va
     let _lock = lease(state)?;
     mail::update(state, id, input)
 }
-fn run(context: &Context, id: &str, a: &Value, input: &Value, limit: usize) -> Result<usize> {
+fn run(
+    context: &Context,
+    id: &str,
+    config: &Value,
+    password: &str,
+    input: &Value,
+    limit: usize,
+) -> Result<usize> {
     let state = &context.state_root;
-    let password = mail::secret(id)?;
-    let config = &a["config"];
-    let mut session = Session::open(config, &password)?;
+    let mut session = Session::open(config, password)?;
     let folders = session.folders()?;
     let configured = config["folders"].as_array().ok_or(BAD)?;
     let mut downloaded = 0;
@@ -551,11 +556,10 @@ fn begin(state: &Path, id: &str) -> Result<Value> {
     Ok(a)
 }
 
-fn finish(context: &Context, id: &str, a: &Value, input: &Value, limit: usize) {
-    let outcome = run(context, id, a, input, limit);
+fn record_outcome(context: &Context, id: &str, outcome: &Result<usize>) {
     let (status, detail) = match outcome {
         Ok(_) => ("idle", ""),
-        Err(code) => ("error", code),
+        Err(code) => ("error", *code),
     };
     if let Err(code) = mail::sync_status(&context.state_root, id, status, detail) {
         eprintln!(
@@ -565,8 +569,98 @@ fn finish(context: &Context, id: &str, a: &Value, input: &Value, limit: usize) {
     }
     eprintln!(
         "{}",
-        json!({"event":"native_mail_sync","status":status,"code":detail,"downloaded":outcome.ok()})
+        json!({"event":"native_mail_sync","status":status,"code":detail,"downloaded":outcome.as_ref().ok()})
     );
+}
+
+fn finish(context: &Context, id: &str, a: &Value, input: &Value, limit: usize) {
+    let outcome = mail::secret(id)
+        .and_then(|password| run(context, id, &a["config"], &password, input, limit));
+    record_outcome(context, id, &outcome);
+}
+
+pub(super) fn import_once(context: Arc<Context>, input: Value) -> Result<Value> {
+    use crate::index_batch::configuration::Settings;
+    let settings = Settings::load(&context.state_root).map_err(|_| BAD)?;
+    let text = |field: &str, env: &str| {
+        input[field]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| settings.get(env, ""))
+    };
+    let limit = input["max_messages"].as_u64().unwrap_or(25);
+    if !(1..=200).contains(&limit) {
+        return Err(BAD);
+    }
+    let password = text("password", "MAIL_IMAP_PASSWORD").to_owned();
+    if password.is_empty() || password.len() > 2560 || password.chars().any(char::is_control) {
+        return Err(BAD);
+    }
+    let port = input["port"]
+        .as_u64()
+        .or_else(|| settings.get("MAIL_IMAP_PORT", "993").parse().ok())
+        .ok_or(BAD)?;
+    let ssl = input["ssl"].as_bool().unwrap_or_else(|| {
+        !matches!(
+            settings
+                .get("MAIL_IMAP_SSL", "true")
+                .to_ascii_lowercase()
+                .as_str(),
+            "false" | "0" | "off" | "no"
+        )
+    });
+    let folders = input.get("folders").cloned().unwrap_or_else(|| {
+        json!(settings
+            .get("MAIL_IMAP_FOLDERS", "INBOX")
+            .split(',')
+            .map(str::trim)
+            .filter(|f| !f.is_empty())
+            .collect::<Vec<_>>())
+    });
+    let config = mail::imap_config(
+        &json!({"host":text("host","MAIL_IMAP_HOST"),"login":text("login","MAIL_IMAP_LOGIN"),
+        "port":port,"ssl":ssl,"folders":folders}),
+    )?;
+    let key = les_core::sha256_hex(
+        format!("{}:{}:{}", config["host"], config["port"], config["login"]).as_bytes(),
+    );
+    let lock = lease(&context.state_root)?;
+    mail::recover_sync(&context.state_root)?;
+    let account = mail::create(
+        &context.state_root,
+        &context.database,
+        &json!({"kind":"archive","label":"Импорт IMAP","native_account_id":format!("imap:{key}")}),
+        true,
+    )?;
+    let id = account["id"].as_str().ok_or(BAD)?.to_owned();
+    if account["enabled"] != true {
+        return Err("MAIL_ACCOUNT_DISABLED");
+    }
+    let parse = input["parse"].as_bool().unwrap_or(false);
+    let options = json!({"parse":parse});
+    mail::sync_status(&context.state_root, &id, "running", "")?;
+    let mut response = json!({"status":"running","component":"Е.Ж.И.К.","account_id":id,
+        "dataset_id":account["dataset_id"],"dataset_name":account["dataset_name"]});
+    if input["background"] == true {
+        std::thread::spawn(move || {
+            let _lock = lock;
+            let result = run(&context, &id, &config, &password, &options, limit as usize);
+            record_outcome(&context, &id, &result);
+        });
+    } else {
+        let _lock = lock;
+        let result = run(&context, &id, &config, &password, &options, limit as usize);
+        record_outcome(&context, &id, &result);
+        let count = result?;
+        response["status"] = json!(if count > 0 {
+            "registered"
+        } else {
+            "no_new_mail"
+        });
+        response["files"] = json!(count);
+        response["parse_started"] = json!(parse && count > 0);
+    }
+    Ok(response)
 }
 
 pub(super) fn poll(context: &Context) -> Result<()> {

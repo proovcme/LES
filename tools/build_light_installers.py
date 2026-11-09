@@ -48,7 +48,8 @@ def build(payload: Path, output: Path, makensis: Path) -> None:
         raise FileNotFoundError("An existing NSIS compiler is required")
     package = json.loads((payload / "light-package.json").read_text(encoding="utf-8"))
     version = json.loads((ROOT / "config/version.json").read_text(encoding="utf-8"))
-    if package.get("version") != version["product_version"] or package.get("build_number") != version["build_number"]:
+    if (package.get("runtime_mode") != "rust" or package.get("version") != version["product_version"]
+            or package.get("build_number") != version["build_number"]):
         raise ValueError("Payload version differs from the current source contract")
     subprocess.run([
         "powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
@@ -56,12 +57,9 @@ def build(payload: Path, output: Path, makensis: Path) -> None:
     ], check=True)
     output.mkdir(parents=True)
     offline = output / "LES-RAG-Setup.exe"
-    native_launch = all((payload / relative).is_file() for relative in (
-        "native/runtime/les-runtime.exe", "native/api/les-api.exe",
-    ))
     subprocess.run([
         str(makensis), "/INPUTCHARSET", "UTF8", f"/DPAYLOAD_DIR={payload}", f"/DOUTPUT_FILE={offline}",
-        f"/DPRODUCT_VERSION={package['version']}", *(["/DNATIVE_LAUNCH"] if native_launch else []),
+        f"/DPRODUCT_VERSION={package['version']}",
         str(INSTALLERS / "setup.nsi"),
     ], cwd=INSTALLERS, check=True)
     verify_installer_description(offline)

@@ -16,6 +16,7 @@ futures-util = { version = "=0.3.34", default-features = false, features = ["std
 serde_json = { version = "=1.0.150", features = ["arbitrary_precision"] }
 percent-encoding = "=2.3.2"
 native-tls = "=0.2.18"
+outlook-pst = "=1.2.0"
 pdfium-render = { version = "=0.9.3", default-features = false, features = ["pdfium_7763"] }
 
 [features]

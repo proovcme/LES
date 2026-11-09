@@ -34,7 +34,7 @@ def test_public_auth_and_key_replay_share_json_sse_but_not_callers(native_turn):
     assert t.client.post(PUBLIC, headers={'Origin': 'https://example.invalid'}, json=body).status_code == 403
     assert t.client.post(PUBLIC, headers={'Content-Type': 'text/plain'}, content=json.dumps(body)).status_code == 415
     assert t.client.get(PUBLIC).status_code == 405
-    pending = t.client.get('/api/light/instance')
+    pending = t.client.get('/api/light/unsupported-fixture')
     assert pending.status_code == 501 and pending.json()['code'] == 'NATIVE_ROUTE_NOT_AVAILABLE'
     assert not t.seen
     key = 'public-repeat-key'

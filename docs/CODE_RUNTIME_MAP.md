@@ -19,12 +19,12 @@
 
 | Метрика | Значение |
 | --- | --- |
-| Python-файлов под git | 717 |
-| Строк Python | 170846 |
+| Python-файлов под git | 716 |
+| Строк Python | 170895 |
 | PRODUCT_REACHABLE | 417 |
 | RUNTIME_SUPPORT | 5 |
 | TEST_OR_TOOL_ONLY | 271 |
-| DORMANT_CANDIDATE | 24 |
+| DORMANT_CANDIDATE | 23 |
 | Зарегистрированных API-маршрутов | 298 |
 | Ошибок разбора | 0 |
 
@@ -34,7 +34,7 @@
 | --- | --- | --- |
 | sovushka/styles.py | 3264 | 3 |
 | mlx_host.py | 2216 | 0 |
-| sovushka/pages/chat.py | 2200 | 2 |
+| sovushka/pages/chat.py | 2196 | 2 |
 | proxy/services/chat_evidence_application_service.py | 2122 | 7 |
 | proxy/services/dataset_memory_service.py | 1811 | 10 |
 | proxy/services/project_pdf_table_service.py | 1653 | 2 |
@@ -104,7 +104,6 @@
 | proxy/services/office_passport_service.py | 175 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/parent_card_hydration_service.py | 172 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/preset_chat_service.py | 64 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
-| proxy/services/reconcile_chat_service.py | 150 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/scoped_rag_builder.py | 111 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/sovushka_tone.py | 49 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/spreadsheet_object_model.py | 153 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |

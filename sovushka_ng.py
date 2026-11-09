@@ -421,7 +421,7 @@ async def classic_admin_page(request: Request):
         "w-full h-screen no-wrap gap-0 sov-ui-shell sov-app-shell"
         + (" les-settings-shell" if is_light() else "")
     ):
-        # Граф знаний: canvas-2D со своей физикой + тумблер «связи НТД» (Олегу зашёл больше cosmos).
+        # Основная карта знаний использует 2D canvas.
         # /graph-cosmos (3d-force-graph) оставлен как альтернатива.
         visualizer_url = "/graph"
 

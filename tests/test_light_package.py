@@ -7,17 +7,15 @@ from pathlib import Path
 from tools import build_light_package as package
 
 
-def test_finished_package_drops_build_tools_but_keeps_embedded_python(tmp_path):
-    assets = tmp_path / "runtime/installers/windows/tools"
-    assets.mkdir(parents=True)
-    for name in ("uv.exe", "python.zip", "asset-receipt.json"):
-        (assets / name).write_bytes(b"build asset")
-    (tmp_path / "python").mkdir()
-    python = tmp_path / "python/python.exe"
-    python.write_bytes(b"runtime")
-    package.remove_build_assets(tmp_path, "python.zip")
-    assert sorted(path.name for path in assets.iterdir()) == ["asset-receipt.json"]
-    assert python.read_bytes() == b"runtime"
+def test_windows_native_payload_excludes_application_python(tmp_path):
+    package.stage_native_code(tmp_path)
+    assert (tmp_path / "les.cmd").read_bytes() == (package.ROOT / "tools/les-native.cmd").read_bytes()
+    runtime = tmp_path / "runtime"
+    assert (runtime / "tools/light_windows_ocr.ps1").is_file()
+    assert (runtime / "tools/install-les.ps1").is_file()
+    assert not list(runtime.rglob("*.py"))
+    assert not any((runtime / folder).exists() for folder in ("proxy", "backend", "sovushka"))
+    assert not (tmp_path / "python").exists()
 
 
 def test_package_follows_transitive_tool_imports_without_private_state(tmp_path, monkeypatch):

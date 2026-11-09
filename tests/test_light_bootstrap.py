@@ -3,6 +3,7 @@ import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import threading
@@ -111,3 +112,38 @@ def test_bad_manifest_is_not_accepted(server, body, status):
     responses['/manifest'] = (body, status, None)
     result = run(f'$c=New-LesHttpClient; try {{ Get-LesRelease $c {quote(base + "/manifest")} }} finally {{ $c.Dispose() }}')
     assert result.returncode != 0
+
+
+def test_desktop_update_rechecks_selected_release_and_rejects_tampered_handoff(tmp_path, server):
+    base, responses = server
+    responses['/payload'] = (PAYLOAD, 200, None)
+    helper = tmp_path / 'runtime/tools/install-les.ps1'
+    helper.parent.mkdir(parents=True)
+    shutil.copyfile(SCRIPT, helper)
+    version = tmp_path / 'runtime/config/version.json'
+    version.parent.mkdir()
+    version.write_text(json.dumps({'product_version': '0.1.0', 'build_number': 848}))
+    offer = manifest(build_number=849)
+    download = tmp_path / 'download'
+    bootstrap = (
+        f". {quote(helper)}; "
+        f"function Get-LesRelease {{ $r=ConvertTo-LesRelease (ConvertFrom-Json {quote(json.dumps(offer))}); "
+        f"$r.Uri=[uri]{quote(base + '/payload')}; $r }}; "
+    )
+    def desktop(body):
+        return subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command',
+                               bootstrap + body], capture_output=True, timeout=25, check=True)
+
+    checked = json.loads(desktop("$DesktopAction='Check'; Invoke-LesDesktopUpdate").stdout)
+    assert checked['available'] and checked['current_build'] == 848 and checked['build'] == 849
+    action = f"$DesktopAction='Download'; $OutputDirectory={quote(download)}; $ExpectedSha={quote(offer['sha256'])}; "
+    changed = desktop(action + '$ExpectedBuild=850; Invoke-LesDesktopUpdate')
+    assert json.loads(changed.stdout) == {'changed': True}
+    assert not download.exists()
+    result = desktop(action + '$ExpectedBuild=849; Invoke-LesDesktopUpdate')
+    path = Path(json.loads(result.stdout)['installer'])
+    assert path.read_bytes() == PAYLOAD
+    path.write_bytes(b'tampered')
+    rejected = desktop(f"$DesktopAction='Launch'; $ExpectedSha={quote(offer['sha256'])}; $InstallerPath={quote(path)}; "
+                       "try { Invoke-LesDesktopUpdate; exit 2 } catch { $_.Exception.Message }")
+    assert b'checksum mismatch' in rejected.stdout

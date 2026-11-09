@@ -21,8 +21,7 @@ def test_guide_renders_offline_with_close_control():
 
 def test_guide_discloses_actual_release_and_mail_limitations():
     text = " ".join(article[3] for article in ARTICLES)
-    assert "0.1.0" in text
-    assert "первый выпуск" in text
+    assert "https://github.com/proovcme/LES/releases/latest" in text
     assert "не отправляет ответы" in text
     assert "OAuth требует отдельной реализации" in text
 

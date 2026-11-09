@@ -1,6 +1,7 @@
 //! Opaque, expiring attachments. A display name or model argument never grants a path.
 mod folder;
 mod picture;
+pub(crate) use picture::base64 as encode_base64;
 mod preview;
 mod upload;
 pub use upload::{claim, replay_upload, save_upload, UploadClaim};

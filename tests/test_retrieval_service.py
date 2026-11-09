@@ -203,7 +203,7 @@ class CadSourceNameBackend(FakeBackend):
                 0.99,
             ),
             Chunk(
-                "Source path: /RAG/00_Лесной 64_Котельная/04_ГСВ/лесной ГСВ Спецификация.dwg\n"
+                "Source path: /RAG/00_Северный 24_Демо/04_ГСВ/северный ГСВ Спецификация.dwg\n"
                 "Object type: DXFModel\nProperties: dxf_read_mode=repaired_group_codes",
                 "cad_bim_json_502617b60ad4.md",
                 0.1,
@@ -224,7 +224,7 @@ class CadAtmSourceNameBackend(FakeBackend):
                 0.99,
             ),
             Chunk(
-                "Source path: /RAG/00_Лесной 64_Котельная/АТМ/3.Лесной_64-АТМ-Р-Планы.dwg\n"
+                "Source path: /RAG/00_Северный 24_Демо/АТМ/3.Северный_24-АТМ-Р-Планы.dwg\n"
                 "Import ID: e9c1e1822523",
                 "cad_bim_json_e9c1e1822523.md",
                 0.1,
@@ -1106,7 +1106,7 @@ async def test_retrieve_chat_chunks_promotes_cad_source_name_after_rerank(monkey
     backend = CadSourceNameBackend()
 
     result = await retrieve_chat_chunks(
-        question="лесной ГСВ Спецификация CAD BIM",
+        question="северный ГСВ Спецификация CAD BIM",
         dataset_ids=["ds-1"],
         rag_backend=backend,
         reranker_enabled=True,
@@ -1127,7 +1127,7 @@ async def test_retrieve_chat_chunks_promotes_cad_source_name_with_compact_path(m
     backend = CadAtmSourceNameBackend()
 
     result = await retrieve_chat_chunks(
-        question="АТМ планы Лесной64 CAD BIM 3.Лесной64-АТМ-Р-Планы",
+        question="АТМ планы Северный24 CAD BIM 3.Северный24-АТМ-Р-Планы",
         dataset_ids=["ds-1"],
         rag_backend=backend,
         reranker_enabled=True,

@@ -9,12 +9,14 @@ mod close_guard;
 mod lifecycle;
 mod supervisor;
 mod launcher;
+mod update;
 #[path = "../../../../runtime/src/desktop_control.rs"]
 mod desktop_control;
 #[cfg(windows)] use std::os::windows::process::CommandExt;
 
 struct Runtime { directory: PathBuf, state: PathBuf, child: Mutex<Option<Child>>, close: Mutex<close_guard::CloseGuard>,
-                 stopping: AtomicBool, launch_id: Option<String> }
+                 stopping: AtomicBool, launch_id: Option<String>, update_operation: AtomicBool,
+                 pending_update: Mutex<Option<Value>> }
 
 fn read_status(runtime: &Runtime) -> Value {
     let path = runtime.state.join("launcher-status.json");
@@ -28,7 +30,7 @@ fn read_status(runtime: &Runtime) -> Value {
 fn owned_url(status: &Value) -> Option<tauri::Url> {
     let url = tauri::Url::parse(status.get("ui_url")?.as_str()?).ok()?;
     if url.scheme() != "http" || url.host_str() != Some("127.0.0.1") || url.port().is_none()
-        || !matches!(url.path(), "/classic" | "/app/") || !url.username().is_empty() || url.password().is_some()
+        || url.path() != "/app/" || !url.username().is_empty() || url.password().is_some()
         || url.query().is_some() || url.fragment().is_some() { return None; }
     Some(url)
 }
@@ -40,9 +42,8 @@ fn instance_ready(status: &Value) -> bool {
     let Ok(mut socket) = TcpStream::connect_timeout(&address, Duration::from_millis(600)) else { return false; };
     let _ = socket.set_read_timeout(Some(Duration::from_secs(1)));
     let _ = socket.set_write_timeout(Some(Duration::from_secs(1)));
-    let probe = if url.path() == "/app/" { "/api/light/instance" } else { "/healthz" };
-    let request = format!("GET {probe} HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
-    if socket.write_all(request.as_bytes()).is_err() { return false; }
+    let request = b"GET /api/light/instance HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
+    if socket.write_all(request).is_err() { return false; }
     let mut response = String::new();
     if socket.take(65536).read_to_string(&mut response).is_err() { return false; }
     let Some((headers, body)) = response.split_once("\r\n\r\n") else { return false; };
@@ -77,11 +78,8 @@ fn start_child(runtime: &Runtime) -> Result<(), String> {
     let root = runtime.directory.join("runtime");
     fs::create_dir_all(runtime.state.join("logs")).map_err(|_| "Нет доступа к папке данных LES RAG. Проверьте права пользователя.")?;
     let output = fs::OpenOptions::new().create(true).append(true).open(runtime.state.join("logs/launcher.txt")).map_err(|_| "Не удалось открыть журнал запуска.")?;
-    let native=std::env::args().any(|arg| arg=="--native-launcher" || arg=="--native-api");
-    let mut command=launcher::command(&runtime.directory,&root,&runtime.state,native).map_err(str::to_string)?;
-    if std::env::args().any(|arg|arg=="--native-api") {command.arg("--native-api");}
+    let mut command = launcher::command(&runtime.directory, &root, &runtime.state).map_err(str::to_string)?;
     command.current_dir(&runtime.state).stdin(Stdio::piped()).stdout(Stdio::from(output.try_clone().map_err(|e| e.to_string())?)).stderr(Stdio::from(output));
-    if std::env::args().any(|arg| arg == "--svelte") { command.args(["--frontend", "svelte"]); }
     if std::env::args().any(|arg| arg == "--read-only") { command.arg("--read-only"); }
     #[cfg(windows)] command.creation_flags(0x08000000);
     let child = command.spawn().map_err(|_| "Windows не смог запустить компоненты LES RAG. Проверьте защитное ПО или восстановите установку.")?;
@@ -104,6 +102,19 @@ fn validate_editor(window: &tauri::WebviewWindow, runtime: &Runtime) -> Result<(
 }
 
 #[tauri::command]
+async fn pick_folder(window: tauri::WebviewWindow, runtime: tauri::State<'_, Runtime>, initial: Option<String>) -> Result<Option<String>, String> {
+    validate_editor(&window, &runtime)?;
+    #[cfg(windows)]
+    {
+        let owner = window.hwnd().map_err(|_| "Не удалось найти окно Леса.")?.0 as isize;
+        tauri::async_runtime::spawn_blocking(move || launcher::pick_folder(owner, initial))
+            .await.map_err(|_| "Не удалось открыть выбор папки".to_string())?
+    }
+    #[cfg(not(windows))]
+    { let _ = initial; Err("Укажите путь к папке.".into()) }
+}
+
+#[tauri::command]
 fn editor_ready(window: tauri::WebviewWindow, runtime: tauri::State<Runtime>) -> Result<(), String> {
     validate_editor(&window, &runtime)?;
     runtime.close.lock().map_err(|_| "Закрытие занято")?.register();
@@ -115,6 +126,11 @@ fn editor_ready(window: tauri::WebviewWindow, runtime: tauri::State<Runtime>) ->
 fn editor_close_result(window: tauri::WebviewWindow, runtime: tauri::State<Runtime>, nonce: u64, saved: bool) -> Result<(), String> {
     validate_editor(&window, &runtime)?;
     let exit = runtime.close.lock().map_err(|_| "Закрытие занято")?.acknowledge(nonce, saved)?;
+    let update = runtime.pending_update.lock().map_err(|_| "Обновление занято")?.take();
+    if let Some(update) = update {
+        if exit { update::arm(&runtime.state, &update)?; }
+        else { update::discard(&runtime.state, &update); }
+    }
     let _ = fs::write(runtime.state.join("editor-close-status.json"), json!({"phase":if saved {"saved"} else {"blocked"}}).to_string());
     if !saved { let _ = window.set_title("LES RAG"); }
     if exit { window.app_handle().exit(0); }
@@ -157,6 +173,9 @@ fn request_exit(app: &tauri::AppHandle) {
             if webview.eval(script).is_err() {
                 let _ = webview.set_title("Лес — не удалось подтвердить сохранение");
                 if let Ok(mut guard) = runtime.close.lock() { let _ = guard.acknowledge(nonce, false); }
+                if let Ok(mut pending) = runtime.pending_update.lock() {
+                    if let Some(update) = pending.take() { update::discard(&runtime.state, &update); }
+                }
                 let _ = fs::write(runtime.state.join("editor-close-status.json"), json!({"phase":"blocked"}).to_string());
             }
             return;
@@ -209,8 +228,9 @@ fn main() {
     let _ = fs::write(state.join("desktop-status.json"), json!({"phase":"opening_window"}).to_string());
     tauri::Builder::default()
         .manage(Runtime { directory, state, child: Mutex::new(None), close: Mutex::new(close_guard::CloseGuard::default()),
-                          stopping: AtomicBool::new(false), launch_id })
-        .invoke_handler(tauri::generate_handler![startup_status, retry_start, open_browser, editor_ready, editor_close_result])
+                          stopping: AtomicBool::new(false), launch_id, update_operation: AtomicBool::new(false),
+                          pending_update: Mutex::new(None) })
+        .invoke_handler(tauri::generate_handler![startup_status, retry_start, open_browser, editor_ready, editor_close_result, pick_folder, update::update_check, update::update_install])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
@@ -221,10 +241,10 @@ fn main() {
             let url = payload.url();
             if payload.event() == tauri::webview::PageLoadEvent::Started
                 && (url.host_str() == Some("tauri.localhost") || matches!(url.path(),
-                    "/app/" | "/classic" | "/les/classic" | "/qdrant-visualizer/index.html")) {
+                    "/app/" | "/qdrant-visualizer/index.html")) {
                 if let Ok(mut guard) = webview.state::<Runtime>().close.lock() { guard.invalidate(); }
             }
-            if payload.event() == tauri::webview::PageLoadEvent::Finished && url.host_str() == Some("127.0.0.1") && matches!(url.path(), "/classic" | "/les/classic" | "/app/") {
+            if payload.event() == tauri::webview::PageLoadEvent::Finished && url.host_str() == Some("127.0.0.1") && url.path() == "/app/" {
                 let runtime = webview.state::<Runtime>();
                 let _ = fs::write(runtime.state.join("desktop-status.json"), json!({"phase":"loaded","url":url.as_str()}).to_string());
             }
@@ -316,11 +336,9 @@ fn main() {
 mod tests {
     use super::*;
     #[test]
-    fn navigation_is_limited_to_our_two_loopback_renderers() {
-        for value in ["http://127.0.0.1:54321/classic", "http://127.0.0.1:54321/app/"] {
-            assert!(owned_url(&json!({"ui_url":value})).is_some());
-        }
-        for value in ["https://example.org/app/", "http://127.0.0.1/app/", "http://user@127.0.0.1:54321/app/", "http://127.0.0.1:54321/app/?url=other", "http://127.0.0.1:54321/api/private", "http://localhost:54321/app/"] {
+    fn navigation_is_limited_to_the_native_loopback_renderer() {
+        assert!(owned_url(&json!({"ui_url":"http://127.0.0.1:54321/app/"})).is_some());
+        for value in ["http://127.0.0.1:54321/classic", "https://example.org/app/", "http://127.0.0.1/app/", "http://user@127.0.0.1:54321/app/", "http://127.0.0.1:54321/app/?url=other", "http://127.0.0.1:54321/api/private", "http://localhost:54321/app/"] {
             assert!(owned_url(&json!({"ui_url":value})).is_none());
         }
     }

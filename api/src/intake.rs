@@ -489,6 +489,21 @@ pub(crate) fn attachment_folder(state: &Path, raw: &str) -> Result<PathBuf, &'st
         .map_err(|stop| stop.code)
 }
 
+pub(crate) fn external_file(state: &Path, raw: &Path) -> Result<PathBuf, &'static str> {
+    if !raw.is_absolute() {
+        return Err("MAIL_SOURCE_PATH_INVALID");
+    }
+    let path = raw.canonicalize().map_err(|_| "MAIL_SOURCE_UNAVAILABLE")?;
+    let policy = policy(state).ok_or("MAIL_SOURCE_PATH_INVALID")?;
+    if !policy.allows(&path) {
+        return Err("INTAKE_OUTSIDE_ALLOWED_ROOT");
+    }
+    if !path.is_file() {
+        return Err("MAIL_SOURCE_PATH_INVALID");
+    }
+    Ok(path)
+}
+
 async fn record(context: &Context, id: &Value, action: &'static str, stop: Option<Stop>) {
     let (reason, message) = stop.map_or(("", ""), |stop| (stop.code, stop.message));
     let database = context.database.clone();

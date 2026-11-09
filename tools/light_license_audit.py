@@ -44,15 +44,16 @@ def collect(site: Path, output: Path):
     (output / 'README.txt').write_text(
         'Third-party components retain their original licenses; the LES license does not replace them.\n'
         'Python source distributions: exact version links in python-packages.json.\n'
-        'Pure-Python MPL components are supplied in source form in python/Lib/site-packages.\n'
+        'Pure-Python MPL components are supplied in source form in native/skill-python/Lib/site-packages.\n'
         'Native component sources, including orjson, are available through those versioned source links.\n', encoding='utf-8')
     return inventory
 
 
 def stage_notices(root: Path, payload: Path):
     output = payload / 'THIRD_PARTY_NOTICES'
-    collect(payload / 'python/Lib/site-packages', output / 'python')
-    shutil.copy2(payload / 'python/LICENSE.txt', output / 'Python-LICENSE.txt')
+    skill = payload / 'native/skill-python'
+    collect(skill / 'Lib/site-packages', output / 'python')
+    shutil.copy2(skill / 'LICENSE.txt', output / 'Python-LICENSE.txt')
     shutil.copytree(root / 'licenses', output / 'native', dirs_exist_ok=True)
     packages, seen = [], set()
     manifests = ['desktop/light/src-tauri/Cargo.toml', 'core/Cargo.toml']

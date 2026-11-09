@@ -101,6 +101,13 @@ impl Probe {
         self.get(url, None)
             .is_some_and(|(status, value)| status == 200 && value["instance_id"] == expected)
     }
+    pub fn ui(&self, url: &str, expected: &str, native_only: bool) -> bool {
+        if native_only {
+            self.get(url, None).is_some_and(|(status, _)| status == 200)
+        } else {
+            self.instance(url, expected)
+        }
+    }
     pub fn qdrant(&self, url: &str, key: &str, check_protection: bool) -> bool {
         let endpoint = format!("{url}/collections");
         self.get(&endpoint, Some(key))
@@ -117,13 +124,14 @@ impl Probe {
         instance: &str,
         qdrant: &str,
         key: &str,
+        native_only: bool,
     ) -> Option<Value> {
         if Instant::now() < self.next {
             return None;
         }
         let checks = [
             ("API", self.instance(api, instance)),
-            ("UI", self.instance(ui, instance)),
+            ("UI", self.ui(ui, instance, native_only)),
             ("Qdrant", self.qdrant(qdrant, key, false)),
         ];
         let mut details = serde_json::Map::new();

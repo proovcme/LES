@@ -66,6 +66,11 @@ def stage(output, source, *, lock_sha256=''):
         destination=output/relative
         destination.parent.mkdir(parents=True,exist_ok=True)
         shutil.copy2(path,destination)
+    return seal(output, version, lock_sha256=lock_sha256)
+
+
+def seal(output, version, *, lock_sha256=''):
+    """Finish a trusted, freshly extracted interpreter in its destination."""
     library=output/'Lib/site-packages'
     library.mkdir(parents=True,exist_ok=True)
     module_roots=['Lib/site-packages']
@@ -98,7 +103,7 @@ def stage(output, source, *, lock_sha256=''):
     inventory_path=output/'skill-python-files.json'
     inventory_path.write_text(json.dumps(inventory,ensure_ascii=False,indent=2),encoding='utf-8')
     receipt={'schema':'les.skill-python.v1','executable':'python.exe','python_sha256':digest(output/'python.exe'),
-        'stdlib':archives[0].name,'stdlib_sha256':digest(output/archives[0].name),
+        'stdlib':version+'.zip','stdlib_sha256':digest(output/(version+'.zip')),
         'inventory':'skill-python-files.json','inventory_sha256':digest(inventory_path),
         'source_uv_lock_sha256':lock_sha256,'distributions':distributions,
         'module_roots':module_roots,'dll_roots':dll_roots,

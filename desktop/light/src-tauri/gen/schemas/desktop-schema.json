@@ -195,6 +195,12 @@
           "markdownDescription": "Enables the open_browser command without any pre-configured scope."
         },
         {
+          "description": "Enables the pick_folder command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-pick-folder",
+          "markdownDescription": "Enables the pick_folder command without any pre-configured scope."
+        },
+        {
           "description": "Enables the retry_start command without any pre-configured scope.",
           "type": "string",
           "const": "allow-retry-start",
@@ -205,6 +211,18 @@
           "type": "string",
           "const": "allow-startup-status",
           "markdownDescription": "Enables the startup_status command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the update_check command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-update-check",
+          "markdownDescription": "Enables the update_check command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the update_install command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-update-install",
+          "markdownDescription": "Enables the update_install command without any pre-configured scope."
         },
         {
           "description": "Denies the editor_close_result command without any pre-configured scope.",
@@ -225,6 +243,12 @@
           "markdownDescription": "Denies the open_browser command without any pre-configured scope."
         },
         {
+          "description": "Denies the pick_folder command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-pick-folder",
+          "markdownDescription": "Denies the pick_folder command without any pre-configured scope."
+        },
+        {
           "description": "Denies the retry_start command without any pre-configured scope.",
           "type": "string",
           "const": "deny-retry-start",
@@ -235,6 +259,18 @@
           "type": "string",
           "const": "deny-startup-status",
           "markdownDescription": "Denies the startup_status command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the update_check command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-update-check",
+          "markdownDescription": "Denies the update_check command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the update_install command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-update-install",
+          "markdownDescription": "Denies the update_install command without any pre-configured scope."
         },
         {
           "description": "Default core plugins set.\n#### This default permission set includes:\n\n- `core:path:default`\n- `core:event:default`\n- `core:window:default`\n- `core:webview:default`\n- `core:app:default`\n- `core:image:default`\n- `core:resources:default`\n- `core:menu:default`\n- `core:tray:default`",

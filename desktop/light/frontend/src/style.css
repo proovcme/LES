@@ -124,6 +124,7 @@ textarea::placeholder { color: var(--forest-muted); }
 .notice { padding: 10px 24px; margin-bottom: 0; background: var(--forest-warning); font-size: 13px; color: #6f501d; }
 dialog { width: min(580px,calc(100% - 32px)); max-width: none; max-height: calc(100dvh - 40px); border: 1px solid var(--forest-line); border-radius: 20px; background: var(--forest-paper); color: var(--forest-ink); padding: 0; box-shadow: 0 24px 80px #143b2a24; }
 dialog.wide { width: min(1100px,calc(100% - 32px)); }
+dialog.editor { width: min(740px,calc(100% - 24px)); }
 dialog::backdrop { background: #143b2a60; backdrop-filter: blur(3px); }
 .modal-heading { display: flex; gap: 14px; align-items: center; justify-content: space-between; padding: 18px 24px; border-bottom: 1px solid var(--forest-line); background: var(--forest-paper); position: sticky; top: 0; z-index: 2; }
 .modal-heading h2 { margin: 0; font-size: 19px; overflow-wrap: anywhere; }
@@ -134,6 +135,10 @@ dialog::backdrop { background: #143b2a60; backdrop-filter: blur(3px); }
 .session-button span { min-width: 0; overflow-wrap: anywhere; }
 .session-button small { white-space: nowrap; }.session-button[aria-current=true] { background: var(--forest-selected); }
 .option { display: flex; align-items: center; gap: 14px; min-height: 60px; padding: 12px 4px; border-bottom: 1px solid var(--forest-line); cursor: pointer; }
+.editor-form label.field, .editor-form > label:not(.option) { display: grid; gap: 6px; min-width: 0; font-weight: 600; font-size: 13px; }
+.editor-form :is(input:not([type="checkbox"], [type="radio"]), select, textarea) { width: 100%; min-width: 0; min-height: 44px; padding: 9px 12px; border: 1px solid var(--forest-line); border-radius: 10px; background: white; font-weight: 400; font-size: 14px; }
+.editor-form textarea { min-height: 100px; resize: vertical; }
+.editor-form :is(input, select, textarea):disabled { background: var(--forest-floor); }
 .option span { min-width: 0; overflow-wrap: anywhere; }.option strong { font-size: 14px; font-weight: 600; }
 .dataset-options { margin: 4px 0 12px 24px; }
 .evidence { margin: 18px 0 24px; padding: 16px 20px; border-left: 3px solid var(--forest-green); background: var(--forest-floor); white-space: pre-wrap; overflow-wrap: anywhere; }

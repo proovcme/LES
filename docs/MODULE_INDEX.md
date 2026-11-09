@@ -1,6 +1,6 @@
 # Модули LES RAG
 
-844: [IMAPS, фоновая синхронизация и почтовый индекс](modules/native-mail.md) —
+846: [Импорт OLM и PST, IMAPS и почтовый индекс](modules/native-mail.md) —
 `api/src/mail`, `core/src/catalog/mail` и нативная очередь индексации.
 
 842: [скрепка, настройки и чтение писем](modules/native-settings-attachments.md) —

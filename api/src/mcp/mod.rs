@@ -208,7 +208,7 @@ async fn perform(request: &Value) -> Result<Value> {
     if action == "list" {
         return Ok(json!({"connections":catalog(registry::list(&database))?}));
     }
-    if action == "save" {
+    if matches!(action, "save" | "update") {
         let name = field(request, "name")?.trim();
         if name.is_empty() || name.chars().count() > 120 {
             return Err(bad("Введите название подключения длиной до 120 символов"));
@@ -248,7 +248,17 @@ async fn perform(request: &Value) -> Result<Value> {
             }
             _ => return Err(bad("Выберите HTTP или локальную программу")),
         };
-        return catalog(registry::add(&database, name, &raw, &config));
+        return if action == "update" {
+            catalog(registry::update(
+                &database,
+                field(request, "connection_id")?,
+                name,
+                &raw,
+                &config,
+            ))
+        } else {
+            catalog(registry::add(&database, name, &raw, &config))
+        };
     }
     let id = field(request, "connection_id")?;
     if action == "remove" {
@@ -260,7 +270,7 @@ async fn perform(request: &Value) -> Result<Value> {
         item["cwd"] = request["working_directory"].clone();
     }
     if action == "enable" && request["names"] == json!([]) {
-        return catalog(registry::enable(&database, id, &[]));
+        return catalog(registry::enable(&database, id, &[], &item));
     }
     let mut session = Session::connect(&item).await.map_err(network)?;
     let outcome = async { match action {
@@ -287,7 +297,7 @@ async fn perform(request: &Value) -> Result<Value> {
                 selected.push(tool.clone());
             }
             if selected.len()!=names.len(){return Err(bad("Список инструментов изменился. Проверьте подключение ещё раз"));}
-            catalog(registry::enable(&database, id, &selected))
+            catalog(registry::enable(&database, id, &selected, &item))
         }
         "call" => {
             let expected = &request["expected"];

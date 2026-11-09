@@ -115,6 +115,11 @@ pub fn run(executable:&Path, state:&Path, args:&[String]) -> Result<(),String> {
         if normal {
             lifecycle::status(state,"launcher-status.json",json!({"schema":"les.light-launcher.v1","phase":"stopped","message":"LES RAG остановлен","reason":"normal_exit","updated_at":lifecycle::stamp()}));
             lifecycle::status(state,"supervisor-status.json",json!({"phase":"stopped","pid":std::process::id(),"launch_id":launch_id,"reason":"normal_exit","updated_at":lifecycle::stamp()}));
+            if result.success() {
+                if let Err(reason) = crate::update::launch(state, executable.parent().ok_or("Не найдена папка установки.")?, &launch_id) {
+                    lifecycle::event(state, "supervisor", "update_handoff_failed", json!({"reason":reason}));
+                }
+            }
             return Ok(());
         }
         let Some(delay) = recovery.next(Instant::now()) else {

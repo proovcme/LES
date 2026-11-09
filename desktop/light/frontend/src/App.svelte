@@ -11,9 +11,14 @@
   import ScopePicker from './components/ScopePicker.svelte';
   import AgentMemory from './components/AgentMemory.svelte';
   import ModelSettings from './components/ModelSettings.svelte';
+  import Mail from './components/Mail.svelte';
+  import DataLibrary from './components/DataLibrary.svelte';
+  import ProfileEditor from './components/ProfileEditor.svelte';
+  import McpEditor from './components/McpEditor.svelte';
+  import UpdatePanel from './components/UpdatePanel.svelte';
 
   let { workspace = new Workspace() }: { workspace?: Workspace } = $props();
-  let modal = $state<'sessions' | 'scope' | 'options' | 'attachment' | 'models' | null>(null);
+  let modal = $state<'sessions' | 'scope' | 'options' | 'attachment' | 'models' | 'mail' | 'data' | 'profiles' | 'mcp' | 'update' | null>(null);
   let source = $state<Source | null>(null); let mobileNav = $state(false);
   let actionBusy = $state(false); let sessionQuery = $state('');
   let memoryOpen = $state(false); let memoryDirty = $state(false); let memoryEditor: AgentMemory;
@@ -34,7 +39,16 @@
   onMount(() => {
     workspace.beforeClose = async () => { await memoryEditor?.flush(); };
     const bridge = connectNativeClose(workspace);
-    void bridge.ready.then(() => workspace.initialize()).catch(() => {
+    void bridge.ready.then(() => workspace.initialize()).then(() => {
+      const url = new URL(location.href);
+      const panel = url.searchParams.get('panel');
+      if (panel === 'data' || panel === 'profiles' || panel === 'mcp' || panel === 'update'
+        || (panel === 'models' && workspace.nativeModelSettings)) {
+        modal = panel;
+        url.searchParams.delete('panel');
+        history.replaceState(history.state, '', url);
+      }
+    }).catch(() => {
       workspace.loading = false;
       workspace.error = 'Не удалось включить сохранение при закрытии окна. Перезапустите Лес; запуск чата остановлен, чтобы сохранить ваши данные.';
     });
@@ -97,12 +111,16 @@
       <button class="nav-item selected" aria-current="page" onclick={() => { mobileNav = false; composer?.focus(); }}><Icon name="chat" />Чат</button>
       <button class="nav-item" disabled={disabled} onclick={() => { modal = 'sessions'; mobileNav = false; }}><Icon name="history" />Диалоги</button>
       <button class="nav-item" disabled={disabled} onclick={() => { memoryOpen = true; mobileNav = false; }}><Icon name="file" />Память</button>
-      {#if workspace.legacyURL}
-        <button class="nav-item" disabled={disabled} onclick={() => navigate('/classic?tab=data')}><Icon name="folder" />Данные</button>
+      {#if workspace.nativeMail}
+        <button class="nav-item" disabled={disabled} onclick={() => { modal = 'mail'; mobileNav = false; }}><Icon name="folder" />Почта</button>
       {/if}
+      <button class="nav-item" disabled={disabled} onclick={() => { modal = 'data'; mobileNav = false; }}><Icon name="folder" />Данные</button>
+      <button class="nav-item" disabled={disabled} onclick={() => { modal = 'profiles'; mobileNav = false; }}><Icon name="settings" />Профили чата</button>
+      <button class="nav-item" disabled={disabled} onclick={() => { modal = 'mcp'; mobileNav = false; }}><Icon name="settings" />Подключения MCP</button>
       <button class="nav-item" disabled={disabled} onclick={() => navigate('/qdrant-visualizer/index.html', location.origin)}><Icon name="tree" />Лес знаний</button>
     </div>
     <div class="nav-footer">
+      <button class="nav-item" disabled={disabled} onclick={() => { modal = 'update'; mobileNav = false; }}><Icon name="status" />Обновление</button>
       <button class="nav-item" disabled={disabled} onclick={() => navigate(statusPath, location.origin)}><Icon name="status" />Состояние</button>
       {#if workspace.nativeModelSettings || workspace.legacyURL}
         <button class="nav-item" disabled={disabled} onclick={openModels}><Icon name="settings" />{workspace.nativeModelSettings ? 'Модели' : 'Настройки'}</button>
@@ -172,6 +190,12 @@
     </div>
   </main>
 </div>
+
+{#if modal === 'data'}
+  <DataLibrary datasets={workspace.datasets} refresh={() => workspace.refreshDatasets()}
+    useProject={(id) => workspace.setScope({ scope_type: 'project', project_ids: [id], dataset_ids: [], selected_sources_only: false })}
+    close={() => modal = null} />
+{/if}
 <AgentMemory bind:this={memoryEditor} bind:open={memoryOpen} projectId={workspace.session?.project_id || 0} onDirty={(value) => memoryDirty = value} />
 {#if modal === 'sessions'}
   <Modal title="Ваши диалоги" close={() => modal = null}>
@@ -183,6 +207,14 @@
   <ScopePicker scope={workspace.session.scope} datasets={workspace.datasets} save={(scope) => workspace.setScope(scope)} close={() => modal = null} />
 {:else if modal === 'models'}
   <ModelSettings close={() => { modal = null; void workspace.refreshModel().catch((error) => { workspace.error = errorMessage(error); }); }} />
+{:else if modal === 'mail'}
+  <Mail close={() => { modal = null; }} />
+{:else if modal === 'profiles'}
+  <ProfileEditor session={workspace.session ?? undefined} close={() => modal = null} />
+{:else if modal === 'mcp'}
+  <McpEditor close={() => modal = null} />
+{:else if modal === 'update'}
+  <UpdatePanel close={() => modal = null} />
 {:else if modal === 'attachment'}
   <Modal title="Прикрепить файл" close={() => modal = null}>
     <p>Прочитать файл в этом диалоге или сохранить его в наборе «Вложения чата» для поиска.</p>
