@@ -59,6 +59,51 @@ fn route<'a>(method: &str, path: &'a str) -> Option<Route<'a>> {
     })
 }
 pub use imap::recover;
+
+fn poll_seconds(state: &std::path::Path) -> u64 {
+    if std::env::var("LES_STARTUP_BACKGROUND_MUTATIONS").as_deref() != Ok("true") {
+        return 0;
+    }
+    let Ok(settings) = crate::index_batch::configuration::Settings::load(state) else {
+        return 0;
+    };
+    settings
+        .get("MAIL_IMAP_POLL_SEC", "180")
+        .parse::<u64>()
+        .ok()
+        .filter(|seconds| *seconds > 0)
+        .map(|seconds| seconds.clamp(60, 86_400))
+        .unwrap_or(0)
+}
+
+pub async fn schedule(context: Arc<Context>) {
+    if std::env::var("LES_STARTUP_BACKGROUND_MUTATIONS").as_deref() != Ok("true") {
+        return;
+    }
+    tokio::time::sleep(Duration::from_secs(25)).await;
+    loop {
+        let worker = context.clone();
+        let delay = tokio::task::spawn_blocking(move || {
+            let seconds = poll_seconds(&worker.state_root);
+            if seconds > 0 {
+                if let Err(code) = imap::poll(&worker) {
+                    if code != "MAIL_SYNC_BUSY" {
+                        eprintln!("{}", json!({"event":"native_mail_poll_failed","code":code}));
+                    }
+                }
+            }
+            if seconds == 0 {
+                300
+            } else {
+                seconds
+            }
+        })
+        .await
+        .unwrap_or(300);
+        tokio::time::sleep(Duration::from_secs(delay)).await;
+    }
+}
+
 pub fn handles(method: &str, path: &str) -> bool {
     route(method, path).is_some()
 }
@@ -88,13 +133,13 @@ fn failure(code: &str) -> Response {
             StatusCode::BAD_GATEWAY,
             "Почта отклонила вход. Проверьте имя пользователя и пароль приложения.",
         ),
-        "MAIL_IMAP_TLS_REQUIRED" | "MAIL_IMAP_TLS_UNAVAILABLE" => (
+        "MAIL_IMAP_TLS_REQUIRED" => (
             StatusCode::SERVICE_UNAVAILABLE,
             "Для внешней почты требуется защищённое подключение IMAP.",
         ),
         "MAIL_IMAP_TLS_FAILED" => (
             StatusCode::BAD_GATEWAY,
-            "Не удалось установить защищённое соединение с почтой.",
+            "Не удалось установить защищённое соединение с почтой. Проверьте имя сервера, порт и сертификат.",
         ),
         "MAIL_IMAP_CONNECT_FAILED" => (
             StatusCode::BAD_GATEWAY,
@@ -359,7 +404,7 @@ async fn receive(
             "accounts"=>mail::accounts(state),
             "status"=>{let counts=mail::accounts(state)?;Ok(json!({"component":"Е.Ж.И.К.","accounts":counts["accounts"],"folders":counts["folders"],"owner":"rust.mail"}))},
             "create"=>{if input["kind"]!="imap"{return Err(BAD);}Ok(json!({"status":"created","account":mail::create(state,database,&input,false)?}))},
-            "update"=>Ok(json!({"status":"updated","account":mail::update(state,&id,&input)?})),
+            "update"=>Ok(json!({"status":"updated","account":imap::update_account(state,&id,&input)?})),
             "test"=>imap::test(state,&id),
             "sync"=>imap::start(context.clone(),id,input),
             "register"=>{let a=register(&context,&input)?;Ok(json!({"status":"ready","account_id":a["id"],"dataset_id":a["dataset_id"],"dataset_name":a["dataset_name"]}))},

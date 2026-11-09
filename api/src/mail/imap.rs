@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 use std::{
     fs::{self, File},
     io::{BufRead, BufReader, Read, Write},
-    net::{IpAddr, TcpStream},
+    net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs},
     path::Path,
     sync::Arc,
     time::{Duration, Instant},
@@ -41,24 +41,47 @@ fn connect(config: &Value) -> Result<Box<dyn Socket>> {
         .as_u64()
         .and_then(|v| u16::try_from(v).ok())
         .ok_or(BAD)?;
-    if config["ssl"] != false {
-        return Err("MAIL_IMAP_TLS_UNAVAILABLE");
-    }
-    // Plaintext is supported exclusively for explicitly configured local servers.
-    let ip = host
-        .parse::<IpAddr>()
-        .ok()
-        .filter(IpAddr::is_loopback)
-        .ok_or("MAIL_IMAP_TLS_REQUIRED")?;
-    let stream = TcpStream::connect_timeout(&(ip, port).into(), Duration::from_secs(5))
-        .map_err(|_| "MAIL_IMAP_CONNECT_FAILED")?;
+    let tls = config["ssl"] != false;
+    let addresses = if tls {
+        (host, port)
+            .to_socket_addrs()
+            .map_err(|_| "MAIL_IMAP_CONNECT_FAILED")?
+            .collect::<Vec<_>>()
+    } else {
+        // A hostname must never turn a plaintext test connection into a remote login.
+        let ip = host
+            .parse::<IpAddr>()
+            .ok()
+            .filter(IpAddr::is_loopback)
+            .ok_or("MAIL_IMAP_TLS_REQUIRED")?;
+        vec![SocketAddr::new(ip, port)]
+    };
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let stream = addresses
+        .into_iter()
+        .find_map(|address| {
+            let remaining = deadline.checked_duration_since(Instant::now())?;
+            TcpStream::connect_timeout(&address, remaining.min(Duration::from_secs(2))).ok()
+        })
+        .ok_or("MAIL_IMAP_CONNECT_FAILED")?;
     stream
         .set_read_timeout(Some(Duration::from_secs(8)))
         .map_err(|_| IO)?;
     stream
         .set_write_timeout(Some(Duration::from_secs(8)))
         .map_err(|_| IO)?;
-    Ok(Box::new(stream))
+    if !tls {
+        return Ok(Box::new(stream));
+    }
+    // Keep the configured hostname for certificate verification, including after DNS lookup.
+    let connector = native_tls::TlsConnector::builder()
+        .min_protocol_version(Some(native_tls::Protocol::Tlsv12))
+        .build()
+        .map_err(|_| "MAIL_IMAP_TLS_FAILED")?;
+    connector
+        .connect(host, stream)
+        .map(|stream| Box::new(stream) as Box<dyn Socket>)
+        .map_err(|_| "MAIL_IMAP_TLS_FAILED")
 }
 impl Session {
     fn open(config: &Value, password: &str) -> Result<Self> {
@@ -407,6 +430,11 @@ pub fn test(state: &Path, id: &str) -> Result<Value> {
     }
     Ok(result)
 }
+pub(super) fn update_account(state: &Path, id: &str, input: &Value) -> Result<Value> {
+    // Read the connection settings and its credential under the same lease as sync.
+    let _lock = lease(state)?;
+    mail::update(state, id, input)
+}
 fn run(context: &Context, id: &str, a: &Value, input: &Value, limit: usize) -> Result<usize> {
     let state = &context.state_root;
     let password = mail::secret(id)?;
@@ -499,7 +527,17 @@ pub fn start(context: Arc<Context>, id: String, input: Value) -> Result<Value> {
     }
     let lock = lease(&context.state_root)?;
     mail::recover_sync(&context.state_root)?;
-    let a = mail::account(&context.state_root, &id)?;
+    let a = begin(&context.state_root, &id)?;
+    let result = json!({"status":"running","account_id":id,"dataset_id":a["dataset_id"]});
+    std::thread::spawn(move || {
+        let _lock = lock;
+        finish(&context, &id, &a, &input, limit as usize);
+    });
+    Ok(result)
+}
+
+fn begin(state: &Path, id: &str) -> Result<Value> {
+    let a = mail::account(state, id)?;
     if a["kind"] != "imap" {
         return Err(BAD);
     }
@@ -509,27 +547,43 @@ pub fn start(context: Arc<Context>, id: String, input: Value) -> Result<Value> {
     if a["secret_set"] != true {
         return Err("MAIL_SECRET_MISSING");
     }
-    mail::sync_status(&context.state_root, &id, "running", "")?;
-    let result = json!({"status":"running","account_id":id,"dataset_id":a["dataset_id"]});
-    std::thread::spawn(move || {
-        let _lock = lock;
-        let outcome = run(&context, &id, &a, &input, limit as usize);
-        let (status, detail) = match outcome {
-            Ok(_) => ("idle", ""),
-            Err(code) => ("error", code),
-        };
-        if let Err(code) = mail::sync_status(&context.state_root, &id, status, detail) {
-            eprintln!(
-                "{}",
-                json!({"event":"native_mail_checkpoint_failed","code":code})
-            );
-        }
+    mail::sync_status(state, id, "running", "")?;
+    Ok(a)
+}
+
+fn finish(context: &Context, id: &str, a: &Value, input: &Value, limit: usize) {
+    let outcome = run(context, id, a, input, limit);
+    let (status, detail) = match outcome {
+        Ok(_) => ("idle", ""),
+        Err(code) => ("error", code),
+    };
+    if let Err(code) = mail::sync_status(&context.state_root, id, status, detail) {
         eprintln!(
             "{}",
-            json!({"event":"native_mail_sync","status":status,"code":detail,"downloaded":outcome.ok()})
+            json!({"event":"native_mail_checkpoint_failed","code":code})
         );
-    });
-    Ok(result)
+    }
+    eprintln!(
+        "{}",
+        json!({"event":"native_mail_sync","status":status,"code":detail,"downloaded":outcome.ok()})
+    );
+}
+
+pub(super) fn poll(context: &Context) -> Result<()> {
+    let state = &context.state_root;
+    if !state.join("data/mail_registry.db").is_file() {
+        return Ok(());
+    }
+    for id in mail::enabled_imap_accounts(state)? {
+        let _lock = lease(state)?;
+        mail::recover_sync(state)?;
+        match begin(state, &id) {
+            Ok(account) => finish(context, &id, &account, &Value::Null, 200),
+            Err("MAIL_ACCOUNT_DISABLED" | "MAIL_SECRET_MISSING") => continue,
+            Err(code) => return Err(code),
+        }
+    }
+    Ok(())
 }
 pub fn recover(state: &Path) {
     if state.join("data/mail_registry.db").is_file() {

@@ -514,6 +514,9 @@ fn main() {
                 mail::recover(&context.state_root);
             }
             let context = Arc::new(context);
+            if context.public_chat_rust && context.upstream.is_none() {
+                tokio::spawn(mail::schedule(context.clone()));
+            }
             tokio::spawn(conversation::resume(context.clone()));
             let background = context.clone();
             if context.reader.is_some() {

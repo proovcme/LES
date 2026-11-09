@@ -11988,7 +11988,7 @@
     },
     {
       "inbound": [],
-      "lines": 292,
+      "lines": 342,
       "module": "tests.test_light_native_mail",
       "outbound": [
         "tests/native_batch_fixtures.py",
@@ -16033,7 +16033,7 @@
     "runtime_support": 5,
     "test_or_tool_only": 271,
     "tracked_python_files": 717,
-    "tracked_python_lines": 170796
+    "tracked_python_lines": 170846
   },
   "warnings": []
 }

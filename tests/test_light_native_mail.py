@@ -4,6 +4,7 @@ import hashlib
 import os
 from pathlib import Path
 import socketserver
+import ssl
 import sqlite3
 import subprocess
 from threading import Event, Thread
@@ -26,11 +27,12 @@ def eml(uid, marker):
 
 
 class FakeImap:
-    def __init__(self):
+    def __init__(self, tls=None):
         self.messages = {1: eml(1, "First IMAP original"), 2: eml(2, "Second IMAP original")}
         self.commands = []
         self.arrived = Event()
         self.release = Event()
+        self.tls_attempted = Event()
         self.pause = True
         owner = self
 
@@ -71,7 +73,20 @@ class FakeImap:
                 except (ConnectionError, OSError):
                     pass
 
-        self.server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), Handler)
+        class Server(socketserver.ThreadingTCPServer):
+            def get_request(self):
+                sock, peer = super().get_request()
+                if tls is None:
+                    return sock, peer
+                owner.tls_attempted.set()
+                try:
+                    sock.settimeout(5)
+                    return tls.wrap_socket(sock, server_side=True), peer
+                except OSError:
+                    sock.close()
+                    raise
+
+        self.server = Server(("127.0.0.1", 0), Handler)
         self.server.daemon_threads = True
         self.thread = Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -81,6 +96,30 @@ class FakeImap:
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(timeout=5)
+
+
+def untrusted_imap_tls(root):
+    from datetime import datetime, timedelta, timezone
+    from ipaddress import ip_address
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(x509.NameOID.COMMON_NAME, "127.0.0.1")])
+    now = datetime.now(timezone.utc)
+    cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name)
+            .public_key(key.public_key()).serial_number(x509.random_serial_number())
+            .not_valid_before(now - timedelta(minutes=1)).not_valid_after(now + timedelta(hours=1))
+            .add_extension(x509.SubjectAlternativeName([x509.IPAddress(ip_address("127.0.0.1"))]), False)
+            .sign(key, hashes.SHA256()))
+    cert_path, key_path = root/"imap.crt", root/"imap.key"
+    cert_path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    key_path.write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                          serialization.NoEncryption()))
+    tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    tls.load_cert_chain(cert_path, key_path)
+    return tls
 
 
 def make_msg(path):
@@ -162,6 +201,7 @@ def exercise(tmp_path, source_files=()):
             or k in ("LES_ENV_PATH", "LES_EMBED_PROFILE", "BGE_MODEL", "LES_NATIVE_EMBEDDING_SPEC"))}
     env.update(LES_LIGHT_QDRANT_URL=url, LES_LIGHT_QDRANT_API_KEY=key,
                LES_INTERNAL_INGEST_TOKEN="9"*64, LES_STARTUP_BACKGROUND_MUTATIONS="true",
+               MAIL_IMAP_POLL_SEC="60",
                LES_NATIVE_PDFIUM=str(Path(pypdfium2_raw.__file__).with_name("pdfium.dll")),
                PYTHONHOME=str(tmp_path/"no-python"), PYTHONPATH=str(tmp_path/"no-app"),
                PATH=str(tmp_path/"no-programs"))
@@ -171,6 +211,7 @@ def exercise(tmp_path, source_files=()):
     account = None
     embeddings = None
     imap = FakeImap()
+    untrusted = FakeImap(untrusted_imap_tls(tmp_path))
 
     with httpx.Client(base_url=url, trust_env=False, timeout=30) as client:
         def start():
@@ -216,14 +257,22 @@ def exercise(tmp_path, source_files=()):
             assert "Verified attachment bytes" in msg_profile["text"]
             assert msg_profile["metadata"]["attachments"][0]["sha256"] == hashlib.sha256(b"Verified attachment bytes.").hexdigest()
             account = client.post("/api/mail/accounts", json={"kind": "imap", "label": "IMAP fixture",
-                "host": "127.0.0.1", "port": imap.server.server_address[1], "ssl": False,
+                "host": "127.0.0.1", "port": untrusted.server.server_address[1], "ssl": True,
                 "login": "fixture", "password": "dummy fixture password"}).raise_for_status().json()["account"]
             assert account["secret_set"] and "password" not in str(account)
             aid = account["id"]
             route = f"/api/mail/accounts/{aid}"
+            rejected = client.post(route+"/test")
+            assert rejected.status_code == 502
+            assert rejected.json()["code"] == "MAIL_IMAP_TLS_FAILED"
+            assert untrusted.tls_attempted.is_set()
+            assert not untrusted.commands
+            client.patch(route, json={"port": imap.server.server_address[1], "ssl": False,
+                                     "password": "dummy fixture password"}).raise_for_status()
             assert client.post(route+"/test").raise_for_status().json()["folders"] == 1
             assert client.post(route+"/sync", json={"max_messages": 2}).status_code == 202
             assert imap.arrived.wait(18), (tmp_path/"api.log").read_text(encoding="utf-8", errors="replace")
+            assert client.patch(route, json={"enabled": False}).status_code == 409
             assert get(f"/api/mail/messages?account_id={aid}")["count"] == 1
             api.kill()
             api.wait(timeout=10)
@@ -231,8 +280,8 @@ def exercise(tmp_path, source_files=()):
             imap.release.set()
             start()
             assert progress(aid)["last_error"] == "MAIL_SYNC_INTERRUPTED"
-            assert client.post(route+"/sync", json={"max_messages": 2}).status_code == 202
-            wait_for(lambda: progress(aid)["sync_state"] == "idle", timeout=15)
+            # Recovery is driven by the real native scheduler after restart.
+            wait_for(lambda: progress(aid)["sync_state"] == "idle", timeout=40)
             assert b"UID SEARCH UID 2:*" in imap.commands
             assert imap.commands.count(b"UID FETCH 1 (UID BODY.PEEK[])") == 1
             assert get(f"/api/mail/messages?account_id={aid}")["count"] == 2
@@ -274,6 +323,7 @@ def exercise(tmp_path, source_files=()):
             assert not list((state/"mail").rglob("*.pending"))
         finally:
             imap.close()
+            untrusted.close()
             try:
                 if api is not None and api.poll() is None:
                     api.terminate()

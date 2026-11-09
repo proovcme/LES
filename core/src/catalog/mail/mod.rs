@@ -113,6 +113,14 @@ fn raw_account(conn: &Connection, id: &str) -> Result<Value> {
 pub fn account(state: &Path, id: &str) -> Result<Value> {
     projection(raw_account(&registry(state)?, id)?)
 }
+pub fn enabled_imap_accounts(state: &Path) -> Result<Vec<String>> {
+    let conn = registry(state)?;
+    let mut query = conn
+        .prepare("SELECT id FROM mail_accounts WHERE kind='imap' AND enabled=1 ORDER BY id")
+        .map_err(sql)?;
+    let ids = query.query_map([], |row| row.get(0)).map_err(sql)?;
+    ids.collect::<std::result::Result<Vec<_>, _>>().map_err(sql)
+}
 pub fn secret(id: &str) -> Result<String> {
     if !safe_id(id) {
         return Err(INVALID);
