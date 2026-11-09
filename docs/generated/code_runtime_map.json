@@ -10211,6 +10211,7 @@
       "inbound": [
         "tests/test_light_collection_safety.py",
         "tests/test_light_native_index_batch.py",
+        "tests/test_light_native_indexed_attachment.py",
         "tests/test_light_native_intake_execution.py",
         "tests/test_light_native_table_publication.py"
       ],
@@ -10448,6 +10449,7 @@
         "tests/test_light_native_dispatch_sources.py",
         "tests/test_light_native_document.py",
         "tests/test_light_native_index_batch.py",
+        "tests/test_light_native_indexed_attachment.py",
         "tests/test_light_native_intake.py",
         "tests/test_light_native_intake_execution.py",
         "tests/test_light_native_preparation.py",
@@ -11512,6 +11514,7 @@
         "tests/test_light_native_conversation.py",
         "tests/test_light_native_dataset_reader.py",
         "tests/test_light_native_index_batch.py",
+        "tests/test_light_native_indexed_attachment.py",
         "tests/test_light_native_intake_execution.py",
         "tests/test_light_native_public_upload.py",
         "tests/test_light_native_publication.py",
@@ -11631,6 +11634,7 @@
         "tests/test_light_native_attachments.py",
         "tests/test_light_native_conversation.py",
         "tests/test_light_native_document_review.py",
+        "tests/test_light_native_model_discovery.py",
         "tests/test_light_native_public_chat.py",
         "tests/test_light_native_public_upload.py"
       ],
@@ -11906,6 +11910,20 @@
     },
     {
       "inbound": [],
+      "lines": 108,
+      "module": "tests.test_light_native_indexed_attachment",
+      "outbound": [
+        "tests/native_batch_fixtures.py",
+        "tests/pdf_fixtures.py",
+        "tests/test_light_native_api.py",
+        "tests/test_light_native_intake_execution.py"
+      ],
+      "path": "tests/test_light_native_indexed_attachment.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
       "lines": 117,
       "module": "tests.test_light_native_intake",
       "outbound": [
@@ -11922,7 +11940,8 @@
     },
     {
       "inbound": [
-        "tests/test_light_native_document_review.py"
+        "tests/test_light_native_document_review.py",
+        "tests/test_light_native_indexed_attachment.py"
       ],
       "lines": 225,
       "module": "tests.test_light_native_intake_execution",
@@ -11972,6 +11991,17 @@
         "proxy/services/tool_harness_service.py"
       ],
       "path": "tests/test_light_native_mcp.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
+      "lines": 48,
+      "module": "tests.test_light_native_model_discovery",
+      "outbound": [
+        "tests/test_light_native_chat_turn.py"
+      ],
+      "path": "tests/test_light_native_model_discovery.py",
       "status": "TEST_OR_TOOL_ONLY",
       "windows_runtime_explicit": false
     },
@@ -15973,9 +16003,9 @@
     "product_reachable": 417,
     "registered_api_routes": 298,
     "runtime_support": 5,
-    "test_or_tool_only": 267,
-    "tracked_python_files": 713,
-    "tracked_python_lines": 170266
+    "test_or_tool_only": 269,
+    "tracked_python_files": 715,
+    "tracked_python_lines": 170422
   },
   "warnings": []
 }

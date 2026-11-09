@@ -224,6 +224,11 @@ pub fn run(request: &Value, bridge: impl Fn(u8, &Value) -> Result<Value>) -> Res
                     }
                     let path = row["path"].as_str().ok_or_else(|| error(INVALID))?;
                     let source = fingerprint(path).map_err(error)?;
+                    if let Some(expected) = request["expected_source_sha256"].as_str() {
+                        if source["file_hash"] != expected {
+                            return Err(error("ATTACHMENT_HASH_CHANGED"));
+                        }
+                    }
                     let mut bytes = [0u8; 16];
                     getrandom::fill(&mut bytes).map_err(|_| error(INVALID))?;
                     let id = bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();

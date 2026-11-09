@@ -242,6 +242,10 @@ pub(crate) fn intake(
     if binding["value"].is_null() {
         return Err("EMBEDDING_MODEL_NOT_ASSIGNED");
     }
+    let attachment = job["root"] == les_core::catalog::INDEXED_ATTACHMENT_ROOT;
+    if attachment && binding["value"]["revision"]["locality"] == "remote" {
+        return Err("ATTACHMENT_INDEX_LOCAL_MODEL_REQUIRED");
+    }
     let env = std::env::var_os("LES_ENV_PATH")
         .map(PathBuf::from)
         .unwrap_or_else(|| context.state_root.join(".env"));
@@ -269,5 +273,8 @@ pub(crate) fn intake(
     input["intake_id"] = job["id"].clone();
     input["limit"] = json!(sources.as_array().ok_or("INDEX_BATCH_INVALID")?.len());
     input["sources"] = sources;
+    if attachment {
+        input["expected_source_sha256"] = job["attachment_sha256"].clone();
+    }
     Ok(input)
 }

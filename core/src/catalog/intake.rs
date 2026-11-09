@@ -6,7 +6,7 @@ const FIELDS: &str = "j.id,'dataset_intake' AS type,'native_external' AS source,
     j.dataset_name,j.status,j.phase,j.total,j.processed,j.errors,j.message,j.reason_code,
     j.index_pending,j.indexed,j.index_errors,j.index_skipped,j.recoveries,j.started_at,j.updated_at,j.finished_at";
 
-fn init(conn: &Connection) -> Result<()> {
+pub(super) fn init(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS native_intakes (
             id TEXT PRIMARY KEY, dataset_id TEXT NOT NULL, dataset_name TEXT NOT NULL,
@@ -20,8 +20,14 @@ fn init(conn: &Connection) -> Result<()> {
             retry_at REAL NOT NULL DEFAULT 0, started_at TEXT NOT NULL,
             updated_at TEXT NOT NULL, finished_at TEXT
          );
-         CREATE UNIQUE INDEX IF NOT EXISTS native_intakes_active_dataset
-         ON native_intakes(dataset_id) WHERE finished_at IS NULL;
+         DROP INDEX IF EXISTS native_intakes_active_dataset;
+         CREATE UNIQUE INDEX IF NOT EXISTS native_intakes_active_folder_dataset
+         ON native_intakes(dataset_id) WHERE finished_at IS NULL AND root<>'les:chat-index:v1';
+         CREATE TABLE IF NOT EXISTS les_indexed_attachments(
+            id TEXT PRIMARY KEY, owner TEXT NOT NULL, key_hash TEXT NOT NULL,
+            fingerprint TEXT NOT NULL, dataset_id TEXT NOT NULL, doc_id TEXT NOT NULL,
+            job_id TEXT NOT NULL UNIQUE, sha256 TEXT NOT NULL, response TEXT NOT NULL
+         );
          CREATE TABLE IF NOT EXISTS native_intake_files (
             job_id TEXT NOT NULL, ordinal INTEGER NOT NULL, file_name TEXT NOT NULL,
             source_path TEXT NOT NULL, PRIMARY KEY(job_id,ordinal)
@@ -85,6 +91,9 @@ fn enqueue(conn: &Connection, args: &Args) -> Result<Value> {
     ).optional()?;
     let name = name.ok_or_else(|| Failure::missing("Набор документов не найден."))?;
     let root = text(args, "root")?;
+    if root == super::INDEXED_ATTACHMENT_ROOT {
+        return Err(Failure::invalid("Укажите путь к папке."));
+    }
     let parse_limit = integer(args, "parse_limit", 0)?;
     let existing = first(
         conn,
@@ -133,6 +142,14 @@ fn claim(conn: &Connection, now: &str) -> Result<Value> {
         params![id, now],
     )?;
     let mut claimed = first(conn, "SELECT * FROM native_intakes WHERE id=?1", [id])?;
+    if claimed["root"] == super::INDEXED_ATTACHMENT_ROOT {
+        claimed["attachment_sha256"] = first(
+            conn,
+            "SELECT sha256 FROM les_indexed_attachments WHERE job_id=?1",
+            [id],
+        )?["sha256"]
+            .clone();
+    }
     claimed["resumed"] = json!(job["status"] == "running");
     Ok(claimed)
 }
@@ -321,7 +338,7 @@ fn checkpoint(conn: &Connection, id: &str, args: &Args, now: &str) -> Result<Val
     )
 }
 
-fn timestamp() -> String {
+pub(super) fn timestamp() -> String {
     chrono::Local::now()
         .format("%Y-%m-%dT%H:%M:%S%.6f")
         .to_string()

@@ -3,11 +3,11 @@ use super::*;
 
 pub struct UploadClaim {
     pub ident: String,
-    pub(super) owner: String,
-    pub(super) key: String,
-    pub(super) fingerprint: String,
-    pub(super) sha256: String,
-    pub(super) size: u64,
+    pub(crate) owner: String,
+    pub(crate) key: String,
+    pub(crate) fingerprint: String,
+    pub(crate) sha256: String,
+    pub(crate) size: u64,
 }
 pub fn claim(
     path: &Path,

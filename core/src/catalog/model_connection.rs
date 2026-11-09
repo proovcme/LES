@@ -23,6 +23,11 @@ pub(super) fn snapshot(conn: &Connection, args: &Args) -> Result<Value> {
                 Some("answer" | "embeddings" | "local_fallback")
             ) =>
         {
+            if !super::table(conn, "les_model_role_bindings")?
+                && !super::table(conn, "les_model_connection_revisions")?
+            {
+                return Ok(Value::Null);
+            }
             bound = first(
                 conn,
                 "SELECT connection_revision_id FROM les_model_role_bindings WHERE role=?

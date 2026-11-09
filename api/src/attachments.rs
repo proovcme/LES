@@ -9,6 +9,7 @@ use std::{
     sync::Arc,
     time::Duration,
 };
+pub(crate) use upload::Temporary;
 pub use upload::{handle_public, public_path};
 pub const PRIVATE: &str = "/api/light/internal-attachments";
 pub fn handles(path: &str) -> bool {
@@ -230,11 +231,13 @@ pub fn failure(code: &str) -> Response {
         StatusCode::NOT_FOUND
     } else if matches!(
         code,
-        "ATTACHMENT_KEY_REUSED" | "ATTACHMENT_KEY_INVALID" | "ATTACHMENT_ID_CONFLICT"
+        "ATTACHMENT_KEY_REUSED"
+            | "ATTACHMENT_KEY_INVALID"
+            | "ATTACHMENT_ID_CONFLICT"
+            | "ATTACHMENT_INDEX_DATASET_CONFLICT"
+            | "ATTACHMENT_INDEX_BUSY"
     ) {
         StatusCode::CONFLICT
-    } else if code == "ATTACHMENT_INDEX_PENDING" {
-        StatusCode::NOT_IMPLEMENTED
     } else if code == "INTAKE_OUTSIDE_ALLOWED_ROOT" {
         StatusCode::FORBIDDEN
     } else if code == "ATTACHMENT_QUEUE_BUSY" {
@@ -266,7 +269,9 @@ pub(crate) fn detail(code: &str) -> &'static str {
         "ATTACHMENT_KEY_REUSED"|"ATTACHMENT_ID_CONFLICT"=>"С этим ключом уже загружено другое вложение. Отправьте новый запрос с новым ключом.",
         "ATTACHMENT_KEY_INVALID"=>"Ключ повторной загрузки некорректен. Отправьте один ключ до 256 байт.",
         "ATTACHMENT_QUEUE_BUSY"=>"Лес уже принимает файлы. Дождитесь завершения текущей загрузки и повторите.",
-        "ATTACHMENT_INDEX_PENDING"=>"В испытательном Rust-чате индексация из скрепки ещё недоступна. Выберите чтение файла или добавьте папку как набор.",
+        "ATTACHMENT_INDEX_UNAVAILABLE"=>"Очередь индексации не запущена. Пока можно прикрепить файл для чтения.",
+        "ATTACHMENT_INDEX_DATASET_CONFLICT"=>"Набор «Вложения чата» неоднозначен или разрешён для внешних моделей. Выберите локальный набор или переименуйте дубликат.",
+        "ATTACHMENT_INDEX_BUSY"=>"Набор «Вложения чата» сейчас импортирует папку. Дождитесь завершения и повторите.",
         "ATTACHMENT_FOLDER_LIMIT"=>"Папка превышает лимит одного вложения. Добавьте её как набор документов.",
         "ATTACHMENT_FOLDER_EMPTY"=>"В папке нет поддерживаемых документов.",
         "ATTACHMENT_FOLDER_INCOMPLETE"=>"Не удалось прочитать весь комплект. Вложение не создано; проверьте файлы или добавьте папку как набор.",

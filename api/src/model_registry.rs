@@ -1,5 +1,6 @@
 //! Read model connections directly from the native transaction owner.
-//! Writes/probes remain explicitly upstream until their transport/security contract is ported.
+//! Writes and capability probes still use the retained HTTP handlers.
+mod discovery;
 use crate::{auth, error, json_response, Context};
 use axum::{
     extract::Request,
@@ -10,13 +11,14 @@ use serde_json::{json, Value};
 use std::{collections::HashSet, io::Read, path::Path, sync::Arc, time::Duration};
 
 pub fn handles(method: &str, path: &str) -> bool {
-    method == "GET"
-        && matches!(
-            path,
-            "/api/model-connections"
-                | "/api/model-connections/templates"
-                | "/api/model-connections/effective"
-        )
+    discovery::handles(method, path)
+        || (method == "GET"
+            && matches!(
+                path,
+                "/api/model-connections"
+                    | "/api/model-connections/templates"
+                    | "/api/model-connections/effective"
+            ))
 }
 
 fn secret_key(reference: &str) -> Option<&str> {
@@ -121,6 +123,9 @@ fn project(mut value: Value, env_path: &Path) -> Result<Value, ()> {
 }
 
 pub async fn handle(context: Arc<Context>, request: Request) -> Response {
+    if discovery::handles(request.method().as_str(), request.uri().path()) {
+        return discovery::handle(context, request).await;
+    }
     let effective = request.uri().path() == "/api/model-connections/effective";
     let cors = match auth::authorize(&context, request.headers(), !effective).await {
         Ok(v) => v,

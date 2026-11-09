@@ -34,6 +34,38 @@ impl Service {
     }
 }
 
+pub(crate) async fn queue_attachment(
+    context: Arc<Context>,
+    temp: crate::attachments::Temporary,
+    name: String,
+    caller: String,
+    key: Option<String>,
+) -> Result<Value, String> {
+    let owner = context.clone();
+    let value = tokio::task::spawn_blocking(move || {
+        let claim =
+            les_core::chat_attachments::claim(&temp.0, &name, &caller, key.as_deref(), "index")?;
+        let value = les_core::catalog::queue_indexed_attachment(
+            &owner.database,
+            &owner.state_root,
+            &temp.0,
+            &name,
+            &claim,
+        );
+        drop(temp);
+        value
+    })
+    .await
+    .map_err(|_| "ATTACHMENT_STORE_UNAVAILABLE")??;
+    context
+        .intake
+        .as_ref()
+        .ok_or("ATTACHMENT_INDEX_UNAVAILABLE")?
+        .wake
+        .notify_one();
+    Ok(value)
+}
+
 pub fn internal(path: &str) -> bool {
     matches!(path, POLICY | START_INDEXING)
 }
@@ -63,11 +95,12 @@ pub async fn handle(context: Arc<Context>, request: Request) -> Response {
 }
 
 async fn enqueue(context: &Context, body: &Value) -> Response {
-    let Some(path) = body["path"]
-        .as_str()
-        .map(str::trim)
-        .filter(|path| !path.is_empty() && !path.contains('\0') && path.len() <= 32 * 1024)
-    else {
+    let Some(path) = body["path"].as_str().map(str::trim).filter(|path| {
+        !path.is_empty()
+            && !path.contains('\0')
+            && path.len() <= 32 * 1024
+            && *path != les_core::catalog::INDEXED_ATTACHMENT_ROOT
+    }) else {
         return error(StatusCode::UNPROCESSABLE_ENTITY, "Укажите путь к папке.");
     };
     let Some(dataset) = body["dataset_id"].as_str().filter(|id| {
@@ -503,6 +536,7 @@ fn index_stop(code: &str) -> Stop {
         "INDEX_CONTRACT_MISMATCH" => "INDEX_CONTRACT_MISMATCH",
         "INDEX_SETTINGS_INVALID" => "INDEX_SETTINGS_INVALID",
         "DOCUMENT_TOKENIZER_UNAVAILABLE" => "DOCUMENT_TOKENIZER_UNAVAILABLE",
+        "ATTACHMENT_INDEX_LOCAL_MODEL_REQUIRED" => "ATTACHMENT_INDEX_LOCAL_MODEL_REQUIRED",
         "DOCUMENT_TOKENIZER_CHANGED" => "DOCUMENT_TOKENIZER_CHANGED",
         "EMBEDDING_MODEL_NOT_ASSIGNED" => "EMBEDDING_MODEL_NOT_ASSIGNED",
         "EMBEDDING_MODEL_NOT_READY" => "EMBEDDING_MODEL_NOT_READY",
@@ -517,6 +551,7 @@ fn index_stop(code: &str) -> Stop {
         "INDEX_CONTRACT_MISMATCH" | "EMBEDDING_INDEX_MODEL_MISMATCH" => "Параметры поиска изменились и не совпадают с индексом. Верните прежние настройки или создайте новый индекс. Файлы сохранены.",
         "INDEX_SETTINGS_INVALID" => "Не удалось прочитать параметры индексации. Проверьте настройки. Файлы сохранены.",
         "DOCUMENT_TOKENIZER_UNAVAILABLE" | "DOCUMENT_TOKENIZER_CHANGED" => "Токенизатор поиска недоступен или изменён. Восстановите локальные файлы модели. Индекс не изменён.",
+        "ATTACHMENT_INDEX_LOCAL_MODEL_REQUIRED" => "Для индексации вложения назначьте локальную модель поиска. Вложение не отправлено наружу.",
         "EMBEDDING_MODEL_NOT_ASSIGNED" => "Файлы зарегистрированы. Назначьте модель поиска в настройках.",
         "EMBEDDING_MODEL_NOT_READY" => "Файлы зарегистрированы. Проверьте подключение и доступность модели поиска.",
         "DOCUMENT_NATIVE_DISPATCH_REQUIRED" => "В партии есть формат, для которого нативная обработка ещё недоступна. Файлы зарегистрированы, индексация не начата.",
@@ -551,7 +586,11 @@ async fn start_indexing_inner(context: Arc<Context>, job: &Value) -> Result<(), 
     let input_job = job.clone();
     // An explicit indexing request may initialize a genuinely new owned index.
     // Existing collections without an identity still require explicit adoption.
-    crate::index_bootstrap::ensure(context.clone(), true, false, false, None, true)
+    let attachment = job["root"] == les_core::catalog::INDEXED_ATTACHMENT_ROOT;
+    if attachment && !job["attachment_sha256"].is_string() {
+        return Err(STORAGE);
+    }
+    crate::index_bootstrap::ensure(context.clone(), !attachment, false, false, None, true)
         .await
         .map_err(|code| index_stop(code.split(':').next().unwrap_or(&code)))?;
     let input = tokio::task::spawn_blocking(move || {
@@ -635,6 +674,11 @@ pub async fn run(context: Arc<Context>) {
 }
 
 async fn process(context: Arc<Context>, job: Value) {
+    if job["root"] == les_core::catalog::INDEXED_ATTACHMENT_ROOT {
+        let stop = start_indexing(context.clone(), &job).await.err();
+        record(&context, &job["id"], "intake_index_checkpoint", stop).await;
+        return;
+    }
     let state = context.state_root.clone();
     let policy = tokio::task::spawn_blocking(move || policy(&state))
         .await

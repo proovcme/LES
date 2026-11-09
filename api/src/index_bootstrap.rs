@@ -147,6 +147,9 @@ pub(crate) async fn ensure(
             let saved=core::read(&path)?;
             let pending=session.pending()?;
             let binding=selected(&context)?;
+            if for_batch && !allow_remote && binding["revision"]["locality"]=="remote"{
+                return Err("ATTACHMENT_INDEX_LOCAL_MODEL_REQUIRED".into());
+            }
             let env=std::env::var_os("LES_ENV_PATH").map(std::path::PathBuf::from).unwrap_or_else(||context.state_root.join(".env"));
             let resolved=model_runtime::resolve(&binding,"embeddings",&env)?;
             let revision=resolved.revision["revision_id"].as_str().ok_or("MODEL_REGISTRY_UNAVAILABLE")?;

@@ -1,5 +1,9 @@
 # Модули LES RAG
 
+841: [индексация вложения и обнаружение моделей](modules/native-indexed-attachments.md) —
+`core/src/catalog/indexed_attachment.rs`, `api/src/intake.rs`,
+`api/src/model_registry/discovery.rs`: оригинал, квитанция очереди и каталоги моделей.
+
 840: [публичные вложения и внешние модели](modules/native-public-attachments.md) —
 `api/src/attachments/`, `core/src/chat_attachments/`, `api/src/chat/egress.rs`:
 загрузка, восстановление, чтение папок и допуск данных к внешней модели.

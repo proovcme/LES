@@ -75,6 +75,24 @@ pub async fn get(
 ) -> Result<Reply, &'static str> {
     open_request(url, addresses, None, Vec::new(), timeout, false, true, None).await
 }
+pub async fn get_authorized(
+    url: Url,
+    addresses: Vec<IpAddr>,
+    authorization: Option<String>,
+    timeout: Duration,
+) -> Result<Reply, &'static str> {
+    open_request(
+        url,
+        addresses,
+        authorization,
+        Vec::new(),
+        timeout,
+        false,
+        true,
+        None,
+    )
+    .await
+}
 pub async fn mcp(
     url: Url,
     addresses: Vec<IpAddr>,

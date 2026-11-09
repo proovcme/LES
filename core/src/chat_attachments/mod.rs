@@ -58,7 +58,7 @@ pub fn new_id() -> Result<String> {
         b.iter().map(|c| format!("{c:02x}")).collect::<String>()
     ))
 }
-fn regular(path: &Path) -> Result<bool> {
+pub(crate) fn regular(path: &Path) -> Result<bool> {
     let m = match fs::symlink_metadata(path) {
         Ok(v) => v,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
@@ -165,7 +165,7 @@ fn source(base: &Path, ident: &str, card: &Value) -> Result<PathBuf> {
     }
     Ok(path)
 }
-fn digest(file: &mut File) -> Result<(u64, String)> {
+pub(crate) fn digest(file: &mut File) -> Result<(u64, String)> {
     let mut hash = Sha256::new();
     let mut bytes = [0u8; 65536];
     let mut size = 0;

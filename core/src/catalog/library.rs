@@ -28,6 +28,40 @@ pub(crate) fn register_visibility(conn: &Connection) -> rusqlite::Result<()> {
     )
 }
 
+pub(super) fn initialize_empty(conn: &Connection) -> Result<()> {
+    match (table(conn, "datasets")?, table(conn, "documents")?) {
+        (true, true) => return Ok(()),
+        (false, false) => (),
+        _ => {
+            return Err(Failure::new(
+                "WORKSPACE_UNAVAILABLE",
+                "Каталог документов неполон.",
+            ))
+        }
+    }
+    conn.execute_batch(
+        "CREATE TABLE datasets(id TEXT PRIMARY KEY,name TEXT,status TEXT,chunk_count INTEGER DEFAULT 0,
+            sensitivity TEXT DEFAULT 'P0',group_name TEXT DEFAULT '',dataset_scope TEXT DEFAULT 'user',
+            module_id TEXT DEFAULT '');
+         CREATE TABLE documents(id TEXT PRIMARY KEY,dataset_id TEXT,file_name TEXT,status TEXT,file_hash TEXT,
+            file_mtime REAL,file_size INTEGER,chunk_count INTEGER DEFAULT 0,domain TEXT DEFAULT '',
+            route_dataset TEXT DEFAULT '',doc_type TEXT DEFAULT '',content_type TEXT DEFAULT '',
+            complexity TEXT DEFAULT '',pipeline TEXT DEFAULT '',last_error TEXT DEFAULT '',
+            stage TEXT DEFAULT '',source_path TEXT DEFAULT '',parse_attempts INTEGER DEFAULT 0,
+            last_attempt_at REAL DEFAULT 0,retryable INTEGER DEFAULT 0,retry_after REAL DEFAULT 0,
+            error_code TEXT DEFAULT '');
+         CREATE INDEX idx_docs_dataset ON documents(dataset_id);
+         CREATE INDEX idx_docs_source ON documents(dataset_id,file_name);
+         CREATE TABLE structured_rules(id TEXT PRIMARY KEY,document_id TEXT NOT NULL,file_key TEXT NOT NULL,
+            chunk_id TEXT NOT NULL,subject TEXT NOT NULL,parameter TEXT NOT NULL,operator TEXT NOT NULL,
+            value REAL NOT NULL,unit TEXT NOT NULL,condition TEXT,char_start INTEGER NOT NULL,char_end INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+         CREATE INDEX idx_rules_doc ON structured_rules(document_id);
+         CREATE INDEX idx_rules_file ON structured_rules(file_key);",
+    )?;
+    Ok(())
+}
+
 fn create(conn: &Connection, args: &Args) -> Result<Value> {
     let name = trim(text(args, "name")?);
     if name.is_empty() {
@@ -120,6 +154,10 @@ fn forest(conn: &Connection) -> Result<Value> {
 }
 
 pub(super) fn execute(conn: &Connection, action: &str, args: &Args) -> Result<Value> {
+    if action == "dataset_create" {
+        initialize_empty(conn)?;
+        return create(conn, args);
+    }
     let has_datasets = table(conn, "datasets")?;
     let has_documents = table(conn, "documents")?;
     if action == "library_datasets" && !has_datasets && !has_documents {
@@ -130,9 +168,6 @@ pub(super) fn execute(conn: &Connection, action: &str, args: &Args) -> Result<Va
             "WORKSPACE_UNAVAILABLE",
             "Каталог документов ещё запускается.",
         ));
-    }
-    if action == "dataset_create" {
-        return create(conn, args);
     }
     let flags = FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC;
     register_visibility(conn)?;

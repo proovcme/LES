@@ -73,7 +73,7 @@ pub(super) async fn scratch(context: &Context) -> Result<PathBuf> {
         .await?;
     Ok(directory)
 }
-pub(super) struct Temporary(pub PathBuf);
+pub(crate) struct Temporary(pub PathBuf);
 impl Drop for Temporary {
     fn drop(&mut self) {
         if std::fs::remove_file(&self.0).is_err() {
@@ -236,13 +236,14 @@ fn multipart_error(error: &multer::Error) -> String {
     .into()
 }
 pub async fn handle(context: Arc<Context>, request: Request) -> Response {
-    perform(context, request, None, StatusCode::OK).await
+    perform(context, request, None, StatusCode::OK, false).await
 }
 async fn perform(
     context: Arc<Context>,
     request: Request,
     caller: Option<String>,
     status: StatusCode,
+    index: bool,
 ) -> Response {
     let result = async {
         let _slot = context
@@ -273,6 +274,10 @@ async fn perform(
             .await;
         }
         let (temp, name) = receive(&context, request).await?;
+        if index {
+            let caller = caller.ok_or("ATTACHMENT_REQUEST_INVALID")?;
+            return crate::intake::queue_attachment(context, temp, name, caller, key).await;
+        }
         publish(context, &temp, name, caller, key).await
     };
     match tokio::time::timeout(Duration::from_secs(180), result).await {
@@ -343,10 +348,14 @@ pub async fn handle_public(context: Arc<Context>, request: Request) -> Response 
                     } else {
                         StatusCode::OK
                     },
+                    false,
                 )
                 .await
             }
-            "index" => failure("ATTACHMENT_INDEX_PENDING"),
+            "index" if context.intake.is_some() && context.index_store.is_some() => {
+                perform(context, request, Some(caller), StatusCode::OK, true).await
+            }
+            "index" => failure("ATTACHMENT_INDEX_UNAVAILABLE"),
             _ => failure("ATTACHMENT_MODE_INVALID"),
         }
     };
