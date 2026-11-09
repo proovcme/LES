@@ -116,6 +116,7 @@ pub(crate) fn reference(doc: &Value, page: Value) -> Value {
         .append_pair("source_sha256", doc["file_hash"].as_str().unwrap_or(""));
     json!({"doc_id":doc["id"],"dataset_id":doc["dataset_id"],"doc_name":doc["file_name"],
         "source_sha256":doc["file_hash"],"page":page,"source_page":page,
+        "locator":{"source_sha256":doc["file_hash"],"source_page":page},
         "url":format!("{}?{}{}",uri.path(),uri.query().unwrap_or(""),page.as_u64().map(|p|format!("#page={p}")).unwrap_or_default())})
 }
 pub async fn run(
@@ -154,15 +155,8 @@ pub async fn run(
         source["doc_id"] = doc["id"].clone();
         source["dataset_id"] = doc["dataset_id"].clone();
         source["doc_name"] = doc["file_name"].clone();
-        let result=tokio::task::spawn_blocking(move||->Result<Value>{
-            let program=std::env::current_exe().map_err(|_|"PDF_READER_UNAVAILABLE")?;
-            let library=PathBuf::from(std::env::var_os("LES_NATIVE_PDFIUM").ok_or("PDFIUM_UNAVAILABLE")?);
-            if !library.is_absolute(){return Err("PDFIUM_UNAVAILABLE".into());}
-            let value=les_core::run_native_pdf(&json!({"schema":"les.worker-host.v1","program":program,"directory":program.parent(),
-                "args":["--serve-pdf-text",library],"context":"les.pdf-text.v1","timeout_ms":30000,
-                "input":{"kind":"source_page","database":database,"content_root":content_root,"source":source}}))?;
-            if value["status"]!="completed"{return Err(value["code"].as_str().unwrap_or("PDF_READ_FAILED").into());}
-            super::super::unwrap(value["result"].clone())
+        let result=tokio::task::spawn_blocking(move||{
+            crate::pdf_text::supervised_source(json!({"kind":"source_page","database":database,"content_root":content_root,"source":source}))
         }).await.map_err(|_|"PDF_READ_FAILED")??;
         let mut provenance = doc;
         provenance["file_hash"] = result["source_sha256"].clone();
@@ -170,6 +164,12 @@ pub async fn run(
         source["evidence_kind"] = json!("physical_pdf_page");
         source["offset"] = result["offset"].clone();
         source["next_offset"] = result["next_offset"].clone();
+        source["snippet"] = json!(result["text"]
+            .as_str()
+            .unwrap_or("")
+            .chars()
+            .take(240)
+            .collect::<String>());
         return Ok(envelope(name, "physical_page", result, vec![source]));
     }
     if name == "read_source" {

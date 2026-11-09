@@ -42,10 +42,7 @@ pub(crate) async fn release_owned(context: Arc<Context>, revision: &str) -> Resu
     );
     url.set_path(&path);
     if url.port_or_known_default() == Some(context.listen_port)
-        || url.port_or_known_default()
-            == reqwest::Url::parse(&context.upstream)
-                .ok()
-                .and_then(|u| u.port())
+        || url.port_or_known_default() == context.upstream_port()
     {
         return Err("MODEL_BRIDGE_TARGET_REJECTED".into());
     }
@@ -208,10 +205,7 @@ pub(crate) async fn execute(context: Arc<Context>, value: &Value) -> Result<Vec<
             )
         };
         url.set_path(&path);
-        let upstream_port = reqwest::Url::parse(&context.upstream)
-            .ok()
-            .and_then(|v| v.port())
-            .unwrap_or(0);
+        let upstream_port = context.upstream_port().unwrap_or(0);
         if resolved.endpoint.locality == "loopback"
             && url
                 .port_or_known_default()

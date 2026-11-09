@@ -10,7 +10,10 @@ fn open(database: &Path) -> Result<Connection> {
     db.execute_batch("PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS les_chat_runs(
         id TEXT PRIMARY KEY,session_key TEXT NOT NULL,request_key TEXT,request_sha TEXT NOT NULL,history_id INTEGER NOT NULL,
         status TEXT NOT NULL,response TEXT,error_code TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(session_key,request_key));").map_err(|_|"CHAT_STORAGE_UNAVAILABLE")?;
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(session_key,request_key));
+        CREATE TABLE IF NOT EXISTS les_chat_caller_keys(
+        caller_scope TEXT NOT NULL,key_sha TEXT NOT NULL,run_id TEXT NOT NULL REFERENCES les_chat_runs(id),
+        PRIMARY KEY(caller_scope,key_sha));").map_err(|_|"CHAT_STORAGE_UNAVAILABLE")?;
     Ok(db)
 }
 fn catalog(database: &Path, action: &str, args: Value) -> Result<Value> {
@@ -38,6 +41,17 @@ pub fn recover(database: &Path) -> Result<()> {
     Ok(())
 }
 pub fn begin(database: &Path, request: &Value, key: Option<&str>) -> Result<Value> {
+    begin_for_caller(database, request, key, None)
+}
+
+/// The public key namespace is deliberately separate from internal callers and
+/// shared by JSON and SSE. A receipt never accepts an identity from the request.
+pub fn begin_for_caller(
+    database: &Path,
+    request: &Value,
+    key: Option<&str>,
+    caller: Option<&str>,
+) -> Result<Value> {
     if key.is_some_and(|v| v.is_empty() || v.len() > 256 || v.chars().any(char::is_control)) {
         return Err("CHAT_REQUEST_KEY_INVALID");
     }
@@ -49,8 +63,35 @@ pub fn begin(database: &Path, request: &Value, key: Option<&str>) -> Result<Valu
     let mut normalized = request.clone();
     normalized.sort_all_objects();
     let hash = crate::sha256_hex(normalized.to_string().as_bytes());
+    let key_sha = key.map(|key| crate::sha256_hex(key.as_bytes()));
     if let Some(key) = key {
-        let saved=tx.query_row("SELECT id,request_sha,status,response,history_id FROM les_chat_runs WHERE session_key=? AND request_key=?",params![session,key],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,Option<String>>(3)?,r.get::<_,i64>(4)?))).optional().map_err(|_|"CHAT_STORAGE_UNAVAILABLE")?;
+        let decode = |r: &rusqlite::Row<'_>| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, Option<String>>(3)?,
+                r.get::<_, i64>(4)?,
+            ))
+        };
+        let saved = if let Some(caller) = caller {
+            tx.query_row(
+                "SELECT r.id,r.request_sha,r.status,r.response,r.history_id
+                FROM les_chat_caller_keys k JOIN les_chat_runs r ON r.id=k.run_id
+                WHERE k.caller_scope=? AND k.key_sha=?",
+                params![caller, key_sha],
+                decode,
+            )
+        } else {
+            tx.query_row(
+                "SELECT id,request_sha,status,response,history_id FROM les_chat_runs
+                WHERE session_key=? AND request_key=?",
+                params![session, key],
+                decode,
+            )
+        }
+        .optional()
+        .map_err(|_| "CHAT_STORAGE_UNAVAILABLE")?;
         if let Some((id, previous, status, response, history)) = saved {
             if hash != previous {
                 return Err("IDEMPOTENCY_KEY_REUSED");
@@ -77,7 +118,15 @@ pub fn begin(database: &Path, request: &Value, key: Option<&str>) -> Result<Valu
     tx.execute("INSERT INTO chat_history(session_id,question,answer,crag_status,success,validation_enabled,attachment_context) VALUES(?,?,'','IN_PROGRESS',0,0,?)",
         params![request["session_id"].as_str(),request["question"].as_str().ok_or("CHAT_QUESTION_REQUIRED")?,attachment_context]).map_err(|_|"CHAT_STORAGE_UNAVAILABLE")?;
     let history = tx.last_insert_rowid();
-    tx.execute("INSERT INTO les_chat_runs(id,session_key,request_key,request_sha,history_id,status) VALUES(?,?,?,?,?,'running')",params![id,session,key,hash,history]).map_err(|_|"CHAT_STORAGE_UNAVAILABLE")?;
+    let internal_key = if caller.is_some() { None } else { key };
+    tx.execute("INSERT INTO les_chat_runs(id,session_key,request_key,request_sha,history_id,status) VALUES(?,?,?,?,?,'running')",params![id,session,internal_key,hash,history]).map_err(|_|"CHAT_STORAGE_UNAVAILABLE")?;
+    if let (Some(caller), Some(key_sha)) = (caller, key_sha) {
+        tx.execute(
+            "INSERT INTO les_chat_caller_keys(caller_scope,key_sha,run_id) VALUES(?,?,?)",
+            params![caller, key_sha, id],
+        )
+        .map_err(|_| "CHAT_STORAGE_UNAVAILABLE")?;
+    }
     tx.commit().map_err(|_| "CHAT_STORAGE_UNAVAILABLE")?;
     Ok(json!({"id":id,"history_id":history,"status":"running","created":true}))
 }
@@ -90,6 +139,14 @@ pub fn checkpoint(database: &Path, id: &str, history: i64, event: &str, text: &s
         "token"=>db.execute("UPDATE chat_history SET answer=COALESCE(answer,'')||?,tokens=COALESCE(tokens,0)+1 WHERE id=? AND crag_status='IN_PROGRESS' AND EXISTS(SELECT 1 FROM les_chat_runs WHERE id=? AND history_id=chat_history.id AND status='running')",params![text,history,id]),
         "reset"=>db.execute("UPDATE chat_history SET answer='',tokens=0 WHERE id=? AND crag_status='IN_PROGRESS' AND EXISTS(SELECT 1 FROM les_chat_runs WHERE id=? AND history_id=chat_history.id AND status='running')",params![history,id]),
         "attachment_context"=>db.execute("UPDATE chat_history SET attachment_context=? WHERE id=? AND crag_status='IN_PROGRESS' AND EXISTS(SELECT 1 FROM les_chat_runs WHERE id=? AND history_id=chat_history.id AND status='running')",params![text,history,id]),
+        "sources"=>{
+            let sources:Value=serde_json::from_str(text).map_err(|_|"CHAT_REQUEST_INVALID")?;
+            if !sources.is_array(){return Err("CHAT_REQUEST_INVALID");}
+            db.execute("UPDATE chat_history SET retrieval_trace_json=json_patch(
+                CASE WHEN json_valid(retrieval_trace_json) THEN retrieval_trace_json ELSE '{}' END,?)
+                WHERE id=? AND crag_status='IN_PROGRESS' AND EXISTS(SELECT 1 FROM les_chat_runs WHERE id=? AND history_id=chat_history.id AND status='running')",
+                params![json!({"engine":"rust.chat","source_map":sources}).to_string(),history,id])
+        }
         _=>return Err("CHAT_REQUEST_INVALID")
     }.map_err(|_|"CHAT_STORAGE_UNAVAILABLE")?;
     if changed != 1 {

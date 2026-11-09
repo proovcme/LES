@@ -11,6 +11,7 @@ mod protocol;
 mod runner;
 mod table_document;
 mod tools;
+mod view;
 use crate::Context;
 use error::Result;
 pub use journal::Service;

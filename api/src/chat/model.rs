@@ -11,6 +11,7 @@ pub async fn complete(
     tools: Vec<Value>,
     journal: &Journal,
     sink: &Sink,
+    publish_text: bool,
 ) -> Result<Value> {
     let profile = &turn.connection.profile;
     let maximum = profile["generation_reserve_tokens"]
@@ -45,10 +46,7 @@ pub async fn complete(
             None,
         )
         .is_ok();
-    let upstream_port = reqwest::Url::parse(&context.upstream)
-        .ok()
-        .and_then(|u| u.port())
-        .unwrap_or(0);
+    let upstream_port = context.upstream_port().unwrap_or(0);
     let body = turn
         .connection
         .chat(
@@ -83,8 +81,10 @@ pub async fn complete(
                 if text.len() > 4 * 1024 * 1024 {
                     return Err("UPSTREAM_RESPONSE_TOO_LARGE".into());
                 }
-                journal.checkpoint("token", json!(part)).await?;
-                sink.emit("token", json!(part)).await?;
+                if publish_text {
+                    journal.checkpoint("token", json!(part)).await?;
+                    sink.emit("token", json!(part)).await?;
+                }
             }
             if event["thinking"] == true {
                 sink.progress("generation", "Модель обдумывает ответ")

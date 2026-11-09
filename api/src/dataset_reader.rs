@@ -311,10 +311,7 @@ async fn execute(context: &Arc<Context>, job: &Value) -> Result<(), String> {
         let request = json!({"messages":[{"role":"user","content":prompt}],"max_output_tokens":max_tokens,
             "tools":[],"reasoning_enabled":false,"temperature":0,
             "response_format":if structured{json!({"type":"json_schema","json_schema":{"name":"les_dataset_reader","strict":true,"schema":prepared["schema"]}})}else{Value::Null}});
-        let upstream = reqwest::Url::parse(&context.upstream)
-            .ok()
-            .and_then(|v| v.port())
-            .unwrap_or(0);
+        let upstream = context.upstream_port().unwrap_or(0);
         let body = resolved
             .chat(
                 &request,

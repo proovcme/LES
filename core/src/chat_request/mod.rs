@@ -170,6 +170,17 @@ pub fn validate(input: &Value) -> Result<Value> {
     {
         return Err("CHAT_SCOPE_INVALID");
     }
+    if let Some(selected) = request
+        .get("scope")
+        .and_then(|v| v.get("selected_sources_only"))
+    {
+        if !selected.is_null() && !selected.is_boolean() {
+            return Err("CHAT_SCOPE_INVALID");
+        }
+        if request["selected_sources_only"].is_null() {
+            request.insert("selected_sources_only".into(), selected.clone());
+        }
+    }
     Ok(Value::Object(request))
 }
 pub fn resolve_scope(request: &Value, datasets: &[Value], projects: &[Value]) -> Result<Value> {

@@ -1,5 +1,9 @@
 # Модули LES RAG
 
+839: [публичный вход Rust-чата](modules/native-public-chat.md) —
+`api/src/chat/http.rs`, `api/src/chat/view.rs`, `core/src/chat_request/journal.rs`:
+допуск, JSON/SSE, ключи повторов по авторизованному клиенту и ссылки в истории.
+
 838: [нативная проверка документов](modules/native-document-review.md) —
 `core/src/document_review/`, `api/src/chat/document_review/`: неизменяемый журнал,
 передача текста модели, цитаты, зависимости, курсоры и источник в общем чате.

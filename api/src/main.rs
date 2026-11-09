@@ -50,7 +50,7 @@ pub struct Context {
     pub listen_port: u16,
     pub database: PathBuf,
     pub state_root: PathBuf,
-    pub upstream: String,
+    pub upstream: Option<reqwest::Url>,
     pub client: reqwest::Client,
     pub workspace_slots: Arc<tokio::sync::Semaphore>,
     pub attachment_slots: Arc<tokio::sync::Semaphore>,
@@ -62,6 +62,12 @@ pub struct Context {
     pub reader: Option<dataset_reader::Service>,
     pub index_store: Option<index_store::Store>,
     pub chat: tokio::sync::OnceCell<chat::Service>,
+    pub public_chat_rust: bool,
+}
+impl Context {
+    pub fn upstream_port(&self) -> Option<u16> {
+        self.upstream.as_ref().and_then(reqwest::Url::port)
+    }
 }
 
 pub fn json_response(status: StatusCode, value: Value, engine: &str) -> Response {
@@ -151,6 +157,9 @@ async fn dispatch(State(context): State<Arc<Context>>, request: Request) -> Resp
     {
         return auth::preflight(&context, request.headers()).await;
     }
+    if context.public_chat_rust && chat::http::public_path(request.uri().path()) {
+        return chat::http::handle_public(context, request).await;
+    }
     if let Some(frontend) = &context.frontend {
         if let Some(response) = frontend
             .serve(&request)
@@ -183,6 +192,9 @@ async fn dispatch(State(context): State<Arc<Context>>, request: Request) -> Resp
     }
     if history::handles(request.method().as_str(), request.uri().path()) {
         return history::handle(context, request).await;
+    }
+    if context.public_chat_rust && documents::browse::handles(&request) {
+        return documents::browse::handle(context, request).await;
     }
     if matches!(request.method().as_str(), "GET" | "HEAD")
         && documents::route(request.uri().path()).is_some()
@@ -227,6 +239,7 @@ fn configuration() -> Result<(std::net::SocketAddr, Context), &'static str> {
                 | "--legacy-ui-url"
                 | "--auth-policy-file"
                 | "--edge-storage"
+                | "--chat-owner"
         ) {
             return Err("Invalid native API argument");
         }
@@ -235,6 +248,11 @@ fn configuration() -> Result<(std::net::SocketAddr, Context), &'static str> {
             return Err("Duplicate native API argument");
         }
     }
+    let public_chat_rust = match values.get("--chat-owner").map(String::as_str) {
+        None | Some("legacy") => false,
+        Some("rust") => true,
+        _ => return Err("Invalid public chat owner"),
+    };
     let listen: std::net::SocketAddr = values
         .get("--listen")
         .ok_or("Native API address missing")?
@@ -243,22 +261,25 @@ fn configuration() -> Result<(std::net::SocketAddr, Context), &'static str> {
     if listen.ip() != std::net::Ipv4Addr::LOCALHOST || listen.port() == 0 {
         return Err("Native API requires explicit IPv4 loopback port");
     }
-    let upstream = reqwest::Url::parse(
-        values
-            .get("--upstream")
-            .ok_or("Legacy API address missing")?,
-    )
-    .map_err(|_| "Invalid legacy API address")?;
-    if upstream.scheme() != "http"
-        || upstream.host_str() != Some("127.0.0.1")
-        || upstream.port().is_none()
-        || upstream.path() != "/"
-        || !upstream.username().is_empty()
-        || upstream.password().is_some()
-        || upstream.query().is_some()
-        || upstream.fragment().is_some()
-        || upstream.port() == Some(listen.port())
-    {
+    let upstream = values
+        .get("--upstream")
+        .map(|value| reqwest::Url::parse(value))
+        .transpose()
+        .map_err(|_| "Invalid legacy API address")?;
+    if upstream.is_none() && !public_chat_rust {
+        return Err("Legacy API address missing");
+    }
+    if upstream.as_ref().is_some_and(|upstream| {
+        upstream.scheme() != "http"
+            || upstream.host_str() != Some("127.0.0.1")
+            || upstream.port().is_none()
+            || upstream.path() != "/"
+            || !upstream.username().is_empty()
+            || upstream.password().is_some()
+            || upstream.query().is_some()
+            || upstream.fragment().is_some()
+            || upstream.port() == Some(listen.port())
+    }) {
         return Err("Legacy API requires a separate owned loopback address");
     }
     let database = PathBuf::from(
@@ -285,7 +306,11 @@ fn configuration() -> Result<(std::net::SocketAddr, Context), &'static str> {
     let local_model = token
         .as_ref()
         .map(|token| {
-            local_model::Bridge::new(token.clone(), listen.port(), upstream.port().unwrap())
+            local_model::Bridge::new(
+                token.clone(),
+                listen.port(),
+                upstream.as_ref().and_then(reqwest::Url::port).unwrap_or(0),
+            )
         })
         .transpose()?;
     let ingest_token = std::env::var("LES_INTERNAL_INGEST_TOKEN").ok();
@@ -344,7 +369,7 @@ fn configuration() -> Result<(std::net::SocketAddr, Context), &'static str> {
             listen_port: listen.port(),
             database,
             state_root,
-            upstream: upstream.to_string().trim_end_matches('/').to_owned(),
+            upstream,
             client,
             workspace_slots: Arc::new(tokio::sync::Semaphore::new(16)),
             attachment_slots: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -356,6 +381,7 @@ fn configuration() -> Result<(std::net::SocketAddr, Context), &'static str> {
             reader,
             index_store,
             chat: tokio::sync::OnceCell::new(),
+            public_chat_rust,
         },
     ))
 }

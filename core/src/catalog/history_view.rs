@@ -162,6 +162,9 @@ pub(super) fn messages(conn: &Connection, args: &Args) -> Result<Value> {
         if !artifact.as_object().unwrap().is_empty() {
             meta["artifact"] = artifact.clone();
         }
+        if let Some(status) = artifact["completion_status"].as_str() {
+            meta["completion_status"] = json!(status);
+        }
         let status = string(&row["crag_status"]);
         let answer = string(&row["answer"]);
         if artifact["error"].is_object() {

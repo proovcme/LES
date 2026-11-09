@@ -93,10 +93,18 @@ fn upstream_headers(headers: &HeaderMap) -> HeaderMap {
 }
 
 pub async fn forward(context: Arc<Context>, request: Request) -> Response {
+    let Some(origin) = context.upstream.as_ref() else {
+        return crate::json_response(
+            StatusCode::NOT_IMPLEMENTED,
+            serde_json::json!({"code":"NATIVE_ROUTE_NOT_AVAILABLE",
+                "detail":"Этот раздел ещё недоступен без прежнего сервера Леса."}),
+            "rust.api",
+        );
+    };
     let (parts, body) = request.into_parts();
     let endpoint = format!(
         "{}{}",
-        context.upstream,
+        origin.as_str().trim_end_matches('/'),
         parts
             .uri
             .path_and_query()
@@ -125,27 +133,25 @@ pub async fn forward(context: Arc<Context>, request: Request) -> Response {
         .map(str::to_string)
     {
         if let Ok(url) = reqwest::Url::parse(&location) {
-            if let Ok(origin) = reqwest::Url::parse(&context.upstream) {
-                let public_origin = parts
-                    .headers
-                    .get(header::HOST)
-                    .and_then(|host| host.to_str().ok())
-                    .and_then(|host| reqwest::Url::parse(&format!("http://{host}")).ok());
-                if url.origin() == origin.origin()
-                    || public_origin.is_some_and(|public| url.origin() == public.origin())
-                {
-                    let mut relative = url.path().to_owned();
-                    if let Some(query) = url.query() {
-                        relative.push('?');
-                        relative.push_str(query);
-                    }
-                    if let Some(fragment) = url.fragment() {
-                        relative.push('#');
-                        relative.push_str(fragment);
-                    }
-                    if let Ok(value) = relative.parse() {
-                        headers.insert(header::LOCATION, value);
-                    }
+            let public_origin = parts
+                .headers
+                .get(header::HOST)
+                .and_then(|host| host.to_str().ok())
+                .and_then(|host| reqwest::Url::parse(&format!("http://{host}")).ok());
+            if url.origin() == origin.origin()
+                || public_origin.is_some_and(|public| url.origin() == public.origin())
+            {
+                let mut relative = url.path().to_owned();
+                if let Some(query) = url.query() {
+                    relative.push('?');
+                    relative.push_str(query);
+                }
+                if let Some(fragment) = url.fragment() {
+                    relative.push('#');
+                    relative.push_str(fragment);
+                }
+                if let Ok(value) = relative.parse() {
+                    headers.insert(header::LOCATION, value);
                 }
             }
         }

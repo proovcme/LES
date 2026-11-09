@@ -49,6 +49,9 @@ pub(crate) fn answer(context: &Context) -> Result<model_runtime::Resolved> {
     if execution.is_null() {
         return Err("ANSWER_MODEL_NOT_ASSIGNED".into());
     }
+    if context.public_chat_rust && execution["revision"]["locality"] == "remote" {
+        return Err("NATIVE_CLOUD_POLICY_PENDING".into());
+    }
     let settings = crate::index_batch::configuration::Settings::load(&context.state_root)?;
     let env = std::env::var_os("LES_ENV_PATH")
         .map(std::path::PathBuf::from)
@@ -72,24 +75,27 @@ pub(crate) fn answer(context: &Context) -> Result<model_runtime::Resolved> {
     }
     Ok(connection)
 }
-fn prepare_sync(context: &Context, input: Value) -> Result<Prepared> {
-    let request = les_core::chat_request::validate(&input)?;
+pub(super) fn admit(request: &Value) -> Result<()> {
     if request["provider_config"].is_object() {
         return Err("SESSION_PROVIDER_OVERRIDE_DISABLED".into());
     }
     if request["candidate_acceptance"] == true {
         return Err("CANDIDATE_ACCEPTANCE_REQUIRED".into());
     }
-    // The private acceptance path exposes gaps instead of silently dropping an
-    // explicitly requested feature. Public chat retains its current full owner.
+    // Reject unsupported requests before creating a receipt or calling a model,
+    // including deterministic commands, with no mid-turn fallback.
     for (field, code) in [
         ("validation_enabled", "NATIVE_VALIDATION_CAPABILITY_PENDING"),
         ("semantic_cache_enabled", "NATIVE_CACHE_CAPABILITY_PENDING"),
+        ("reranker_enabled", "NATIVE_RERANKER_CAPABILITY_PENDING"),
     ] {
         if request[field] == true {
             return Err(code.into());
         }
     }
+    Ok(())
+}
+fn prepare_sync(context: &Context, request: Value) -> Result<Prepared> {
     let database = &context.database;
     let connection = answer(context)?;
     let sid = request["session_id"].as_str().unwrap_or("");

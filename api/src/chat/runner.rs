@@ -104,6 +104,10 @@ pub async fn run(
     let mut review_result = Value::Null;
     let mut table_proposal = Value::Null;
     let mut review_proposal = Value::Null;
+    let selected_evidence = turn.request["selected_sources_only"] == true
+        && turn.scope["document_grounding_enabled"] == true
+        && turn.profile["mode"] == "search";
+    let mut published_sources = json!([]);
     loop {
         match agent.next()? {
             Step::Model { final_answer } => {
@@ -188,6 +192,12 @@ pub async fn run(
                 let trace = les_core::chat_context::execute(
                     &json!({"action":"prepared_trace","packet":packed["packet"],"purpose":"native_chat","source_map":evidence.sources,"evidence":evidence.blocks}),
                 )?;
+                if visible != published_sources {
+                    journal
+                        .checkpoint("sources", json!(visible.to_string()))
+                        .await?;
+                    published_sources = visible.clone();
+                }
                 contexts.push(json!({"delivery":"prepared","context":trace,"sources":visible,"schema_reserved_tokens":reserve}));
                 sink.emit("sources", json!({"source_map":visible,"sources":visible}))
                     .await?;
@@ -200,6 +210,7 @@ pub async fn run(
                     if native { advertised } else { vec![] },
                     journal,
                     sink,
+                    !selected_evidence || visible.as_array().is_some_and(|v| !v.is_empty()),
                 )
                 .await?;
                 if let Some(review) = &tools.review {
@@ -299,6 +310,9 @@ pub async fn run(
                     .last()
                     .map(|c| c["sources"].clone())
                     .unwrap_or(json!([]));
+                if selected_evidence && visible.as_array().is_none_or(Vec::is_empty) {
+                    return Err("SOURCE_EVIDENCE_MISSING".into());
+                }
                 if visible
                     .as_array()
                     .is_some_and(|v| v.iter().any(|s| s["evidence_kind"] == "physical_pdf_page"))

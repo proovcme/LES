@@ -24,6 +24,7 @@ pub(crate) async fn configuration(
         if !embedding {return Ok((frozen,Value::Null,String::new(),false));}
         let execution=super::super::super::unwrap(crate::library::catalog(&context.database,"model_execution_snapshot",json!({"role":"embeddings"})))?;
         if execution.is_null(){return Err("EMBEDDING_MODEL_NOT_ASSIGNED".into());}
+        if context.public_chat_rust&&execution["revision"]["locality"]=="remote"{return Err("NATIVE_CLOUD_POLICY_PENDING".into());}
         let env=std::env::var_os("LES_ENV_PATH").map(PathBuf::from).unwrap_or_else(||context.state_root.join(".env"));
         let binding=crate::model_runtime::resolve(&execution,"embeddings",&env)?;
         if les_core::index_bootstrap::model_key(binding.revision["model_id"].as_str().unwrap_or(""))!=les_core::index_bootstrap::model_key(contract["embedding_model"].as_str().unwrap_or("")){
@@ -54,9 +55,6 @@ pub(super) async fn search(context: Arc<Context>, turn: &Prepared, args: Value) 
     }
     for dataset in &datasets {
         scoped(turn, dataset)?;
-    }
-    if turn.request["reranker_enabled"] == true {
-        return Err("NATIVE_RERANKER_CAPABILITY_PENDING".into());
     }
     let query = args["q"]
         .as_str()

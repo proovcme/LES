@@ -1,4 +1,4 @@
-//! A private acceptance boundary; public chat stays on its current owner until parity.
+//! One native HTTP turn behind internal and explicitly selected public ingress.
 use super::{
     error::Failure,
     journal::{Journal, Service},
@@ -7,7 +7,7 @@ use super::{
 use axum::{
     body::{to_bytes, Body},
     extract::Request,
-    http::StatusCode,
+    http::{header, HeaderValue, Method, StatusCode},
     response::{IntoResponse, Response},
 };
 use futures_util::{
@@ -18,8 +18,13 @@ use serde_json::{json, Value};
 use std::{convert::Infallible, sync::Arc, time::Duration};
 pub const PATH: &str = "/api/light/internal-chat";
 pub const STREAM: &str = "/api/light/internal-chat/stream";
+const PUBLIC: &str = "/api/chat";
+const PUBLIC_STREAM: &str = "/api/chat/stream";
 pub fn handles(path: &str) -> bool {
     matches!(path, PATH | STREAM)
+}
+pub fn public_path(path: &str) -> bool {
+    matches!(path, PUBLIC | PUBLIC_STREAM)
 }
 fn failed(error: Failure) -> Response {
     crate::json_response(error.status, error.payload(), "rust.chat")
@@ -37,11 +42,21 @@ pub(crate) async fn initialize(context: &Arc<Context>) -> Result<()> {
     crate::conversation::start(context);
     Ok(())
 }
-async fn receipt(context: Arc<Context>, request: Value, key: Option<String>) -> Result<Value> {
+async fn receipt(
+    context: Arc<Context>,
+    request: Value,
+    key: Option<String>,
+    caller: Option<String>,
+) -> Result<Value> {
     initialize(&context).await?;
     let db = context.database.clone();
     tokio::task::spawn_blocking(move || {
-        les_core::chat_request::journal::begin(&db, &request, key.as_deref())
+        les_core::chat_request::journal::begin_for_caller(
+            &db,
+            &request,
+            key.as_deref(),
+            caller.as_deref(),
+        )
     })
     .await
     .map_err(|_| "CHAT_STORAGE_UNAVAILABLE")?
@@ -74,7 +89,10 @@ async fn execute(
         }
     };
     let result = match result {
-        Ok(value) => journal.finish(&request, &value).await.map(|_| value),
+        Ok(value) => {
+            let value = super::view::decorate(value);
+            journal.finish(&request, &value).await.map(|_| value)
+        }
         Err(error) => Err(error),
     };
     match result {
@@ -103,7 +121,60 @@ pub async fn handle(context: Arc<Context>, request: Request) -> Response {
     {
         return crate::error(StatusCode::NOT_FOUND, "Not Found");
     }
-    let streaming = request.uri().path() == STREAM;
+    handle_turn(context, request, None).await
+}
+
+pub async fn handle_public(context: Arc<Context>, request: Request) -> Response {
+    let (cors, caller) =
+        match crate::auth::authorize_caller(&context, request.headers(), false).await {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
+    let headers = request.headers();
+    let allowed_origin = headers.get(header::ORIGIN).is_none_or(|origin| {
+        cors.contains_key(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            || headers
+                .get(header::HOST)
+                .and_then(|h| h.to_str().ok())
+                .is_some_and(|host| origin.as_bytes() == format!("http://{host}").as_bytes())
+    });
+    let mut response = if !allowed_origin {
+        crate::error(
+            StatusCode::FORBIDDEN,
+            "Источник запроса к чату не разрешён.",
+        )
+    } else if request.method() != Method::POST {
+        let mut response =
+            crate::error(StatusCode::METHOD_NOT_ALLOWED, "Для чата используйте POST.");
+        response
+            .headers_mut()
+            .insert(header::ALLOW, HeaderValue::from_static("POST"));
+        response
+    } else if !headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| {
+            v.split(';')
+                .next()
+                .is_some_and(|v| v.trim().eq_ignore_ascii_case("application/json"))
+        })
+    {
+        crate::error(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "Отправьте запрос чата в формате JSON.",
+        )
+    } else {
+        handle_turn(context, request, Some(caller)).await
+    };
+    response.headers_mut().extend(cors);
+    response
+}
+
+async fn handle_turn(context: Arc<Context>, request: Request, caller: Option<String>) -> Response {
+    let streaming = matches!(request.uri().path(), STREAM | PUBLIC_STREAM);
+    if request.headers().get_all("idempotency-key").iter().count() > 1 {
+        return failed("CHAT_REQUEST_KEY_INVALID".into());
+    }
     let key = match request.headers().get("idempotency-key").map(|v| v.to_str()) {
         Some(Err(_)) => return failed("CHAT_REQUEST_KEY_INVALID".into()),
         Some(Ok(v)) => Some(v.to_owned()),
@@ -121,7 +192,10 @@ pub async fn handle(context: Arc<Context>, request: Request) -> Response {
         Ok(v) => v,
         Err(e) => return failed(e.into()),
     };
-    let saved = match receipt(context.clone(), request.clone(), key).await {
+    if let Err(error) = super::prepare::admit(&request) {
+        return failed(error);
+    }
+    let saved = match receipt(context.clone(), request.clone(), key, caller).await {
         Ok(v) => v,
         Err(e) => return failed(e),
     };

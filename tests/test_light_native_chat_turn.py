@@ -21,7 +21,7 @@ PATH='/api/light/internal-chat'
 HEADERS={'X-Les-Model-Token':MODEL_BRIDGE_TOKEN}
 
 @pytest.fixture
-def native_turn(tmp_path):
+def native_turn(tmp_path, request):
     program=os.getenv('LES_TEST_NATIVE_API')
     if not program:pytest.skip('Build native API and set LES_TEST_NATIVE_API')
     import pypdfium2_raw
@@ -60,8 +60,10 @@ def native_turn(tmp_path):
     for key in ('LES_LIGHT_QDRANT_URL','LES_LIGHT_QDRANT_API_KEY','LES_INTERNAL_INGEST_TOKEN','LES_NATIVE_EMBEDDING_SPEC'):env.pop(key,None)
     if os.getenv('LES_TEST_SKILL_PYTHON'):env['LES_SKILL_PYTHON']=os.environ['LES_TEST_SKILL_PYTHON']
     client=httpx.Client(base_url=f'http://127.0.0.1:{port}',timeout=20,trust_env=False)
+    public=getattr(request,'param',None)=='public'
     def start():
-        p=subprocess.Popen([program,'--listen',f'127.0.0.1:{port}','--upstream',f'http://127.0.0.1:{free_port()}','--state',str(state),'--database',str(database)],env=env,cwd=tmp_path,stdout=log,stderr=log,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0));children.append(p)
+        extra=['--chat-owner','rust'] if public else ['--upstream',f'http://127.0.0.1:{free_port()}']
+        p=subprocess.Popen([program,'--listen',f'127.0.0.1:{port}','--state',str(state),'--database',str(database),*extra],env=env,cwd=tmp_path,stdout=log,stderr=log,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0));children.append(p)
         wait_for(lambda:client.get('/api/profiles').status_code==200);return p
     try:
         start()
@@ -76,6 +78,7 @@ def native_turn(tmp_path):
 def test_json_and_stream_share_native_turn_and_repeated_key_never_calls_model(native_turn):
     t=native_turn;request={'question':'Привет 日本語','session_id':'fixture-turn'};headers={**HEADERS,'Idempotency-Key':'once'}
     assert t.client.post(PATH,json=request).status_code==404
+    assert t.client.post('/api/chat',json=request).headers.get('x-les-handler')!='rust.chat'
     response=t.client.post(PATH,json=request,headers=headers).raise_for_status()
     assert response.headers['x-les-handler']=='rust.chat'
     result=response.json();assert result['answer']=='Ответ 日本語';assert len(t.seen)==1
@@ -280,6 +283,9 @@ def test_failed_native_workspace_write_has_an_incomplete_execution_receipt(nativ
     receipt=result['artifact']['execution_receipt']
     assert receipt['status']=='incomplete' and receipt['kind']=='agent_file'
     assert result['artifact']['completion_status']=='incomplete' and 'не выполнена' in result['answer']
+    assert result['execution']['status']=='incomplete' and result['completion_status']=='incomplete'
+    history=t.client.get('/api/chat/history',params={'session_id':sid}).raise_for_status().json()
+    assert history[-1]['meta']['completion_status']=='incomplete' and history[-1]['meta']['execution']==result['execution']
     assert not list(t.state.rglob('failed.txt'))
 
 

@@ -1,4 +1,5 @@
 //! Original bytes resolved through the catalog and checked on the streamed handle.
+pub mod browse;
 use crate::{auth, Context};
 use axum::{
     body::Body,
@@ -7,7 +8,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use futures_util::stream;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::{
     fs::File,
     io::{Read, Seek, SeekFrom},
@@ -17,6 +18,77 @@ pub fn route(path: &str) -> Option<&str> {
     path.strip_prefix("/api/documents/by-id/")?
         .strip_suffix("/raw")
         .filter(|id| !id.is_empty() && !id.contains('/'))
+}
+fn catalog_document(context: &Context, args: &Value) -> Result<Value, &'static str> {
+    let read = |args| {
+        let value = crate::library::catalog(&context.database, "library_document", args);
+        if value["status"] != "completed" {
+            return Err("SOURCE_CATALOG_UNAVAILABLE");
+        }
+        Ok(value["value"].clone())
+    };
+    let mut doc = read(args.clone())?;
+    if doc.is_null()
+        && ["dataset_id", "file_name"]
+            .iter()
+            .all(|key| args[*key].as_str().is_some_and(|v| !v.is_empty()))
+    {
+        // Legacy citations may contain a fragment ID. Use both exact fields
+        // or refuse; a basename or recent revision is never guessed.
+        let mut exact = args.clone();
+        exact["doc_id"] = json!("");
+        doc = read(exact)?;
+    }
+    if doc.is_null() {
+        return Err("SOURCE_DOCUMENT_NOT_FOUND");
+    }
+    Ok(doc)
+}
+
+fn verified_file(
+    context: &Context,
+    doc: &Value,
+    expected: &str,
+) -> Result<(File, u64), &'static str> {
+    let expected = if expected.is_empty() {
+        doc["file_hash"].as_str().unwrap_or("")
+    } else {
+        expected
+    };
+    if !expected.is_empty()
+        && (expected.len() != 64 || !expected.bytes().all(|b| b.is_ascii_hexdigit()))
+    {
+        return Err("SOURCE_REVISION_REQUIRED");
+    }
+    if doc["file_hash"]
+        .as_str()
+        .is_some_and(|h| h.len() == 64 && !h.eq_ignore_ascii_case(expected))
+    {
+        return Err("SOURCE_REVISION_CHANGED");
+    }
+    let path = les_core::document_source::resolve(
+        doc["source_path"].as_str().unwrap_or(""),
+        doc["dataset_id"]
+            .as_str()
+            .ok_or("SOURCE_IDENTITY_INVALID")?,
+        doc["file_name"].as_str().ok_or("SOURCE_IDENTITY_INVALID")?,
+        &context.state_root.join("storage/datasets"),
+    )?;
+    let mut file = File::open(path).map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let actual = les_core::pdf_source::fingerprint(&mut file).map_err(|e| {
+        if e == "PDF_REVISION_CHANGED" {
+            "SOURCE_REVISION_CHANGED"
+        } else {
+            "SOURCE_READ_FAILED"
+        }
+    })?;
+    if !expected.is_empty() && !actual.eq_ignore_ascii_case(expected) {
+        return Err("SOURCE_REVISION_CHANGED");
+    }
+    let length = file.metadata().map_err(|_| "SOURCE_READ_FAILED")?.len();
+    file.seek(SeekFrom::Start(0))
+        .map_err(|_| "SOURCE_READ_FAILED")?;
+    Ok((file, length))
 }
 fn byte_range(value: Option<&str>, length: u64) -> Result<Option<(u64, u64)>, ()> {
     let Some(value) = value else { return Ok(None) };
@@ -91,66 +163,10 @@ pub async fn handle(context: Arc<Context>, request: Request) -> Response {
     }
     let opened =
         tokio::task::spawn_blocking(move || -> Result<(File, u64, String), &'static str> {
-            let mut value =
-                crate::library::catalog(&context.database, "library_document", args.clone());
-            if value["status"] != "completed" {
-                return Err("SOURCE_CATALOG_UNAVAILABLE");
-            }
-            if value["value"].is_null()
-                && args["dataset_id"].is_string()
-                && args["file_name"].is_string()
-            {
-                // Compatibility for old links that used a chunk ID. Both explicit
-                // provenance fields are required; a basename is never guessed.
-                let mut exact = args.clone();
-                exact["doc_id"] = json!("");
-                value = crate::library::catalog(&context.database, "library_document", exact);
-                if value["status"] != "completed" {
-                    return Err("SOURCE_CATALOG_UNAVAILABLE");
-                }
-            }
-            let doc = &value["value"];
-            if doc.is_null() {
-                return Err("SOURCE_DOCUMENT_NOT_FOUND");
-            }
-            let expected = args["source_sha256"]
-                .as_str()
-                .filter(|v| !v.is_empty())
-                .unwrap_or_else(|| doc["file_hash"].as_str().unwrap_or(""));
-            if !expected.is_empty()
-                && (expected.len() != 64 || !expected.bytes().all(|b| b.is_ascii_hexdigit()))
-            {
-                return Err("SOURCE_REVISION_REQUIRED");
-            }
-            if doc["file_hash"]
-                .as_str()
-                .is_some_and(|h| h.len() == 64 && !h.eq_ignore_ascii_case(expected))
-            {
-                return Err("SOURCE_REVISION_CHANGED");
-            }
+            let doc = catalog_document(&context, &args)?;
             let name = doc["file_name"].as_str().ok_or("SOURCE_IDENTITY_INVALID")?;
-            let path = les_core::document_source::resolve(
-                doc["source_path"].as_str().unwrap_or(""),
-                doc["dataset_id"]
-                    .as_str()
-                    .ok_or("SOURCE_IDENTITY_INVALID")?,
-                name,
-                &context.state_root.join("storage/datasets"),
-            )?;
-            let mut file = File::open(path).map_err(|_| "SOURCE_UNAVAILABLE")?;
-            let actual = les_core::pdf_source::fingerprint(&mut file).map_err(|e| {
-                if e == "PDF_REVISION_CHANGED" {
-                    "SOURCE_REVISION_CHANGED"
-                } else {
-                    "SOURCE_READ_FAILED"
-                }
-            })?;
-            if !expected.is_empty() && !actual.eq_ignore_ascii_case(expected) {
-                return Err("SOURCE_REVISION_CHANGED");
-            }
-            let length = file.metadata().map_err(|_| "SOURCE_READ_FAILED")?.len();
-            file.seek(SeekFrom::Start(0))
-                .map_err(|_| "SOURCE_READ_FAILED")?;
+            let (file, length) =
+                verified_file(&context, &doc, args["source_sha256"].as_str().unwrap_or(""))?;
             Ok((
                 file,
                 length,

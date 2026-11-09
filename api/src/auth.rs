@@ -310,16 +310,24 @@ async fn authorize_local(
     policy: &LocalPolicy,
     headers: &HeaderMap,
     admin: bool,
-) -> Decision<()> {
+) -> Decision<String> {
     let key = key_from(headers);
-    let key = if key.is_empty() {
+    let verified = if key.is_empty() {
         None
     } else {
-        Some(lookup(context, key).await?)
+        Some(lookup(context, key.clone()).await?)
     };
-    auth::authorize(key, policy.trusted(headers), admin)
-        .map(|_| ())
-        .map_err(denial_response)
+    let key_role = match &verified {
+        Some(Key::Role { name, .. }) => Some(name.clone()),
+        _ => None,
+    };
+    let trusted = policy.trusted(headers);
+    auth::authorize(verified, trusted, admin).map_err(denial_response)?;
+    Ok(if let Some(role) = key_role {
+        format!("key:{role}:{}", les_core::sha256_hex(key.as_bytes()))
+    } else {
+        format!("trusted:{}", trusted.unwrap_or_default())
+    })
 }
 
 pub fn denial_response(denial: Denial) -> Response {
@@ -343,11 +351,21 @@ pub async fn local_policy<'a>(context: &'a Context) -> Decision<&'a LocalPolicy>
 }
 
 pub async fn authorize(context: &Context, headers: &HeaderMap, admin: bool) -> Decision<HeaderMap> {
+    authorize_caller(context, headers, admin)
+        .await
+        .map(|(cors, _)| cors)
+}
+
+pub async fn authorize_caller(
+    context: &Context,
+    headers: &HeaderMap,
+    admin: bool,
+) -> Decision<(HeaderMap, String)> {
     let clean = transport::clean(headers, true);
     let policy = local_policy(context).await?;
     let cors = cors(policy, headers);
     match authorize_local(context, policy, &clean, admin).await {
-        Ok(()) => Ok(cors),
+        Ok(caller) => Ok((cors, caller)),
         Err(mut response) => {
             response.headers_mut().extend(cors);
             Err(response)

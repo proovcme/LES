@@ -1,4 +1,5 @@
 //! Bounded PDFium reader executed in a disposable child, with no OCR or table inference.
+mod preview;
 use pdfium_render::prelude::*;
 use serde_json::{json, Value};
 use std::{
@@ -252,10 +253,10 @@ fn read(library: &Library, path: &Path, options: &Value) -> Result<Value, &'stat
     if document.is_null() {
         return Err("PDF_OPEN_FAILED");
     }
-    let result = if options["kind"] == "source_page" {
-        read_page(pdf, document, options)
-    } else {
-        read_pages(pdf, document, ocr.as_ref())
+    let result = match options["kind"].as_str() {
+        Some("source_page") => read_page(pdf, document, options),
+        Some("source_preview") => preview::render(pdf, document, options),
+        _ => read_pages(pdf, document, ocr.as_ref()),
     };
     unsafe { pdf.FPDF_CloseDocument(document) };
     if let Some(hash) = options["source_sha256"].as_str() {
@@ -341,6 +342,30 @@ fn source_page(library: &Library, options: &Value) -> Result<Value, &'static str
     Ok(value)
 }
 
+/// Only server-resolved selectors are accepted by callers of this helper.
+pub(crate) fn supervised_source(input: Value) -> Result<Value, String> {
+    let program = std::env::current_exe().map_err(|_| "PDF_READER_UNAVAILABLE")?;
+    let library = std::path::PathBuf::from(
+        std::env::var_os("LES_NATIVE_PDFIUM").ok_or("PDFIUM_UNAVAILABLE")?,
+    );
+    if !library.is_absolute() {
+        return Err("PDFIUM_UNAVAILABLE".into());
+    }
+    let value = les_core::run_native_pdf(
+        &json!({"schema":"les.worker-host.v1","program":program,"directory":program.parent(),
+        "args":["--serve-pdf-text",library],"context":"les.pdf-text.v1","timeout_ms":30000,"input":input}),
+    )?;
+    let result = &value["result"];
+    if value["status"] == "completed" && result["status"] == "completed" {
+        return Ok(result["value"].clone());
+    }
+    Err(result["code"]
+        .as_str()
+        .or_else(|| value["code"].as_str())
+        .unwrap_or("PDF_SOURCE_WORKER_FAILED")
+        .to_owned())
+}
+
 fn response(result: Result<Value, &'static str>) -> Value {
     match result {
         Ok(value) => json!({"status":"completed","value":value}),
@@ -375,7 +400,10 @@ pub fn serve(asset: &Path) -> Result<(), Box<dyn std::error::Error>> {
             .as_str()
             .ok_or("PDF_PATH_INVALID")
             .map(Path::new);
-        let result = if envelope["input"]["kind"] == "source_page" {
+        let result = if matches!(
+            envelope["input"]["kind"].as_str(),
+            Some("source_page" | "source_preview")
+        ) {
             match source_page(&library, &envelope["input"]) {
                 Ok(value) => json!({"status":"completed","value":value}),
                 Err(code) => json!({"status":"failed","code":code}),

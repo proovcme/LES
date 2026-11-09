@@ -35,11 +35,13 @@ impl Tools {
         let profile = turn.profile.clone();
         let registered = turn.session["registered"] == true && turn.profile["mode"] == "agent";
         let grounded = turn.scope["document_grounding_enabled"] == true;
+        let selected_only = turn.request["selected_sources_only"] == true;
         tokio::task::spawn_blocking(move||->Result<Self>{
             let result=super::unwrap(les_core::tool_registry::execute(&json!({"schema":"les.tool-registry.v1","database":database,"action":"registry"})))?;
             let allowed=profile["tools"].as_array().cloned().unwrap_or_default();
             let mut contracts:Vec<_>=result["tools"].as_array().ok_or("TOOL_REGISTRY_INVALID")?.iter()
-                .filter(|t|allowed.contains(&t["name"])&&(grounded||!["dataset","source"].iter().any(|c|t["category"]==*c))).cloned().collect();
+                .filter(|t|allowed.contains(&t["name"])&&(grounded||!["dataset","source"].iter().any(|c|t["category"]==*c))
+                    && (!selected_only || (t["name"]!="web_search"&&t["name"]!="web_read"))).cloned().collect();
             for contract in &mut contracts {
                 if contract["name"]=="search_sources"{contract["timeout_seconds"]=json!(150);}
                 if contract["name"]=="search_sources"||contract["name"]=="read_source"||contract["name"]=="read_excel_source"{

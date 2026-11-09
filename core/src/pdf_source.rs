@@ -1,4 +1,6 @@
 //! Exact, read-only catalog selectors and revision checks for physical PDF reads.
+mod preview;
+pub use preview::{decode_png, encode_png};
 use rusqlite::{params, Connection, OpenFlags};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
