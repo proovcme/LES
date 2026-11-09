@@ -12785,7 +12785,7 @@
     },
     {
       "inbound": [],
-      "lines": 33,
+      "lines": 32,
       "module": "tests.test_light_user_guide",
       "outbound": [
         "sovushka/components/light_guide.py",
@@ -13978,7 +13978,7 @@
       "inbound": [
         "tests/test_light_user_guide.py"
       ],
-      "lines": 43,
+      "lines": 46,
       "module": "tools.light_public_docs",
       "outbound": [
         "sovushka/components/light_guide.py",
@@ -16013,7 +16013,7 @@
     "runtime_support": 5,
     "test_or_tool_only": 271,
     "tracked_python_files": 716,
-    "tracked_python_lines": 170893
+    "tracked_python_lines": 170895
   },
   "warnings": []
 }
