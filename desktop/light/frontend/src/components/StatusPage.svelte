@@ -24,10 +24,16 @@
   const time = new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' });
   const number = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 });
   const session = new URLSearchParams(location.search).get('session');
-  const chatHref = session ? `/app/?session=${encodeURIComponent(session)}` : '/app/';
+  const panelHref = (panel?: string) => {
+    const params = new URLSearchParams();
+    if (session) params.set('session', session);
+    if (panel) params.set('panel', panel);
+    return params.size ? `/app/?${params}` : '/app/';
+  };
+  const chatHref = panelHref();
   const legacyLink = (path: string) => legacy ? new URL(path, legacy).href : null;
-  const modelLink = $derived(legacyLink('/les/classic?tab=models'));
-  const dataLink = $derived(legacyLink('/classic?tab=data') ?? '/qdrant-visualizer/index.html');
+  const modelLink = $derived(legacyLink('/les/classic?tab=models') ?? panelHref('models'));
+  const dataLink = panelHref('data');
   const diagnostics = $derived(legacyLink('/les/classic?tab=state&details=1'));
   let alive = true;
 

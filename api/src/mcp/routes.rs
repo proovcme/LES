@@ -16,6 +16,7 @@ pub fn route(method: &str, path: &str) -> Option<Route> {
     let (action, id) = match (method, parts.as_slice()) {
         ("GET", ["api", "mcp"]) => ("list", None),
         ("POST", ["api", "mcp"]) => ("save", None),
+        ("PUT", ["api", "mcp", id]) => ("update", Some(*id)),
         ("DELETE", ["api", "mcp", id]) => ("remove", Some(*id)),
         ("POST", ["api", "mcp", id, "probe"]) => ("discover", Some(*id)),
         ("PUT", ["api", "mcp", id, "tools"]) => ("enable", Some(*id)),
@@ -56,7 +57,7 @@ async fn authorized(context: Arc<Context>, request: Request, route: Route) -> Re
         }
         input["connection_id"] = id.into();
     }
-    if matches!(route.action, "save" | "enable") {
+    if matches!(route.action, "save" | "update" | "enable") {
         let bytes = match to_bytes(request.into_body(), 256000).await {
             Ok(bytes) => bytes,
             Err(_) => return error(StatusCode::PAYLOAD_TOO_LARGE, "Запрос MCP слишком большой"),
@@ -65,7 +66,7 @@ async fn authorized(context: Arc<Context>, request: Request, route: Route) -> Re
             Ok(Value::Object(value)) => value.into(),
             _ => return error(StatusCode::UNPROCESSABLE_ENTITY, "Ожидается объект JSON"),
         };
-        if route.action == "save" {
+        if route.action != "enable" {
             if !body["name"]
                 .as_str()
                 .is_some_and(|v| !v.is_empty() && v.chars().count() <= 120)

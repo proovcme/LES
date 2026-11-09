@@ -82,6 +82,20 @@ fn resolve_answer(context: &Context, execution: &Value) -> Result<model_runtime:
     }
     Ok(connection)
 }
+
+pub(crate) fn admission(context: &Context) -> Value {
+    let result =
+        answer_execution(context).and_then(|execution| resolve_answer(context, &execution));
+    let memory = les_core::system_memory::available()
+        .ok()
+        .map(|bytes| bytes as f64 / 1_073_741_824.0);
+    match result {
+        Ok(_) => json!({"allowed":true,"memory":{"ram_free_gb":memory}}),
+        Err(error) => {
+            json!({"allowed":false,"code":error.code,"reason":error.payload()["detail"],"memory":{"ram_free_gb":memory}})
+        }
+    }
+}
 pub(super) fn admit(request: &Value) -> Result<()> {
     if request["provider_config"].is_object() {
         return Err("SESSION_PROVIDER_OVERRIDE_DISABLED".into());

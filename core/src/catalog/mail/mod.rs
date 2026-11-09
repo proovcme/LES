@@ -1,6 +1,8 @@
 //! Native mailbox registry. The existing SQLite identities remain readable.
 mod credentials;
+mod olm;
 mod snapshots;
+mod threads;
 use super::{connection, first, rows, table, Failure};
 use rusqlite::{params, Connection, TransactionBehavior};
 use serde_json::{json, Value};
@@ -9,14 +11,48 @@ use std::{
     path::{Path, PathBuf},
 };
 
+pub use olm::visit_olm;
 pub use snapshots::{
     cursor, folder_checkpoint, index_authorized, list, message, publish_pending, read, register,
 };
+pub use threads::{rebuild_threads, threads};
 type Result<T> = std::result::Result<T, &'static str>;
 const STORE: &str = "MAIL_REGISTRY_UNAVAILABLE";
 const INVALID: &str = "MAIL_REQUEST_INVALID";
 pub const MAX_MESSAGE: usize = 16 * 1024 * 1024;
 pub const INDEX_ROOT: &str = "les:mail-index:v1";
+
+pub fn encode_mime_base64(bytes: &[u8]) -> String {
+    crate::chat_attachments::encode_base64(bytes)
+}
+
+pub fn decode_mapi_text(bytes: &[u8], codepage: u32) -> String {
+    use mail_parser::decoders::charsets::map::charset_decoder;
+    let bytes = &bytes[..bytes.iter().rposition(|&b| b != 0).map_or(0, |i| i + 1)];
+    let name = match codepage {
+        65001 => "utf-8".to_owned(),
+        932 => "shift_jis".to_owned(),
+        936 => "gbk".to_owned(),
+        949 => "euc-kr".to_owned(),
+        950 => "big5".to_owned(),
+        20866 => "koi8-r".to_owned(),
+        28591..=28606 => format!("iso-8859-{}", codepage - 28590),
+        _ => format!("cp{codepage}"),
+    };
+    if let Some(decode) = charset_decoder(name.as_bytes()) {
+        return decode(bytes);
+    }
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
+pub fn filetime_rfc2822(ticks: i64) -> Option<String> {
+    let seconds = ticks.checked_div(10_000_000)?.checked_sub(11_644_473_600)?;
+    let date = chrono::DateTime::from_timestamp(seconds, 0)?;
+    use chrono::Datelike;
+    (1601..=9999)
+        .contains(&date.year())
+        .then(|| date.to_rfc2822())
+}
 
 fn db(_: Failure) -> &'static str {
     STORE
@@ -151,6 +187,9 @@ pub fn accounts(state: &Path) -> Result<Value> {
     Ok(json!({"component":"Е.Ж.И.К.","accounts":accounts,"folders":folders}))
 }
 fn mailbox_config(kind: &str, input: &Value, old: &Value) -> Result<Value> {
+    if kind == "archive" {
+        return Ok(json!({}));
+    }
     if kind == "outlook_classic" {
         return Ok(json!({"exclude_special":["junk","trash","drafts"]}));
     }
@@ -210,6 +249,10 @@ fn mailbox_config(kind: &str, input: &Value, old: &Value) -> Result<Value> {
         json!({"provider":provider,"host":host,"port":port,"login":login,"ssl":ssl,"folders":folders}),
     )
 }
+
+pub fn imap_config(input: &Value) -> Result<Value> {
+    mailbox_config("imap", input, &Value::Null)
+}
 fn dataset(database: &Path, id: &str, name: &str) -> Result<()> {
     if !safe_id(id) {
         return Err(INVALID);
@@ -264,7 +307,7 @@ pub fn create(state: &Path, database: &Path, input: &Value, collector: bool) -> 
     let native = input["native_account_id"].as_str().unwrap_or("");
     if native.len() > 4096
         || native.chars().any(char::is_control)
-        || (collector && (kind != "outlook_classic" || native.is_empty()))
+        || (collector && (!matches!(kind, "outlook_classic" | "archive") || native.is_empty()))
     {
         return Err(INVALID);
     }
@@ -275,8 +318,8 @@ pub fn create(state: &Path, database: &Path, input: &Value, collector: bool) -> 
     if collector {
         let row = first(
             &tx,
-            "SELECT * FROM mail_accounts WHERE kind='outlook_classic' AND native_account_id=?1",
-            [native],
+            "SELECT * FROM mail_accounts WHERE kind=?1 AND native_account_id=?2",
+            [kind, native],
         )
         .map_err(db)?;
         if row.is_object() {

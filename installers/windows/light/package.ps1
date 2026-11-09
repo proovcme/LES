@@ -176,6 +176,23 @@ $files = @($manifest.files)
 if (-not ($files | Where-Object { $_.path -eq 'les-light.exe' })) {
   throw 'LES Light: пакет не содержит приложение. Загрузите полный установщик.'
 }
+if ($manifest.runtime_mode -eq 'rust') {
+  $paths = @($files | ForEach-Object { ([string]$_.path).Replace('\','/') })
+  foreach ($required in @(
+      'native/runtime/les-runtime.exe', 'native/api/les-api.exe', 'native/qdrant/qdrant.exe',
+      'native/pdf/pdfium.dll', 'native/skill-python/python.exe',
+      'native/skill-python/skill-python-receipt.json', 'native/skill-python-required.json',
+      'runtime/desktop/light/frontend/dist/index.html',
+      'runtime/desktop/light/frontend/dist/build-receipt.json', 'les.cmd')) {
+    if ($required -notin $paths) { throw "LES Light: в пакете отсутствует компонент $required." }
+  }
+  if ($manifest.build_number -ge 848 -and 'runtime/tools/install-les.ps1' -notin $paths) {
+    throw 'LES Light: в пакете отсутствует компонент обновления.'
+  }
+  if ($paths | Where-Object { $_ -match '^(python/|runtime/(backend|proxy|sovushka)/)|(^|/)nicegui([/.-]|$)|^runtime/.*\.py$' }) {
+    throw 'LES Light: нативный пакет содержит старые компоненты приложения.'
+  }
+}
 $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
 Write-Output 'Проверяю целостность установочного комплекта...'
 $checkedCount = 0

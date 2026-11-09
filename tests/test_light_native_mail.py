@@ -7,6 +7,7 @@ import socketserver
 import ssl
 import sqlite3
 import subprocess
+import zipfile
 from threading import Event, Thread
 
 import httpx
@@ -289,6 +290,86 @@ def exercise(tmp_path, source_files=()):
             wait_for(lambda: progress(aid)["sync_state"] == "idle", timeout=15)
             assert imap.commands.count(b"UID FETCH 2 (UID BODY.PEEK[])") == 2
 
+            archive = tmp_path/"fixture.olm"
+            with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as output:
+                for seq, subject in [(1, "Письмо OLM"), (2, "Re: Письмо OLM")]:
+                    xml = f"""<message xmlns="urn:fixture">
+                        <OPFMessageCopySubject>{subject}</OPFMessageCopySubject>
+                        <OPFMessageCopySenderAddress><emailAddress
+                            OPFContactEmailAddressAddress="sender@example.invalid"
+                            OPFContactEmailAddressName="A &amp; B"/></OPFMessageCopySenderAddress>
+                        <OPFMessageCopySentTime>2026-10-03T09:00:00+03:00</OPFMessageCopySentTime>
+                        <OPFMessageCopyReceivedTime>2026-10-03T09:01:00+03:00</OPFMessageCopyReceivedTime>
+                        <OPFMessageCopyBody>{'Проверка OLM &amp; оригинала. ' * 16}</OPFMessageCopyBody>
+                    </message>"""
+                    output.writestr(f"Inbox/message-{seq}.xml", xml if seq == 1 else xml.encode("utf-16"))
+                output.writestr("Inbox/message-bad.xml", "<invalid>")
+            payload = {"path": str(archive), "parse": True, "max_messages": 1}
+            first = client.post("/api/mail/import-archive", json=payload).raise_for_status().json()
+            assert first["format"] == "olm" and first["created"] == 1 and first["next_offset"] == 1
+            second = client.post("/api/mail/import-archive", json={**payload, "offset": 1}).raise_for_status().json()
+            assert second["account_id"] == first["account_id"] and second["created"] == 1
+            tail = client.post("/api/mail/import-archive", json={**payload, "offset": second["next_offset"]}).raise_for_status().json()
+            assert tail["messages"] == 0 and tail["skipped"] == 1 and tail["next_offset"] is None
+            replay = client.post("/api/mail/import-archive", json={**payload, "max_messages": 10}).raise_for_status().json()
+            assert replay["created"] == 0 and replay["skipped"] == 1 and replay["next_offset"] is None
+            archive_id = first["account_id"]
+            messages = get(f"/api/mail/messages?account_id={archive_id}")["messages"]
+            assert {item["subject"] for item in messages} == {"Письмо OLM", "Re: Письмо OLM"}
+            imported_message = get("/api/mail/messages/"+messages[0]["id"])
+            assert "Проверка OLM & оригинала." in imported_message["profile"]["text"]
+            assert "A & B" in imported_message["profile"]["text"]
+            assert client.post(f"/api/mail/rebuild-threads?account_id={archive_id}").raise_for_status().json()["updated_messages"] == 2
+            threads = get(f"/api/mail/threads?account_id={archive_id}")
+            assert threads["total_threads"] == 1 and threads["threads"][0]["message_count"] == 2
+
+            broken_pst = tmp_path/"broken.pst"
+            broken_pst.write_bytes(b"invalid PST")
+            rejected = client.post("/api/mail/import-archive", json={"path": str(broken_pst)})
+            assert rejected.json()["code"] == "MAIL_ARCHIVE_INVALID"
+            broken_pst.write_bytes(b"!BDN" + bytes(6) + b"\xff\xff")
+            rejected = client.post("/api/mail/import-archive", json={"path": str(broken_pst)})
+            assert rejected.json()["code"] == "MAIL_PST_VERSION_UNSUPPORTED"
+            if sample := os.getenv("LES_TEST_PST_FILE"):
+                # Apache Tika testPST.pst, kept outside the repository.
+                pst = Path(sample).resolve()
+                digest = hashlib.sha256(pst.read_bytes()).digest()
+                options = {"path": str(pst), "max_messages": 2}
+                results = []
+                for offset in (0, 2, 4, 6):
+                    result = client.post("/api/mail/import-archive",
+                        json={**options, "offset": offset}).raise_for_status().json()
+                    assert result["format"] == "pst"
+                    results.append(result)
+                assert [r["next_offset"] for r in results] == [2, 4, 6, None]
+                assert [r["created"] for r in results] == [2, 2, 2, 1]
+                assert len({r["account_id"] for r in results}) == 1
+                assert sum(r["skipped_attachments"] for r in results) == 1
+                replay = client.post("/api/mail/import-archive",
+                    json={**options, "max_messages": 10}).raise_for_status().json()
+                assert replay["created"] == 0 and replay["messages"] == 7
+                assert hashlib.sha256(pst.read_bytes()).digest() == digest
+
+            folder = tmp_path/"mail-source"
+            folder.mkdir()
+            (folder/"local.eml").write_bytes(eml(88, "Local source fixture"))
+            imported = client.post("/api/mail/import-local", json={"source_folder": str(folder), "parse": True})
+            assert imported.raise_for_status().json()["files"] == 1
+            pushed = client.post("/api/mail/push", json={
+                "subject": "Письмо от плагина", "from": "fixture@example.invalid",
+                "body": "Текст для индексации " * 20,
+                "attachments": [{"name": "test.txt", "content_b64": "SGVsbG8="}],
+            }).raise_for_status().json()
+            assert pushed["attachments"] == 1
+            assert "Hello" in get("/api/mail/messages/"+pushed["message_id"])["profile"]["text"]
+
+            oneoff = client.post("/api/mail/import-imap", json={
+                "host":"127.0.0.1", "port":imap.server.server_address[1], "ssl":False,
+                "login":"fixture", "password":"dummy fixture password", "parse":True,
+            }).raise_for_status().json()
+            assert oneoff["files"] == 2
+            assert progress(oneoff["account_id"])["secret_set"] is False
+
             actual = []
             for n, path in enumerate(source_files):
                 before = hashlib.sha256(path.read_bytes()).hexdigest()
@@ -302,7 +383,7 @@ def exercise(tmp_path, source_files=()):
                 db.execute("UPDATE native_intakes SET retry_at=0")
             def finished():
                 with closing(sqlite3.connect(database)) as db:
-                    return db.execute("SELECT count(*) FROM documents WHERE status='INDEXED' AND chunk_count>0").fetchone()[0] == 5 + len(actual)
+                    return db.execute("SELECT count(*) FROM documents WHERE status='INDEXED' AND chunk_count>0").fetchone()[0] == 11 + len(actual)
             wait_for(finished, timeout=55)
             evidence = get("/api/mail/messages/"+outlook["message_id"])
             assert evidence["index_status"] == "INDEXED"

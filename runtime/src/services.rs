@@ -223,11 +223,15 @@ impl Stack {
             if self.api == 0 || !port_free(self.api) {
                 self.api = free_port()?;
             }
-            if self.ui == 0 || !port_free(self.ui) {
-                self.ui = free_port()?;
-            }
-            while self.ui == self.api {
-                self.ui = free_port()?;
+            if self.config.native_only {
+                self.ui = self.api;
+            } else {
+                if self.ui == 0 || !port_free(self.ui) {
+                    self.ui = free_port()?;
+                }
+                while self.ui == self.api {
+                    self.ui = free_port()?;
+                }
             }
             if self.config.edge_storage.is_some() {
                 self.qdrant_url = format!("http://127.0.0.1:{}", self.api);
@@ -246,7 +250,7 @@ impl Stack {
                 &self.instance,
             );
             let mut backend_port = self.api;
-            if self.config.native_api {
+            if self.config.native_api && !self.config.native_only {
                 loop {
                     backend_port = free_port()?;
                     if backend_port != self.api && backend_port != self.ui {
@@ -254,94 +258,97 @@ impl Stack {
                     }
                 }
             }
-            let mut api = Command::new(&self.config.python);
-            api.args([
-                "-B",
-                "-m",
-                "uvicorn",
-                "proxy.app:app",
-                "--host",
-                "127.0.0.1",
-                "--port",
-                &backend_port.to_string(),
-            ]);
-            let mut ui = Command::new(&self.config.python);
-            ui.arg("-B").arg(self.config.root.join("sovushka_ng.py"));
-            for command in [&mut api, &mut ui] {
-                command
-                    .current_dir(&self.config.state)
-                    .env_clear()
-                    .envs(environment.clone());
-            }
-            if self.config.native_api {
-                api.env(
-                    "LES_NATIVE_FORMAT_WORKER",
-                    self.config.root.parent().unwrap().join(format!(
-                        "native/api/les-api{}",
-                        std::env::consts::EXE_SUFFIX
-                    )),
-                )
-                .env(
-                    "LES_NATIVE_TABLE_WORKER",
-                    self.config.root.parent().unwrap().join(format!(
-                        "native/api/les-api{}",
-                        std::env::consts::EXE_SUFFIX
-                    )),
-                );
-            }
             let private_tokens = if self.config.native_api {
-                let model_token = control::random_id()?;
-                let ingest_token = control::random_id()?;
-                api.env("LES_INTERNAL_MODEL_TOKEN", &model_token)
-                    .env(
-                        "LES_INTERNAL_MODEL_URL",
-                        format!(
-                            "http://127.0.0.1:{}/api/light/internal-model-http",
-                            self.api
-                        ),
-                    )
-                    .env("LES_INTERNAL_INGEST_TOKEN", &ingest_token)
-                    .env(
-                        "LES_INTERNAL_INFERENCE_URL",
-                        format!("http://127.0.0.1:{}/api/light/internal-inference", self.api),
-                    )
-                    .env(
-                        "LES_NATIVE_INDEX_URL",
-                        format!(
-                            "http://127.0.0.1:{}/api/light/internal-index-store",
-                            self.api
-                        ),
-                    );
-                #[cfg(windows)]
-                if let Some(python_root) = self.config.python.parent() {
-                    let pdfium = python_root.join("Lib/site-packages/pypdfium2_raw/pdfium.dll");
-                    if pdfium.is_file() {
-                        api.env("LES_NATIVE_PDFIUM", pdfium).env(
-                            "LES_NATIVE_PDF_WORKER",
-                            self.config
-                                .root
-                                .parent()
-                                .unwrap()
-                                .join("native/api/les-api.exe"),
-                        );
-                    }
-                }
-                Some((model_token, ingest_token))
+                Some((control::random_id()?, control::random_id()?))
             } else {
                 None
             };
-            let mut commands = vec![
-                (
-                    if self.config.native_api {
-                        "legacy_api"
-                    } else {
-                        "api"
-                    },
-                    api,
-                    "logs/api-console.txt",
-                ),
-                ("ui", ui, "logs/ui-console.txt"),
-            ];
+            let mut commands = Vec::new();
+            if let Some(python) = &self.config.python {
+                let mut api = Command::new(python);
+                api.args([
+                    "-B",
+                    "-m",
+                    "uvicorn",
+                    "proxy.app:app",
+                    "--host",
+                    "127.0.0.1",
+                    "--port",
+                    &backend_port.to_string(),
+                ]);
+                let mut ui = Command::new(python);
+                ui.arg("-B").arg(self.config.root.join("sovushka_ng.py"));
+                for command in [&mut api, &mut ui] {
+                    command
+                        .current_dir(&self.config.state)
+                        .env_clear()
+                        .envs(environment.clone());
+                }
+                if self.config.native_api {
+                    api.env(
+                        "LES_NATIVE_FORMAT_WORKER",
+                        self.config.root.parent().unwrap().join(format!(
+                            "native/api/les-api{}",
+                            std::env::consts::EXE_SUFFIX
+                        )),
+                    )
+                    .env(
+                        "LES_NATIVE_TABLE_WORKER",
+                        self.config.root.parent().unwrap().join(format!(
+                            "native/api/les-api{}",
+                            std::env::consts::EXE_SUFFIX
+                        )),
+                    );
+                }
+                if let Some((model_token, ingest_token)) = &private_tokens {
+                    api.env("LES_INTERNAL_MODEL_TOKEN", model_token)
+                        .env(
+                            "LES_INTERNAL_MODEL_URL",
+                            format!(
+                                "http://127.0.0.1:{}/api/light/internal-model-http",
+                                self.api
+                            ),
+                        )
+                        .env("LES_INTERNAL_INGEST_TOKEN", ingest_token)
+                        .env(
+                            "LES_INTERNAL_INFERENCE_URL",
+                            format!("http://127.0.0.1:{}/api/light/internal-inference", self.api),
+                        )
+                        .env(
+                            "LES_NATIVE_INDEX_URL",
+                            format!(
+                                "http://127.0.0.1:{}/api/light/internal-index-store",
+                                self.api
+                            ),
+                        );
+                    #[cfg(windows)]
+                    if let Some(python_root) = python.parent() {
+                        let pdfium = python_root.join("Lib/site-packages/pypdfium2_raw/pdfium.dll");
+                        if pdfium.is_file() {
+                            api.env("LES_NATIVE_PDFIUM", pdfium).env(
+                                "LES_NATIVE_PDF_WORKER",
+                                self.config
+                                    .root
+                                    .parent()
+                                    .unwrap()
+                                    .join("native/api/les-api.exe"),
+                            );
+                        }
+                    }
+                }
+                commands.extend([
+                    (
+                        if self.config.native_api {
+                            "legacy_api"
+                        } else {
+                            "api"
+                        },
+                        api,
+                        "logs/api-console.txt",
+                    ),
+                    ("ui", ui, "logs/ui-console.txt"),
+                ]);
+            }
             if let Some((model_token, ingest_token)) = private_tokens {
                 let mut native = Command::new(self.config.root.parent().unwrap().join(format!(
                     "native/api/les-api{}",
@@ -350,19 +357,24 @@ impl Stack {
                 native
                     .arg("--listen")
                     .arg(format!("127.0.0.1:{}", self.api))
-                    .arg("--upstream")
-                    .arg(format!("http://127.0.0.1:{backend_port}"))
                     .arg("--database")
                     .arg(self.config.state.join("data/meta.db"))
                     .arg("--state")
                     .arg(&self.config.state)
-                    .arg("--legacy-ui-url")
-                    .arg(format!("http://127.0.0.1:{}/classic", self.ui))
                     .current_dir(&self.config.state)
                     .env_clear()
                     .envs(environment)
                     .env("LES_INTERNAL_MODEL_TOKEN", model_token)
                     .env("LES_INTERNAL_INGEST_TOKEN", ingest_token);
+                if self.config.native_only {
+                    native.args(["--chat-owner", "rust"]);
+                } else {
+                    native
+                        .arg("--upstream")
+                        .arg(format!("http://127.0.0.1:{backend_port}"))
+                        .arg("--legacy-ui-url")
+                        .arg(format!("http://127.0.0.1:{}/classic", self.ui));
+                }
                 if let Some(frontend) = self.config.native_frontend() {
                     native.arg("--frontend-assets").arg(frontend);
                 }
@@ -389,7 +401,9 @@ impl Stack {
                     break;
                 }
                 if self.probe.instance(&self.api_probe(), &self.instance)
-                    && self.probe.instance(&self.ui_probe(), &self.instance)
+                    && self
+                        .probe
+                        .ui(&self.ui_probe(), &self.instance, self.config.native_only)
                 {
                     return Ok(self.ui_url());
                 }
@@ -431,6 +445,9 @@ impl Stack {
         format!("http://127.0.0.1:{}/api/light/instance", self.api)
     }
     fn ui_probe(&self) -> String {
+        if self.config.native_only {
+            return self.ui_url();
+        }
         format!("http://127.0.0.1:{}/healthz", self.ui)
     }
     pub fn ui_url(&self) -> String {
@@ -450,6 +467,7 @@ impl Stack {
         json!({"instance_id":self.instance,"ui_url":self.ui_url(),"api_url":format!("http://127.0.0.1:{}",self.api),
             "qdrant_pid":pid("qdrant"),"api_pid":pid("api"),"ui_pid":pid("ui"),
             "legacy_api_pid":pid("legacy_api"),"api_native":self.config.native_api,
+            "native_only":self.config.native_only,
             "vector_store":if self.config.edge_storage.is_some(){"edge"}else{"server"}})
     }
     fn exited(&mut self) -> Result<Option<Value>> {
@@ -472,9 +490,14 @@ impl Stack {
         }
         let api = self.api_probe();
         let ui = self.ui_probe();
-        Ok(self
-            .probe
-            .failed(&api, &ui, &self.instance, &self.qdrant_url, &self.key))
+        Ok(self.probe.failed(
+            &api,
+            &ui,
+            &self.instance,
+            &self.qdrant_url,
+            &self.key,
+            self.config.native_only,
+        ))
     }
     pub fn stop(&mut self, journal: &Journal) {
         for mut service in self.services.drain(..).rev() {

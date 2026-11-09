@@ -22,6 +22,7 @@ export class Workspace {
   uploading = $state(false);
   indexedAttachments = $state(false);
   nativeModelSettings = $state(false);
+  nativeMail = $state(false);
   indexReceipt = $state<IndexedAttachment | null>(null);
   indexNotice = $state('');
   indexReady = $state(false);
@@ -49,7 +50,7 @@ export class Workspace {
     this.initializing = true; this.loading = true;
     try {
       const results = await Promise.allSettled([
-        request<{ legacy_url: string | null; indexed_attachments?: boolean; native_model_settings?: boolean }>('/api/light/frontend'),
+        request<{ legacy_url: string | null; indexed_attachments?: boolean; native_model_settings?: boolean; native_mail?: boolean }>('/api/light/frontend'),
         request<{ roles: { answer: ModelRole | null } }>('/api/model-connections/effective'),
         request<{ datasets: Dataset[] }>('/api/documents/datasets'),
         this.refreshSessions(),
@@ -61,6 +62,7 @@ export class Workspace {
         this.legacyURL = config.value.legacy_url;
         this.indexedAttachments = config.value.indexed_attachments === true;
         this.nativeModelSettings = config.value.native_model_settings === true;
+        this.nativeMail = config.value.native_mail === true;
         if (this.indexedAttachments) this.restoreIndexWatch();
       }
       if (models.status === 'fulfilled') this.model = models.value.roles.answer;
@@ -250,7 +252,7 @@ export class Workspace {
     }
   }
 
-  private async refreshDatasets(): Promise<void> {
+  async refreshDatasets(): Promise<void> {
     const result = await request<{ datasets: Dataset[] }>('/api/documents/datasets');
     if (this.alive) this.datasets = result.datasets;
   }

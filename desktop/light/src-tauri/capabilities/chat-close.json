@@ -4,5 +4,5 @@
   "windows": ["main"],
   "local": false,
   "remote": { "urls": ["http://127.0.0.1:*"] },
-  "permissions": ["allow-editor-ready", "allow-editor-close-result"]
+  "permissions": ["allow-editor-ready", "allow-editor-close-result", "allow-pick-folder", "allow-update-check", "allow-update-install"]
 }

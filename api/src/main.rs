@@ -34,6 +34,7 @@ mod openai_chat;
 mod pdf_ocr;
 mod pdf_text;
 mod profiles;
+mod status;
 mod transport;
 mod web;
 mod workspace;
@@ -92,6 +93,25 @@ pub fn error(status: StatusCode, detail: &str) -> Response {
 async fn dispatch(State(context): State<Arc<Context>>, request: Request) -> Response {
     if !transport::local_browser(request.headers()) {
         return error(StatusCode::FORBIDDEN, "Local LES browser access required");
+    }
+    if context.upstream.is_none()
+        && request.uri().path() == "/api/light/instance"
+        && request.method() == axum::http::Method::GET
+    {
+        let instance_id = std::env::var("LES_LIGHT_INSTANCE_ID").unwrap_or_default();
+        return json_response(
+            StatusCode::OK,
+            json!({"instance_id":instance_id}),
+            "rust.launcher",
+        );
+    }
+    if context.upstream.is_none() && request.method() == axum::http::Method::GET {
+        match request.uri().path() {
+            "/api/status" => return status::runtime(context, request.headers()).await,
+            "/api/health" => return status::health(&context).await,
+            "/api/jobs/summary" => return status::jobs(context, request).await,
+            _ => {}
+        }
     }
     #[cfg(feature = "edge")]
     if edge::handles(request.uri().path())

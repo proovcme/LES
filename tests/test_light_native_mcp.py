@@ -27,6 +27,13 @@ def test_native_settings_and_cached_tool_revocation_without_backend(profiles, se
     result=asyncio.run(harness.call_async(name,{'text':'Native read'}))
     assert result['status']=='ok',result
     assert server[1]==['Native read']
+    renamed=client.put(f'/api/mcp/{key}',json={'name':'Renamed','url':server[0]}).raise_for_status().json()
+    assert renamed['id']==key and renamed['name']=='Renamed'
+    assert [tool['name'] for tool in renamed['tools']]==['echo']
+    moved=client.put(f'/api/mcp/{key}',json={'name':'Renamed','url':server[0]+'/new'}).raise_for_status().json()
+    assert moved['id']==key and moved['tools']==[]
+    denied=asyncio.run(harness.call_async(name,{'text':'old tool must stay disabled'}))
+    assert denied['status']!='ok' and server[1]==['Native read']
     client.delete(f'/api/mcp/{key}').raise_for_status()
     denied=asyncio.run(harness.call_async(name,{'text':'must not reach server'}))
     assert denied['status']!='ok'

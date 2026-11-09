@@ -3,7 +3,11 @@
 param(
     [switch]$Silent,
     [switch]$DownloadOnly,
-    [string]$OutputDirectory = ''
+    [string]$OutputDirectory = '',
+    [ValidateSet('', 'Check', 'Download', 'Launch')][string]$DesktopAction = '',
+    [long]$ExpectedBuild = 0,
+    [string]$ExpectedSha = '',
+    [string]$InstallerPath = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -47,6 +51,7 @@ function Get-LesRelease([object]$Client, [uri]$Uri) {
     $stream = $null
     try {
         $response = $Client.GetAsync($Uri, [Net.Http.HttpCompletionOption]::ResponseHeadersRead, $cancel.Token).GetAwaiter().GetResult()
+        if ($Uri.Scheme -eq 'https' -and $response.RequestMessage.RequestUri.Scheme -ne 'https') { throw 'Release manifest requires HTTPS.' }
         if ([int]$response.StatusCode -eq 404) { throw 'A public LES RAG release has not been published yet.' }
         $response.EnsureSuccessStatusCode() | Out-Null
         if ($response.Content.Headers.ContentLength -gt 65536) { throw 'Release manifest is too large.' }
@@ -69,6 +74,13 @@ function Get-LesRelease([object]$Client, [uri]$Uri) {
     }
 }
 
+function Get-LesInstallerHash([string]$Path) {
+    $algorithm = [Security.Cryptography.SHA256]::Create()
+    $hashStream = [IO.File]::OpenRead($Path)
+    try { return [BitConverter]::ToString($algorithm.ComputeHash($hashStream)).Replace('-', '').ToLowerInvariant() }
+    finally { $hashStream.Dispose(); $algorithm.Dispose() }
+}
+
 function Receive-LesInstaller([object]$Client, [object]$Release, [string]$Directory) {
     $directoryPath = [IO.Path]::GetFullPath($Directory)
     New-Item -ItemType Directory -Path $directoryPath -Force | Out-Null
@@ -83,6 +95,7 @@ function Receive-LesInstaller([object]$Client, [object]$Release, [string]$Direct
     $cancel.CancelAfter([TimeSpan]::FromMinutes(20))
     try {
         $response = $Client.GetAsync($Release.Uri, [Net.Http.HttpCompletionOption]::ResponseHeadersRead, $cancel.Token).GetAwaiter().GetResult()
+        if ($Release.Uri.Scheme -eq 'https' -and $response.RequestMessage.RequestUri.Scheme -ne 'https') { throw 'Installer download requires HTTPS.' }
         $response.EnsureSuccessStatusCode() | Out-Null
         if ($null -ne $response.Content.Headers.ContentLength -and $response.Content.Headers.ContentLength -ne $Release.Bytes) {
             throw 'Installer size does not match the release manifest.'
@@ -100,10 +113,7 @@ function Receive-LesInstaller([object]$Client, [object]$Release, [string]$Direct
         }
         $output.Dispose(); $output = $null
         if ($received -ne $Release.Bytes) { throw 'Download was interrupted. Run the installer again to retry.' }
-        $algorithm = [Security.Cryptography.SHA256]::Create()
-        $hashStream = [IO.File]::OpenRead($partial)
-        try { $actualHash = [BitConverter]::ToString($algorithm.ComputeHash($hashStream)).Replace('-', '').ToLowerInvariant() }
-        finally { $hashStream.Dispose(); $algorithm.Dispose() }
+        $actualHash = Get-LesInstallerHash $partial
         if ($actualHash -cne $Release.Sha256) { throw 'SHA-256 verification failed. The downloaded file will not run.' }
         Move-Item -LiteralPath $partial -Destination $target
         return $target
@@ -139,8 +149,53 @@ function Install-LesRelease {
     } finally { $client.Dispose() }
 }
 
+function Invoke-LesDesktopUpdate {
+    [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+    if ($DesktopAction -eq 'Launch') {
+        if ($ExpectedSha -cnotmatch '^[0-9a-f]{64}\z' -or (Get-LesInstallerHash $InstallerPath) -cne $ExpectedSha) {
+            throw 'Installer checksum mismatch.'
+        }
+        try { Start-Process -FilePath $InstallerPath -Wait }
+        finally {
+            Remove-Item -LiteralPath $InstallerPath -Force
+            [IO.Directory]::Delete((Split-Path -Parent $InstallerPath), $false)
+        }
+        return
+    }
+    $installed = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\config\version.json') -Raw | ConvertFrom-Json
+    $client = New-LesHttpClient
+    try {
+        try {
+            $release = Get-LesRelease $client ([uri]'https://github.com/proovcme/LES/releases/latest/download/light-update.json')
+        } catch {
+            if ($DesktopAction -eq 'Check' -and $_.Exception.Message -eq 'A public LES RAG release has not been published yet.') {
+                @{ available=$false; unpublished=$true; current_build=$installed.build_number } | ConvertTo-Json -Compress
+                return
+            }
+            throw
+        }
+        $current = [version]$installed.product_version
+        $latest = [version]$release.Version
+        $available = $latest -gt $current -or ($latest -eq $current -and $release.Build -gt $installed.build_number)
+        if ($DesktopAction -eq 'Check') {
+            @{ available=$available; current_build=$installed.build_number; version=$release.Version;
+               build=$release.Build; sha256=$release.Sha256; bytes=$release.Bytes } | ConvertTo-Json -Compress
+            return
+        }
+        if (-not $available -or $release.Build -ne $ExpectedBuild -or $release.Sha256 -cne $ExpectedSha) {
+            @{ changed=$true } | ConvertTo-Json -Compress
+            return
+        }
+        $target = Receive-LesInstaller $client $release $OutputDirectory 6>$null
+        @{ installer=$target; sha256=$release.Sha256 } | ConvertTo-Json -Compress
+    } finally { $client.Dispose() }
+}
+
 # Dot-sourcing exposes functions for offline acceptance without starting installation.
 if ($MyInvocation.InvocationName -ne '.') {
-    try { Install-LesRelease; exit 0 }
+    try {
+        if ($DesktopAction) { Invoke-LesDesktopUpdate } else { Install-LesRelease }
+        exit 0
+    }
     catch { Write-Error $_ -ErrorAction Continue; exit 1 }
 }

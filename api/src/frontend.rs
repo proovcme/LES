@@ -278,11 +278,22 @@ pub fn classic_link(request: &Request, legacy: Option<&str>) -> Option<Response>
     let query = request.uri().query().unwrap_or_default();
     let destination = if path == "/classic" && (query.is_empty() || query == "tab=chat") {
         "/app/".parse().ok()?
-    } else {
-        let mut url = reqwest::Url::parse(legacy?).ok()?;
+    } else if let Some(legacy) = legacy {
+        let mut url = reqwest::Url::parse(legacy).ok()?;
         url.set_path(path);
         url.set_query((!query.is_empty()).then_some(query));
         url.as_str().parse().ok()?
+    } else {
+        match (path, query) {
+            ("/classic", "tab=data") => "/app/?panel=data",
+            ("/les/classic", "tab=state" | "tab=state&details=1") => "/app/?view=status",
+            ("/les/classic", "tab=models") => "/app/?panel=models",
+            ("/les/classic", "tab=profiles") => "/app/?panel=profiles",
+            ("/les/classic", "tab=tools") => "/app/?panel=mcp",
+            _ => return None,
+        }
+        .parse()
+        .ok()?
     };
     let mut result = response(StatusCode::TEMPORARY_REDIRECT, Body::empty());
     result.headers_mut().insert(header::LOCATION, destination);
@@ -316,6 +327,7 @@ pub async fn configuration(context: &Context, headers: &HeaderMap, url: Option<&
         configuration["indexed_attachments"] =
             json!(context.intake.is_some() && context.index_store.is_some());
         configuration["native_model_settings"] = json!(true);
+        configuration["native_mail"] = json!(context.upstream.is_none());
     }
     let mut response = json_response(StatusCode::OK, configuration, "rust.frontend");
     response

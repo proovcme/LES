@@ -10827,7 +10827,7 @@
     },
     {
       "inbound": [],
-      "lines": 113,
+      "lines": 149,
       "module": "tests.test_light_bootstrap",
       "outbound": [],
       "path": "tests/test_light_bootstrap.py",
@@ -11988,7 +11988,7 @@
     },
     {
       "inbound": [],
-      "lines": 342,
+      "lines": 423,
       "module": "tests.test_light_native_mail",
       "outbound": [
         "tests/native_batch_fixtures.py",
@@ -12001,7 +12001,7 @@
     },
     {
       "inbound": [],
-      "lines": 112,
+      "lines": 119,
       "module": "tests.test_light_native_mcp",
       "outbound": [
         "proxy/services/mcp_connection_service.py",
@@ -12167,7 +12167,7 @@
     },
     {
       "inbound": [],
-      "lines": 269,
+      "lines": 323,
       "module": "tests.test_light_native_runtime",
       "outbound": [
         "backend/light_processes.py",
@@ -12351,7 +12351,7 @@
     },
     {
       "inbound": [],
-      "lines": 147,
+      "lines": 145,
       "module": "tests.test_light_package",
       "outbound": [
         "tools/build_light_package.py"
@@ -13485,7 +13485,7 @@
     },
     {
       "inbound": [],
-      "lines": 90,
+      "lines": 88,
       "module": "tools.build_light_installers",
       "outbound": [
         "tools/__init__.py"
@@ -13499,13 +13499,12 @@
         "tests/test_light_package.py",
         "tools/install_light_macos.py"
       ],
-      "lines": 314,
+      "lines": 327,
       "module": "tools.build_light_package",
       "outbound": [
         "tools/__init__.py",
         "tools/build_light_frontend.py",
         "tools/build_native_api.py",
-        "tools/build_native_core.py",
         "tools/build_native_runtime.py",
         "tools/build_release_artifacts.py",
         "tools/build_tauri_app.py",
@@ -13563,7 +13562,6 @@
     {
       "inbound": [
         "tests/test_light_core_package.py",
-        "tools/build_light_package.py",
         "tools/install_light_macos.py"
       ],
       "lines": 60,
@@ -13947,7 +13945,7 @@
       "inbound": [
         "tools/build_light_package.py"
       ],
-      "lines": 93,
+      "lines": 94,
       "module": "tools.light_license_audit",
       "outbound": [
         "tools/__init__.py"
@@ -14173,7 +14171,7 @@
         "tests/test_light_skill_python_asset.py",
         "tools/build_light_package.py"
       ],
-      "lines": 116,
+      "lines": 121,
       "module": "tools.skill_python_asset",
       "outbound": [
         "tools/__init__.py"
@@ -16033,7 +16031,7 @@
     "runtime_support": 5,
     "test_or_tool_only": 271,
     "tracked_python_files": 717,
-    "tracked_python_lines": 170846
+    "tracked_python_lines": 171039
   },
   "warnings": []
 }
