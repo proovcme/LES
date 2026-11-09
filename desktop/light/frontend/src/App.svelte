@@ -10,13 +10,15 @@
   import SourcePanel from './components/SourcePanel.svelte';
   import ScopePicker from './components/ScopePicker.svelte';
   import AgentMemory from './components/AgentMemory.svelte';
+  import ModelSettings from './components/ModelSettings.svelte';
 
   let { workspace = new Workspace() }: { workspace?: Workspace } = $props();
-  let modal = $state<'sessions' | 'scope' | 'options' | null>(null);
+  let modal = $state<'sessions' | 'scope' | 'options' | 'attachment' | 'models' | null>(null);
   let source = $state<Source | null>(null); let mobileNav = $state(false);
   let actionBusy = $state(false); let sessionQuery = $state('');
   let memoryOpen = $state(false); let memoryDirty = $state(false); let memoryEditor: AgentMemory;
   let composer: HTMLTextAreaElement; let transcript = $state<HTMLDivElement>(); let fileInput: HTMLInputElement;
+  let indexFile = false;
   let sourceTrigger: HTMLElement | null = null; let followAnswer = $state(true);
   const disabled = $derived(workspace.busy || workspace.contextChanging || workspace.uploading || workspace.closing || actionBusy || workspace.loading);
   const scopeLabel = $derived(workspace.session?.scope.scope_type === 'mixed' ? 'Проект и наборы'
@@ -64,6 +66,15 @@
       event.preventDefault(); followAnswer = true; void workspace.send();
     }
   }
+  function chooseFile(index: boolean) {
+    indexFile = index;
+    modal = null;
+    fileInput.click();
+  }
+  function openModels() {
+    if (workspace.nativeModelSettings) { modal = 'models'; mobileNav = false; }
+    else void navigate('/les/classic?tab=models');
+  }
   function dropped(event: DragEvent) {
     event.preventDefault();
     const files = event.dataTransfer?.files;
@@ -93,7 +104,9 @@
     </div>
     <div class="nav-footer">
       <button class="nav-item" disabled={disabled} onclick={() => navigate(statusPath, location.origin)}><Icon name="status" />Состояние</button>
-      {#if workspace.legacyURL}<button class="nav-item" disabled={disabled} title="Модели, профили и почта" onclick={() => navigate('/les/classic?tab=models')}><Icon name="settings" />Настройки</button>{/if}
+      {#if workspace.nativeModelSettings || workspace.legacyURL}
+        <button class="nav-item" disabled={disabled} onclick={openModels}><Icon name="settings" />{workspace.nativeModelSettings ? 'Модели' : 'Настройки'}</button>
+      {/if}
       <p>В лесу нельзя заблудиться.</p>
     </div>
   </nav>
@@ -112,9 +125,9 @@
           <div class="conversation">
             {#if !workspace.messages.length}
               <div class="empty-state"><Icon name="chat" size={28} />
-                {#if workspace.session && !workspace.model && workspace.legacyURL}
+                {#if workspace.session && !workspace.model && (workspace.nativeModelSettings || workspace.legacyURL)}
                   <h2>Подключите модель</h2><p>Выберите локальную модель или API.<br />Затем добавьте документы и задайте вопрос.</p>
-                  <button disabled={disabled} onclick={() => navigate('/les/classic?tab=models')}>Подключить модель</button>
+                  <button disabled={disabled} onclick={openModels}>Подключить модель</button>
                 {:else}
                   <h2>Что найдём в ваших документах?</h2><p>Выберите набор или прикрепите файл.<br />Лес ответит и покажет источники.</p>
                   <button class="quiet" disabled={disabled || !workspace.session} onclick={() => modal = 'scope'}><Icon name="folder" />Выбрать документы</button>
@@ -133,13 +146,24 @@
       {/if}
       <div class="composer-zone">
         {#if workspace.error}<div class="error" role="alert"><p>{workspace.error}</p>{#if !workspace.session}<button class="quiet" disabled={workspace.loading} onclick={() => location.reload()}>Повторить подключение</button>{/if}</div>{/if}
-        {#if workspace.busy || workspace.uploading || workspace.closing || workspace.status}<div class="activity" role="status" aria-live="polite">{#if workspace.closing}Сохраняю диалог перед закрытием…{:else if workspace.busy}<span class="activity-dot"></span>{workspace.status} · {workspace.elapsed} с{:else if workspace.uploading}<span class="activity-dot"></span>Читаю файл…{:else}{workspace.status}{/if}</div>{/if}
+        {#if workspace.busy || workspace.uploading || workspace.closing || workspace.status}<div class="activity" role="status" aria-live="polite">{#if workspace.closing}Сохраняю диалог перед закрытием…{:else if workspace.busy}<span class="activity-dot"></span>{workspace.status} · {workspace.elapsed} с{:else if workspace.uploading}<span class="activity-dot"></span>{workspace.indexingUpload ? 'Передаю файл в очередь…' : 'Читаю файл…'}{:else}{workspace.status}{/if}</div>{/if}
+        {#if workspace.indexReceipt}
+          <div class="attachment index-attachment">
+            <Icon name="file" />
+            <span role="status"><strong>{workspace.indexReceipt.name}</strong><small>{workspace.indexNotice}</small></span>
+            {#if workspace.indexReady}<button type="button" class="quiet" disabled={disabled} onclick={() => action(() => workspace.useIndexedAttachments())}>Искать во вложениях</button>{/if}
+            {#if !workspace.indexWatching}<button type="button" class="icon-button quiet" aria-label="Скрыть состояние индексации" onclick={() => workspace.dismissIndexNotice()}><Icon name="close" size={16} /></button>{/if}
+          </div>
+        {/if}
         <form class="composer" onsubmit={(event) => { event.preventDefault(); followAnswer = true; void workspace.send(); }}>
 
           {#if workspace.attachment}<div class="attachment"><Icon name="file" /><span>{workspace.attachment.name}</span><button type="button" class="icon-button quiet" aria-label="Убрать вложение" disabled={workspace.busy} onclick={() => { workspace.attachment = null; workspace.changed(); }}><Icon name="close" size={16} /></button></div>{/if}
           <label for="question" class="sr-only">Ваш вопрос Лесу</label>
           <textarea id="question" bind:this={composer} bind:value={workspace.text} oninput={() => workspace.changed()} onkeydown={keyboard} ondragover={(event) => event.preventDefault()} ondrop={dropped} placeholder="Спросите Лес…" rows="2" maxlength="20000" disabled={workspace.loading || workspace.closing || !workspace.session} aria-describedby="composer-hint"></textarea>
-          <div class="composer-actions"><input class="sr-only" type="file" bind:this={fileInput} tabindex="-1" aria-label="Выбрать файл для чтения" onchange={() => { const file = fileInput.files?.[0]; if (file) void workspace.attach(file); fileInput.value = ''; }} /><button type="button" class="icon-button quiet" aria-label="Прикрепить файл для чтения" disabled={disabled || !workspace.session} onclick={() => fileInput.click()}><Icon name="paperclip" /></button><button type="button" class="scope-button quiet" disabled={disabled || !workspace.session} onclick={() => modal = 'scope'} title={scopeLabel}><Icon name="folder" /><span>{scopeLabel}</span></button><button type="button" class="icon-button quiet options-button" aria-label="Параметры ответа" aria-haspopup="dialog" data-active={workspace.reranker} disabled={disabled} onclick={() => modal = 'options'}><Icon name="settings" /></button>
+          <div class="composer-actions">
+            <input class="sr-only" type="file" bind:this={fileInput} tabindex="-1" aria-label="Выбрать файл" onchange={() => { const file = fileInput.files?.[0]; if (file) void workspace.attach(file, indexFile); fileInput.value = ''; }} />
+            <button type="button" class="icon-button quiet" aria-label={workspace.indexedAttachments ? 'Прикрепить файл' : 'Прикрепить файл для чтения'} aria-haspopup={workspace.indexedAttachments ? 'dialog' : undefined} disabled={disabled || !workspace.session} onclick={() => workspace.indexedAttachments ? modal = 'attachment' : chooseFile(false)}><Icon name="paperclip" /></button>
+            <button type="button" class="scope-button quiet" disabled={disabled || !workspace.session} onclick={() => modal = 'scope'} title={scopeLabel}><Icon name="folder" /><span>{scopeLabel}</span></button><button type="button" class="icon-button quiet options-button" aria-label="Параметры ответа" aria-haspopup="dialog" data-active={workspace.reranker} disabled={disabled} onclick={() => modal = 'options'}><Icon name="settings" /></button>
             {#if workspace.busy}<button type="button" class="stop-button" aria-label="Остановить ответ" onclick={() => workspace.stop()}><Icon name="stop" /><span class="send-label">Остановить</span></button>{:else}<button type="submit" class="send-button" disabled={disabled || !workspace.session || !workspace.text.trim()} aria-label="Отправить вопрос"><Icon name="arrow" /><span class="send-label">Отправить</span></button>{/if}
           </div>
         </form>
@@ -157,6 +181,17 @@
   </Modal>
 {:else if modal === 'scope' && workspace.session}
   <ScopePicker scope={workspace.session.scope} datasets={workspace.datasets} save={(scope) => workspace.setScope(scope)} close={() => modal = null} />
+{:else if modal === 'models'}
+  <ModelSettings close={() => { modal = null; void workspace.refreshModel().catch((error) => { workspace.error = errorMessage(error); }); }} />
+{:else if modal === 'attachment'}
+  <Modal title="Прикрепить файл" close={() => modal = null}>
+    <p>Прочитать файл в этом диалоге или сохранить его в наборе «Вложения чата» для поиска.</p>
+    {#if workspace.indexWatching}<p class="muted">Сначала дождитесь окончания текущей индексации.</p>{/if}
+    <div class="modal-footer">
+      <button type="button" class="quiet" onclick={() => chooseFile(false)}>Прочитать в чате</button>
+      <button type="button" disabled={workspace.indexWatching} onclick={() => chooseFile(true)}>Добавить в поиск</button>
+    </div>
+  </Modal>
 {:else if modal === 'options'}
   <Modal title="Параметры ответа" close={() => modal = null}>
     <label class="option"><input type="checkbox" bind:checked={workspace.reranker} /><span><strong>Уточнять результаты поиска</strong><small>Для вопросов по документам. Если доступен реранкер, он пересортирует найденные фрагменты. Ответ может занять больше времени.</small></span></label>

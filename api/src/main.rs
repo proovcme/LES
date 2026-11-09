@@ -186,6 +186,11 @@ async fn dispatch(State(context): State<Arc<Context>>, request: Request) -> Resp
     if let Some(route) = auth_keys::route(request.method(), request.uri().path()) {
         return auth_keys::handle(context, request, route).await;
     }
+    if context.public_chat_rust
+        && model_registry::settings::handles(request.method().as_str(), request.uri().path())
+    {
+        return model_registry::settings::handle(context, request).await;
+    }
     if model_registry::handles(request.method().as_str(), request.uri().path()) {
         return model_registry::handle(context, request).await;
     }

@@ -11635,6 +11635,7 @@
         "tests/test_light_native_conversation.py",
         "tests/test_light_native_document_review.py",
         "tests/test_light_native_model_discovery.py",
+        "tests/test_light_native_model_settings.py",
         "tests/test_light_native_public_chat.py",
         "tests/test_light_native_public_upload.py"
       ],
@@ -12034,6 +12035,17 @@
     },
     {
       "inbound": [],
+      "lines": 65,
+      "module": "tests.test_light_native_model_settings",
+      "outbound": [
+        "tests/test_light_native_chat_turn.py"
+      ],
+      "path": "tests/test_light_native_model_settings.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
       "lines": 298,
       "module": "tests.test_light_native_preparation",
       "outbound": [
@@ -12067,7 +12079,7 @@
     },
     {
       "inbound": [],
-      "lines": 100,
+      "lines": 117,
       "module": "tests.test_light_native_public_upload",
       "outbound": [
         "tests/test_light_native_api.py",
@@ -16003,9 +16015,9 @@
     "product_reachable": 417,
     "registered_api_routes": 298,
     "runtime_support": 5,
-    "test_or_tool_only": 269,
-    "tracked_python_files": 715,
-    "tracked_python_lines": 170422
+    "test_or_tool_only": 270,
+    "tracked_python_files": 716,
+    "tracked_python_lines": 170504
   },
   "warnings": []
 }

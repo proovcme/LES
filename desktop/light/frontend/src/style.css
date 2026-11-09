@@ -114,6 +114,9 @@ textarea::placeholder { color: var(--forest-muted); }
 .send-button,.stop-button { margin-left: auto; flex-shrink: 0; }
 .attachment { display: flex; align-items: center; gap: 8px; background: var(--forest-selected); border-radius: 10px; padding: 0 4px 0 12px; font-size: 12px; }
 .attachment span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.index-attachment { flex-wrap: wrap; padding: 5px 6px 5px 12px; }
+.index-attachment span { min-width: min(12rem, 100%); }
+.index-attachment small { display: block; color: var(--forest-muted); }
 .composer-footnote { display: flex; justify-content: space-between; gap: 16px; min-height: 20px; margin: 8px 4px 0; font-size: 11px; color: var(--forest-muted); }.composer-footnote>span { white-space: nowrap; }.draft-status { margin: 0; }
 .latest { position: absolute; left: 50%; bottom: 250px; z-index: 1; background: var(--forest-paper); }
 .error { padding: 12px 16px; border: 1px solid #ceaaa2; border-radius: 12px; color: var(--forest-danger); background: #fff6f2; font-size: 13px; margin: 10px 0; overflow-wrap: anywhere; }

@@ -1,5 +1,5 @@
 import { ApiError, errorMessage, request, streamChat } from './api';
-import type { Attachment, ChatPayload, ContextExclusion, Dataset, Draft, Message, ModelRole, Scope, Session } from './contracts';
+import type { Attachment, ChatPayload, ContextExclusion, Dataset, Draft, IndexedAttachment, Message, ModelRole, Scope, Session } from './contracts';
 import { contextPath, sourcesFor } from './contracts';
 import { DraftWriter } from './drafts';
 
@@ -20,6 +20,13 @@ export class Workspace {
   closing = $state(false);
   beforeClose?: () => Promise<void>;
   uploading = $state(false);
+  indexedAttachments = $state(false);
+  nativeModelSettings = $state(false);
+  indexReceipt = $state<IndexedAttachment | null>(null);
+  indexNotice = $state('');
+  indexReady = $state(false);
+  indexWatching = $state(false);
+  indexingUpload = $state(false);
   error = $state('');
   notice = $state('');
   status = $state('');
@@ -30,6 +37,8 @@ export class Workspace {
   private writer?: DraftWriter;
   private timer?: ReturnType<typeof setTimeout>;
   private controller?: AbortController;
+  private indexTimer?: ReturnType<typeof setTimeout>;
+  private indexController?: AbortController;
   private alive = true;
   private initializing = false;
   private generationFinished?: Promise<void>;
@@ -40,7 +49,7 @@ export class Workspace {
     this.initializing = true; this.loading = true;
     try {
       const results = await Promise.allSettled([
-        request<{ legacy_url: string | null }>('/api/light/frontend'),
+        request<{ legacy_url: string | null; indexed_attachments?: boolean; native_model_settings?: boolean }>('/api/light/frontend'),
         request<{ roles: { answer: ModelRole | null } }>('/api/model-connections/effective'),
         request<{ datasets: Dataset[] }>('/api/documents/datasets'),
         this.refreshSessions(),
@@ -48,7 +57,12 @@ export class Workspace {
       ]);
       if (!this.alive) return;
       const [config, models, datasets] = results;
-      if (config.status === 'fulfilled') this.legacyURL = config.value.legacy_url;
+      if (config.status === 'fulfilled') {
+        this.legacyURL = config.value.legacy_url;
+        this.indexedAttachments = config.value.indexed_attachments === true;
+        this.nativeModelSettings = config.value.native_model_settings === true;
+        if (this.indexedAttachments) this.restoreIndexWatch();
+      }
       if (models.status === 'fulfilled') this.model = models.value.roles.answer;
       else this.notice = 'Не удалось проверить назначение модели. Откройте подключения перед отправкой.';
       if (datasets.status === 'fulfilled') this.datasets = datasets.value.datasets;
@@ -57,8 +71,7 @@ export class Workspace {
       if (results[3].status === 'rejected') throw results[3].reason;
       if (results[4].status === 'fulfilled') {
         const connection = results[4].value.connections.find((item) => item.connection_id === this.model?.connection_id);
-        const names: Record<string, string> = { ollama: 'Ollama', mlx: 'MLX', lm_studio: 'LM Studio', llama_cpp: 'llama.cpp', lemonade: 'Lemonade', freetoken: 'FreeToken' };
-        this.service = connection ? names[connection.extension_type || ''] || 'Совместимый API' : '';
+        this.service = connection ? serviceLabel(connection.extension_type) : '';
       }
       const requested = new URL(location.href).searchParams.get('session');
       if (requested) await this.openSession(requested);
@@ -71,6 +84,16 @@ export class Workspace {
   async refreshSessions(): Promise<void> {
     const result = await request<{ sessions: Session[] }>('/api/workspace/sessions');
     if (this.alive) this.sessions = result.sessions;
+  }
+
+  async refreshModel(): Promise<void> {
+    const data = await request<{ roles: { answer: ModelRole | null } }>('/api/model-connections/effective');
+    if (!this.alive) return;
+    this.model = data.roles.answer;
+    this.service = '';
+    const saved = await request<{ connections: { connection_id: string; extension_type: string | null }[] }>('/api/model-connections').catch(() => null);
+    const connection = saved?.connections.find((item) => item.connection_id === this.model?.connection_id);
+    if (this.alive && connection) this.service = serviceLabel(connection.extension_type);
   }
 
   changed(): void {
@@ -156,20 +179,97 @@ export class Workspace {
     });
   }
 
-  async attach(file: File): Promise<void> {
+  async attach(file: File, index = false): Promise<void> {
     if (this.uploading || this.busy || this.closing || !this.session) return;
+    if (index && (!this.indexedAttachments || this.indexWatching)) return;
     if (file.size > 50 * 1024 * 1024) { this.error = 'Для чата выберите файл до 50 МБ. Большие документы добавляйте в набор.'; return; }
     this.uploading = true; this.error = '';
+    this.indexingUpload = index;
     try {
       const body = new FormData(); body.append('file', file);
-      const attached = await request<Attachment>('/api/chat/attachments', {
+      const options = {
         method: 'POST', body, headers: { 'Idempotency-Key': crypto.randomUUID() }, signal: AbortSignal.timeout(180000),
-      });
+      };
+      if (index) {
+        const receipt = await request<IndexedAttachment>('/api/rag/attach?mode=index', options);
+        if (!validReceipt(receipt)) throw new ApiError('Лес не вернул номер задания. Проверьте раздел «Состояние».');
+        if (!this.alive) return;
+        this.indexReceipt = receipt; this.indexReady = false; this.indexWatching = true;
+        this.indexNotice = 'Файл в очереди на индексацию';
+        try { localStorage.setItem(INDEX_RECEIPT, JSON.stringify(receipt)); } catch { /* The job itself is on the server. */ }
+        void this.checkIndex();
+        return;
+      }
+      const attached = await request<Attachment>('/api/chat/attachments', options);
       if (!this.alive) return;
       this.attachment = { attachment_id: attached.attachment_id, name: attached.name };
       await this.persist();
     } catch (error) { this.error = errorMessage(error); }
-    finally { this.uploading = false; }
+    finally { this.uploading = false; this.indexingUpload = false; }
+  }
+
+  private restoreIndexWatch(): void {
+    try {
+      const receipt = JSON.parse(localStorage.getItem(INDEX_RECEIPT) || 'null');
+      if (!validReceipt(receipt)) return;
+      this.indexReceipt = receipt; this.indexWatching = true;
+      this.indexNotice = 'Проверяю состояние индексации';
+      void this.checkIndex();
+    } catch { /* An invalid saved receipt cannot start a job. */ }
+  }
+
+  private async checkIndex(): Promise<void> {
+    const receipt = this.indexReceipt;
+    if (!receipt || !this.alive) return;
+    const controller = new AbortController();
+    this.indexController = controller;
+    let delay = 2000;
+    try {
+      const job = await request<{ id: string; dataset_id: string; status: string; message?: string; indexed?: number }>(
+        `/api/light/intake?id=${encodeURIComponent(receipt.intake_job_id)}`,
+        { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(8000)]) });
+      if (!this.alive || controller.signal.aborted) return;
+      if (job.id !== receipt.intake_job_id || job.dataset_id !== receipt.dataset_id) throw new ApiError('Не удалось подтвердить задание.');
+      this.indexReady = job.status === 'completed' && job.indexed === 1;
+      this.indexWatching = job.status !== 'completed' && job.status !== 'failed';
+      this.indexNotice = this.indexReady ? 'Файл готов к поиску'
+        : job.message || (this.indexWatching ? 'Файл ещё обрабатывается' : 'Файл не добавлен в поиск');
+      if (this.indexReady) void this.refreshDatasets().catch(() => undefined);
+      if (job.status === 'waiting') delay = 5000;
+    } catch (error) {
+      if (!this.alive || controller.signal.aborted) return;
+      if (error instanceof ApiError && [401, 403, 404].includes(error.status)) {
+        this.indexWatching = false;
+        this.indexNotice = 'Задание недоступно. Проверьте его в разделе «Состояние».';
+      } else {
+        this.indexNotice = 'Пока не удаётся проверить состояние. Лес повторит проверку.';
+        delay = 5000;
+      }
+    } finally {
+      if (this.alive && this.indexWatching) this.indexTimer = setTimeout(() => { void this.checkIndex(); }, delay);
+    }
+  }
+
+  private async refreshDatasets(): Promise<void> {
+    const result = await request<{ datasets: Dataset[] }>('/api/documents/datasets');
+    if (this.alive) this.datasets = result.datasets;
+  }
+
+  async useIndexedAttachments(): Promise<void> {
+    const receipt = this.indexReceipt;
+    if (!this.indexReady || !receipt) return;
+    await this.refreshDatasets();
+    if (!this.datasets.some((dataset) => dataset.id === receipt.dataset_id)) {
+      throw new ApiError('Набор вложений больше не доступен.');
+    }
+    await this.setScope({ scope_type: 'dataset', dataset_ids: [receipt.dataset_id], project_ids: [], selected_sources_only: false });
+    this.dismissIndexNotice();
+  }
+
+  dismissIndexNotice(): void {
+    if (this.indexWatching) return;
+    this.indexReceipt = null; this.indexNotice = ''; this.indexReady = false;
+    try { localStorage.removeItem(INDEX_RECEIPT); } catch { /* Optional browser storage. */ }
   }
 
   async send(): Promise<void> {
@@ -244,7 +344,7 @@ export class Workspace {
 
   stop(): void { this.controller?.abort(); }
   async prepareClose(): Promise<void> {
-    if (this.uploading) throw new ApiError('Файл ещё читается. Дождитесь завершения и повторите закрытие.');
+    if (this.uploading) throw new ApiError('Файл ещё загружается. Дождитесь завершения и повторите закрытие.');
     this.closing = true; clearTimeout(this.timer);
     try {
       const generation = this.generationFinished;
@@ -258,6 +358,22 @@ export class Workspace {
   dispose(): void {
     // Route changes inside this SPA do not destroy the workspace. A real close
     // disconnects the stream, which checkpoints the partial answer on the API.
-    clearTimeout(this.timer); this.controller?.abort(); this.alive = false;
+    this.alive = false;
+    clearTimeout(this.timer); this.controller?.abort();
+    clearTimeout(this.indexTimer); this.indexController?.abort();
   }
+}
+
+const INDEX_RECEIPT = 'les.indexed-attachment.receipt.v1';
+function serviceLabel(extension: string | null): string {
+  const names: Record<string, string> = { ollama: 'Ollama', mlx: 'MLX', lm_studio: 'LM Studio',
+    llama_cpp: 'llama.cpp', lemonade: 'Lemonade', freetoken: 'FreeToken' };
+  return names[extension || ''] || 'Совместимый API';
+}
+function validReceipt(value: unknown): value is IndexedAttachment {
+  if (!value || typeof value !== 'object') return false;
+  const receipt = value as Partial<IndexedAttachment>;
+  return typeof receipt.intake_job_id === 'string' && /^[a-f0-9]{32}$/.test(receipt.intake_job_id)
+    && typeof receipt.dataset_id === 'string' && /^[a-zA-Z0-9_.-]{1,160}$/.test(receipt.dataset_id)
+    && typeof receipt.name === 'string' && receipt.name.length > 0 && receipt.name.length <= 512;
 }

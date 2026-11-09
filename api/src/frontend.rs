@@ -311,7 +311,13 @@ pub async fn configuration(context: &Context, headers: &HeaderMap, url: Option<&
         Ok(cors) => cors,
         Err(response) => return response,
     };
-    let mut response = json_response(StatusCode::OK, json!({"legacy_url":url}), "rust.frontend");
+    let mut configuration = json!({"legacy_url":url});
+    if context.public_chat_rust {
+        configuration["indexed_attachments"] =
+            json!(context.intake.is_some() && context.index_store.is_some());
+        configuration["native_model_settings"] = json!(true);
+    }
+    let mut response = json_response(StatusCode::OK, configuration, "rust.frontend");
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, "no-store".parse().unwrap());

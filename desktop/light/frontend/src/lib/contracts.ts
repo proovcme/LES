@@ -7,6 +7,7 @@ export interface Session {
   scope: Scope; role: string; registered: boolean; updated_at: string;
 }
 export interface Attachment { attachment_id: string; name: string }
+export interface IndexedAttachment { intake_job_id: string; dataset_id: string; name: string }
 export interface Draft { revision: number; text: string; attachment: Attachment | null }
 export interface Source {
   index: number; doc_id?: string; dataset_id?: string; doc_name?: string;

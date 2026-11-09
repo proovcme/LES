@@ -13,12 +13,13 @@ async function check(response: Response): Promise<Response> {
   if (response.ok) return response;
   let body: { detail?: unknown; code?: string } = {};
   try { body = await response.json(); } catch { /* HTML from an unavailable service is not user text. */ }
-  const detail = typeof body.detail === 'string' ? body.detail : undefined;
+  const nested = body.detail && typeof body.detail === 'object' ? body.detail as { message?: unknown; code?: string } : null;
+  const detail = typeof body.detail === 'string' ? body.detail : typeof nested?.message === 'string' ? nested.message : undefined;
   const message = response.status === 401 ? 'Нужно войти в Лес. Откройте прежний интерфейс и проверьте доступ.'
     : response.status === 403 ? 'Недостаточно прав для этого действия.'
     : response.status === 422 ? detail ?? 'Проверьте заполненные поля. Вопрос — не больше 20 000 символов.'
     : detail ?? 'Лес не смог выполнить действие. Повторите попытку; ваш текст сохранён.';
-  throw new ApiError(message, response.status, body.code);
+  throw new ApiError(message, response.status, body.code ?? nested?.code);
 }
 
 export async function request<T>(path: string, options: RequestInit = {}): Promise<T> {

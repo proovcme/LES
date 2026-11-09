@@ -31,6 +31,48 @@ beforeEach(() => {
 });
 afterEach(async () => { await unmount(component); document.body.innerHTML = ''; vi.unstubAllGlobals(); });
 
+it('uses the paperclip to index a file, waits for publication and preserves the draft', async () => {
+  await settle(() => !!document.querySelector('#question'));
+  workspace.indexedAttachments = true;
+  const receipt = { intake_job_id: 'a'.repeat(32), dataset_id: 'chat-files', name: 'План.pdf' };
+  let queued = false; let selected = false;
+  const fetcher = vi.fn(async (path: string, init?: RequestInit) => {
+    if (path === '/api/rag/attach?mode=index') {
+      expect(init?.body).toBeInstanceOf(FormData);
+      expect(new Headers(init?.headers).get('Idempotency-Key')).toBeTruthy();
+      queued = true; return json(receipt);
+    }
+    if (path.startsWith('/api/light/intake?')) {
+      expect(path).toContain(receipt.intake_job_id);
+      return json({ id: receipt.intake_job_id, dataset_id: receipt.dataset_id, status: 'completed', indexed: 1 });
+    }
+    if (path === '/api/documents/datasets') return json({ datasets: [{ id: 'chat-files', name: 'Вложения чата' }] });
+    if (path === '/api/workspace/sessions/demo' && init?.method === 'PATCH') {
+      const { scope } = JSON.parse(init.body as string);
+      expect(scope.dataset_ids).toEqual(['chat-files']);
+      selected = true; return json({ ...workspace.session, scope });
+    }
+    throw new Error(`Unexpected fixture request: ${path}`);
+  });
+  vi.stubGlobal('fetch', fetcher);
+  flushSync();
+  document.querySelector<HTMLButtonElement>('[aria-label="Прикрепить файл"]')!.click();
+  await settle(() => !!document.querySelector('dialog'));
+  const button = [...document.querySelectorAll<HTMLButtonElement>('dialog button')].find((b) => b.textContent === 'Добавить в поиск')!;
+  button.click();
+  const input = document.querySelector<HTMLInputElement>('input[type=file]')!;
+  Object.defineProperty(input, 'files', { value: [new File(['sample'], receipt.name, { type: 'application/pdf' })] });
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+  await settle(() => document.body.textContent!.includes('Файл готов к поиску'));
+  expect(queued).toBe(true);
+  expect(workspace.attachment).toBeNull();
+  expect(workspace.session?.scope.scope_type).toBe('none');
+  const search = [...document.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Искать во вложениях')!;
+  search.click();
+  await settle(() => selected && !workspace.indexReceipt);
+  expect(document.querySelector<HTMLTextAreaElement>('#question')?.value).toBe('Мой черновик');
+});
+
 it('opens evidence and its original, then returns with draft, scroll and focus preserved', async () => {
   await settle(() => !!document.querySelector('[data-citation]'));
   const transcript = document.querySelector<HTMLDivElement>('.transcript')!; transcript.scrollTop = 123;

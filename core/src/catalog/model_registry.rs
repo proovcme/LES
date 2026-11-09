@@ -199,6 +199,229 @@ fn validate_snapshot(value: &Value) -> Result<()> {
     }
     Ok(())
 }
+
+/// The HTTP settings owner checks the head and binding inside the write transaction.
+/// Secrets are kept in the established local store, never in arguments/audit rows.
+pub fn manage(
+    database: &std::path::Path,
+    env_path: &std::path::Path,
+    action: &str,
+    args: &Args,
+    secret: Option<&str>,
+) -> Result<Value> {
+    let mut conn =
+        super::connection(database, true)?.ok_or_else(|| domain("MODEL_REGISTRY_UNAVAILABLE"))?;
+    conn.pragma_update(None, "foreign_keys", true)?;
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    execute(&tx, "model_registry_init", &Args::new())?;
+    let actor = text(args, "actor")?;
+    let mut secret_write = None;
+    let value = match action {
+        "create" => {
+            let current = execute(&tx, "model_registry_create", args)?;
+            if secret.is_some() {
+                let id = current["connection_id"].as_str().unwrap();
+                let reference = owned_reference(id);
+                let next = revision_change(&tx, &current, actor, json!({"secret_ref":reference}))?;
+                secret_write = Some(reference);
+                next
+            } else {
+                current
+            }
+        }
+        "revise" | "disable" | "secret" => {
+            let id = text(args, "connection_id")?;
+            let mut current = existing(head(&tx, id)?, "CONNECTION_NOT_FOUND")?;
+            if current["revision_id"] != text(args, "expected_revision_id")? {
+                return Err(conflict("CONNECTION_REVISION_CONFLICT"));
+            }
+            match action {
+                "disable" => {
+                    if args.get("confirm_bound_roles").and_then(Value::as_bool) != Some(true) {
+                        for role in ["answer", "embeddings", "local_fallback"] {
+                            let active = binding(&tx, role)?;
+                            if let Some(id) = active["connection_revision_id"].as_str() {
+                                if revision(&tx, id)?["connection_id"] == current["connection_id"] {
+                                    return Err(conflict("BOUND_CONNECTION_CONFIRMATION_REQUIRED"));
+                                }
+                            }
+                        }
+                    }
+                    revision_change(&tx, &current, actor, json!({"enabled":false}))?
+                }
+                "revise" => {
+                    let changes = &args["changes"];
+                    if current["secret_ref"].is_string()
+                        && ["base_url", "locality"]
+                            .iter()
+                            .any(|key| changes.get(*key).is_some_and(|v| v != &current[*key]))
+                    {
+                        return Err(conflict("CONNECTION_SECRET_ENDPOINT_CHANGED"));
+                    }
+                    revision_change(&tx, &current, actor, changes.clone())?
+                }
+                _ => {
+                    let reference = current["secret_ref"]
+                        .as_str()
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| owned_reference(id));
+                    if current["secret_ref"].is_null() {
+                        current =
+                            revision_change(&tx, &current, actor, json!({"secret_ref":reference}))?;
+                    }
+                    secret_write = Some(reference);
+                    current
+                }
+            }
+        }
+        "bind" => {
+            let role = role(args)?;
+            let revision_id = text(args, "connection_revision_id")?;
+            let target = existing(revision(&tx, revision_id)?, "CONNECTION_REVISION_NOT_FOUND")?;
+            let current = head(&tx, target["connection_id"].as_str().unwrap())?;
+            if current["revision_id"] != revision_id || current["enabled"] != 1 {
+                return Err(conflict("CONNECTION_REVISION_CONFLICT"));
+            }
+            if role == "local_fallback" && target["locality"] == "remote" {
+                return Err(domain("LOCAL_FALLBACK_REQUIRES_LOCAL_MODEL"));
+            }
+            let snapshot = execute(
+                &tx,
+                "model_registry_snapshot",
+                json!({"connection_revision_id":revision_id})
+                    .as_object()
+                    .unwrap(),
+            )?;
+            let observations = snapshot["observations_json"]
+                .as_str()
+                .and_then(|v| serde_json::from_str::<Value>(v).ok())
+                .unwrap_or(Value::Null);
+            let required = if role == "embeddings" {
+                "embeddings"
+            } else {
+                "chat_completions"
+            };
+            crate::model_capabilities::require(
+                &json!({"expires_at":snapshot["expires_at"],"observations":observations}),
+                &[required.to_owned()],
+                None,
+            )
+            .map_err(|code| domain(code.split(':').next().unwrap_or("CAPABILITY_REQUIRED")))?;
+            execute(&tx, "model_registry_bind", args)?
+        }
+        _ => return Err(Failure::invalid("Unknown model settings action")),
+    };
+    if let Some(reference) = secret_write {
+        let secret = secret
+            .filter(|v| !v.chars().any(char::is_control))
+            .ok_or_else(|| domain("SECRET_VALUE_INVALID"))?;
+        crate::model_secrets::replace(env_path, &reference, secret, actor).map_err(domain)?;
+    }
+    tx.commit()?;
+    Ok(value)
+}
+
+fn owned_reference(id: &str) -> String {
+    let token = id
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_uppercase()
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    format!("env:LES_MODEL_CONNECTION_{token}_API_KEY")
+}
+
+pub fn record_probe(
+    database: &std::path::Path,
+    revision: &str,
+    actor: &str,
+    mut observations: Vec<Value>,
+    mut options: Value,
+) -> Result<Value> {
+    let mut db =
+        super::connection(database, true)?.ok_or_else(|| domain("MODEL_REGISTRY_UNAVAILABLE"))?;
+    db.pragma_update(None, "foreign_keys", true)?;
+    let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let clock = chrono::Utc::now();
+    let when = clock.to_rfc3339_opts(chrono::SecondsFormat::Micros, false);
+    let mut expires = clock + chrono::Duration::hours(24);
+    let prior = execute(
+        &tx,
+        "model_registry_snapshot",
+        json!({"connection_revision_id":revision})
+            .as_object()
+            .unwrap(),
+    )?;
+    let expiry = prior["expires_at"]
+        .as_str()
+        .and_then(|v| chrono::DateTime::parse_from_rfc3339(v).ok())
+        .map(|v| v.with_timezone(&chrono::Utc))
+        .filter(|v| *v > clock);
+    let previous = prior["observations_json"]
+        .as_str()
+        .and_then(|v| serde_json::from_str::<Vec<Value>>(v).ok())
+        .unwrap_or_default();
+    let old_options = prior["transport_options_json"]
+        .as_str()
+        .and_then(|v| serde_json::from_str::<Value>(v).ok())
+        .unwrap_or(Value::Null);
+    for row in &mut observations {
+        if row["detail"] == "not_requested" {
+            if let (Some(expiry), Some(old)) = (
+                expiry,
+                previous
+                    .iter()
+                    .find(|v| v["capability"] == row["capability"] && v["state"] == "supported"),
+            ) {
+                let keys: &[&str] = match row["capability"].as_str() {
+                    Some("chat_completions") => &[
+                        "chat_protocol",
+                        "observed_context_tokens",
+                        "max_output_field",
+                    ],
+                    Some("embeddings") => &["embedding_protocol"],
+                    _ => &[],
+                };
+                for key in keys {
+                    if old_options[*key].is_string() {
+                        options[*key] = old_options[*key].clone();
+                    }
+                }
+                *row = old.clone();
+                expires = expires.min(expiry);
+                continue;
+            }
+        }
+        row["observed_at"] = json!(when);
+    }
+    let expires = expires.to_rfc3339_opts(chrono::SecondsFormat::Micros, false);
+    let snapshot = json!({"snapshot_id":format!("cap:{}",id()?), "connection_revision_id":revision,
+        "observed_at":when,"expires_at":expires,"observations":observations,"transport_options":options});
+    execute(
+        &tx,
+        "model_registry_save_snapshot",
+        json!({"snapshot":snapshot,"actor":actor})
+            .as_object()
+            .unwrap(),
+    )?;
+    tx.commit()?;
+    Ok(snapshot)
+}
+
+fn revision_change(
+    conn: &Connection,
+    current: &Value,
+    actor: &str,
+    changes: Value,
+) -> Result<Value> {
+    let args = json!({"connection_id":current["connection_id"],"expected_revision_id":current["revision_id"],
+        "actor":actor,"changes":changes});
+    execute(conn, "model_registry_revise", args.as_object().unwrap())
+}
 pub(super) fn execute(conn: &Connection, action: &str, args: &Args) -> Result<Value> {
     match action {
         "model_registry_view" => {

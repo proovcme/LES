@@ -1,5 +1,10 @@
 # Модули LES RAG
 
+842: [скрепка, настройки и чтение писем](modules/native-settings-attachments.md) —
+`api/src/model_registry/`, `core/src/catalog/model_registry.rs`,
+`desktop/light/frontend/src/components/ModelSettings.svelte`,
+`core/src/document/conversion/mail.rs`.
+
 841: [индексация вложения и обнаружение моделей](modules/native-indexed-attachments.md) —
 `core/src/catalog/indexed_attachment.rs`, `api/src/intake.rs`,
 `api/src/model_registry/discovery.rs`: оригинал, квитанция очереди и каталоги моделей.

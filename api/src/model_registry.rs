@@ -1,6 +1,7 @@
 //! Read model connections directly from the native transaction owner.
-//! Writes and capability probes still use the retained HTTP handlers.
 mod discovery;
+mod probe;
+pub mod settings;
 use crate::{auth, error, json_response, Context};
 use axum::{
     extract::Request,

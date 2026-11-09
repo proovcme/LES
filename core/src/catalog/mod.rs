@@ -11,6 +11,7 @@ mod job_store;
 pub(crate) mod library;
 mod model_connection;
 mod model_registry;
+pub use model_registry::{manage, record_probe};
 mod notes;
 mod projects;
 

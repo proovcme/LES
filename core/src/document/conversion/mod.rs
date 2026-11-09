@@ -1,4 +1,5 @@
 //! Read-only, bounded format conversion. The worker owns parsing; callers own indexing.
+mod mail;
 mod pipeline;
 mod presentation;
 mod spreadsheet;
@@ -134,8 +135,13 @@ pub fn execute_with(request: &Value, external: &impl Fn(&Value) -> Result<Value>
         .unwrap_or("")
         .to_ascii_lowercase();
     // Refuse unknown formats before opening them, without a second hidden parser.
-    if !supports(path) {
+    let mail = matches!(suffix.as_str(), "eml" | "emlx");
+    if !supports(path) && !mail {
         return Err("DOCUMENT_CONVERT_UNSUPPORTED");
+    }
+    if mail && request["pipeline"] == "nodes" {
+        // Generic folder publication does not yet enforce the mailbox egress policy.
+        return Err("DOCUMENT_NATIVE_DISPATCH_REQUIRED");
     }
     let bytes = bytes(path)?;
     let source_sha256 = crate::sha256_hex(&bytes);
@@ -147,6 +153,7 @@ pub fn execute_with(request: &Value, external: &impl Fn(&Value) -> Result<Value>
     }
     let table = matches!(suffix.as_str(), "xlsx" | "xlsm" | "xls" | "csv");
     let mut result = match suffix.as_str() {
+        "eml" | "emlx" => mail::read(&bytes, suffix == "emlx")?,
         "pptx" if request["pipeline"] != "nodes" => presentation::read(&bytes)?,
         "pptx" => Value::Null,
         "docx" => {

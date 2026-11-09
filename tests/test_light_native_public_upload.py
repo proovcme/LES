@@ -1,5 +1,6 @@
 """Public file/folder intake, durable receipts and the actual model boundary."""
 import json
+from email.message import EmailMessage
 import sqlite3
 from threading import Event, Thread
 import httpx
@@ -98,3 +99,19 @@ def test_quick_alias_and_folder_deliver_complete_snapshot_without_index(native_t
     assert rejected.status_code==422 and rejected.json()['code']=='ATTACHMENT_FOLDER_INCOMPLETE'
     assert len(list((t.state/'storage/chat_attachments').glob('*.json')))==2
     assert not list((t.state/'storage/upload-tmp').iterdir())
+
+
+def test_native_saved_mail_reads_mime_without_touching_any_mailbox(native_turn):
+    mail=EmailMessage()
+    mail['Subject']='Проверка письма'
+    mail['From']='Sender <sender@example.invalid>'
+    mail['To']='Recipient <recipient@example.invalid>'
+    mail.set_content('Тело письма: проект 日本語')
+    mail.add_attachment('Строка из вложения',subtype='plain',filename='Заметка.txt')
+    mail.add_attachment(b'%PDF test',maintype='application',subtype='pdf',filename='Не разобран.pdf')
+    original=mail.as_bytes()
+    for suffix, content in [('eml',original),('emlx',str(len(original)).encode()+b'\n'+original+b'<plist>ignored</plist>')]:
+        result=native_turn.client.post(URL,files={'file':('Письмо.'+suffix,content)}).raise_for_status().json()
+        assert all(text in result['text'] for text in ['Проверка письма','проект 日本語','Строка из вложения',
+            'Не разобран.pdf','Содержимое вложения не прочитано.'])
+        assert 'ignored' not in result['text']
