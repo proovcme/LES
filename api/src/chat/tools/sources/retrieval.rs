@@ -1,9 +1,15 @@
 //! Query-time dense/BM25/RRF followed by generation-checked parent reads.
 use super::*;
 use crate::index_batch::configuration::{identity, tokenizer, Settings};
+mod envelope;
 mod matching;
 mod packing;
+mod pagination;
 mod views;
+use envelope::fit_envelope_budget;
+#[cfg(test)]
+use envelope::{canonical_chars, json_item_count};
+use pagination::Page;
 
 /// A materialized page view replaces all its search chunks at read time. Count
 /// that page once *before* applying the document quota and shortlist limit.
@@ -236,7 +242,7 @@ async fn search_with_navigation(
             let raw_points = result["points"].as_array().ok_or("INDEX_READ_INVALID")?;
             // Diversify the automatic shortlist. Explicit tool pagination must
             // still expose every ranked match, including later pages of one file.
-            let ranked = if navigation { raw_points.clone() } else {
+            let ranked = if navigation { reading_units(raw_points) } else {
                 diverse(&reading_units(raw_points), policy["document_diversity_k"].as_u64().unwrap_or(2) as usize)
             };
             let points: Vec<Value> = ranked
@@ -268,7 +274,7 @@ async fn search_with_navigation(
                     "evidence_admissible":false}));
                 if candidates.len() >= 64 { break; }
             }
-            let max_chars=args["max_chars"].as_u64().unwrap_or(3000).clamp(1,16000) as usize;
+            let max_chars=args["max_chars"].as_u64().or_else(||args["_context_budget_chars"].as_u64()).unwrap_or(3000).clamp(1,16000) as usize;
             let context_budget = if navigation {
                 Some(
                     args["_context_budget_chars"]
@@ -280,7 +286,7 @@ async fn search_with_navigation(
             } else {
                 None
             };
-            let mut reply=passages(&context,turn,&config["collection"],points.clone(),result["revision"].clone(),max_chars,"search_sources",context_budget,true).await?;
+            let mut reply=passages(&context,turn,&config["collection"],points.clone(),result["revision"].clone(),max_chars,"search_sources",context_budget,!navigation,navigation).await?;
             reply["result"]["candidate_documents"] = json!(candidates);
             let total = ranked.len();
             reply["result"]["selection_policy"] = json!({"seed_limit":limit,"per_document_seed_limit":if navigation{Value::Null}else{policy["document_diversity_k"].clone()},"raw_candidates":raw_points.len(),"eligible_candidates":total,"navigation_requested":navigation});
@@ -301,29 +307,7 @@ async fn search_with_navigation(
                     "parent_id":p["payload"]["parent_id"],"evidence_admissible":false})).collect::<Vec<_>>());
             if navigation {
                 fit_envelope_budget(&mut reply, 22500, 240)?;
-                if !points.is_empty() {
-                    let delivered = reply["sources"].as_array().cloned().unwrap_or_default();
-                    let mut consumed = 0usize;
-                    for seed in &points {
-                        let sp = &seed["payload"];
-                        let present = delivered.iter().any(|s| {
-                            s["qdrant_point_id"] == seed["id"]
-                                || (s["reading_representation"] == "pdf_cells"
-                                    && s["dataset_id"] == sp["dataset_id"]
-                                    && s["doc_name"] == sp["file_name"]
-                                    && s["source_sha256"] == sp["source_sha256"]
-                                    && s["page"] == sp["page"])
-                        });
-                        if present {
-                            consumed += 1;
-                        } else {
-                            break;
-                        }
-                    }
-                    let next = offset + consumed.max(1);
-                    reply["result"]["next_offset"] =
-                        if next < total { json!(next) } else { Value::Null };
-                }
+                Page::new(offset, total).apply(&mut reply, "total_candidates")?;
             }
             Ok(reply)
         }
@@ -413,7 +397,10 @@ mod selection_tests {
     }
     #[test]
     fn envelope_budget_guard_bounds_oversized_passages_and_candidates_within_24k_256() {
-        let long_path = format!("{}Спецификация_оборудования.pdf", "Раздел_ПД_Подраздел/".repeat(12));
+        let long_path = format!(
+            "{}Спецификация_оборудования.pdf",
+            "Раздел_ПД_Подраздел/".repeat(12)
+        );
         let mut passages = Vec::new();
         let mut sources = Vec::new();
         for i in 0..16 {
@@ -475,6 +462,9 @@ mod selection_tests {
         assert!(canonical_chars(&reply) <= 22500);
         assert!(json_item_count(&reply) <= 240);
         assert_eq!(reply["result"]["coverage"], "bounded");
+        Page::new(0, 16)
+            .apply(&mut reply, "total_fragments")
+            .unwrap();
         let kept = reply["result"]["passages"].as_array().unwrap();
         assert!(!kept.is_empty() && kept.len() < 16);
         assert_eq!(reply["result"]["offset"], 0);
@@ -482,7 +472,9 @@ mod selection_tests {
         for (i, p) in kept.iter().enumerate() {
             let text = p["text"].as_str().unwrap();
             assert!(
-                text.ends_with(&format!("ЗАПРЕЩАЕТСЯ эксплуатация блока #{i} без заземления.")),
+                text.ends_with(&format!(
+                    "ЗАПРЕЩАЕТСЯ эксплуатация блока #{i} без заземления."
+                )),
                 "passage #{i} was truncated mid-text"
             );
             assert!(p["source"].get("context_unit").is_none());
@@ -494,10 +486,7 @@ mod selection_tests {
             assert!(s.get("document_fragment_count").is_none());
             assert!(s.get("context_origin").is_none());
         }
-        assert_eq!(
-            kept.len(),
-            reply["sources"].as_array().unwrap().len()
-        );
+        assert_eq!(kept.len(), reply["sources"].as_array().unwrap().len());
         assert_eq!(
             kept.len(),
             reply["result"]["read_receipt"]["point_ids"]
@@ -508,7 +497,8 @@ mod selection_tests {
     }
 
     #[test]
-    fn envelope_budget_never_truncates_single_passage_mid_text_and_rejects_unfitting_single_block() {
+    fn envelope_budget_never_truncates_single_passage_mid_text_and_rejects_unfitting_single_block()
+    {
         let source = json!({
             "doc_id": "doc-0",
             "dataset_id": "ds-1",
@@ -576,6 +566,7 @@ async fn passages(
     name: &str,
     context_budget: Option<usize>,
     expand_document: bool,
+    paginated: bool,
 ) -> Result<Value> {
     let store = context
         .index_store
@@ -615,13 +606,20 @@ async fn passages(
     )
     .await?;
     let (points, hydrated) = views::project(points, hydrated)?;
-    let (selected, total) = packing::select(
-        &points,
-        &hydrated["sections"],
-        &hydrated["documents"],
-        max_chars,
-        context_budget,
-    );
+    let (selected, total) = if paginated {
+        (
+            packing::prefix(&points, max_chars, context_budget),
+            points.len(),
+        )
+    } else {
+        packing::select(
+            &points,
+            &hydrated["sections"],
+            &hydrated["documents"],
+            max_chars,
+            context_budget,
+        )
+    };
     let selected_ids: std::collections::HashSet<_> =
         selected.iter().map(|p| p["id"].to_string()).collect();
     let mut output = Vec::new();
@@ -735,230 +733,6 @@ async fn passages(
     Ok(reply)
 }
 
-fn json_item_count(value: &Value) -> usize {
-    match value {
-        Value::Object(map) => map.values().map(json_item_count).sum(),
-        Value::Array(values) => values.len() + values.iter().map(json_item_count).sum::<usize>(),
-        _ => 0,
-    }
-}
-
-fn canonical_chars(value: &Value) -> usize {
-    les_core::tool_execution::canonical_json(value)
-        .map(|s| s.chars().count())
-        .unwrap_or_else(|_| value.to_string().chars().count())
-}
-
-fn reconcile_document_units(reply: &mut Value, orig_passages: &[Value]) {
-    let mut orig_doc_counts = std::collections::HashMap::<(String, String), usize>::new();
-    let mut orig_unit_counts = std::collections::HashMap::<String, usize>::new();
-    for p in orig_passages {
-        let s = &p["source"];
-        let doc_key = (
-            s["doc_id"].as_str().unwrap_or("").to_owned(),
-            s["source_sha256"].as_str().unwrap_or("").to_owned(),
-        );
-        *orig_doc_counts.entry(doc_key).or_default() += 1;
-        if let Some(unit) = s["context_unit"].as_str().filter(|u| !u.is_empty()) {
-            *orig_unit_counts.entry(unit.to_owned()).or_default() += 1;
-        }
-    }
-    let mut kept_doc_counts = std::collections::HashMap::<(String, String), usize>::new();
-    let mut kept_unit_counts = std::collections::HashMap::<String, usize>::new();
-    if let Some(passages) = reply["result"]["passages"].as_array() {
-        for p in passages {
-            let s = &p["source"];
-            let doc_key = (
-                s["doc_id"].as_str().unwrap_or("").to_owned(),
-                s["source_sha256"].as_str().unwrap_or("").to_owned(),
-            );
-            *kept_doc_counts.entry(doc_key).or_default() += 1;
-            if let Some(unit) = s["context_unit"].as_str().filter(|u| !u.is_empty()) {
-                *kept_unit_counts.entry(unit.to_owned()).or_default() += 1;
-            }
-        }
-    }
-    let is_complete = |s: &Value| -> bool {
-        let doc_key = (
-            s["doc_id"].as_str().unwrap_or("").to_owned(),
-            s["source_sha256"].as_str().unwrap_or("").to_owned(),
-        );
-        let kept_doc = kept_doc_counts.get(&doc_key).copied().unwrap_or(0);
-        let orig_doc = orig_doc_counts.get(&doc_key).copied().unwrap_or(kept_doc);
-        let expected_doc = s["document_fragment_count"]
-            .as_u64()
-            .map(|n| n as usize)
-            .unwrap_or(orig_doc);
-        let unit_ok = s["context_unit"]
-            .as_str()
-            .filter(|u| !u.is_empty())
-            .is_none_or(|u| {
-                let kept_u = kept_unit_counts.get(u).copied().unwrap_or(0);
-                let orig_u = orig_unit_counts.get(u).copied().unwrap_or(kept_u);
-                kept_u == orig_u && kept_u == expected_doc
-            });
-        kept_doc > 0 && kept_doc == orig_doc && kept_doc == expected_doc && unit_ok
-    };
-    if let Some(passages) = reply["result"]["passages"].as_array_mut() {
-        for p in passages {
-            if !is_complete(&p["source"]) {
-                if let Some(obj) = p["source"].as_object_mut() {
-                    obj.remove("context_unit");
-                    obj.remove("document_fragment_count");
-                    obj.remove("context_origin");
-                }
-            }
-        }
-    }
-    if let Some(sources) = reply["sources"].as_array_mut() {
-        for s in sources {
-            if !is_complete(s) {
-                if let Some(obj) = s.as_object_mut() {
-                    obj.remove("context_unit");
-                    obj.remove("document_fragment_count");
-                    obj.remove("context_origin");
-                }
-            }
-        }
-    }
-}
-
-pub(crate) fn fit_envelope_budget(
-    reply: &mut Value,
-    max_chars: usize,
-    max_items: usize,
-) -> Result<()> {
-    let orig_passages = reply["result"]["passages"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-    reconcile_document_units(reply, &orig_passages);
-    if canonical_chars(reply) <= max_chars && json_item_count(reply) <= max_items {
-        return Ok(());
-    }
-    let orig_sources = reply["sources"].as_array().cloned().unwrap_or_default();
-    let orig_ids = reply["result"]["read_receipt"]["point_ids"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-    let orig_candidates = reply["result"]
-        .get("candidate_documents")
-        .and_then(Value::as_array)
-        .cloned();
-    let orig_hints = reply["result"]
-        .get("navigation_hints")
-        .and_then(Value::as_array)
-        .cloned();
-    if orig_candidates.is_some() {
-        reply["result"]["candidate_documents"] = json!([]);
-    }
-    if orig_hints.is_some() {
-        reply["result"]["navigation_hints"] = json!([]);
-    }
-    if orig_passages.is_empty() {
-        return Ok(());
-    }
-    let offset = reply["result"]["offset"].as_u64().unwrap_or(0) as usize;
-    let total = (reply["result"]["total_candidates"]
-        .as_u64()
-        .or_else(|| reply["result"]["total_fragments"].as_u64())
-        .unwrap_or(orig_passages.len() as u64) as usize)
-        .max(offset + orig_passages.len());
-    let mut kept_passages = Vec::new();
-    let mut kept_sources = Vec::new();
-    let mut kept_ids = Vec::new();
-    let mut omitted_any = false;
-    for i in 0..orig_passages.len() {
-        kept_passages.push(orig_passages[i].clone());
-        kept_sources.push(
-            orig_sources
-                .get(i)
-                .cloned()
-                .unwrap_or_else(|| orig_passages[i]["source"].clone()),
-        );
-        kept_ids.push(
-            orig_ids
-                .get(i)
-                .cloned()
-                .unwrap_or_else(|| orig_passages[i]["source"]["qdrant_point_id"].clone()),
-        );
-        reply["result"]["passages"] = json!(kept_passages);
-        reply["sources"] = json!(kept_sources);
-        if reply["result"]["read_receipt"].is_object() {
-            reply["result"]["read_receipt"]["point_ids"] = json!(kept_ids);
-        }
-        reply["result"]["included_fragments"] = json!(kept_passages.len());
-        let bounded = omitted_any
-            || kept_passages.len() < orig_passages.len()
-            || offset + kept_passages.len() < total;
-        reply["result"]["coverage"] = json!(if bounded { "bounded" } else { "complete" });
-        if bounded {
-            reply["result"]["offset"] = json!(offset);
-            let next = offset + kept_passages.len();
-            reply["result"]["next_offset"] = if next < total {
-                json!(next)
-            } else {
-                Value::Null
-            };
-        }
-        reconcile_document_units(reply, &orig_passages);
-        if canonical_chars(reply) > max_chars || json_item_count(reply) > max_items {
-            kept_passages.pop();
-            kept_sources.pop();
-            kept_ids.pop();
-            omitted_any = true;
-            // Preserve contiguous block order so next_offset continues without gaps.
-            break;
-        }
-    }
-    reply["result"]["passages"] = json!(kept_passages);
-    reply["sources"] = json!(kept_sources);
-    if reply["result"]["read_receipt"].is_object() {
-        reply["result"]["read_receipt"]["point_ids"] = json!(kept_ids);
-    }
-    reply["result"]["included_fragments"] = json!(kept_passages.len());
-    reconcile_document_units(reply, &orig_passages);
-    if omitted_any || kept_passages.len() < orig_passages.len() || offset + kept_passages.len() < total
-    {
-        reply["result"]["coverage"] = json!("bounded");
-        reply["result"]["offset"] = json!(offset);
-        let next = offset + kept_passages.len();
-        reply["result"]["next_offset"] = if next < total {
-            json!(next)
-        } else {
-            Value::Null
-        };
-    }
-    if kept_passages.is_empty() {
-        return Err("CONTEXT_REQUIRED_SECTION_OVERFLOW".into());
-    }
-    if let Some(hints) = orig_hints {
-        let mut kept_hints = Vec::new();
-        for hint in hints {
-            kept_hints.push(hint);
-            reply["result"]["navigation_hints"] = json!(kept_hints);
-            if canonical_chars(reply) > max_chars || json_item_count(reply) > max_items {
-                kept_hints.pop();
-                reply["result"]["navigation_hints"] = json!(kept_hints);
-                break;
-            }
-        }
-    }
-    if let Some(candidates) = orig_candidates {
-        let cap = if omitted_any { 16 } else { 64 };
-        let mut kept_candidates = Vec::new();
-        for cand in candidates.into_iter().take(cap) {
-            kept_candidates.push(cand);
-            reply["result"]["candidate_documents"] = json!(kept_candidates);
-            if canonical_chars(reply) > max_chars || json_item_count(reply) > max_items {
-                kept_candidates.pop();
-                reply["result"]["candidate_documents"] = json!(kept_candidates);
-                break;
-            }
-        }
-    }
-    Ok(())
-}
 pub(super) async fn read(context: Arc<Context>, turn: &Prepared, args: Value) -> Result<Value> {
     let doc = document(&context, &args).await?;
     scoped_document(turn, &doc)?;
@@ -1062,27 +836,13 @@ pub(super) async fn read(context: Arc<Context>, turn: &Prepared, args: Value) ->
         args["max_chars"].as_u64().unwrap_or(3000).clamp(1, 16000) as usize,
         "read_source",
         args["_context_budget_chars"].as_u64().map(|n| n as usize),
-        clause.is_empty() && read_offset == 0,
+        false,
+        true,
     )
     .await?;
     if let Some(rows) = reply["result"]["passages"].as_array_mut() {
         rows.sort_by_key(|p| p["chunk_ord"].as_u64().unwrap_or(0));
     }
-    let included = reply["result"]["passages"]
-        .as_array()
-        .map(Vec::len)
-        .unwrap_or(0);
-    let total = (reply["result"]["total_fragments"]
-        .as_u64()
-        .unwrap_or(total_units as u64) as usize)
-        .max(total_units);
-    reply["result"]["total_fragments"] = json!(total);
-    reply["result"]["offset"] = json!(read_offset);
-    if read_offset > 0 || read_offset + included < total {
-        reply["result"]["coverage"] = json!("bounded");
-        reply["result"]["next_offset"] = json!(read_offset + included);
-    } else {
-        reply["result"]["next_offset"] = Value::Null;
-    }
+    Page::new(read_offset, total_units).apply(&mut reply, "total_fragments")?;
     Ok(reply)
 }

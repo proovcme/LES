@@ -392,7 +392,7 @@ pub async fn run(
                     usize::from(native && !exchanges.is_empty()),
                 )?;
                 context_request["request_payload"]["reader_budget_max_chars"] =
-                    json!(tools.read_max_chars / 2);
+                    json!(tools.read_max_chars);
                 let packed = les_core::chat_context::execute(&context_request)?;
                 if packed["overflow"] == true {
                     if native

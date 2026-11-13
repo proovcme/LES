@@ -362,6 +362,72 @@ def test_passage_offsets_advance_ranked_hits_and_report_exhaustion(native_turn,t
     assert all('fusion_trace' not in row for row in rows)
 
 
+@pytest.mark.parametrize('native_turn', ['rag-small'], indirect=True)
+@pytest.mark.parametrize('tool', ['read_source', 'search_sources'])
+def test_source_cursor_covers_unequal_pages_once_and_stops_at_end(native_turn, tmp_path, tool):
+    t = native_turn
+    folder = tmp_path / 'source'; folder.mkdir()
+    pages = ['CURSOR_MARKER ALPHA ' + 'source ' * 22 + 'END_ALPHA',
+             'CURSOR_MARKER BETA ' + 'source ' * 22 + 'END_BETA',
+             'CURSOR_MARKER GAMMA evidence END_GAMMA',
+             'CURSOR_MARKER DELTA evidence END_DELTA']
+    original = write_pdf(folder / 'ordered.pdf', pages)
+    digest = hashlib.sha256(original.read_bytes()).hexdigest()
+    dataset = t.client.post('/api/rag/datasets', json={'name': 'Unequal source pages'}).raise_for_status().json()['id']
+    job = t.client.post('/api/rag/index-external', json={'path': str(folder), 'dataset_id': dataset, 'background': True}).raise_for_status().json()['intake_job_id']
+    wait_for(lambda: t.client.get('/api/light/intake', params={'id': job}).json().get('status') == 'completed', timeout=40)
+    with sqlite3.connect(t.database) as db:
+        doc = db.execute('SELECT id FROM documents WHERE dataset_id=?', [dataset]).fetchone()[0]
+    from contextlib import closing
+    from qdrant_client import QdrantClient
+    from qdrant_client.http import models
+    with closing(QdrantClient(url=t.env['LES_LIGHT_QDRANT_URL'], api_key=t.env['LES_LIGHT_QDRANT_API_KEY'], check_compatibility=False)) as index:
+        rows, more = index.scroll('docs', scroll_filter=models.Filter(
+            must=[models.FieldCondition(key='dataset_id', match=models.MatchValue(value=dataset))],
+            must_not=[models.FieldCondition(key='node_role', match=models.MatchValue(value='navigation')),
+                      models.FieldCondition(key='evidence_admissible', match=models.MatchValue(value=False))]),
+            limit=100, with_payload=True, with_vectors=False)
+    assert more is None and len(rows) == 4
+    expected_ids = {str(row.id) for row in rows}
+    offsets = []
+    def step(body):
+        replies = []
+        for message in body['messages']:
+            if message.get('role') == 'tool':
+                value = json.loads(message['content'])
+                if value.get('tool') == tool:
+                    replies.append(value)
+        if replies:
+            last = replies[-1]['result']
+            if last['next_offset'] is None:
+                return source_excerpt_reply(body)
+            offset = last['next_offset']
+        else:
+            offset = 0
+        assert offset not in offsets and len(offsets) < 5
+        offsets.append(offset)
+        args = {'limit': 2, 'max_chars': 250, 'offset': offset}
+        args.update({'doc_id': doc} if tool == 'read_source' else {'q': 'CURSOR_MARKER'})
+        return {'tool': tool, 'args': args}
+    t.scripts.extend([step] * 6)
+    response = t.client.post('/api/chat', json={'question': 'Read CURSOR_MARKER source evidence.', 'mode': 'search', 'retrieval_mode': 'pull',
+        'scope': {'scope_type': 'dataset', 'dataset_ids': [dataset], 'selected_sources_only': True}})
+    assert response.status_code == 200, response.text
+    result = response.json()
+    receipts = [r['result'] for r in result['artifact']['tool_results'] if r['tool'] == tool]
+    assert len(receipts) > 1 and receipts[-1]['next_offset'] is None
+    assert [r['offset'] for r in receipts] == offsets
+    passages = [p for r in receipts for p in r['passages']]
+    identities = [p['source']['qdrant_point_id'] for p in passages]
+    assert len(identities) == len(set(identities)) == 4
+    assert set(identities) == expected_ids
+    assert {p['source']['page'] for p in passages} == {1, 2, 3, 4}
+    assert all(any(end in p['text'] for p in passages) for end in ['END_ALPHA', 'END_BETA', 'END_GAMMA', 'END_DELTA'])
+    assert hashlib.sha256(original.read_bytes()).hexdigest() == digest
+    assert all(r['next_offset'] == r['offset'] + len(r['passages']) for r in receipts[:-1])
+    assert all(c['context']['included_tokens'] <= c['context']['input_budget_tokens'] for c in result['retrieval_trace']['contexts'])
+
+
 @pytest.mark.parametrize('native_turn', ['rag'], indirect=True)
 def test_push_supplies_verified_rust_context_without_model_tools(native_turn,tmp_path):
     t=native_turn;folder=tmp_path/'source';folder.mkdir()

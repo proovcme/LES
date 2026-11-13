@@ -383,13 +383,11 @@ mod tests {
     #[test]
     fn kerning_and_unicode_dash_normalization_preserve_numeric_bounds() {
         let value = json!({"tables":[{"page":1,"cells":[["Труба DN100 – L\u{00a0}=\u{00a0}2500","17.25"]]}]});
-        assert!(page_view(
-            "Труба DN 100 — L = 2\u{00a0}500 17.25",
-            1,
-            Some(&value)
-        )
-        .unwrap()
-        .is_some());
+        assert!(
+            page_view("Труба DN 100 — L = 2\u{00a0}500 17.25", 1, Some(&value))
+                .unwrap()
+                .is_some()
+        );
         let bad_number = json!({"tables":[{"page":1,"cells":[["Труба DN100","17.25"]]}]});
         assert_eq!(
             page_view("Труба DN 100 117.25", 1, Some(&bad_number)).unwrap_err(),

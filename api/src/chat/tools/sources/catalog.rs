@@ -45,28 +45,32 @@ async fn page(
         vec![]
     };
     let result = tokio::task::spawn_blocking(move || -> Result<Value> {
-        collect_catalog_page(&datasets, offset, limit, 20000, |dataset, req_offset, req_limit| {
-            let input = json!({
-                "dataset_id": dataset,
-                "q": q,
-                "limit": req_limit,
-                "offset": req_offset,
-                "doc_filter": selected
-            });
-            let page = super::super::super::unwrap(crate::library::catalog(
-                &database,
-                "library_documents",
-                input,
-            ))?;
-            let count = page["total"]
-                .as_u64()
-                .ok_or("SOURCE_CATALOG_UNAVAILABLE")?;
-            let rows = page["documents"]
-                .as_array()
-                .ok_or("SOURCE_CATALOG_UNAVAILABLE")?
-                .clone();
-            Ok((count, rows))
-        })
+        collect_catalog_page(
+            &datasets,
+            offset,
+            limit,
+            20000,
+            |dataset, req_offset, req_limit| {
+                let input = json!({
+                    "dataset_id": dataset,
+                    "q": q,
+                    "limit": req_limit,
+                    "offset": req_offset,
+                    "doc_filter": selected
+                });
+                let page = super::super::super::unwrap(crate::library::catalog(
+                    &database,
+                    "library_documents",
+                    input,
+                ))?;
+                let count = page["total"].as_u64().ok_or("SOURCE_CATALOG_UNAVAILABLE")?;
+                let rows = page["documents"]
+                    .as_array()
+                    .ok_or("SOURCE_CATALOG_UNAVAILABLE")?
+                    .clone();
+                Ok((count, rows))
+            },
+        )
     })
     .await
     .map_err(|_| "SOURCE_CATALOG_UNAVAILABLE")??;

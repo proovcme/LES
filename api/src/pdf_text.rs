@@ -104,8 +104,7 @@ fn text_range(
             // GetText removed the original word-wrap break. Preserve its
             // confirmed source hyphen and boundary, never fabricate a word.
             normalized.extend_from_slice(&['-' as u16, '\n' as u16]);
-        } else if *code == 0x0020
-            && is_generated_kerning_space(pdf, text, first, offset, rendered)
+        } else if *code == 0x0020 && is_generated_kerning_space(pdf, text, first, offset, rendered)
         {
             continue;
         } else {

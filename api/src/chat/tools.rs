@@ -549,15 +549,19 @@ fn bounded_read(name: &str, args: &mut Value, cap: usize) -> Option<Value> {
     if args.get("max_chars").is_some_and(|v| v.as_u64().is_none()) {
         return None;
     }
-    let requested = args["max_chars"].as_u64().unwrap_or(3000);
-    let granted = requested.min((cap / 2).max(1) as u64);
-    if requested <= granted {
+    let explicit = args["max_chars"].as_u64();
+    let requested = explicit.unwrap_or(cap.min(16000) as u64);
+    // reader_capacity already converts the token window to characters and
+    // reserves the call envelope. Halving this character budget again made a
+    // fitting materialized page unreadable on its next cursor position.
+    let granted = requested.min(cap.max(1) as u64);
+    if explicit.is_some() && requested <= granted {
         return None;
     }
     args["max_chars"] = json!(granted);
     Some(
         json!({"requested_max_chars":requested,"granted_max_chars":granted,"reason":"current_model_context_budget",
-        "note":"Размер порции ограничен свободным окном модели с резервом для идентификаторов и квитанции. Это не полный просмотр. Для PDF продолжай по next_cursor; для индексированных разделов уточни чтение."}),
+        "note":"Размер порции ограничен свободным окном модели с резервом для идентификаторов и квитанции. Это не полный просмотр. Продолжай с точным next_offset при неизменном запросе, документе и редакции."}),
     )
 }
 #[cfg(test)]

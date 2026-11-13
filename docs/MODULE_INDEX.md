@@ -1,5 +1,8 @@
 # Модули LES RAG
 
+874: `retrieval/{pagination,envelope,packing}.rs` в Rust-чате разделяют
+позицию чтения, целостный JSON-конверт и отбор. [Проверка](acceptance/native-source-pagination-874.md).
+
 873: `api/src/chat/evidence/pages.rs` — проверенная сборка последовательных
 передач одной физической PDF-страницы, без отдельного хранилища текста.
 `api/src/chat/{runner,tools}.rs` — отдельные стадии выбора чтения и

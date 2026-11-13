@@ -64,6 +64,18 @@ impl Window {
     }
 }
 
+/// Explicit pages admit a contiguous prefix of the frozen reading stream.
+/// Neighbors must not consume cursor positions or bypass a non-fitting unit.
+pub(super) fn prefix(rows: &[Value], budget: usize, context: Option<usize>) -> Vec<Value> {
+    let mut window = Window::new(budget, context);
+    for row in rows {
+        if !window.admit(std::slice::from_ref(row)) {
+            break;
+        }
+    }
+    window.selected
+}
+
 pub(super) fn select(
     seeds: &[Value],
     sections: &Value,
