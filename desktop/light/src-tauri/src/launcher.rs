@@ -83,6 +83,13 @@ pub fn command(directory: &Path, root: &Path, state: &Path) -> Result<Command, &
         .arg("--qdrant")
         .arg(directory.join("native/qdrant/qdrant.exe"))
         .arg("--parent-pipe");
+    if directory.join("native/edge-preview").is_file() {
+        let storage = state.join("vector-edge");
+        if !storage.join("les-vector.sqlite").is_file() {
+            return Err("Для запуска с Edge сначала перенесите индекс в отдельное хранилище.");
+        }
+        command.arg("--edge-storage").arg(storage);
+    }
     Ok(command)
 }
 
@@ -104,6 +111,15 @@ mod tests {
         assert!(args.contains(&std::ffi::OsStr::new("--parent-pipe")));
         assert!(args.contains(&std::ffi::OsStr::new("--native-only")));
         assert!(!args.contains(&std::ffi::OsStr::new("--python")));
+        assert!(args.contains(&std::ffi::OsStr::new("--qdrant")));
+        std::fs::write(root.join("native/edge-preview"), []).unwrap();
+        assert!(command(&root, &runtime, &root).is_err());
+        std::fs::create_dir(root.join("vector-edge")).unwrap();
+        std::fs::write(root.join("vector-edge/les-vector.sqlite"), []).unwrap();
+        let edge = command(&root, &runtime, &root).unwrap();
+        let args: Vec<_> = edge.get_args().collect();
+        assert!(args.contains(&std::ffi::OsStr::new("--edge-storage")));
+        assert!(args.contains(&std::ffi::OsStr::new("--qdrant")));
         std::fs::remove_dir_all(root).unwrap();
     }
 }

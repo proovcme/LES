@@ -1,94 +1,144 @@
-//! Native research driver. IO bindings prepare/send a model turn or execute one admitted tool.
-use super::{AgentLoop, Step};
+//! Stable synchronous ABI port into the same Rho runtime used by the public API.
+use super::{Coordinator, Step};
 use serde_json::{json, Value};
 use std::time::{Duration, Instant};
-
-type Result<T> = std::result::Result<T, &'static str>;
 pub fn run_research(
     request: &Value,
-    bridge: impl Fn(u8, &Value) -> Result<Value>,
-) -> Result<Value> {
-    if request["schema"] == "les.chat-answer.v1" {
-        return super::answer::run(request, bridge);
-    }
-    if request["schema"] != "les.chat-research.v1" {
+    bridge: impl Fn(u8, &Value) -> Result<Value, &'static str>,
+) -> Result<Value, &'static str> {
+    let answer = request["schema"] == "les.chat-answer.v1";
+    if !answer && request["schema"] != "les.chat-research.v1" {
         return Err("AGENT_REQUEST_INVALID");
     }
-    let allowed = request["allowed_tools"]
-        .as_array()
-        .filter(|v| v.len() <= 128)
-        .ok_or("AGENT_REQUEST_INVALID")?
-        .iter()
-        .map(|v| {
-            v.as_str()
-                .filter(|v| !v.is_empty() && v.len() <= 120)
-                .map(str::to_owned)
-                .ok_or("AGENT_REQUEST_INVALID")
-        })
-        .collect::<Result<Vec<_>>>()?;
-    let maximum = request["max_calls"]
-        .as_u64()
-        .filter(|v| *v <= 256)
-        .ok_or("AGENT_REQUEST_INVALID")?;
+    let allowed = if answer {
+        Vec::new()
+    } else {
+        request["allowed_tools"]
+            .as_array()
+            .filter(|v| v.len() <= 128)
+            .ok_or("AGENT_REQUEST_INVALID")?
+            .iter()
+            .map(|v| {
+                v.as_str()
+                    .filter(|v| !v.is_empty() && v.len() <= 120)
+                    .map(str::to_owned)
+                    .ok_or("AGENT_REQUEST_INVALID")
+            })
+            .collect::<Result<Vec<_>, _>>()?
+    };
+    let maximum = if answer {
+        0
+    } else {
+        request["max_calls"]
+            .as_u64()
+            .ok_or("AGENT_REQUEST_INVALID")?
+    };
     let seconds = request["deadline_seconds"]
         .as_f64()
-        .filter(|v| v.is_finite() && *v > 0. && *v <= 3600.)
         .ok_or("AGENT_REQUEST_INVALID")?;
+    let mut agent = Coordinator::new(maximum, seconds, allowed)?;
     let deadline = Instant::now() + Duration::from_secs_f64(seconds);
-    let mut agent = AgentLoop::new(maximum, seconds, allowed)?;
     let mut binding = request["binding"].clone();
-    if !binding["dataset_ids"].is_array() {
+    let mut attempts = 0;
+    if !answer && !binding["dataset_ids"].is_array() {
         return Err("AGENT_CONTEXT_INVALID");
     }
+    let max_attempts = if answer {
+        request["max_attempts"]
+            .as_u64()
+            .filter(|v| (1..=2).contains(v))
+            .ok_or("AGENT_REQUEST_INVALID")?
+    } else {
+        1
+    };
     loop {
-        let step = agent.next()?;
-        let (operation, input) = match step {
-            Step::Model { final_answer: true } => {
-                return Ok(json!({"status":"needs_final","rounds":agent.rounds,
-                "remaining":agent.remaining(),"stop_reason":agent.stop_reason(),"results":agent.results()}))
-            }
-            Step::Model {
-                final_answer: false,
-            } => (
-                0,
-                json!({"round":agent.rounds.len()+1,"remaining":agent.remaining()}),
-            ),
-            Step::Tool(call) => (1, json!({"call":call})),
-            Step::Complete(response) => {
+        let step = agent.next_blocking()?;
+        let (operation, mut input) = match step {
+            Step::Model { final_answer: true } if !answer => {
                 return Ok(
-                    json!({"status":"completed","terminal":response,"rounds":agent.rounds,
-                "remaining":agent.remaining(),"stop_reason":agent.stop_reason(),"results":agent.results()}),
+                    json!({"status":"needs_final","rounds":agent.rounds,"remaining":agent.remaining(),"stop_reason":agent.stop_reason(),"results":agent.results()}),
                 )
             }
-            Step::Failed(code) => {
-                return Ok(json!({"status":"failed","code":code,"rounds":agent.rounds,
-                "remaining":agent.remaining(),"stop_reason":agent.stop_reason(),"results":agent.results()}))
+            Step::Model { .. } => {
+                attempts += 1;
+                (
+                    0,
+                    if answer {
+                        json!({"attempt":attempts,"strict":attempts>1})
+                    } else {
+                        json!({"round":agent.rounds.len()+1,"remaining":agent.remaining()})
+                    },
+                )
             }
+            Step::Tool(call) => (1, json!({"call":call})),
+            Step::Complete(terminal) => {
+                agent
+                    .accept_completed_blocking(terminal.clone())
+                    .map_err(|_| "RHO_COMPLETION_NOT_FINAL")?;
+                return Ok(if answer {
+                    json!({"status":"completed","attempts":attempts,"terminal":terminal})
+                } else {
+                    json!({"status":"completed","terminal":terminal,"rounds":agent.rounds,"remaining":agent.remaining(),"stop_reason":agent.stop_reason(),"results":agent.results()})
+                });
+            }
+            Step::Failed(code) => {
+                return Ok(
+                    json!({"status":"failed","code":if answer&&code=="RESEARCH_DEADLINE_EXCEEDED"{"ANSWER_DEADLINE_EXCEEDED"}else{&code},"rounds":agent.rounds,"remaining":agent.remaining(),"stop_reason":agent.stop_reason(),"results":agent.results()}),
+                )
+            }
+            Step::Finished => return Err("RHO_COMPLETION_NOT_FINAL"),
         };
         let remaining = deadline.saturating_duration_since(Instant::now());
+        input["timeout_ms"] = json!(remaining.as_millis().min(u64::MAX as u128) as u64);
         if remaining.is_zero() {
-            agent.fail("RESEARCH_DEADLINE_EXCEEDED");
+            agent.fail(if answer {
+                "ANSWER_DEADLINE_EXCEEDED"
+            } else {
+                "RESEARCH_DEADLINE_EXCEEDED"
+            });
             continue;
         }
-        let mut input = input;
-        input["timeout_ms"] = json!(remaining.as_millis().min(u64::MAX as u128) as u64);
         let value = bridge(operation, &input)?;
-        if let Some(failure) = value.get("error") {
-            agent.fail(failure["code"].as_str().unwrap_or("CHAT_IO_FAILED"));
+        if let Some(e) = value.get("error") {
+            agent.fail(e["code"].as_str().unwrap_or("CHAT_IO_FAILED"));
             continue;
         }
         if let Some(epochs) = value.get("epochs") {
             agent.set_epochs(epochs.clone())?;
         }
         if operation == 0 {
+            if answer && (!value["response"].is_object() || !value["response"]["text"].is_string())
+            {
+                return Err("UPSTREAM_RESPONSE_INVALID");
+            }
+            if answer
+                && value["response"]
+                    .get("tool_calls")
+                    .is_some_and(|v| !v.is_null() && v.as_array().is_none_or(|v| !v.is_empty()))
+            {
+                agent.fail("TOOL_BUDGET_EXHAUSTED");
+                continue;
+            }
+            if answer
+                && value["response"]["text"]
+                    .as_str()
+                    .is_some_and(|s| s.trim().is_empty())
+                && attempts < max_attempts
+            {
+                // A bounded answer retry is a Rho control capability, not a second loop.
+                agent.reply(super::Decision::Retry)?;
+                continue;
+            }
             binding["sources"] = value["sources"].clone();
-            agent.model_result_bound(value["response"].clone(), Some(&binding))?;
+            agent.model_result_bound(
+                value["response"].clone(),
+                if answer { None } else { Some(&binding) },
+            )?;
         } else {
             agent.tool_result(value["payload"].clone())?;
         }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;

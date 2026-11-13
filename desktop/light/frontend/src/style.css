@@ -135,6 +135,8 @@ dialog::backdrop { background: #143b2a60; backdrop-filter: blur(3px); }
 .session-button span { min-width: 0; overflow-wrap: anywhere; }
 .session-button small { white-space: nowrap; }.session-button[aria-current=true] { background: var(--forest-selected); }
 .option { display: flex; align-items: center; gap: 14px; min-height: 60px; padding: 12px 4px; border-bottom: 1px solid var(--forest-line); cursor: pointer; }
+.retrieval-option { display: grid; gap: 6px; font-size: 14px; }
+.retrieval-option select { width: 100%; }
 .editor-form label.field, .editor-form > label:not(.option) { display: grid; gap: 6px; min-width: 0; font-weight: 600; font-size: 13px; }
 .editor-form :is(input:not([type="checkbox"], [type="radio"]), select, textarea) { width: 100%; min-width: 0; min-height: 44px; padding: 9px 12px; border: 1px solid var(--forest-line); border-radius: 10px; background: white; font-weight: 400; font-size: 14px; }
 .editor-form textarea { min-height: 100px; resize: vertical; }

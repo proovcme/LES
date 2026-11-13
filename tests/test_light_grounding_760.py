@@ -21,6 +21,25 @@ from proxy.services.saferag_service import build_context, source_map_for_context
 from tools.evaluate_light_chat import coverage, materialize, stream_final
 
 
+def test_native_trial_does_not_score_a_matching_number_with_the_wrong_source_as_correct():
+    from tools.evaluate_light_chat import native_stages
+    expected={'index':1,'doc_name':'approved.md','page':3}
+    wrong={'index':2,'doc_name':'proposal.md','page':1}
+    final={'answer':'Quantity 17 [Источник 2]','source_map':[expected,wrong],'model':{'model_id':'fixture'},
+        'retrieval_trace':{'engine':'rust.chat','prefetch':{'candidate_documents':[{'file_name':'approved.md'}]},
+            'contexts':[{'delivery':'prepared','sources':[wrong]},
+                        {'delivery':'confirmed','sources':[expected,wrong]}],
+            'citation_syntax':{'indexes':[2]}}}
+    result=native_stages(final,['approved'])
+    assert result['candidate_gold_coverage']==result['delivered_gold_coverage']==1
+    assert result['cited_gold_coverage']==0
+    assert result['engine']=='rust.chat' and result['observed_model']=='fixture'
+    assert result['semantic_correctness'] is None
+    assert result['delivered_pages']==[expected,wrong]
+    assert native_stages({},['approved'])['delivered_gold_coverage'] is None
+    assert native_stages({'model':'legacy','model_connection':{'model_id':'older'}},[])['observed_model']=='older'
+
+
 def test_multilingual_quotes_survive_presentation():
     text = 'Сектор 日本語資料, 中文, 한국어; код JP-27.'
     assert clean_visible_text(text) == text

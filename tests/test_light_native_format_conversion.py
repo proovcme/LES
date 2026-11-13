@@ -24,6 +24,20 @@ def read(path, **settings):
         'schema':'les.document-convert.v1', 'action':'convert', 'path':str(path.resolve()), **settings})
 
 
+@pytest.mark.parametrize('content,code',[
+    ('<w:drawing/>','DOCX_DRAWING_UNSUPPORTED'),
+    ('<w:object/>','DOCX_EMBEDDED_OBJECT_UNSUPPORTED'),
+    ('<m:oMath/>','DOCX_EQUATION_UNSUPPORTED'),
+    ('<w:ins><w:r><w:t>Unresolved revision</w:t></w:r></w:ins>','DOCX_REVISION_UNSUPPORTED'),
+    ('<w:sym w:font="Unknown" w:char="F001"/>','DOCX_SYMBOL_UNSUPPORTED'),
+])
+def test_docx_reports_missing_semantic_reader_instead_of_dropping_content(tmp_path,content,code):
+    path=tmp_path/'Unsupported.docx'
+    with zipfile.ZipFile(path,'w') as z:
+        z.writestr('word/document.xml',f'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"><w:body><w:p><w:r><w:t>Readable text must not conceal missing content.</w:t>{content}</w:r></w:p></w:body></w:document>')
+    with pytest.raises(native_core.NativeCoreError,match=f'^{code}$'):read(path)
+
+
 def deck(path, *, order=('r10','r2'), bad_target=False, content=None):
     with zipfile.ZipFile(path,'w',zipfile.ZIP_DEFLATED) as z:
         z.writestr('ppt/presentation.xml','<p:presentation xmlns:p="p" xmlns:r="r"><p:sldIdLst>'+
@@ -67,6 +81,22 @@ def test_sparse_sheet_preserves_actual_row_and_no_fake_zero(tmp_path):
     value=read(path)
     assert '| 9 | A9 | Текст |' in value['text']
     assert value['sheets'][0]['header_row']==4
+
+
+def test_styled_empty_tail_does_not_hide_real_data_outside_the_read_window(tmp_path):
+    from openpyxl.styles import Font
+    path=tmp_path/'formatted-tail.xlsx'
+    book=Workbook();sheet=book.active
+    sheet.append(['Код','Количество']);sheet.append(['ПВ-3',2])
+    sheet['XFD65006'].font=Font(bold=True)
+    book.save(path)
+    value=read(path,view='tables',read_rows=10)
+    assert value['sheets'][0]['rows']==[['ПВ-3',2]]
+    assert value['sheets'][0]['row_numbers']==[2]
+    sheet['A65006']='Late source data'
+    book.save(path)
+    with pytest.raises(native_core.NativeCoreError,match='SPREADSHEET_LIMIT'):
+        read(path,view='tables',read_rows=10)
 
 
 def test_excel_container_signature_wins_over_incorrect_xls_extension(tmp_path):

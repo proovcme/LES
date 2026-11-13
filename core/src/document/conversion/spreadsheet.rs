@@ -103,8 +103,7 @@ fn xlsx(bytes: &[u8], limit: u32, capture: bool) -> Result<Vec<Sheet>> {
         let mut reader = book
             .worksheet_cells_reader(&sheet.name)
             .map_err(|_| INVALID)?;
-        let (last_row, last_col) = reader.dimensions().end;
-        dimensions(last_row, last_col)?;
+        let mut content_end: Option<(u32, u32)> = None;
         let mut rows: BTreeMap<u32, Vec<String>> = BTreeMap::new();
         let mut previous = None;
         let mut missing_formula_cache = 0;
@@ -114,13 +113,20 @@ fn xlsx(bytes: &[u8], limit: u32, capture: bool) -> Result<Vec<Sheet>> {
             .map_err(|_| INVALID)?
         {
             let (row, col) = cell.pos;
-            dimensions(row, col)?;
             if previous.is_some_and(|old| old >= (row, col)) {
                 return Err(INVALID);
             }
             previous = Some((row, col));
+            // Styled empty cells and the declared dimension do not establish
+            // data coverage. Read the bounded XML through to its actual content.
+            let meaningful = !matches!(cell.value, DataRef::Empty) || cell.formula.is_some();
+            if !meaningful {
+                continue;
+            }
+            dimensions(row, col)?;
+            content_end = Some(content_end.map_or((row, col), |(r, c)| (r.max(row), c.max(col))));
             if row > limit {
-                break;
+                continue;
             }
             if cell.formula.is_some() && matches!(cell.value, DataRef::Empty) {
                 missing_formula_cache += 1;
@@ -145,8 +151,8 @@ fn xlsx(bytes: &[u8], limit: u32, capture: bool) -> Result<Vec<Sheet>> {
         output.push(Sheet {
             name: sheet.name,
             rows,
-            total: last_row.saturating_add(1),
-            columns: last_col as usize + 1,
+            total: content_end.map_or(0, |(row, _)| row.saturating_add(1)),
+            columns: content_end.map_or(0, |(_, col)| col as usize + 1),
             missing_formula_cache: Some(missing_formula_cache),
             typed_rows,
         });
@@ -342,7 +348,7 @@ fn render(sheet: &Sheet, request: &Value, limit: usize, csv: bool) -> Result<(St
         .range(header + 1..)
         .filter(|(_, r)| r.iter().any(|v| !v.trim().is_empty()))
         .collect::<Vec<_>>();
-    if rows.is_empty() {
+    if rows.is_empty() && request["retain_single_row"] != true {
         return Ok((
             String::new(),
             json!({"name":sheet.name,"empty":true,"missing_formula_cache":sheet.missing_formula_cache}),
@@ -351,8 +357,11 @@ fn render(sheet: &Sheet, request: &Value, limit: usize, csv: bool) -> Result<(St
     let width = sheet.rows.values().map(Vec::len).max().unwrap_or(0);
     let columns = (0..width)
         .filter(|&c| {
-            rows.iter()
-                .any(|(_, r)| r.get(c).is_some_and(|v| !v.trim().is_empty()))
+            (request["retain_single_row"] == true
+                && head.get(c).is_some_and(|v| !v.trim().is_empty()))
+                || rows
+                    .iter()
+                    .any(|(_, r)| r.get(c).is_some_and(|v| !v.trim().is_empty()))
         })
         .collect::<Vec<_>>();
     if rows.len().saturating_mul(columns.len()) > 300_000 {

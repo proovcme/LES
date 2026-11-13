@@ -21,11 +21,13 @@ flowchart LR
 ```
 
 1. **Indexing.** A background job parses documents and runs OCR when needed. Chunks retain links to their section, page, or sheet. The catalog and index live separately from the source folders. A publication journal helps recover interrupted updates.
-2. **Retrieval.** SQLite BM25 finds terms and identifiers; Qdrant finds semantic matches. Reciprocal rank fusion (RRF) combines the rankings within the selected datasets and filters. Hierarchical retrieval can narrow the search to relevant sections. The default Rust chat does not yet support reranking; Qdrant Server is the default vector store.
+2. **Retrieval.** SQLite BM25 finds terms and identifiers; Qdrant finds semantic matches. Reciprocal rank fusion (RRF) combines these two rankings within the selected datasets and filters. The hierarchy separately suggests sections for navigation and further reading; it does not cast another vote or reorder global results. The default Rust chat does not yet support reranking; Qdrant Server is the default vector store.
 3. **Reading and context.** LES can expand a match to its parent section and nearby chunks. The model receives a bounded context drawn from evidence, conversation history, and memory. It can read a physical PDF page by document ID.
 4. **Answers and evidence.** Answers stream. Citation links are tied to the retrieved source file and revision, including the page or sheet when known. LES reports when the selected sources provide no evidence. A citation lets you verify the answer; it does not guarantee the model's conclusion.
 
 [Ranking](docs/modules/rag-ranking.md) · [Document reading and context](docs/modules/chat-section-context.md) · [Application architecture](docs/LIGHT_ARCHITECTURE.md)
+
+The development branch includes the Rho coordinator, folder watching, and adapters for Docling Word parsing and Xberg PDF tables. These are source candidates, separate from the installer linked below. Overview synthesis and automatic PDF reading still need fixes. [Current status and limitations](docs/SEPARATION.md).
 
 ## Install and use
 

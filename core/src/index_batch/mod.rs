@@ -172,7 +172,13 @@ pub fn run(request: &Value, bridge: impl Fn(u8, &Value) -> Result<Value>) -> Res
                     row["db_key"] == source["file_name"]
                         && row["source_path"] == source["source_path"]
                 });
-                selected.push(found.cloned().unwrap_or_else(||json!({"db_key":source["file_name"],"file_key":source["file_name"],"source_path":source["source_path"],"path":source["source_path"],"error":"INDEX_REGISTRATION_CHANGED"})));
+                let mut row = found.cloned().unwrap_or_else(||json!({"db_key":source["file_name"],"file_key":source["file_name"],"source_path":source["source_path"],"path":source["source_path"],"error":"INDEX_REGISTRATION_CHANGED"}));
+                if source["watch_sha256"].is_string() {
+                    row["watch_sha256"] = source["watch_sha256"].clone();
+                    row["watch_root"] = source["watch_root"].clone();
+                    row["watch_canonical_source"] = source["watch_canonical_source"].clone();
+                }
+                selected.push(row);
             }
             plan["files"] = json!(selected);
         }
@@ -190,7 +196,15 @@ pub fn run(request: &Value, bridge: impl Fn(u8, &Value) -> Result<Value>) -> Res
         for (offset, files_batch) in files.chunks(500).enumerate() {
             let sources = files_batch
                 .iter()
-                .map(|row| json!({"file_name":row["db_key"],"source_path":row["source_path"]}))
+                .map(|row| {
+                    let mut source =
+                        json!({"file_name":row["db_key"],"source_path":row["source_path"]});
+                    if row["watch_sha256"].is_string() {
+                        source["watch_sha256"] = row["watch_sha256"].clone();
+                        source["watch_root"] = row["watch_root"].clone();
+                    }
+                    source
+                })
                 .collect::<Vec<_>>();
             let mut dispatch = json!({"database":database,"sources":sources});
             if request["intake_id"].is_string() {
@@ -225,7 +239,20 @@ pub fn run(request: &Value, bridge: impl Fn(u8, &Value) -> Result<Value>) -> Res
                         return Err(error(row["error"].as_str().unwrap()));
                     }
                     let path = row["path"].as_str().ok_or_else(|| error(INVALID))?;
-                    let source = fingerprint(path).map_err(error)?;
+                    let watched = row["watch_sha256"].is_string();
+                    if watched
+                        && std::fs::canonicalize(path)
+                            .ok()
+                            .as_deref()
+                            .and_then(Path::to_str)
+                            != row["watch_canonical_source"].as_str()
+                    {
+                        return Err(error("SOURCE_CHANGED_DURING_INDEXING"));
+                    }
+                    let source = fingerprint(path, watched).map_err(error)?;
+                    if watched && source["file_hash"] != row["watch_sha256"] {
+                        return Err(error("SOURCE_CHANGED_DURING_INDEXING"));
+                    }
                     if let Some(expected) = request["expected_source_sha256"].as_str() {
                         if source["file_hash"] != expected {
                             return Err(error("ATTACHMENT_HASH_CHANGED"));
@@ -281,7 +308,7 @@ pub fn run(request: &Value, bridge: impl Fn(u8, &Value) -> Result<Value>) -> Res
                         timings["convert_sec"].as_f64().unwrap_or(0.)
                             + convert_start.elapsed().as_secs_f64()
                     );
-                    if fingerprint(path).map_err(error)? != source {
+                    if fingerprint(path, watched).map_err(error)? != source {
                         return Err(error("SOURCE_CHANGED_DURING_INDEXING"));
                     }
                     store::stage(&batch.db, dataset, name, &registration, "EMBED")

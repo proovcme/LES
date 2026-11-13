@@ -34,7 +34,7 @@ pub(super) fn augment(request: &Value) -> Result<Value, &'static str> {
             | "read_excel_source"
             | "look_at_pdf_page"
     ) {
-        if !matches!(tool, "search_sources" | "read_pdf_source")
+        if tool == "look_at_pdf_page"
             && present(&request["question"])
             && !has(&args, "q")
             && !has(&args, "question")
@@ -52,7 +52,10 @@ pub(super) fn augment(request: &Value) -> Result<Value, &'static str> {
         if !datasets.is_empty() {
             if tool == "search_sources" && !has(&args, "dataset_ids") && !has(&args, "dataset_id") {
                 args.insert("dataset_ids".into(), json!(datasets));
-            } else if tool != "search_sources" && !has(&args, "dataset_id") && !has(&args, "doc_id")
+            } else if tool != "search_sources"
+                && datasets.len() == 1
+                && !has(&args, "dataset_id")
+                && !has(&args, "doc_id")
             {
                 args.insert("dataset_id".into(), datasets[0].clone());
             }
@@ -100,7 +103,7 @@ mod tests {
         let value = augment(&request).unwrap();
         assert_eq!(
             value["args"],
-            json!({"q":"Read exact section","dataset_id":"two","doc_name":"folder/Exact.docx"})
+            json!({"dataset_id":"two","doc_name":"folder/Exact.docx"})
         );
         request["call"] = json!({"tool":"search_sources","args":{"q":"model selected query"}});
         assert_eq!(
@@ -125,5 +128,15 @@ mod tests {
         assert!(value["args"].get("q").is_none());
         assert_eq!(value["args"]["page"], 2);
         assert_eq!(value["args"]["source_sha256"], "a".repeat(64));
+    }
+    #[test]
+    fn ordered_read_is_not_a_question_search_and_multiple_datasets_are_not_guessed() {
+        for tool in ["read_source", "read_excel_source"] {
+            let request = json!({"call":{"tool":tool,"args":{"doc_name":"Exact.xlsx"}},"dataset_ids":["one","two"],
+                "question":"Please read this document","sources":[]});
+            let call = augment(&request).unwrap();
+            assert!(call["args"].get("q").is_none());
+            assert!(call["args"].get("dataset_id").is_none());
+        }
     }
 }

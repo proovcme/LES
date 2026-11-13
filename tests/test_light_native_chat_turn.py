@@ -24,6 +24,12 @@ HEADERS={'X-Les-Model-Token':MODEL_BRIDGE_TOKEN}
 def native_turn(tmp_path, request):
     program=os.getenv('LES_TEST_NATIVE_API')
     if not program:pytest.skip('Build native API and set LES_TEST_NATIVE_API')
+    mode = getattr(request, 'param', None)
+    small = mode == 'rag-small'
+    rag = mode in ('rag','rag-small')
+    qdrant = os.getenv('LES_TEST_NATIVE_QDRANT')
+    if rag and not qdrant:
+        pytest.skip('Provide the native Qdrant binary for the RAG turn')
     import pypdfium2_raw
     state=tmp_path/'Состояние 日本語';state.mkdir();database=state/'meta.db'
     seen=[];scripts=[];blocked=Event();release=Event()
@@ -48,10 +54,11 @@ def native_turn(tmp_path, request):
             except OSError:pass
     model=ThreadingHTTPServer(('127.0.0.1',0),Model);thread=Thread(target=model.serve_forever,daemon=True);thread.start()
     registry=ModelConnectionRegistry(database)
-    revision=registry.create_connection(display_name='Fixture',base_url=f'http://127.0.0.1:{model.server_port}/v1',model_id='fixture:9b',locality=ConnectionLocality.LOOPBACK,requested_context_tokens=24000,secret_ref=None,extension_type=None,actor='admin:test')
+    context_tokens=8192 if small else 24000
+    revision=registry.create_connection(display_name='Fixture',base_url=f'http://127.0.0.1:{model.server_port}/v1',model_id='fixture:9b',locality=ConnectionLocality.LOOPBACK,requested_context_tokens=context_tokens,secret_ref=None,extension_type=None,actor='admin:test')
     registry.bind_role(ConnectionRole.ANSWER,revision.revision_id,expected_binding_revision=None,actor='admin:test')
     observed=datetime(2026,1,1,tzinfo=timezone.utc)
-    registry.save_capability_snapshot(CapabilitySnapshot('cap:chat-turn',revision.revision_id,tuple(CapabilityObservation(cap,CapabilityState.SUPPORTED,'probe',observed) for cap in (CapabilityName.CHAT_COMPLETIONS,CapabilityName.STREAMING,CapabilityName.TOOLS)),observed,datetime(2099,1,1,tzinfo=timezone.utc),{'observed_context_tokens':'24000'}),actor='admin:test')
+    registry.save_capability_snapshot(CapabilitySnapshot('cap:chat-turn',revision.revision_id,tuple(CapabilityObservation(cap,CapabilityState.SUPPORTED,'probe',observed) for cap in (CapabilityName.CHAT_COMPLETIONS,CapabilityName.STREAMING,CapabilityName.TOOLS)),observed,datetime(2099,1,1,tzinfo=timezone.utc),{'observed_context_tokens':str(context_tokens)}),actor='admin:test')
     (state/'.env').write_text('TRUSTED_NETWORKS=127.0.0.1/32\nTRUSTED_NETWORK_ROLE=admin\n',encoding='utf-8')
     port=free_port();children=[];log=(state/'api.log').open('wb')
     env={**os.environ,'LES_INTERNAL_MODEL_TOKEN':MODEL_BRIDGE_TOKEN,'LES_ENV_PATH':str(state/'.env'),'LES_STARTUP_BACKGROUND_MUTATIONS':'false',
@@ -60,19 +67,33 @@ def native_turn(tmp_path, request):
     for key in ('LES_LIGHT_QDRANT_URL','LES_LIGHT_QDRANT_API_KEY','LES_INTERNAL_INGEST_TOKEN','LES_NATIVE_EMBEDDING_SPEC'):env.pop(key,None)
     if os.getenv('LES_TEST_SKILL_PYTHON'):env['LES_SKILL_PYTHON']=os.environ['LES_TEST_SKILL_PYTHON']
     client=httpx.Client(base_url=f'http://127.0.0.1:{port}',timeout=20,trust_env=False)
-    public=getattr(request,'param',None)=='public'
+    public=mode in ('public', 'rag','rag-small')
+    storage = embeddings = None
     def start():
         extra=['--chat-owner','rust'] if public else ['--upstream',f'http://127.0.0.1:{free_port()}']
         p=subprocess.Popen([program,'--listen',f'127.0.0.1:{port}','--state',str(state),'--database',str(database),*extra],env=env,cwd=tmp_path,stdout=log,stderr=log,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0));children.append(p)
         wait_for(lambda:client.get('/api/profiles').status_code==200);return p
     try:
+        if rag:
+            from backend.light_qdrant_runtime import LightQdrantRuntime
+            from tests.native_batch_fixtures import NativeBatchEmbeddings
+            from tests.test_light_native_intake_execution import settings
+            storage = LightQdrantRuntime(Path(qdrant), state)
+            storage.start()
+            embeddings = NativeBatchEmbeddings(database)
+            with (state/'.env').open('a', encoding='utf-8') as file:
+                file.write('\n'.join(f"{key}='{value}'" for key, value in settings().items()))
+            env.update(LES_LIGHT_QDRANT_URL=storage.url, LES_LIGHT_QDRANT_API_KEY=storage.api_key,
+                       LES_INTERNAL_INGEST_TOKEN='d'*64, LES_STARTUP_BACKGROUND_MUTATIONS='true')
         start()
-        yield SimpleNamespace(client=client,database=database,state=state,seen=seen,scripts=scripts,children=children,start=start,registry=registry,revision=revision,blocked=blocked,release=release,env=env)
+        yield SimpleNamespace(client=client,database=database,state=state,seen=seen,scripts=scripts,children=children,start=start,registry=registry,revision=revision,blocked=blocked,release=release,env=env,embeddings=embeddings)
     finally:
         release.set();client.close()
         for child in children:
             if child.poll() is None:child.kill()
             child.wait(timeout=10)
+        if storage: storage.stop()
+        if embeddings: embeddings.close()
         log.close();model.shutdown();model.server_close();thread.join(timeout=5)
 
 def test_json_and_stream_share_native_turn_and_repeated_key_never_calls_model(native_turn):
@@ -130,6 +151,20 @@ def source_pdf(t):
         db.execute('CREATE TABLE documents(id TEXT,dataset_id TEXT,file_name TEXT,source_path TEXT,file_hash TEXT)')
         db.execute('INSERT INTO documents VALUES (?,?,?,?,?)',('registered-document','ds','folder/Source.pdf',str(path),digest))
     return path,digest
+
+
+def test_literal_miss_reads_the_same_pinned_pdf_page_without_claiming_a_match(native_turn):
+    t=native_turn;path,digest=source_pdf(t)
+    t.scripts.extend([{'tool':'read_pdf_source','args':{'doc_id':'registered-document','page':2,'q':'NOT PRESENT IN THIS PDF','max_chars':24}},
+                      {'text':'Фраза не найдена. Страница прочитана [Источник 1]'}])
+    result=t.client.post(PATH,json={'question':'Проверь фразу на второй странице','dataset_ids':['ds']},headers=HEADERS).raise_for_status().json()
+    tools=result['artifact']['tool_results'];first=tools[0]['result']
+    assert first['literal_lookup']=={'matched':False,'code':'PDF_QUERY_NOT_FOUND'}
+    assert first.get('selection')!='literal_match'
+    assert ''.join(p['result']['text'] for p in tools)=='Physical second page '+('ABCDE12345 '*120)+'END'
+    assert all(p['result']['page']==2 and p['result']['source_sha256']==digest for p in tools)
+    assert 'Дословное совпадение не найдено' in tools[0]['warnings'][0]
+    assert hashlib.sha256(path.read_bytes()).hexdigest()==digest
 
 def test_native_tool_reads_real_page_and_finishes_all_cursors_before_model_answer(native_turn):
     t=native_turn;path,digest=source_pdf(t);before=path.read_bytes()
@@ -313,6 +348,21 @@ def test_unindexed_physical_pdf_citation_uses_the_hash_of_the_read_handle(native
     source=result['source_map'][0]
     assert source['source_sha256']==digest and 'source_sha256='+digest in source['url']
     assert hashlib.sha256(t.client.get(source['url']).raise_for_status().content).hexdigest()==digest
+
+
+@pytest.mark.skipif(os.name!='nt',reason='Windows process identity for OCR scratch cleanup')
+def test_restart_removes_only_old_ocr_bitmaps_with_a_dead_owner(native_turn,tmp_path):
+    import sys,time
+    t=native_turn;scratch=t.state/'storage/ocr-tmp';scratch.mkdir(parents=True,exist_ok=True)
+    producer=subprocess.Popen([sys.executable,'-c','pass']);producer.wait(timeout=10)
+    dead=scratch/f'page-{producer.pid}-17.bmp';dead.write_bytes(b'owned temporary bitmap')
+    active=scratch/f'page-{os.getpid()}-18.bmp';active.write_bytes(b'live owner')
+    recent=scratch/f'page-{producer.pid}-19.bmp';recent.write_bytes(b'recent file')
+    other=scratch/'keep.bmp';other.write_bytes(b'not an OCR filename')
+    for path in [dead,active,other]:os.utime(path,(time.time()-120,time.time()-120))
+    t.children[-1].terminate();t.children[-1].wait(timeout=10);t.start()
+    assert not dead.exists()
+    assert active.read_bytes()==b'live owner' and recent.read_bytes()==b'recent file' and other.read_bytes()==b'not an OCR filename'
 
 
 def test_unindexed_pdf_without_a_revision_stops_before_a_model_followup(native_turn):

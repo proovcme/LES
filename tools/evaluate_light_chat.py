@@ -76,8 +76,33 @@ def coverage(sources, gold):
 
 
 def safe_source(source):
-    return {key: source[key] for key in ('index','doc_name','quote','snippet','page','source_page',
+    return {key: source[key] for key in ('index','doc_id','source_sha256','doc_name','quote','snippet','page','source_page',
         'context_origin','section_fragment_count') if key in source}
+
+
+def native_stages(final, gold):
+    """Measure document admission and citation separately, never answer truth."""
+    trace = final.get('retrieval_trace') or {}
+    confirmed = [c for c in trace.get('contexts', []) if c.get('delivery') == 'confirmed']
+    delivered = [source for c in confirmed for source in c.get('sources', [])]
+    indexes = set((trace.get('citation_syntax') or {}).get('indexes', []))
+    cited = [s for s in final.get('source_map', []) if s.get('index') in indexes]
+    candidates = [{'doc_name':s.get('file_name', '')} for s in (trace.get('prefetch') or {}).get('candidate_documents', [])]
+    model = final.get('model')
+    if not isinstance(model, dict):
+        model = final.get('model_connection') or {}
+    return {
+        'engine': trace.get('engine'),
+        'observed_model': model.get('model_id'),
+        'candidate_gold_coverage': coverage(candidates, gold) if candidates else None,
+        'delivered_gold_coverage': coverage(delivered, gold) if confirmed else None,
+        'cited_gold_coverage': coverage(cited, gold) if 'citation_syntax' in trace else None,
+        'delivered_pages': [safe_source(s) for s in delivered],
+        'cited_sources': [safe_source(s) for s in cited],
+        'rounds':trace.get('rounds'),
+        'answer_window_retry':trace.get('answer_window_retry'),
+        'semantic_correctness':None,
+    }
 
 
 def unload(http, models):
@@ -124,7 +149,7 @@ def evaluate(args):
     args.output.mkdir(parents=True, exist_ok=False)
     report = {'schema':'les.full-chat-trial.v1','fixture_sha256':hashlib.sha256(raw).hexdigest(),
         'scope':'installed upload/parse + ordinary SSE chat; isolated synthetic dataset',
-        'mode':args.mode,'cases':[], 'ingestion':[], 'originals':[]}
+        'mode':args.mode,'retrieval_mode':args.retrieval_mode,'cases':[], 'ingestion':[], 'originals':[]}
     models = [args.chat_model, args.embedding_model] if args.unload_test_models else []
     with httpx.Client(base_url=args.api_url, timeout=300, trust_env=False) as api, \
          httpx.Client(base_url=args.ollama_url, timeout=30, trust_env=False) as ollama:
@@ -175,16 +200,19 @@ def evaluate(args):
                 started = time.perf_counter()
                 with api.stream('POST','/api/chat/stream',json={'question':case['question'],
                     'dataset_ids':[args.dataset_id], 'session_id':'trial-'+uuid.uuid4().hex,
-                    'mode':args.mode, 'response_length':'short', 'semantic_cache_enabled':False,
+                    'mode':args.mode, 'retrieval_mode':args.retrieval_mode,
+                    'scope':{'scope_type':'datasets','dataset_ids':[args.dataset_id],'selected_sources_only':True},
+                    'response_length':'short', 'semantic_cache_enabled':False,
                     'reranker_enabled':False, 'validation_enabled':False}) as response:
                     response.raise_for_status(); event, final, progress = stream_final(response)
                 sources = [safe_source(source) for source in final.get('source_map',[])]
                 trace = final.get('retrieval_trace') or {}
-                model = final.get('model_connection') or {}
+                stages = native_stages(final,case['gold_documents'])
                 report['cases'].append({**case,'event':event,'error_code':final.get('code') if event=='error' else None,
                     'answer':final.get('answer',''),'sources':sources,'visible_gold_coverage':coverage(sources,case['gold_documents']),
+                    'native_stages':stages,
                     'admission_wait_s':admission_wait,
-                    'elapsed_s':round(time.perf_counter()-started,2),'observed_model':model.get('model_id'),
+                    'elapsed_s':round(time.perf_counter()-started,2),'observed_model':stages['observed_model'],
                     'retrieval':{key:trace[key] for key in ('status','mode','quality_status','quality_detail','score_kind','retry_count') if key in trace},
                     'tool_progress':progress})
                 (args.output/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
@@ -202,6 +230,7 @@ def main():
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--font',type=Path)
     parser.add_argument('--mode',choices=['agent','search'],default='agent')
+    parser.add_argument('--retrieval-mode',choices=['push','pull','hybrid'],default='hybrid')
     parser.add_argument('--case-ids')
     parser.add_argument('--skip-ingest',action='store_true')
     parser.add_argument('--unload-test-models',action='store_true',help='Explicitly unload only the supplied trial models between cases')

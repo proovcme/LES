@@ -48,6 +48,7 @@ pub fn validate(input: &Value) -> Result<Value> {
         key == "question"
             || key == "apply_profile_revision"
             || key == "candidate_acceptance"
+            || key == "retrieval_mode"
             || nullable.contains(&key.as_str())
     });
     for key in nullable {
@@ -55,6 +56,20 @@ pub fn validate(input: &Value) -> Result<Value> {
     }
     for key in ["apply_profile_revision", "candidate_acceptance"] {
         request.entry(key).or_insert(json!(false));
+    }
+    if let Some(value) = request
+        .remove("retrieval_mode")
+        .filter(|value| !value.is_null())
+    {
+        let mode = value
+            .as_str()
+            .ok_or("CHAT_RETRIEVAL_MODE_INVALID")?
+            .trim()
+            .to_ascii_lowercase();
+        if !matches!(mode.as_str(), "push" | "pull" | "hybrid") {
+            return Err("CHAT_RETRIEVAL_MODE_INVALID");
+        }
+        request.insert("retrieval_mode".into(), mode.into());
     }
     for (field, limit, required) in [
         ("question", 20000, true),

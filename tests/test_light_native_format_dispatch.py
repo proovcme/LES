@@ -59,6 +59,20 @@ def test_replacement_has_a_new_blob_and_keeps_previous_generation_readable(tmp_p
     assert len(read_rows(root/old['parquet_path']))==4 and len(read_rows(root/new['parquet_path']))==6
 
 
+def test_artifact_paths_keep_windows_trailing_dots_and_long_source_names_safe(tmp_path):
+    path = tmp_path / 'Книга..xlsx'
+    source(path)
+    root = tmp_path / 'ds'
+    first = dispatch(path, root, file_key='/'.join(['Раздел с пробелами '*8]*3 + [path.name]))
+    ref = first['nodes'][0]['payload']['parquet_path']
+    assert len(ref) < 250
+    assert len(read_rows(root/ref)) == 4
+    second = dispatch(path, root, file_key='Другой раздел/'+path.name)
+    other = second['nodes'][0]['payload']['parquet_path']
+    assert other != ref
+    assert len(read_rows(root/other)) == 4
+
+
 def test_large_table_is_navigation_projection_with_full_parquet(tmp_path):
     path=tmp_path/'rows.xlsx';source(path,30);root=tmp_path/'data'
     value=dispatch(path,root,table_row_limit=10)

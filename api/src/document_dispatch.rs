@@ -2,7 +2,7 @@
 use serde_json::{json, Value};
 use std::path::Path;
 
-fn configured_ocr(owned_state: Option<&Path>) -> Result<Value, &'static str> {
+pub(crate) fn configured_ocr(owned_state: Option<&Path>) -> Result<Value, &'static str> {
     let root = std::env::var_os("LES_RUNTIME_HOME").ok_or("OCR_UNAVAILABLE")?;
     let state = owned_state
         .map(std::path::PathBuf::from)
@@ -55,6 +55,7 @@ fn configured_ocr(owned_state: Option<&Path>) -> Result<Value, &'static str> {
     };
     let scratch = state.join("storage/ocr-tmp");
     std::fs::create_dir_all(&scratch).map_err(|_| "OCR_READ_FAILED")?;
+    crate::pdf_ocr::cleanup(state);
     let dpi = setting(
         if engine == "tesseract" {
             "RAG_OCR_TESSERACT_DPI"
@@ -84,6 +85,13 @@ pub(crate) fn freeze_ocr(options: &mut Value, state: &Path) {
 
 pub(crate) fn external(request: &Value) -> Result<Value, &'static str> {
     let path = Path::new(request["path"].as_str().ok_or("DOCUMENT_PATH_INVALID")?);
+    if request["word_parser"] == "docling"
+        && path
+            .extension()
+            .is_some_and(|s| s.eq_ignore_ascii_case("doc"))
+    {
+        return crate::document_parser::legacy_word(request);
+    }
     let library = std::env::var_os("LES_NATIVE_PDFIUM").ok_or("PDFIUM_UNAVAILABLE")?;
     let mut options = request.clone();
     options["kind"] = json!("pdf_text");
@@ -103,11 +111,27 @@ pub(crate) fn external(request: &Value) -> Result<Value, &'static str> {
         options["kind"] = json!("pdf_ocr");
         value = crate::pdf_text::convert(Path::new(&library), path, &options)?;
     }
+    if value["text"].as_str().is_none_or(|s| s.trim().is_empty()) {
+        return Err("NO_SEARCHABLE_TEXT");
+    }
     Ok(
-        json!({"kind":"pdf","text":value["text"],"metadata":{"page_count":value["pages"],"ocr":value["ocr"],"extractor":"les.pdfium.v1"}}),
+        json!({"kind":"pdf","text":value["text"],"metadata":{"page_count":value["pages"],"pdf_page_views":value["page_views"],"ocr":value["ocr"],"extractor":"les.pdfium.layout.v2"}}),
     )
 }
 
 pub fn serve() -> Result<(), &'static str> {
-    les_core::serve_document_formats_with(&external)
+    let docling = crate::document_parser::enabled()?;
+    les_core::serve_document_format_requests(&|input| {
+        let mut input = input.clone();
+        if docling {
+            input["word_parser"] = json!("docling");
+        }
+        les_core::convert_document_with_parts(&input, &|input, part| match part {
+            Some(bytes) if input["part_kind"] == "word_structure" => {
+                crate::document_parser::word(input, bytes)
+            }
+            Some(bytes) => crate::document_media::read(input, bytes),
+            None => external(input),
+        })
+    })
 }

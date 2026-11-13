@@ -3,6 +3,16 @@ import type { Attachment, ChatPayload, ContextExclusion, Dataset, Draft, Indexed
 import { contextPath, sourcesFor } from './contracts';
 import { DraftWriter } from './drafts';
 
+type RetrievalMode = 'push' | 'pull' | 'hybrid';
+const RETRIEVAL_PREFERENCE = 'les.retrieval-mode';
+function retrievalPreference(): RetrievalMode {
+  try {
+    const saved = localStorage.getItem(RETRIEVAL_PREFERENCE);
+    if (saved === 'push' || saved === 'pull' || saved === 'hybrid') return saved;
+  } catch { /* Browser storage is optional. */ }
+  return 'pull';
+}
+
 export class Workspace {
   session = $state<Session | null>(null);
   sessions = $state<Session[]>([]);
@@ -35,6 +45,7 @@ export class Workspace {
   draftConflict = $state<Draft | null>(null);
   elapsed = $state(0);
   reranker = $state(false);
+  retrievalMode = $state<RetrievalMode>(retrievalPreference());
   private writer?: DraftWriter;
   private timer?: ReturnType<typeof setTimeout>;
   private controller?: AbortController;
@@ -44,6 +55,12 @@ export class Workspace {
   private initializing = false;
   private generationFinished?: Promise<void>;
   private finishGeneration?: () => void;
+
+  setRetrievalMode(mode: string) {
+    if (mode !== 'push' && mode !== 'pull' && mode !== 'hybrid') return;
+    this.retrievalMode = mode;
+    try { localStorage.setItem(RETRIEVAL_PREFERENCE, mode); } catch { /* Current selection remains usable. */ }
+  }
 
   async initialize(): Promise<void> {
     if (this.initializing) return;
@@ -294,6 +311,7 @@ export class Workspace {
       reply = this.messages.length - 1;
       await streamChat({ question, session_id: session.session_id, project_id: session.project_id,
         scope: session.scope, mode: session.role, reranker_enabled: this.reranker, attachment_id: attachment?.attachment_id,
+        retrieval_mode: this.retrievalMode,
       }, this.controller.signal, (item) => {
         if (!this.alive) return;
         if (!acknowledged) {

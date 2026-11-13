@@ -1,0 +1,263 @@
+{
+  "schema": "les.parser-body-comparison.v1",
+  "originals": 638,
+  "source_candidate": 870,
+  "working_application_changed": false,
+  "ocr_tested": false,
+  "rag_accuracy_tested": false,
+  "models_downloaded": false,
+  "profile": "official Windows CPU release, text layer, structure, visual bytes deferred",
+  "limits": {
+    "seconds_per_child": 45,
+    "rss_GiB": 2,
+    "output_MiB": 96
+  },
+  "engines": {
+    "docling-release": {
+      "attempted": 638,
+      "completed": 634,
+      "by_format": {
+        ".doc": {
+          "attempted": 106,
+          "completed": 106,
+          "failures": {}
+        },
+        ".docx": {
+          "attempted": 78,
+          "completed": 76,
+          "failures": {
+            "output_limit": 2
+          }
+        },
+        ".pdf": {
+          "attempted": 260,
+          "completed": 258,
+          "failures": {
+            "process_memory_limit": 2
+          }
+        },
+        ".xls": {
+          "attempted": 20,
+          "completed": 20,
+          "failures": {}
+        },
+        ".xlsm": {
+          "attempted": 6,
+          "completed": 6,
+          "failures": {}
+        },
+        ".xlsx": {
+          "attempted": 168,
+          "completed": 168,
+          "failures": {}
+        }
+      },
+      "pdf_page_counts": {
+        "same_physical_page_count": 258
+      },
+      "pdf_text_status": {
+        "has_text": 203,
+        "les_reference_needs_ocr": 128,
+        "empty_text": 55
+      }
+    },
+    "xberg-release": {
+      "attempted": 638,
+      "completed": 632,
+      "by_format": {
+        ".doc": {
+          "attempted": 106,
+          "completed": 106,
+          "failures": {}
+        },
+        ".docx": {
+          "attempted": 78,
+          "completed": 78,
+          "failures": {}
+        },
+        ".pdf": {
+          "attempted": 260,
+          "completed": 256,
+          "failures": {
+            "timeout": 4
+          }
+        },
+        ".xls": {
+          "attempted": 20,
+          "completed": 18,
+          "failures": {
+            "process_exit": 2
+          }
+        },
+        ".xlsm": {
+          "attempted": 6,
+          "completed": 6,
+          "failures": {}
+        },
+        ".xlsx": {
+          "attempted": 168,
+          "completed": 168,
+          "failures": {}
+        }
+      },
+      "pdf_page_counts": {
+        "same_physical_page_count": 256
+      },
+      "pdf_text_status": {
+        "has_text": 201,
+        "les_reference_needs_ocr": 128,
+        "candidate_marks_scanned_pages": 135,
+        "empty_text": 55
+      }
+    }
+  },
+  "controls": [
+    {
+      "engine": "les",
+      "corrupt_zip_rejected": true,
+      "duplicate_member_rejected": true,
+      "word_body_present": true,
+      "word_header_footer_in_structure": true,
+      "ordered_list_exposed": false,
+      "merged_span_exposed": false,
+      "nested_table_text_present": true,
+      "hidden_sheet_all_cells_in_structure": false,
+      "missing_formula_cache_exposed": true,
+      "correct_formula_addresses": false,
+      "pdf_grid_exposed": true,
+      "pdf_continued_grid_exposed": true,
+      "scan_requires_ocr_detectable": true,
+      "scan_body_empty": true,
+      "picture_record_exposed": false
+    },
+    {
+      "engine": "docling",
+      "corrupt_zip_rejected": true,
+      "duplicate_member_rejected": false,
+      "word_body_present": true,
+      "word_header_footer_in_structure": true,
+      "ordered_list_exposed": true,
+      "merged_span_exposed": true,
+      "nested_table_text_present": true,
+      "hidden_sheet_all_cells_in_structure": true,
+      "missing_formula_cache_exposed": false,
+      "correct_formula_addresses": false,
+      "pdf_grid_exposed": false,
+      "pdf_continued_grid_exposed": false,
+      "scan_requires_ocr_detectable": true,
+      "scan_body_empty": true,
+      "picture_record_exposed": true
+    },
+    {
+      "engine": "xberg",
+      "corrupt_zip_rejected": true,
+      "duplicate_member_rejected": false,
+      "word_body_present": true,
+      "word_header_footer_in_structure": false,
+      "ordered_list_exposed": false,
+      "merged_span_exposed": false,
+      "nested_table_text_present": true,
+      "hidden_sheet_all_cells_in_structure": true,
+      "missing_formula_cache_exposed": false,
+      "correct_formula_addresses": false,
+      "pdf_grid_exposed": true,
+      "pdf_continued_grid_exposed": true,
+      "scan_requires_ocr_detectable": true,
+      "scan_body_empty": true,
+      "picture_record_exposed": true
+    },
+    {
+      "engine": "xberg-structure",
+      "corrupt_zip_rejected": true,
+      "duplicate_member_rejected": false,
+      "word_body_present": true,
+      "word_header_footer_in_structure": true,
+      "ordered_list_exposed": true,
+      "merged_span_exposed": false,
+      "nested_table_text_present": true,
+      "hidden_sheet_all_cells_in_structure": true,
+      "missing_formula_cache_exposed": false,
+      "correct_formula_addresses": false,
+      "pdf_grid_exposed": true,
+      "pdf_continued_grid_exposed": true,
+      "scan_requires_ocr_detectable": true,
+      "scan_body_empty": true,
+      "picture_record_exposed": true
+    },
+    {
+      "engine": "xberg-bytes",
+      "corrupt_zip_rejected": true,
+      "duplicate_member_rejected": true,
+      "word_body_present": true,
+      "word_header_footer_in_structure": true,
+      "ordered_list_exposed": true,
+      "merged_span_exposed": false,
+      "nested_table_text_present": true,
+      "hidden_sheet_all_cells_in_structure": true,
+      "missing_formula_cache_exposed": false,
+      "correct_formula_addresses": false,
+      "pdf_grid_exposed": true,
+      "pdf_continued_grid_exposed": true,
+      "scan_requires_ocr_detectable": true,
+      "scan_body_empty": true,
+      "picture_record_exposed": true
+    },
+    {
+      "engine": "docling-release",
+      "corrupt_zip_rejected": true,
+      "duplicate_member_rejected": false,
+      "word_body_present": true,
+      "word_header_footer_in_structure": true,
+      "ordered_list_exposed": true,
+      "merged_span_exposed": true,
+      "nested_table_text_present": true,
+      "hidden_sheet_all_cells_in_structure": true,
+      "missing_formula_cache_exposed": false,
+      "correct_formula_addresses": false,
+      "pdf_grid_exposed": false,
+      "pdf_continued_grid_exposed": false,
+      "scan_requires_ocr_detectable": false,
+      "scan_body_empty": true,
+      "picture_record_exposed": true
+    },
+    {
+      "engine": "xberg-release",
+      "corrupt_zip_rejected": true,
+      "duplicate_member_rejected": false,
+      "word_body_present": true,
+      "word_header_footer_in_structure": true,
+      "ordered_list_exposed": true,
+      "merged_span_exposed": false,
+      "nested_table_text_present": true,
+      "hidden_sheet_all_cells_in_structure": true,
+      "missing_formula_cache_exposed": false,
+      "correct_formula_addresses": false,
+      "pdf_grid_exposed": true,
+      "pdf_continued_grid_exposed": true,
+      "scan_requires_ocr_detectable": true,
+      "scan_body_empty": true,
+      "picture_record_exposed": true
+    }
+  ],
+  "same_original_hash_across_all_profiles": true,
+  "additional_header_textbox_control": {
+    "les": {
+      "BODY ANCHOR CONTENT": true,
+      "HEADER PARAGRAPH ANCHOR": true,
+      "HEADER TABLE ANCHOR": true,
+      "HEADER TEXTBOX ANCHOR": true
+    },
+    "docling-release": {
+      "BODY ANCHOR CONTENT": true,
+      "HEADER PARAGRAPH ANCHOR": true,
+      "HEADER TABLE ANCHOR": true,
+      "HEADER TEXTBOX ANCHOR": true
+    },
+    "xberg-release": {
+      "BODY ANCHOR CONTENT": true,
+      "HEADER PARAGRAPH ANCHOR": true,
+      "HEADER TABLE ANCHOR": true,
+      "HEADER TEXTBOX ANCHOR": false
+    }
+  }
+}

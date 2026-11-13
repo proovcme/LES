@@ -4,19 +4,27 @@ use serde_json::{json, Map, Value};
 use std::path::Path;
 use std::{sync::Arc, time::Duration};
 
+const FOLDER_WATCHES: &str = "/api/light/folder-watches";
+
 pub fn handles(method: &str, path: &str) -> bool {
     matches!(
         (method, path),
         (
             "GET",
-            "/api/light/library" | "/api/light/forest" | "/api/light/intake"
-        ) | ("POST", "/api/rag/datasets")
+            "/api/light/library" | "/api/light/forest" | "/api/light/intake" | FOLDER_WATCHES
+        ) | ("POST", "/api/rag/datasets" | FOLDER_WATCHES)
     )
 }
 
 pub async fn handle(context: Arc<Context>, request: Request) -> Response {
     let write = request.method() == "POST";
-    let cors = match auth::authorize(&context, request.headers(), write).await {
+    let cors = match auth::authorize(
+        &context,
+        request.headers(),
+        write || request.uri().path() == FOLDER_WATCHES,
+    )
+    .await
+    {
         Ok(cors) => cors,
         Err(response) => return response,
     };
@@ -30,6 +38,7 @@ pub async fn handle(context: Arc<Context>, request: Request) -> Response {
 
 async fn dispatch(context: Arc<Context>, request: Request, write: bool) -> Response {
     let uri = request.uri();
+    let folder_watches = uri.path() == FOLDER_WATCHES;
     let mut args: Map<String, Value> = reqwest::Url::parse(&format!("http://localhost{uri}"))
         .map(|url| {
             url.query_pairs()
@@ -51,7 +60,9 @@ async fn dispatch(context: Arc<Context>, request: Request, write: bool) -> Respo
             match serde_json::from_slice::<Value>(&bytes) {
                 Ok(Value::Null) => {}
                 Ok(Value::Object(body)) => {
-                    if let Some(value) = body.get("name") {
+                    if folder_watches {
+                        args = body;
+                    } else if let Some(value) = body.get("name") {
                         if !value.is_string() {
                             return error(
                                 StatusCode::UNPROCESSABLE_ENTITY,
@@ -64,8 +75,20 @@ async fn dispatch(context: Arc<Context>, request: Request, write: bool) -> Respo
                 _ => return error(StatusCode::UNPROCESSABLE_ENTITY, "Ожидается объект JSON."),
             }
         }
-        args.entry("name").or_insert_with(|| "".into());
-        "dataset_create"
+        if folder_watches {
+            "intake_watch_set"
+        } else {
+            args.entry("name").or_insert_with(|| "".into());
+            "dataset_create"
+        }
+    } else if folder_watches {
+        if let Some(offset) = args.get_mut("offset") {
+            let Some(value) = offset.as_str().and_then(|value| value.parse::<i64>().ok()) else {
+                return error(StatusCode::UNPROCESSABLE_ENTITY, "Неверный номер страницы.");
+            };
+            *offset = value.into();
+        }
+        "intake_watch_list"
     } else if uri.path() == "/api/light/intake" {
         let Some(id) = args.get("id").and_then(Value::as_str) else {
             return error(StatusCode::UNPROCESSABLE_ENTITY, "Укажите ID импорта.");
@@ -122,6 +145,9 @@ async fn dispatch(context: Arc<Context>, request: Request, write: bool) -> Respo
     .await;
     match result {
         Ok(result) if result["status"] == "completed" && result["value"].is_object() => {
+            if action == "intake_watch_set" {
+                crate::intake::wake(&context);
+            }
             json_response(StatusCode::OK, result["value"].clone(), "rust.library")
         }
         Ok(result) if result["code"] == "WORKSPACE_NOT_FOUND" => error(

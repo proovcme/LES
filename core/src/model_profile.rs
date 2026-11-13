@@ -85,7 +85,7 @@ pub fn resolve(
             context.min(32768)
         };
         preset["input_token_limit"] = json!(requested.map_or(usable, |n| usable.min(n)));
-        if context >= 16384 {
+        if preset["input_token_limit"].as_u64().unwrap() >= 16384 {
             preset["generation_reserve_tokens"] =
                 json!(4096.max(preset["generation_reserve_tokens"].as_u64().unwrap()));
         }
@@ -140,5 +140,17 @@ mod tests {
         assert_eq!(result["input_token_limit"], 32768);
         assert_eq!(result["max_tools"], 2);
         assert_eq!(result["normal_tool_count"], 2);
+    }
+
+    #[test]
+    fn generation_reserve_uses_the_requested_context_window() {
+        let preset = resolve(
+            &json!({"model_id":"Qwen3.5:2b","context_tokens":262144,"observed":true}),
+            &json!({"input_tokens":8192}),
+            &Value::Null,
+        )
+        .unwrap();
+        assert_eq!(preset["input_token_limit"], 8192);
+        assert_eq!(preset["generation_reserve_tokens"], 1200);
     }
 }

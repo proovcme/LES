@@ -2,7 +2,8 @@ use super::*;
 pub(super) fn original(r: &Value) -> Result<Value> {
     let doc = &r["document"];
     if doc["status"] != "INDEXED" || doc["file_hash"].as_str().is_none_or(|s| s.is_empty()) {
-        return Err(Failure::invalid(
+        return Err(Failure::new(
+            "REVIEW_SOURCE_NOT_INDEXED",
             "Источник ещё не проиндексирован или его версия неизвестна",
         ));
     }
@@ -12,13 +13,27 @@ pub(super) fn original(r: &Value) -> Result<Value> {
         text(doc, "file_name")?,
         Path::new(text(r, "content_root")?),
     )
-    .map_err(|_| Failure::invalid("Оригинал недоступен; проверьте файл и права чтения"))?;
-    let mut file = std::fs::File::open(path)
-        .map_err(|_| Failure::invalid("Оригинал недоступен; проверьте файл и права чтения"))?;
-    let hash = crate::pdf_source::fingerprint(&mut file)
-        .map_err(|_| Failure::invalid("Оригинал недоступен; проверьте файл и права чтения"))?;
+    .map_err(|_| {
+        Failure::new(
+            "REVIEW_ORIGINAL_UNAVAILABLE",
+            "Оригинал недоступен; проверьте файл и права чтения",
+        )
+    })?;
+    let mut file = std::fs::File::open(path).map_err(|_| {
+        Failure::new(
+            "REVIEW_ORIGINAL_UNAVAILABLE",
+            "Оригинал недоступен; проверьте файл и права чтения",
+        )
+    })?;
+    let hash = crate::pdf_source::fingerprint(&mut file).map_err(|_| {
+        Failure::new(
+            "REVIEW_ORIGINAL_UNAVAILABLE",
+            "Оригинал недоступен; проверьте файл и права чтения",
+        )
+    })?;
     if doc["file_hash"] != hash {
-        return Err(Failure::invalid(
+        return Err(Failure::new(
+            "REVIEW_ORIGINAL_CHANGED",
             "Файл изменился; обновите индекс перед проверкой",
         ));
     }

@@ -12,10 +12,12 @@ concurrency:
 jobs:
   windows:
     runs-on: windows-2022
-    timeout-minutes: 40
+    timeout-minutes: 60
     env:
       PYTHONUTF8: '1'
       UV_FROZEN: '1'
+      CARGO_INCREMENTAL: '0'
+      CARGO_BUILD_JOBS: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -34,6 +36,7 @@ jobs:
             core
             runtime
             api
+            parsers
       - name: Prepare build tools
         run: choco install make --yes --no-progress
       - name: Install frozen Python environment
@@ -61,6 +64,13 @@ jobs:
           "LES_TEST_NATIVE_RUNTIME=$((Resolve-Path native/runtime/les-runtime.exe).Path)" >> $env:GITHUB_ENV
           "LES_TEST_NATIVE_API=$((Resolve-Path native/api/les-api.exe).Path)" >> $env:GITHUB_ENV
           "LES_TEST_NATIVE_QDRANT=$((Resolve-Path native/qdrant/qdrant.exe).Path)" >> $env:GITHUB_ENV
+      - name: Build native Word and PDF table parsers
+        run: |
+          cargo fmt --manifest-path parsers/Cargo.toml --check
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          uv run python tools/native_asset.py parsers --output native/parsers
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          "LES_TEST_NATIVE_DOCUMENT_PARSERS=$((Resolve-Path native/parsers/les-document-parsers.exe).Path)" >> $env:GITHUB_ENV
       - name: Check static frontend
         run: |
           uv run python tools/build_light_frontend.py

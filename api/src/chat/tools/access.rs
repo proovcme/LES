@@ -32,6 +32,7 @@ pub(super) async fn run(
     name: &str,
     args: Value,
     run_id: &str,
+    deadline: std::time::Instant,
 ) -> Result<Value> {
     let eligible: Vec<_> = tools
         .contracts
@@ -61,6 +62,7 @@ pub(super) async fn run(
                 turn,
                 &json!({"tool":target,"args":args.get("arguments").cloned().unwrap_or(json!({}))}),
                 run_id,
+                deadline,
             ))
             .await?
         } else {

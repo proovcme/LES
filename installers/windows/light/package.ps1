@@ -173,6 +173,7 @@ if ($manifest.application_id -ne $appId -or $manifest.schema -ne 'les.light-pack
   throw 'LES Light: это пакет другого приложения. Установка отменена.'
 }
 $files = @($manifest.files)
+$edgePreview = [bool]($files | Where-Object { $_.path -eq 'native/edge-preview' })
 if (-not ($files | Where-Object { $_.path -eq 'les-light.exe' })) {
   throw 'LES Light: пакет не содержит приложение. Загрузите полный установщик.'
 }
@@ -220,6 +221,31 @@ foreach ($item in Get-ChildItem -LiteralPath $sourceRoot -File -Recurse -Force) 
   }
 }
 if ($Mode -eq 'Validate') { Write-Output 'Пакет LES Light проверен.'; exit 0 }
+
+if ($edgePreview) {
+  $edgeStore = Join-Path $stateRoot 'vector-edge'
+  Assert-PlainTree $edgeStore
+  if (-not $seen.Contains('native/vector/les-vector.exe') -or
+      -not (Test-Path -LiteralPath (Join-Path $edgeStore 'les-vector.sqlite') -PathType Leaf)) {
+    throw 'LES Light Edge: сначала перенесите индекс в отдельное хранилище.'
+  }
+  $probe = New-Object Diagnostics.ProcessStartInfo
+  $probe.FileName = Join-Path $sourceRoot 'native/vector/les-vector.exe'
+  $probe.Arguments = 'serve-stdio "' + $edgeStore + '"'
+  $probe.UseShellExecute = $false
+  $probe.CreateNoWindow = $true
+  $probe.RedirectStandardInput = $true
+  $process = [Diagnostics.Process]::Start($probe)
+  try {
+    $process.StandardInput.Close()
+    if (-not $process.WaitForExit(30000)) {
+      $process.Kill()
+      $process.WaitForExit()
+      throw 'LES Light Edge: проверка индекса не завершилась.'
+    }
+    if ($process.ExitCode -ne 0) { throw 'LES Light Edge: перенесённый индекс недоступен.' }
+  } finally { $process.Dispose() }
+}
 
 $requiredBytes = 64MB
 foreach ($file in $files) { $requiredBytes += (Get-Item -LiteralPath (Join-Path $sourceRoot $file.path)).Length }

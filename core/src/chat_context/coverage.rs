@@ -1,6 +1,13 @@
 use super::*;
 use std::collections::BTreeSet;
 fn key(source: &Value) -> [String; 3] {
+    if truth(&source["context_unit"]) && source["document_fragment_count"].as_u64().is_some() {
+        return [
+            string(&source["dataset_id"]),
+            string(&source["doc_name"]),
+            string(&source["context_unit"]),
+        ];
+    }
     ["dataset_id", "doc_name", "parent_id"].map(|field| {
         if truth(&source[field]) {
             string(&source[field])
@@ -23,7 +30,13 @@ pub(super) fn report(sources: &[Value], visible: &[Value], compact: bool) -> Val
                 groups.push((key, BTreeSet::new()));
                 groups.len() - 1
             });
-        let count = source["section_fragment_count"].as_u64().filter(|n| *n > 0);
+        let count = if truth(&source["context_unit"]) {
+            &source["document_fragment_count"]
+        } else {
+            &source["section_fragment_count"]
+        }
+        .as_u64()
+        .filter(|n| *n > 0);
         groups[index].1.insert(count);
     }
     let rows:Vec<_>=groups.into_iter().map(|(group,counts)|{

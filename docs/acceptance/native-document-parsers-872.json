@@ -1,0 +1,84 @@
+{
+  "schema": "les.document-parser-acceptance.v1",
+  "candidate": 872,
+  "date": "2026-11-13",
+  "working_application_changed": false,
+  "existing_index_copy_reused": true,
+  "models_downloaded": false,
+  "parser_runtime": "Rust",
+  "dependencies": {
+    "docling.rs": "2.82.1",
+    "docling-core": "2.82.1",
+    "xberg": "1.3.10"
+  },
+  "selected_originals": {
+    "total": 19,
+    "docx": 11,
+    "doc": 1,
+    "pdf": 7,
+    "published_nonempty": 19,
+    "full_corpus_reprocessed": false
+  },
+  "word_preservation": {
+    "originals_hashed": 11,
+    "parts_hashed": 924,
+    "ocr_parts": 362,
+    "ocr_accuracy_graded": false,
+    "normalized_text_probes": 15451,
+    "missing_after_publication": 0
+  },
+  "empty_documents": {
+    "attempted": 2,
+    "indexed": 0,
+    "chunks": 0,
+    "error_code": "NO_SEARCHABLE_TEXT"
+  },
+  "real_pdf_reader": {
+    "physical_page": 5,
+    "page_count": 11,
+    "characters": 2059,
+    "portions": 9,
+    "identical_to_full_page": true,
+    "original_hash_preserved": true
+  },
+  "tests": {
+    "targeted_passed": 41,
+    "core_unit_passed": 122,
+    "api_unit_passed": 73,
+    "full_passed": 2205,
+    "full_skipped": 2,
+    "make_verify_passed": true
+  },
+  "qwen": {
+    "model": "qwen3.5:9b",
+    "questions": 39,
+    "explicit_file_filters": false,
+    "http200": 38,
+    "controlled_errors": {
+      "TABLE_VALUE_INVALID": 1
+    },
+    "validations": {
+      "source_rows_verified": 30,
+      "insufficient_evidence": 8,
+      "controlled_error": 1
+    },
+    "error_causes_preserved_in_history": true,
+    "latency_p50_seconds": 14.2,
+    "factual_accuracy_grade": null,
+    "overview_questions": 4,
+    "overview_accepted": 0
+  },
+  "citations": {
+    "source_entries": 257,
+    "physical_page_locators": 118,
+    "unique_originals_hashed": 95,
+    "unique_links_head_checked": 95,
+    "identity_link_or_page_errors": 0
+  },
+  "explicit_pdf_read_requests": {
+    "attempted": 2,
+    "physical_reader_invoked": 0,
+    "fulfilled": 0
+  },
+  "production_release_accepted": false
+}

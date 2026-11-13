@@ -88,6 +88,10 @@ def test_cold_recovery_without_python_backend(tmp_path, phase):
                     assert json.loads(conn.execute('SELECT body FROM replacement').fetchone()[0]) == pending
                 return
             response.raise_for_status()
+            schema=http.get('/collections/les_test').raise_for_status().json()['result']['payload_schema']
+            assert schema['node_role']['data_type']=='keyword'
+            assert schema['ancestor_ids']['data_type']=='keyword'
+            assert schema['evidence_admissible']['data_type']=='bool'
             found = http.post('/api/light/internal-index-store', headers={'x-les-index-token': 'a' * 64},
                 json={'action': 'hybrid_search', 'collection': 'les_test', 'text': 'кабелепровод',
                       'vector': [0.6, 0.8, 0.0], 'dense_name': 'dense', 'limit': 10}).raise_for_status().json()

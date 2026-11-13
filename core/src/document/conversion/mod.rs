@@ -73,9 +73,12 @@ fn bytes(path: &Path) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-fn archive(bytes: &[u8]) -> Result<zip::ZipArchive<std::io::Cursor<&[u8]>>> {
+pub(super) fn archive(bytes: &[u8]) -> Result<zip::ZipArchive<std::io::Cursor<&[u8]>>> {
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes))
         .map_err(|_| "DOCUMENT_ARCHIVE_INVALID")?;
+    if archive.has_duplicate_names() {
+        return Err("DOCUMENT_ARCHIVE_INVALID");
+    }
     if archive.len() > 10_000 {
         return Err("DOCUMENT_ARCHIVE_LIMIT");
     }
@@ -132,6 +135,29 @@ pub(crate) fn execute(request: &Value) -> Result<Value> {
 }
 
 pub fn execute_with(request: &Value, external: &impl Fn(&Value) -> Result<Value>) -> Result<Value> {
+    execute_inner(
+        request,
+        &|input, part| {
+            if part.is_some() {
+                return Err("DOCX_DRAWING_UNSUPPORTED");
+            }
+            external(input)
+        },
+        false,
+    )
+}
+
+pub fn execute_with_parts(
+    request: &Value,
+    external: &impl Fn(&Value, Option<&[u8]>) -> Result<Value>,
+) -> Result<Value> {
+    execute_inner(request, external, true)
+}
+fn execute_inner(
+    request: &Value,
+    external: &impl Fn(&Value, Option<&[u8]>) -> Result<Value>,
+    full_docx: bool,
+) -> Result<Value> {
     if request["schema"] != "les.document-convert.v1" {
         return Err("DOCUMENT_CONVERT_SCHEMA_INVALID");
     }
@@ -164,8 +190,14 @@ pub fn execute_with(request: &Value, external: &impl Fn(&Value) -> Result<Value>
         "msg" => msg::read(&bytes)?,
         "pptx" if request["pipeline"] != "nodes" => presentation::read(&bytes)?,
         "pptx" => Value::Null,
+        "docx" if full_docx => super::docx::convert(&bytes, request, external)?,
         "docx" => {
-            json!({"text":super::docx::read_bytes(&bytes).ok_or("DOCX_READ_FAILED")?,"metadata":{"extractor":"les.docx-paragraphs.v1"}})
+            json!({"text":super::docx::checked(&bytes)?,"metadata":{"extractor":"les.docx-paragraphs.v1"}})
+        }
+        "doc" if request["word_parser"] == "docling" => {
+            let mut input = request.clone();
+            input["source_sha256"] = json!(source_sha256);
+            external(&input, None)?
         }
         "doc" => {
             json!({"text":super::legacy_doc::read(path)?,"metadata":{"extractor":"les.ms-doc.v1"}})
@@ -197,7 +229,7 @@ pub fn execute_with(request: &Value, external: &impl Fn(&Value) -> Result<Value>
         "pdf" => {
             let mut input = request.clone();
             input["source_sha256"] = json!(source_sha256);
-            external(&input)?
+            external(&input, None)?
         }
         _ if request["pipeline"] == "nodes" => Value::Null,
         _ => spreadsheet::read(&bytes, &suffix, path, request)?,
@@ -256,7 +288,34 @@ pub fn serve() -> Result<()> {
 pub fn serve_with(external: &impl Fn(&Value) -> Result<Value>) -> Result<()> {
     serve_requests(&|input| execute_with(input, external))
 }
-pub(crate) fn serve_requests(handler: &impl Fn(&Value) -> Result<Value>) -> Result<()> {
+pub fn serve_with_parts(external: &impl Fn(&Value, Option<&[u8]>) -> Result<Value>) -> Result<()> {
+    serve_requests(&|input| execute_with_parts(input, external))
+}
+
+pub(super) fn embedded_spreadsheet(bytes: &[u8], name: &str) -> Result<Value> {
+    let path = Path::new(name);
+    let suffix = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .ok_or("DOCX_EMBEDDED_OBJECT_UNSUPPORTED")?;
+    let value = spreadsheet::read(
+        bytes,
+        suffix,
+        path,
+        &json!({"read_rows":20000,"full_table_max_cells":300000,"retain_single_row":true}),
+    )?;
+    if value["sheets"].as_array().is_none_or(|sheets| {
+        sheets.iter().any(|s| {
+            s["truncated"] == true
+                || s["projected"] == true
+                || s["missing_formula_cache"].as_u64().unwrap_or(0) > 0
+        })
+    }) {
+        return Err("SPREADSHEET_LIMIT");
+    }
+    Ok(value)
+}
+pub fn serve_requests(handler: &impl Fn(&Value) -> Result<Value>) -> Result<()> {
     let mut input = BufReader::new(std::io::stdin().lock());
     let mut output = std::io::stdout().lock();
     loop {

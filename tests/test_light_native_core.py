@@ -71,3 +71,28 @@ def test_native_protocol_rejects_unknown_version_and_oversized_batch(native):
         native_core.call('prepare_terms', tokenizer='other', stop_words=[], documents=[])
     with pytest.raises(native_core.NativeCoreError, match='CORE_BATCH_LIMIT'):
         native_core.call('prepare_terms', tokenizer='les.lexical.v2', stop_words=[], documents=[[]]*257)
+
+
+def test_versioned_snowball_postings_find_word_forms_without_switching_legacy(native, tmp_path):
+    def analyze(text, version):
+        return native_core.required('prepare_terms', tokenizer=version,
+                                    stop_words=[], raw_texts=[text])['documents'][0]['terms']
+
+    def bm(**request):
+        return native_core.required('bm25', request=request)
+
+    for version in ('les.lexical.v2', 'les.lexical.v3'):
+        database = str(tmp_path / (version + '.sqlite'))
+        handle = bm(action='begin', database=database)['handle']
+        bm(action='put', handle=handle, points=[{
+            'id': '"source"', 'terms': analyze('Ведомость. Оборудование. Заключение. Том.', version),
+            'payload': {'dataset_id': 'dataset', 'file_name': 'source.pdf', 'node_role': 'evidence'},
+        }])
+        bm(action='commit', handle=handle, revision=version, expected_count=1)
+        for query in ('ведомости', 'оборудования', 'заключения', 'томов'):
+            result = bm(action='search', database=database, revision=version,
+                        terms=list(analyze(query, version)), dataset_ids=['dataset'], limit=5)
+            assert bool(result['hits']) is (version == 'les.lexical.v3'), (query, version)
+        with pytest.raises(native_core.NativeCoreError, match='INDEX_SPARSE_STALE'):
+            bm(action='search', database=database, revision='wrong-generation', terms=['том'], limit=5)
+    assert analyze('ведомости', 'les.lexical.v2') == {'ведомос': 1}

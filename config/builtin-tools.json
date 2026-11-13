@@ -78,10 +78,10 @@
     },
     {
       "name": "dataset_map",
-      "version": "1.0.0",
-      "title": "Dataset map",
+      "version": "1.0.1",
+      "title": "Dataset document list",
       "category": "dataset",
-      "summary": "Return the typed dataset navigation map: topics, sections, routes and operator guidance.",
+      "summary": "List registered documents within the current dataset and file selection. Metadata is navigation, not factual evidence; read a document to use its contents.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1210,10 +1210,10 @@
     },
     {
       "name": "read_source",
-      "version": "1.0.0",
+      "version": "1.2.0",
       "title": "Read indexed source",
       "category": "source",
-      "summary": "Read ordered indexed chunks from one document by doc_id or dataset_id+doc_name. Set clause to read an exact numbered heading.",
+      "summary": "Read indexed sections or preserved Word media. view=text reads chunks. view=parts lists originals/previews with a cursor. To read a specific DOCX picture or attachment, use view=part and its exact member name (for example word/media/image7.emf); prefer member to copying a hash. Optional part_id must belong to the same member. The result only describes that exact member, never a differently named picture. Empty OCR is unread content. Media navigation does not prove image details.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1239,6 +1239,32 @@
           "max_chars": {
             "type": "integer",
             "minimum": 1
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "text",
+              "parts",
+              "part"
+            ]
+          },
+          "part_id": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "source_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "member": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000,
+            "description": "Exact member name from the Word parts manifest. No aliases or path normalization. Used only with view=part. If part_id is also supplied, both must identify the same part."
           }
         },
         "additionalProperties": false,
@@ -1281,6 +1307,32 @@
           "max_chars": {
             "type": "integer",
             "minimum": 1
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "text",
+              "parts",
+              "part"
+            ]
+          },
+          "part_id": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "source_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "member": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000,
+            "description": "Exact member name from the Word parts manifest. No aliases or path normalization. Used only with view=part. If part_id is also supplied, both must identify the same part."
           }
         },
         "additionalProperties": false,
@@ -1450,10 +1502,10 @@
     },
     {
       "name": "search_sources",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "title": "Search indexed sources",
       "category": "source",
-      "summary": "Search lexical chunks inside the selected dataset/document scope.",
+      "summary": "Search the selected datasets. view=passages (default): dense + lexical retrieval; use short factual queries, separately for each subquestion. view=documents: discover filenames by a short literal name fragment such as a document type, cipher or section; no embeddings, no factual evidence. Continue next_offset until null. Read the discovered document before answering. Short search excerpts do not prove a fact is absent or establish which revision is current.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1483,6 +1535,18 @@
           },
           "dataset_id": {
             "type": "string"
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "passages",
+              "documents"
+            ]
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000
           }
         },
         "additionalProperties": false,
@@ -1519,6 +1583,18 @@
           },
           "dataset_id": {
             "type": "string"
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "passages",
+              "documents"
+            ]
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000
           }
         },
         "additionalProperties": false,

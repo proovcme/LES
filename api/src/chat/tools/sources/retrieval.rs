@@ -1,6 +1,56 @@
 //! Query-time dense/BM25/RRF followed by generation-checked parent reads.
 use super::*;
 use crate::index_batch::configuration::{identity, tokenizer, Settings};
+mod matching;
+mod packing;
+mod views;
+
+/// A materialized page view replaces all its search chunks at read time. Count
+/// that page once *before* applying the document quota and shortlist limit.
+/// Pages without such a view keep their separate chunks and continuations.
+fn reading_units(points: &[Value]) -> Vec<Value> {
+    let page = |p: &Value| {
+        let p = &p["payload"];
+        p["page"].as_u64().map(|page| {
+            json!([p["dataset_id"], p["file_name"], p["source_sha256"], page]).to_string()
+        })
+    };
+    let materialized: std::collections::HashSet<_> = points
+        .iter()
+        .filter(|p| {
+            p["payload"]["pdf_page_view_schema"] == "les.pdf-page-view.v1"
+                && p["payload"]["pdf_page_view"]
+                    .as_str()
+                    .is_some_and(|v| !v.is_empty())
+        })
+        .filter_map(&page)
+        .collect();
+    let mut seen = std::collections::HashSet::new();
+    points
+        .iter()
+        .filter(|p| match page(p) {
+            Some(key) if materialized.contains(&key) => seen.insert(key),
+            _ => true,
+        })
+        .cloned()
+        .collect()
+}
+/// Limit repeated search seeds, never the continuation pages read afterwards.
+/// Dataset, full path and revision distinguish different physical sources.
+fn diverse(points: &[Value], per_document: usize) -> Vec<Value> {
+    let mut counts = std::collections::HashMap::<String, usize>::new();
+    points
+        .iter()
+        .filter(|point| {
+            let p = &point["payload"];
+            let key = json!([p["dataset_id"], p["file_name"], p["source_sha256"]]).to_string();
+            let count = counts.entry(key).or_default();
+            *count += 1;
+            *count <= per_document
+        })
+        .cloned()
+        .collect()
+}
 fn query_text(settings: &Settings, query: &str) -> Result<String> {
     match settings.get("RAG_QUERY_EMBEDDING_MODE","raw-v1") {
         "raw-v1"=>Ok(query.into()),
@@ -27,7 +77,10 @@ async fn scoped_configuration(
         let bytes=std::fs::read(path).map_err(|_|"INDEX_NOT_CONFIGURED")?;
         if bytes.len()>1024*1024{return Err("INDEX_SETTINGS_INVALID".into());}
         let contract:Value=serde_json::from_slice(&bytes).map_err(|_|"INDEX_SETTINGS_INVALID")?;
-        let frozen=les_core::index_configuration::execute(&json!({"contract":contract,"settings":settings.core_values(),"tokenizer":tokenizer(&settings,&contract)?}))?;
+        let mut frozen=les_core::index_configuration::execute(&json!({"contract":contract,"settings":settings.core_values(),"tokenizer":tokenizer(&settings,&contract)?}))?;
+        let fusion=settings.get("RAG_HYBRID_FUSION","rrf");
+        if !matches!(fusion,"rrf"|"dbsf") { return Err("FUSION_METHOD_INVALID".into()); }
+        frozen["fusion"]=json!(fusion);
         if !embedding {return Ok((frozen,Value::Null,String::new(),false));}
         let execution=super::super::super::unwrap(crate::library::catalog(&context.database,"model_execution_snapshot",json!({"role":"embeddings"})))?;
         if execution.is_null(){return Err("EMBEDDING_MODEL_NOT_ASSIGNED".into());}
@@ -48,7 +101,48 @@ async fn scoped_configuration(
         Ok((frozen,revision,prefix,consent))
     }).await.map_err(|_|"INDEX_SETTINGS_INVALID")?
 }
-pub(super) async fn search(context: Arc<Context>, turn: &Prepared, args: Value) -> Result<Value> {
+/// The coordinator and recovery use the same initial read policy as tools.
+pub(in crate::chat) async fn initial(context: Arc<Context>, turn: &Prepared) -> Result<Value> {
+    // This is only an IO ceiling. The shared model packer owns final admission
+    // with the actual prompt, schemas and dialogue. A fixed 6000-char pre-cut
+    // discarded continuation pages before that packer could consider them.
+    let profile = &turn.connection.profile;
+    let chars = profile["input_token_limit"]
+        .as_u64()
+        .ok_or("CHAT_CONTEXT_INVALID")?
+        .saturating_sub(
+            profile["generation_reserve_tokens"]
+                .as_u64()
+                .ok_or("CHAT_CONTEXT_INVALID")?,
+        )
+        .saturating_sub(
+            profile["safety_reserve_tokens"]
+                .as_u64()
+                .ok_or("CHAT_CONTEXT_INVALID")?,
+        )
+        .saturating_mul(2)
+        .clamp(1, 16000);
+    search_with_navigation(
+        context,
+        turn,
+        json!({"q":turn.request["question"],"max_chars":chars}),
+        false,
+    )
+    .await
+}
+pub(in crate::chat) async fn search(
+    context: Arc<Context>,
+    turn: &Prepared,
+    args: Value,
+) -> Result<Value> {
+    search_with_navigation(context, turn, args, true).await
+}
+async fn search_with_navigation(
+    context: Arc<Context>,
+    turn: &Prepared,
+    args: Value,
+    navigation: bool,
+) -> Result<Value> {
     let requested = args["dataset_ids"].as_array().cloned().unwrap_or_else(|| {
         turn.scope["resolved_dataset_ids"]
             .as_array()
@@ -70,6 +164,9 @@ pub(super) async fn search(context: Arc<Context>, turn: &Prepared, args: Value) 
         .as_str()
         .filter(|s| !s.trim().is_empty() && s.chars().count() <= 20000)
         .ok_or("INDEX_QUERY_INVALID")?;
+    if args["view"] == "documents" {
+        return super::catalog::search(context, turn, &args, &datasets).await;
+    }
     let remote_scope = turn
         .egress_tag
         .as_ref()
@@ -122,29 +219,161 @@ pub(super) async fn search(context: Arc<Context>, turn: &Prepared, args: Value) 
         .as_u64()
         .unwrap_or(policy["model_evidence_k"].as_u64().unwrap_or(6))
         .clamp(1, 16) as usize;
+    let offset = args["offset"].as_u64().unwrap_or(0) as usize;
+    let candidate_limit = policy["retrieval_candidate_k"].as_u64().unwrap_or(64) as usize;
+    if offset > candidate_limit {
+        return Err("SOURCE_OFFSET_INVALID".into());
+    }
     let store = context
         .index_store
         .as_ref()
         .ok_or("INDEX_STORAGE_UNAVAILABLE")?;
-    let result=store.hybrid_owned(&context,json!({"collection":config["collection"],"text":query,"vector":vector,"dense_name":config["vector_names"]["dense"],
-        "limit":policy["retrieval_candidate_k"],"rank_constant":2,"filters":{"dataset_ids":datasets,"doc_filter":files},"hierarchy":true})).await?;
-    let points = result["points"]
-        .as_array()
-        .ok_or("INDEX_READ_INVALID")?
-        .iter()
-        .take(limit)
-        .cloned()
-        .collect::<Vec<_>>();
-    passages(
-        &context,
-        turn,
-        &config["collection"],
-        points,
-        result["revision"].clone(),
-        args["max_chars"].as_u64().unwrap_or(3000).clamp(1, 16000) as usize,
-        "search_sources",
-    )
-    .await
+    let request = json!({"collection":config["collection"],"text":query,"vector":vector,"dense_name":config["vector_names"]["dense"],
+        "limit":policy["retrieval_candidate_k"],"rank_constant":policy["rrf_rank_constant"],"fusion":config["fusion"],"preserve_heads":!navigation,"filters":{"dataset_ids":datasets,"doc_filter":files},"hierarchy":navigation});
+    for attempt in 0..16 {
+        let result: Result<Value> = async {
+            let result = store.hybrid_owned(&context, request.clone()).await?;
+            let raw_points = result["points"].as_array().ok_or("INDEX_READ_INVALID")?;
+            // Diversify the automatic shortlist. Explicit tool pagination must
+            // still expose every ranked match, including later pages of one file.
+            let ranked = if navigation { raw_points.clone() } else {
+                diverse(&reading_units(raw_points), policy["document_diversity_k"].as_u64().unwrap_or(2) as usize)
+            };
+            let points: Vec<Value> = ranked
+                .iter()
+                .skip(offset).take(limit)
+                .cloned()
+                .collect();
+            // These identities remain discoverable even when the corresponding
+            // text did not fit. They are navigation, never admitted evidence.
+            let mut candidates = Vec::new();
+            let mut documents = std::collections::HashSet::new();
+            // Discovery must describe the searched pool, not only the few hits
+            // whose text was read. A relevant lower-ranked document is still
+            // reachable through its registered ID without repeating retrieval.
+            for point in if navigation { &points } else { raw_points } {
+                let p = &point["payload"];
+                if !documents.insert(json!([p["dataset_id"],p["file_name"]]).to_string()) { continue; }
+                let doc = document(&context, &json!({"dataset_id":p["dataset_id"],"file_name":p["file_name"]})).await?;
+                scoped_document(turn, &doc)?;
+                if p["source_sha256"].as_str().is_some_and(|hash| !hash.is_empty() && doc["file_hash"] != hash) {
+                    // Selected text was checked by passages(). An unread stale
+                    // catalog card cannot invalidate otherwise verified evidence.
+                    continue;
+                }
+                candidates.push(json!({"doc_id":doc["id"],"dataset_id":doc["dataset_id"],
+                    "path":doc["file_name"],
+                    "file_name":doc["file_name"].as_str().unwrap_or("").rsplit(['/', '\\']).next().unwrap_or(""),
+                    "source_sha256":doc["file_hash"],"page":p.get("source_page").filter(|v|!v.is_null()).unwrap_or(&p["page"]),
+                    "evidence_admissible":false}));
+                if candidates.len() >= 64 { break; }
+            }
+            let max_chars=args["max_chars"].as_u64().unwrap_or(3000).clamp(1,16000) as usize;
+            let mut reply=passages(&context,turn,&config["collection"],points.clone(),result["revision"].clone(),max_chars,"search_sources",None,true).await?;
+            reply["result"]["candidate_documents"] = json!(candidates);
+            let total = ranked.len();
+            reply["result"]["selection_policy"] = json!({"seed_limit":limit,"per_document_seed_limit":if navigation{Value::Null}else{policy["document_diversity_k"].clone()},"raw_candidates":raw_points.len(),"eligible_candidates":total,"navigation_requested":navigation});
+            // Diagnostics belong to the initial request receipt, never to the
+            // model's repeated search-tool exchanges or their result budget.
+            if !navigation {
+                reply["result"]["fusion"] = result["fusion"].clone();
+                reply["result"]["fusion_trace"] = json!(raw_points.iter().map(|p|json!({"id":p["id"],"score":p["score"],"provenance":p["retrieval_fusion"]})).collect::<Vec<_>>());
+            }
+            let next = offset + points.len();
+            reply["result"]["offset"] = json!(offset);
+            reply["result"]["total_candidates"] = json!(total);
+            reply["result"]["next_offset"] = if next < total { json!(next) } else { Value::Null };
+            let mut seen=std::collections::HashSet::new();
+            reply["result"]["navigation_hints"]=json!(result["hierarchy_candidates"].as_array().into_iter().flatten()
+                .filter(|p|seen.insert(json!([p["payload"]["dataset_id"],p["payload"]["file_name"],p["payload"]["parent_id"]]).to_string()))
+                .take(2).map(|p|json!({"dataset_id":p["payload"]["dataset_id"],"doc_name":p["payload"]["file_name"],
+                    "parent_id":p["payload"]["parent_id"],"evidence_admissible":false})).collect::<Vec<_>>());
+            Ok(reply)
+        }
+        .await;
+        match result {
+            Err(code)
+                if attempt < 15
+                    && matches!(
+                        code.code.as_str(),
+                        "INDEX_UPDATE_BUSY"
+                            | "INDEX_RECOVERY_REQUIRED"
+                            | "INDEX_CHANGED_DURING_SEARCH"
+                            | "INDEX_SPARSE_STALE"
+                            | "INDEX_RECOVERING"
+                    ) =>
+            {
+                if attempt == 0 {
+                    eprintln!(
+                        "{}",
+                        json!({"event":"search_waiting_for_publication","reason":code.code})
+                    );
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            }
+            _ => return result,
+        }
+    }
+    unreachable!()
+}
+
+#[cfg(test)]
+mod selection_tests {
+    use super::*;
+    #[test]
+    fn projected_page_duplicates_do_not_spend_the_other_page_slot() {
+        let mut first = point(1, "a", "source.pdf", "r1");
+        first["payload"]["page"] = json!(1);
+        first["payload"]["pdf_page_view_schema"] = json!("les.pdf-page-view.v1");
+        first["payload"]["pdf_page_view"] = json!("Complete first page");
+        let mut tail = point(2, "a", "source.pdf", "r1");
+        tail["payload"]["page"] = json!(1);
+        let mut later = point(3, "a", "source.pdf", "r1");
+        later["payload"]["page"] = json!(3);
+        let rows = vec![tail.clone(), first.clone(), later.clone()];
+        let units = reading_units(&rows);
+        assert_eq!(diverse(&units, 2), vec![tail.clone(), later.clone()]);
+        assert_eq!(rows.len(), 3);
+        // Unprojected text must retain its continuation chunks.
+        first["payload"]
+            .as_object_mut()
+            .unwrap()
+            .remove("pdf_page_view_schema");
+        assert_eq!(
+            reading_units(&[tail.clone(), first.clone(), later.clone()]),
+            vec![tail, first, later]
+        );
+    }
+    fn point(id: usize, dataset: &str, path: &str, revision: &str) -> Value {
+        json!({"id":id,"payload":{"dataset_id":dataset,"file_name":path,"source_sha256":revision}})
+    }
+    #[test]
+    fn repeated_hits_cannot_hide_a_lower_ranked_document() {
+        let rows = vec![
+            point(1, "a", "one.pdf", "r1"),
+            point(2, "a", "one.pdf", "r1"),
+            point(3, "a", "one.pdf", "r1"),
+            point(4, "a", "two.pdf", "r1"),
+        ];
+        assert_eq!(
+            diverse(&rows, 2)
+                .iter()
+                .map(|r| r["id"].clone())
+                .collect::<Vec<_>>(),
+            vec![json!(1), json!(2), json!(4)]
+        );
+        assert_eq!(rows.len(), 4);
+    }
+    #[test]
+    fn names_do_not_merge_datasets_paths_or_revisions() {
+        let rows = vec![
+            point(1, "a", "one.pdf", "r1"),
+            point(2, "b", "one.pdf", "r1"),
+            point(3, "a", "nested/one.pdf", "r1"),
+            point(4, "a", "one.pdf", "r2"),
+        ];
+        assert_eq!(diverse(&rows, 1), rows);
+    }
 }
 async fn passages(
     context: &Context,
@@ -154,6 +383,8 @@ async fn passages(
     revision: Value,
     max_chars: usize,
     name: &str,
+    context_budget: Option<usize>,
+    expand_document: bool,
 ) -> Result<Value> {
     let store = context
         .index_store
@@ -188,47 +419,25 @@ async fn passages(
     let hydrated = crate::index_store::sections::read(
         context,
         store,
-        &json!({"collection":collection,"revision":revision,"seeds":seeds,"scopes":scopes}),
+        &json!({"collection":collection,"revision":revision,"seeds":seeds,"scopes":scopes,
+            "document_budget_chars":if expand_document{Some(max_chars)}else{None}}),
     )
     .await?;
-    let mut selected = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    for point in &points {
-        let payload = &point["payload"];
-        if let Some(section) = hydrated["sections"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .find(|s| {
-                s["scope"]["dataset_id"] == payload["dataset_id"]
-                    && s["scope"]["file_name"] == payload["file_name"]
-                    && s["scope"]["parent_id"] == payload["parent_id"]
-            })
-        {
-            let mut rows = section["points"].as_array().cloned().unwrap_or_default();
-            rows.sort_by_key(|r| r["payload"]["chunk_ord"].as_u64().unwrap_or(0));
-            for row in rows {
-                if seen.insert(row["id"].to_string()) {
-                    selected.push(row);
-                }
-            }
-        } else if seen.insert(point["id"].to_string()) {
-            selected.push(point.clone());
-        }
-    }
-    let total = selected.len();
-    let mut used = 0;
+    let (points, hydrated) = views::project(points, hydrated)?;
+    let (selected, total) = packing::select(
+        &points,
+        &hydrated["sections"],
+        &hydrated["documents"],
+        max_chars,
+        context_budget,
+    );
+    let selected_ids: std::collections::HashSet<_> =
+        selected.iter().map(|p| p["id"].to_string()).collect();
     let mut output = Vec::new();
     let mut sources = Vec::new();
     for point in selected {
         let p = &point["payload"];
         let text = p["text"].as_str().unwrap_or("");
-        let n = text.chars().count();
-        // Never silently truncate a section and describe it as complete.
-        if used + n > max_chars {
-            continue;
-        }
-        used += n;
         let doc = document(
             context,
             &json!({"dataset_id":p["dataset_id"],"file_name":p["file_name"]}),
@@ -247,8 +456,57 @@ async fn passages(
             .unwrap_or(&p["page"])
             .clone();
         let mut source = reference(&doc, page);
+        if p["ocr"] == true {
+            source["ocr"] = json!(true);
+        }
+        for field in ["visual_content", "unread_visual_count", "visual_coverage"] {
+            if !p[field].is_null() {
+                source[field] = p[field].clone();
+            }
+        }
+        if p["visual_content"] == true {
+            source["parts_url"] = json!(format!(
+                "/api/documents/by-id/{}/parts?source_sha256={}",
+                doc["id"].as_str().unwrap_or(""),
+                doc["file_hash"].as_str().unwrap_or("")
+            ));
+        }
+        for field in ["sheet_name", "row", "source_ref"] {
+            if !p[field].is_null() {
+                source[field] = p[field].clone();
+            }
+        }
         source["qdrant_point_id"] = point["id"].clone();
         source["parent_id"] = p["parent_id"].clone();
+        if p["reading_representation"].is_string() {
+            source["reading_representation"] = p["reading_representation"].clone();
+        }
+        if let Some(document) = hydrated["documents"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|d| {
+                d["points"]
+                    .as_array()
+                    .is_some_and(|rows| rows.iter().any(|r| r["id"] == point["id"]))
+            })
+        {
+            let rows = document["points"].as_array().unwrap();
+            // Only a fully selected document becomes an atomic context unit.
+            // Selection adds all its points contiguously or none as a unit.
+            if rows
+                .iter()
+                .all(|r| selected_ids.contains(&r["id"].to_string()))
+            {
+                source["context_unit"] = json!(format!(
+                    "document:{}:{}",
+                    doc["id"].as_str().unwrap_or(""),
+                    doc["file_hash"].as_str().unwrap_or("")
+                ));
+                source["document_fragment_count"] = json!(rows.len());
+                source["context_origin"] = json!("document");
+            }
+        }
         sources.push(source.clone());
         output.push(json!({"text":text,"source":source,"chunk_ord":p["chunk_ord"],"source_ref":p["source_ref"]}));
     }
@@ -269,7 +527,10 @@ async fn passages(
     Ok(envelope(
         name,
         "indexed_sections",
-        json!({"passages":output,"index_revision":revision,"coverage":if included==total{"complete"}else{"bounded"},"total_fragments":total,"included_fragments":included}),
+        json!({"passages":output,"index_revision":revision,
+            "read_receipt":{"schema":"les.indexed-read.v1","index_revision":revision,
+                "point_ids":sources.iter().map(|s|s["qdrant_point_id"].clone()).collect::<Vec<_>>()},
+            "coverage":if included==total{"complete"}else{"bounded"},"total_fragments":total,"included_fragments":included}),
         sources,
     ))
 }
@@ -342,48 +603,25 @@ pub(super) async fn read(context: Arc<Context>, turn: &Prepared, args: Value) ->
         if headings.len() > 1 {
             return Err("SOURCE_CLAUSE_AMBIGUOUS".into());
         }
-    } else if let Some(query) = args["q"].as_str().filter(|s| !s.trim().is_empty()) {
+    }
+    let query = args["q"]
+        .as_str()
+        .filter(|s| !s.trim().is_empty() && clause.is_empty());
+    if let Some(query) = query {
         let query = query.to_owned();
-        points = tokio::task::spawn_blocking(move || -> Result<Vec<Value>> {
-            let mut texts = vec![query];
-            texts.extend(
-                points
-                    .iter()
-                    .map(|p| p["payload"]["text"].as_str().unwrap_or("").into()),
-            );
-            let tokens = les_core::lexical::current(&texts)?;
-            let terms = tokens["documents"][0]["terms"]
-                .as_object()
-                .ok_or("INDEX_QUERY_INVALID")?;
-            let mut ranked: Vec<_> = points
-                .into_iter()
-                .enumerate()
-                .map(|(i, p)| {
-                    let count = terms
-                        .keys()
-                        .filter(|key| tokens["documents"][i + 1]["terms"].get(*key).is_some())
-                        .count();
-                    (count, p)
-                })
-                .collect();
-            ranked.retain(|(score, _)| *score > 0);
-            ranked.sort_by_key(|(n, p)| {
-                (
-                    std::cmp::Reverse(*n),
-                    p["payload"]["chunk_ord"].as_u64().unwrap_or(0),
-                )
-            });
-            Ok(ranked.into_iter().map(|(_, p)| p).collect())
-        })
-        .await
-        .map_err(|_| "SOURCE_READ_FAILED")??;
+        points = tokio::task::spawn_blocking(move || matching::rank(points, query))
+            .await
+            .map_err(|_| "SOURCE_READ_FAILED")??;
     }
     if points.is_empty() {
         return Err("SOURCE_SECTION_NOT_FOUND".into());
     }
+    if query.is_none() {
+        points.sort_by_key(|p| p["payload"]["chunk_ord"].as_u64().unwrap_or(0));
+    }
     points.truncate(args["limit"].as_u64().unwrap_or(6).clamp(1, 16) as usize);
-    points.sort_by_key(|p| p["payload"]["chunk_ord"].as_u64().unwrap_or(0));
-    passages(
+    // Admission follows query relevance. Reading order is presentation only.
+    let mut reply = passages(
         &context,
         turn,
         &config["collection"],
@@ -391,6 +629,12 @@ pub(super) async fn read(context: Arc<Context>, turn: &Prepared, args: Value) ->
         revision,
         args["max_chars"].as_u64().unwrap_or(3000).clamp(1, 16000) as usize,
         "read_source",
+        args["_context_budget_chars"].as_u64().map(|n| n as usize),
+        clause.is_empty(),
     )
-    .await
+    .await?;
+    if let Some(rows) = reply["result"]["passages"].as_array_mut() {
+        rows.sort_by_key(|p| p["chunk_ord"].as_u64().unwrap_or(0));
+    }
+    Ok(reply)
 }

@@ -60,6 +60,17 @@ def test_inconsistent_or_missing_counts_never_claim_complete(counts):
     assert section_coverage(sources, sources)['sections'][0]['status'] == 'unknown'
 
 
+def test_document_coverage_counts_different_page_parents_as_one_reading_unit():
+    sources=[source(i,f'page-{i}',parent_id=f'parent-{i}',context_unit='document:revision-A',
+                    document_fragment_count=3) for i in (1,2,3)]
+    complete=section_coverage(sources,sources)['sections']
+    partial=section_coverage(sources,sources[:1])['sections']
+    assert len(complete)==len(partial)==1
+    assert complete[0]['indexed_fragments']==complete[0]['model_fragments']==3
+    assert complete[0]['status']=='complete'
+    assert partial[0]['status']=='partial' and partial[0]['omitted_fragments']==2
+
+
 def test_two_documents_with_same_parent_id_do_not_share_coverage():
     first, other = source(1, 'a', 1), source(2, 'b', 1, doc_name='Другой.pdf')
     rows = section_coverage([first, other], [first])['sections']

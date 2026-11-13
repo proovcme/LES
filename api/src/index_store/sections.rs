@@ -7,6 +7,7 @@ use std::{
     collections::{HashMap, HashSet},
     time::Duration,
 };
+mod documents;
 
 const UNAVAILABLE: &str = "SECTION_READ_UNAVAILABLE";
 const CHANGED: &str = "INDEX_CHANGED_DURING_SEARCH";
@@ -238,10 +239,22 @@ pub(crate) async fn read(
         }
         sections.push(json!({"scope":scope,"points":points}));
     }
+    let documents = if let Some(budget) = body["document_budget_chars"].as_u64() {
+        documents::read(
+            context,
+            store,
+            collection,
+            seeds,
+            budget.min(16000) as usize,
+        )
+        .await?
+    } else {
+        vec![]
+    };
     if store.revision(context, collection).await? != revision {
         return Err(CHANGED);
     }
-    Ok(json!({"current":current,"sections":sections}))
+    Ok(json!({"current":current,"sections":sections,"documents":documents}))
 }
 
 pub(super) async fn handle(context: &Context, store: &Store, body: &Value) -> Response {

@@ -1,5 +1,6 @@
 //! Dense, exact BM25 and hierarchy share one checked document generation.
 use crate::{Result, Shard};
+use les_core::retrieval_fusion::retrieve as fuse;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 
@@ -44,84 +45,6 @@ fn query_filter(filters: &Value) -> Result<Value> {
         }
         filter
     })
-}
-fn fuse(channels: &[Vec<Value>], limit: usize, constant: f64) -> Result<Vec<Value>> {
-    let mut records = HashMap::new();
-    let ids = channels
-        .iter()
-        .map(|rows| {
-            rows.iter()
-                .map(|p| {
-                    records
-                        .entry(p["id"].to_string())
-                        .or_insert_with(|| p.clone());
-                    p["id"].clone()
-                })
-                .collect::<Vec<_>>()
-        })
-        .collect::<Vec<_>>();
-    let ranked = les_core::bm25::execute(&json!({"action":"fuse","channels":ids,
-        "rank_constant":constant,"limit":limit}))?;
-    ranked["hits"]
-        .as_array()
-        .ok_or("EDGE_RESPONSE_INVALID")?
-        .iter()
-        .map(|hit| {
-            let mut point = records
-                .get(&hit[0].to_string())
-                .cloned()
-                .ok_or("INDEX_CHANGED_DURING_SEARCH")?;
-            point["score"] = hit[1].clone();
-            Ok(point)
-        })
-        .collect()
-}
-fn fuse_hierarchy(channels: &[Vec<Value>], limit: usize) -> Result<Vec<Value>> {
-    let mut records = HashMap::new();
-    let channels = channels
-        .iter()
-        .map(|rows| {
-            rows.iter()
-                .filter(|p| p["payload"]["node_role"] != "navigation")
-                .map(|point| {
-                    let payload = &point["payload"];
-                    let key = ["node_id", "doc_id"]
-                        .iter()
-                        .find_map(|key| {
-                            payload[*key]
-                                .as_str()
-                                .filter(|s| !s.is_empty())
-                                .map(str::to_owned)
-                        })
-                        .unwrap_or_else(|| {
-                            format!(
-                                "{}:{}",
-                                payload["file_name"].as_str().unwrap_or(""),
-                                payload["text"].as_str().unwrap_or("")
-                            )
-                        });
-                    records.insert(key.clone(), point.clone());
-                    key
-                })
-                .collect::<Vec<_>>()
-        })
-        .collect::<Vec<_>>();
-    let ranked = les_core::bm25::execute(
-        &json!({"action":"fuse","channels":channels,"rank_constant":61.,"limit":limit}),
-    )?;
-    ranked["hits"]
-        .as_array()
-        .ok_or("EDGE_RESPONSE_INVALID")?
-        .iter()
-        .map(|hit| {
-            let mut point = records
-                .get(hit[0].as_str().ok_or("EDGE_RESPONSE_INVALID")?)
-                .cloned()
-                .ok_or("EDGE_RESPONSE_INVALID")?;
-            point["score"] = hit[1].clone();
-            Ok(point)
-        })
-        .collect()
 }
 impl Shard {
     fn hybrid_leg(&self, request: &Value, filters: &Value, limit: usize) -> Result<Vec<Value>> {
@@ -190,6 +113,8 @@ impl Shard {
             &[dense, lexical],
             limit,
             request["rank_constant"].as_f64().unwrap_or(2.),
+            request["fusion"].as_str().unwrap_or("rrf"),
+            request["preserve_heads"] == true,
         )
     }
     pub fn hybrid_search(&self, request: &Value) -> Result<Value> {
@@ -212,11 +137,10 @@ impl Shard {
         }
         let mut filters = request["filters"].as_object().cloned().unwrap_or_default();
         let hierarchy = request["hierarchy"] == true;
-        if hierarchy {
-            filters.insert("node_roles".into(), json!(["evidence", ""]));
-        }
+        filters.insert("node_roles".into(), json!(["evidence", ""]));
         let global = self.hybrid_leg(request, &json!(filters), limit)?;
         let mut points = global;
+        let mut hierarchy_candidates = Vec::new();
         if hierarchy {
             filters.insert("node_roles".into(), json!(["navigation"]));
             let routes = self.hybrid_leg(request, &json!(filters), (limit / 2).clamp(4, 16))?;
@@ -229,7 +153,8 @@ impl Shard {
                 filters.insert("node_roles".into(), json!(["evidence", ""]));
                 filters.insert("ancestor_ids".into(), json!(ids));
                 let descendants = self.hybrid_leg(request, &json!(filters), limit)?;
-                points = fuse_hierarchy(&[points, descendants], limit)?;
+                hierarchy_candidates =
+                    les_core::bm25::hierarchy_candidates(&points, descendants, limit);
             }
         }
         points.retain(|p| p["payload"]["text"].as_str().is_some_and(|s| !s.is_empty()));
@@ -237,7 +162,7 @@ impl Shard {
             return Err("INDEX_CHANGED_DURING_SEARCH");
         }
         Ok(
-            json!({"points":points,"revision":revision,"channels":["dense","bm25_postings"],"hierarchy":hierarchy}),
+            json!({"points":points,"revision":revision,"channels":["dense","bm25_postings"],"fusion":request["fusion"].as_str().unwrap_or("rrf"),"hierarchy":hierarchy,"hierarchy_candidates":hierarchy_candidates}),
         )
     }
 }

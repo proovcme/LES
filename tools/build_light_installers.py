@@ -40,13 +40,15 @@ def release_manifest(installer: Path, package: dict) -> dict:
     }
 
 
-def build(payload: Path, output: Path, makensis: Path) -> None:
+def build(payload: Path, output: Path, makensis: Path, *, edge_preview: bool = False) -> None:
     payload, output, makensis = payload.resolve(), output.resolve(), makensis.resolve()
     if output.exists():
         raise FileExistsError("Use a new output directory to preserve previous installers")
     if not makensis.is_file():
         raise FileNotFoundError("An existing NSIS compiler is required")
     package = json.loads((payload / "light-package.json").read_text(encoding="utf-8"))
+    if (payload / "native/edge-preview").is_file() != edge_preview:
+        raise ValueError("Edge preview requires its own offline installer")
     version = json.loads((ROOT / "config/version.json").read_text(encoding="utf-8"))
     if (package.get("runtime_mode") != "rust" or package.get("version") != version["product_version"]
             or package.get("build_number") != version["build_number"]):
@@ -56,13 +58,18 @@ def build(payload: Path, output: Path, makensis: Path) -> None:
         "-File", str(INSTALLERS / "package.ps1"), "-Mode", "Validate", "-Source", str(payload),
     ], check=True)
     output.mkdir(parents=True)
-    offline = output / "LES-RAG-Setup.exe"
+    offline = output / ("LES-RAG-Edge-Preview-Setup.exe" if edge_preview else "LES-RAG-Setup.exe")
     subprocess.run([
         str(makensis), "/INPUTCHARSET", "UTF8", f"/DPAYLOAD_DIR={payload}", f"/DOUTPUT_FILE={offline}",
         f"/DPRODUCT_VERSION={package['version']}",
         str(INSTALLERS / "setup.nsi"),
     ], cwd=INSTALLERS, check=True)
     verify_installer_description(offline)
+    if edge_preview:
+        with offline.open("rb") as stream:
+            digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        (output / "SHA256.txt").write_text(f"{digest}  {offline.name}\n", encoding="utf-8")
+        return
     subprocess.run([
         str(makensis), "/INPUTCHARSET", "UTF8", f"/DOUTPUT_FILE={output / 'LES-RAG-Web-Setup.exe'}",
         str(INSTALLERS / "bootstrap.nsi"),
@@ -84,5 +91,6 @@ if __name__ == "__main__":
     parser.add_argument("--payload", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--makensis", type=Path, required=True)
+    parser.add_argument("--edge-preview", action="store_true")
     args = parser.parse_args()
-    build(args.payload, args.output, args.makensis)
+    build(args.payload, args.output, args.makensis, edge_preview=args.edge_preview)

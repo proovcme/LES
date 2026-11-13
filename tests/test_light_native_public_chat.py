@@ -99,6 +99,8 @@ def test_public_page_links_and_errors_survive_history_reload(native_turn):
     broken = events(t.client.post(STREAM, json=body, headers=origin))
     assert broken[-1][0] == 'error' and broken[-1][1]['code'] == 'UPSTREAM_STREAM_INTERRUPTED'
     assert all(event != 'final' for event, _ in broken)
+    assert all(event != 'token' for event, _ in broken), 'Unverified document draft escaped into the stream'
+    assert 'Сохранённая часть' not in broken[-1][1]['detail']
     t.children[-1].kill()
     t.children[-1].wait(timeout=10)
     t.start()
@@ -106,7 +108,9 @@ def test_public_page_links_and_errors_survive_history_reload(native_turn):
     assert history[1]['meta']['source_map'][0]['url'] == source['url']
     assert history[-1]['meta']['source_map'][0]['url'] == source['url']
     assert history[-1]['meta']['error']['code'] == 'UPSTREAM_STREAM_INTERRUPTED'
-    assert history[-1]['text'] == 'Полученная часть'
+    # Source-bound output is buffered until validation. Keep the error and
+    # source identity, without promoting an interrupted draft into the answer.
+    assert history[-1]['text'] == ''
 
 
 def test_selected_sources_only_never_streams_a_claim_without_evidence(native_turn):
@@ -120,6 +124,22 @@ def test_selected_sources_only_never_streams_a_claim_without_evidence(native_tur
     assert stream[-1][1]['code'] == 'SOURCE_EVIDENCE_MISSING'
     with sqlite3.connect(t.database) as db:
         assert db.execute('SELECT answer,success FROM chat_history').fetchall() == [('', 0)]
+
+
+def test_push_without_a_prepared_index_reports_search_configuration_not_a_model_failure(native_turn):
+    t=native_turn
+    source_pdf(t)
+    stream=events(t.client.post(STREAM,json={'question':'Что в документе?','mode':'search','retrieval_mode':'push',
+        'scope':{'scope_type':'dataset','dataset_ids':['ds'],'selected_sources_only':True}}))
+    assert all(event not in ('token','final') for event,_ in stream)
+    error=stream[-1][1]
+    assert error['code']=='INDEX_NOT_CONFIGURED' and 'Поиск по документам' in error['detail']
+    assert 'модел' not in error['detail'].lower() and not t.seen
+    with sqlite3.connect(t.database) as db:
+        answer,success,artifact=db.execute('SELECT answer,success,artifact_json FROM chat_history').fetchone()
+    assert error['status']==503 and error['message']==error['detail']
+    assert answer=='' and success==0
+    assert json.loads(artifact)['error']=={key:error[key] for key in ('code','detail')}
 
 
 def test_pending_options_fail_before_even_a_deterministic_command(native_turn):

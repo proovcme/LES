@@ -268,7 +268,7 @@ def stage_mail_collector(payload):
     return target
 
 
-def build(destination, executable, qdrant=None, native_runtime=None, native_api=None, skill_python=None):
+def build(destination, executable, qdrant=None, native_runtime=None, native_api=None, skill_python=None, native_parsers=None):
     destination = destination.resolve()
     if destination.exists():
         raise FileExistsError("Use a new empty output directory; existing artifacts are never removed by this builder")
@@ -305,6 +305,11 @@ def build(destination, executable, qdrant=None, native_runtime=None, native_api=
     else:
         from tools.build_native_api import build as build_api
         build_api(destination/'native/api')
+    from tools import native_asset
+    if native_parsers is None:
+        native_asset.build('parsers',destination/'native/parsers')
+    else:
+        native_asset.stage_asset('parsers',destination/'native/parsers',native_parsers,native_asset.source_digest('parsers'))
     stage_mail_collector(destination)
     from tools.light_license_audit import stage_notices
     stage_notices(ROOT, destination)
@@ -318,10 +323,12 @@ if __name__ == "__main__":
     parser.add_argument("--qdrant", type=Path)
     parser.add_argument("--native-runtime", type=Path)
     parser.add_argument("--native-api", type=Path)
+    parser.add_argument("--native-parsers", type=Path)
     parser.add_argument("--skill-python", type=Path, help="Prepared portable skill runtime; defaults to the locked bundled dependency set")
     args = parser.parse_args()
     result = build(args.output, args.desktop_exe.resolve(), args.qdrant.resolve() if args.qdrant else None,
                    args.native_runtime.resolve() if args.native_runtime else None,
                    args.native_api.resolve() if args.native_api else None,
-                   args.skill_python.resolve() if args.skill_python else None)
+                   args.skill_python.resolve() if args.skill_python else None,
+                   args.native_parsers.resolve() if args.native_parsers else None)
     print(json.dumps({"files": len(result["files"]), "version": result["version"], "output": str(args.output)}))

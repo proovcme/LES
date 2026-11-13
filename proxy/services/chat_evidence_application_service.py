@@ -41,7 +41,7 @@ from proxy.services.context_governor_service import (
     ContextPacket,
     ContextRequiredSectionOverflow,
 )
-from proxy.services.harness_loop_service import admitted_tool_evidence
+from proxy.services.tool_evidence_service import admitted_tool_evidence
 from proxy.services.chat_section_context_service import ChatSectionReader, SectionReadError, visible_chunks
 from proxy.services.document_review_tool import bind_review_tool, TOOL_NAME as REVIEW_TOOL
 from proxy.services.bound_document_tools import document_tool_context, bound_contract_shortlist
@@ -1779,7 +1779,7 @@ async def _execute_chat_evidence_application(
                 deadline_seconds=max(1., _env_float('LES_CHAT_ANSWER_DEADLINE_SECONDS', 900.)),
             )
             retrieval_trace['answer_loop'] = {
-                'owner': 'rust.agent_loop', 'attempts': answer_result['attempts'],
+                'owner': 'rust.rho_coordinator', 'attempts': answer_result['attempts'],
                 'status': answer_result['status'],
             }
 

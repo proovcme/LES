@@ -2,6 +2,29 @@ use super::*;
 fn candidate(kind: &str, objects: Vec<Value>, required: bool) -> Value {
     json!({"kind":kind,"objects":objects,"required":required})
 }
+fn chronological(items: &[Value]) -> Vec<&Value> {
+    let mut ordered: Vec<_> = items.iter().collect();
+    ordered.sort_by_key(|item| item["context_sequence"].as_u64().unwrap_or(0));
+    ordered
+}
+fn dialogue_groups(dialogue: &[Value]) -> Vec<Value> {
+    let mut groups: Vec<Vec<Value>> = Vec::new();
+    for message in dialogue {
+        if message["role"] != "assistant" || groups.is_empty() {
+            groups.push(Vec::new());
+        }
+        groups.last_mut().unwrap().push(message.clone());
+    }
+    groups
+        .into_iter()
+        .enumerate()
+        .map(|(sequence, group)| {
+            let mut item = object(&format!("dialogue:{sequence}"), json!(group));
+            item["context_sequence"] = json!(sequence);
+            item
+        })
+        .collect()
+}
 fn pack(request: &Value, candidates: &[Value]) -> Result<Value> {
     let mut all = Vec::new();
     let mut rows = Vec::new();
@@ -9,8 +32,26 @@ fn pack(request: &Value, candidates: &[Value]) -> Result<Value> {
         let mut items = Vec::new();
         for item in list(candidate, "objects") {
             let text = object_render(item);
-            items.push(json!({"id":item["object_id"],"render":text,"tokens":tokens(&text),"index":all.len()}));
+            let mut packed = json!({"id":item["object_id"],"render":text,"tokens":tokens(&text),"index":all.len()});
             all.push(item.clone());
+            // A document is preferred whole. If it cannot fit this round,
+            // admit complete typed reading blocks rather than discard every page.
+            // Mandatory reads and provider exchanges remain indivisible.
+            if candidate["required"] != true && item["payload"]["schema"] == "les.evidence-unit.v1"
+            {
+                let mut fallback = Vec::new();
+                for (page, block) in list(&item["payload"], "blocks").iter().enumerate() {
+                    let value = object(
+                        &format!("{}:block:{page}", item["object_id"].as_str().ok_or(ERROR)?),
+                        block.clone(),
+                    );
+                    let text = object_render(&value);
+                    fallback.push(json!({"id":value["object_id"],"render":text,"tokens":tokens(&text),"index":all.len()}));
+                    all.push(value);
+                }
+                packed["fallback"] = json!(fallback);
+            }
+            items.push(packed);
         }
         rows.push(
             json!({"kind":candidate["kind"],"required":candidate["required"],"objects":items}),
@@ -57,17 +98,16 @@ pub(super) fn messages(packet: &Value, request_last: bool) -> Result<Value> {
         let mut row = json!({"kind":section["kind"],"render":text});
         if section["kind"] == "native_tool_exchange" {
             let mut messages = Vec::new();
-            for item in items {
+            for item in chronological(items) {
                 messages.extend(item["payload"].as_array().ok_or(ERROR)?.iter().cloned());
             }
             row["native"] = json!(messages);
         }
         if section["kind"] == "dialogue" {
-            row["dialogue"]=json!(items.iter().map(|item|{
-                let payload=&item["payload"];
+            row["dialogue"]=json!(chronological(items).into_iter().flat_map(|item|item["payload"].as_array().map(Vec::as_slice).unwrap_or_else(||std::slice::from_ref(&item["payload"]))).map(|payload|{
                 if payload.is_object() && ["user","assistant"].iter().any(|v|payload["role"]==*v) {
                     json!({"role":payload["role"],"content":if truth(&payload["content"]){string(&payload["content"])}else{String::new()}})
-                } else {json!({"role":"user","content":object_render(item)})}
+                } else {json!({"role":"user","content":render(payload)})}
             }).collect::<Vec<_>>());
         }
         sections.push(row);
@@ -108,6 +148,21 @@ pub(super) fn assemble(request: &Value) -> Result<Value> {
             }
         })
         .collect();
+    let history = list(request, "native_tool_history");
+    let mut previous = objects("prior-tool-turn", history);
+    for (sequence, item) in previous.iter_mut().enumerate() {
+        item["context_sequence"] = json!(sequence);
+    }
+    // Prefer recent history when optional groups cannot all fit; provider
+    // messages are restored to chronological order after packing.
+    previous.reverse();
+    let mut current = objects("current-tool-turn", list(request, "native_tool_exchange"));
+    for (sequence, item) in current.iter_mut().enumerate() {
+        item["context_sequence"] = json!(history.len() + sequence);
+    }
+    let mut prior_dialogue = dialogue_groups(list(request, "dialogue"));
+    let recent_dialogue: Vec<_> = prior_dialogue.pop().into_iter().collect();
+    prior_dialogue.reverse();
     let mut candidates = vec![
         candidate(
             "profile_prefix",
@@ -135,32 +190,33 @@ pub(super) fn assemble(request: &Value) -> Result<Value> {
         ),
         candidate(
             "evidence",
-            objects("evidence", list(request, "evidence")),
+            evidence_objects("evidence", list(request, "evidence")),
             false,
         ),
         candidate(
             "evidence",
-            objects("current-document", list(request, "required_evidence")),
+            evidence_objects("current-document", list(request, "required_evidence")),
             true,
         ),
-        candidate(
-            "native_tool_exchange",
-            objects("current-tool-turn", list(request, "native_tool_exchange")),
-            true,
-        ),
+        candidate("native_tool_exchange", current, true),
+        candidate("native_tool_exchange", previous, false),
         candidate("source_map", objects("source", &projected), false),
         candidate(
             "tool_exchange",
             objects("exchange", list(request, "tool_exchange")),
             false,
         ),
-        candidate(
-            "dialogue",
-            objects("dialogue", list(request, "dialogue")),
-            !list(request, "dialogue").is_empty(),
-        ),
+        candidate("dialogue", recent_dialogue, true),
+        candidate("dialogue", prior_dialogue, false),
     ];
-    let reservation = coverage::reservation(sources);
+    // Old search candidates are not a mandatory report about every section ever
+    // encountered. Reserve coverage only for sources that can reach this round.
+    let preliminary = pack(request, &candidates)?;
+    if preliminary["overflow"] == true {
+        return Ok(preliminary);
+    }
+    let coverage_sources = visible(&preliminary, sources);
+    let reservation = coverage::reservation(&coverage_sources);
     if let Some(item) = &reservation {
         candidates.push(candidate("request", vec![item.clone()], true));
     }
@@ -190,7 +246,7 @@ pub(super) fn assemble(request: &Value) -> Result<Value> {
     }
     if reservation.is_some() {
         let visible = visible(&packet, sources);
-        packet = coverage::finalize(packet, sources, &visible)?;
+        packet = coverage::finalize(packet, &coverage_sources, &visible)?;
     }
     Ok(json!({"messages":messages(&packet,true)?,"packet":packet}))
 }

@@ -3,7 +3,7 @@ import hashlib
 import json
 import sqlite3
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from threading import Thread
+from threading import Event, Thread
 
 import pytest
 from proxy.services.document_task_store import digest, native_request
@@ -20,13 +20,15 @@ def review_turn(native_turn):
     point = {'id': '00000000-0000-0000-0000-000000000001', 'payload': {
         **selector, 'doc_id': 'registered-document', 'page': 2, 'chunk_ord': 0,
         'text': 'Прочитанный раздел 日本語 😀: требуется 12 м.', 'source_sha256': checksum}}
-    queries = []
+    queries = []; unavailable = Event()
     class Index(BaseHTTPRequestHandler):
         def log_message(self, *args): pass
         def do_POST(self):
             query = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
             queries.append(query)
             assert self.headers['api-key'] == 'review-fixture'
+            if unavailable.is_set():
+                self.send_response(503); self.send_header('Content-Length','0'); self.end_headers(); return
             value = {'points': [point], 'next_page_offset': None} if self.path.endswith('/scroll') else [point]
             body = json.dumps({'status': 'ok', 'result': value}, ensure_ascii=False).encode()
             self.send_response(200); self.send_header('Content-Length', str(len(body)))
@@ -53,7 +55,7 @@ def review_turn(native_turn):
                                            'arguments': {'operation': operation, **args}}}
         snapshot = native_request('review_snapshot', dict(selector=selector, allowed=['ds'], files=[],
             source={'sha256': checksum, 'document_id': 'registered-document'}, points=[point]))
-        t.review = dict(path=path, checksum=checksum, selector=selector, point=point, queries=queries,
+        t.review = dict(path=path, checksum=checksum, selector=selector, point=point, queries=queries, unavailable=unavailable,
             request=request, call=call, unit=digest(selector), fingerprint=snapshot['fingerprint'])
         yield t
     finally:
@@ -90,6 +92,8 @@ def test_review_credits_only_delivered_text_persists_quotes_and_rechecks_changed
     os.utime(r['path'], ns=(stat.st_atime_ns, stat.st_mtime_ns))
     response=t.client.post(PATH, json={**r['request'], 'question':'Продолжи task_id '+task}, headers=HEADERS).raise_for_status().json()
     assert response['artifact']['execution_receipt']['status']=='needs_recheck'
+    assert response['artifact']['execution_receipt']['source_check']=='changed'
+    assert response['artifact']['execution_receipt']['source_errors']=={r['unit']:'REVIEW_ORIGINAL_CHANGED'}
     assert response['artifact']['completion_status']=='incomplete'
     assert 'Требуется перепроверка' in response['answer']
     with sqlite3.connect(dbpath) as db:
@@ -127,12 +131,35 @@ def test_long_unicode_review_follows_every_cursor_and_never_replays_old_text(rev
     assert rows[1]['result']['next_cursor']=={'fragment_index':0,'offset':3000}
     assert rows[3]['result']['offset']==3000 and rows[3]['result']['next_cursor'] is None
     assert rows[1]['result']['text']+rows[3]['result']['text']==r['point']['payload']['text']
-    assert response['artifact']['execution_receipt']['status']=='recorded'
+    assert response['artifact']['execution_receipt']['status']=='recorded', response['artifact']
     # The current page is mandatory; prior pages stay in the ledger, not a growing transcript.
     final=json.dumps(t.seen[-1],ensure_ascii=False)
     assert 'А😀Б'*1000 not in final and 'А😀Б'*501 in final
     with sqlite3.connect(t.state/'data/document-tasks.sqlite3') as db:
         assert db.execute('SELECT start,stop FROM review_reads ORDER BY start').fetchall()==[(0,3000),(3000,4503)]
+
+
+def test_review_preserves_the_cause_of_an_unavailable_final_check_and_recovers_without_losing_decisions(review_turn):
+    t=review_turn; r=t.review; call=r['call']
+    def lose_index_after_generation_started(body):
+        r['unavailable'].set()
+        return {'text':'Решение записано.'}
+    t.scripts.extend([call('start',selectors=[r['selector']]),call('read'),call('record',**decisions(t)),lose_index_after_generation_started])
+    first=t.client.post(PATH,json=r['request'],headers=HEADERS).raise_for_status().json()
+    receipt=first['artifact']['execution_receipt']; task=receipt['task_id']
+    assert receipt['status']=='needs_recheck' and receipt['source_check']=='unavailable'
+    assert receipt['source_errors']=={r['unit']:'INDEX_READ_UNAVAILABLE'}
+    assert first['artifact']['completion_status']=='incomplete'
+    assert 'доступность' in receipt['notice'] and 'изменились' not in receipt['notice']
+    with sqlite3.connect(t.database) as db:
+        saved=json.loads(db.execute('SELECT artifact_json FROM chat_history ORDER BY id DESC LIMIT 1').fetchone()[0])
+    assert saved['execution_receipt']['source_errors']==receipt['source_errors']
+    r['unavailable'].clear()
+    t.scripts.extend([call('status',task_id=task),{'text':'Проверка источника восстановлена.'}])
+    restored=t.client.post(PATH,json={**r['request'],'question':'Проверь сохранённое задание '+task},headers=HEADERS).raise_for_status().json()
+    assert restored['artifact']['execution_receipt']['status']=='recorded'
+    with sqlite3.connect(t.state/'data/document-tasks.sqlite3') as db:
+        assert db.execute('SELECT count(*) FROM review_events').fetchone()[0]==1
 
 
 def test_review_owner_matches_existing_codec_and_cannot_cross_sessions(review_turn):

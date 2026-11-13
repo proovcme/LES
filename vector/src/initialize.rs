@@ -2,6 +2,27 @@
 use crate::{Result, Shard, database};
 use serde_json::{Value, json};
 use std::{fs, path::Path};
+
+impl Shard {
+    /// Build the filter indexes used by every leg of hierarchical retrieval.
+    /// Payload indexes do not change document contents or publication revisions.
+    pub fn ensure_search_indexes(&self) -> Result<()> {
+        let schema = self.info()?["payload_schema"].clone();
+        for (field, kind) in [
+            ("node_role", "keyword"),
+            ("ancestor_ids", "keyword"),
+            ("evidence_admissible", "bool"),
+        ] {
+            if schema.get(field).is_none() {
+                self.call(
+                    "create_payload_index",
+                    &json!({"field_name":field,"field_schema":kind}),
+                )?;
+            }
+        }
+        Ok(())
+    }
+}
 pub fn metadata(contract: &Value) -> Value {
     let dense = contract["dense_vector_name"].as_str().unwrap_or("dense");
     let sparse = contract["sparse_vector_name"]
@@ -50,6 +71,7 @@ pub fn create(root: &Path, contract: &Value) -> Result<Shard> {
     }
     let metadata = metadata(contract);
     let shard = Shard::load(root, Some(&metadata), false)?;
+    shard.ensure_search_indexes()?;
     let db = database(root)?;
     let phase: String = db
         .query_row("SELECT phase FROM migration WHERE id=1", [], |r| r.get(0))

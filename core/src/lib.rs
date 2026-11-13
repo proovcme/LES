@@ -1,7 +1,6 @@
 //! Versioned C ABI. All returned buffers belong to this library until les_core_free.
 pub mod access_policy;
 pub mod agent_files;
-pub mod agent_loop;
 pub mod auth;
 pub mod auth_keys;
 pub mod bm25;
@@ -15,6 +14,7 @@ pub mod chat_stream;
 pub mod citations;
 mod context;
 pub mod conversation_summary;
+pub mod coordinator;
 mod document;
 mod document_review;
 pub mod document_source;
@@ -22,7 +22,6 @@ pub mod document_tasks;
 pub mod embedding_native;
 mod files;
 pub mod filesystem;
-mod harness;
 pub mod harness_evidence;
 pub mod index_batch;
 pub mod index_bootstrap;
@@ -32,6 +31,7 @@ mod index_dispatch;
 mod index_events;
 pub mod index_journal;
 mod index_points;
+pub mod index_postings;
 pub mod index_publication;
 mod index_sources;
 mod jobs;
@@ -49,6 +49,8 @@ pub mod pdf_source;
 mod process_guard;
 mod receipts;
 pub use receipts::execute as execution_receipt;
+pub mod document_image;
+pub mod retrieval_fusion;
 mod retrieval_quality;
 pub mod skills;
 mod source_scan;
@@ -64,9 +66,11 @@ mod worker_host;
 pub mod workspace;
 pub use document::conversion::serve as serve_document_formats;
 pub use document::conversion::{
-    execute_with as convert_document_with, serve_with as serve_document_formats_with,
+    execute_with as convert_document_with, execute_with_parts as convert_document_with_parts,
+    serve_with as serve_document_formats_with,
+    serve_with_parts as serve_document_formats_with_parts,
 };
-pub use files::sha256_hex;
+pub use files::{fingerprint as file_fingerprint, sha256_hex};
 pub use index_sources::plan as plan_index_sources;
 pub fn supports_native_mail_dispatch(path: &std::path::Path) -> bool {
     document::conversion::supports_mail(path)
@@ -74,6 +78,7 @@ pub fn supports_native_mail_dispatch(path: &std::path::Path) -> bool {
 pub fn supports_native_document_dispatch(path: &std::path::Path) -> bool {
     document::conversion::supports(path)
 }
+pub use document::conversion::serve_requests as serve_document_format_requests;
 pub use process_guard::{prepare as prepare_child, JobGuard};
 use serde_json::{json, Value};
 use std::{
@@ -83,6 +88,7 @@ use std::{
 pub use worker_host::release_batch as release_batch_workers;
 pub use worker_host::run_attachments as run_native_attachments;
 pub use worker_host::run_embeddings as run_native_embeddings;
+pub use worker_host::run_parsers as run_native_parsers;
 pub use worker_host::{release_idle as release_native_workers, run_pdf as run_native_pdf};
 
 pub const MAX_INPUT: usize = 8 * 1024 * 1024;
@@ -126,7 +132,7 @@ fn dispatch(bytes: &[u8]) -> Result<Value, &'static str> {
         Some("table_snapshot") => document::workbook::snapshot(&request["request"]),
         Some("workbook_index") => document::workbook_index::execute(&request["request"]),
         Some("citations") => citations::execute(&request["request"]),
-        Some("harness") => harness::execute(&request["request"]),
+        Some("harness") => receipts::execute(&request["request"]),
         Some("harness_evidence") => harness_evidence::execute(&request["request"]),
         Some("index_journal") => index_journal::execute(&request["request"]),
         Some("index_sources") => index_sources::plan(&request["request"]),
@@ -349,7 +355,7 @@ pub unsafe extern "C" fn les_core_research_run(
         reply(input, input_len, output_len, |bytes| {
             let request = serde_json::from_slice(bytes).map_err(|_| "CORE_INVALID_JSON")?;
             let adapter = adapter.ok_or("AGENT_REQUEST_INVALID")?;
-            agent_loop::run_research(&request, |operation, data| {
+            coordinator::run_research(&request, |operation, data| {
                 bridge_json(
                     adapter,
                     operation,

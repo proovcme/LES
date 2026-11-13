@@ -1,5 +1,8 @@
 //! Render one page at a time and supervise the configured OCR executable.
+mod render;
+mod scratch;
 use pdfium_render::prelude::*;
+pub(crate) use scratch::cleanup;
 use serde_json::Value;
 use std::{
     fs::{self, File},
@@ -107,7 +110,7 @@ impl<'a> Ocr<'a> {
                     ])
                     .arg(self.helper)
                     .arg("-ImagePath")
-                    .arg(path);
+                    .arg(winrt_path(path));
                 command
             }
             Engine::Vision => {
@@ -175,68 +178,23 @@ impl<'a> Ocr<'a> {
         pdf: &dyn PdfiumLibraryBindings,
         page: FPDF_PAGE,
     ) -> Result<Option<String>, &'static str> {
-        // The PDF worker owns page and bitmap for the duration of this call.
-        let (width, height) = unsafe {
-            (
-                pdf.FPDF_GetPageWidthF(page) as f64,
-                pdf.FPDF_GetPageHeightF(page) as f64,
-            )
-        };
-        if !width.is_finite() || !height.is_finite() || width <= 0. || height <= 0. {
-            return Err(RENDER);
-        }
-        let limit = match self.engine {
-            Engine::Windows => 2400.,
-            Engine::Vision => 3200.,
-            Engine::Tesseract { .. } => 4800.,
-        };
-        let scale = (self.dpi / 72.).min(limit / width.max(height));
-        let width = (width * scale).ceil().clamp(1., limit) as i32;
-        let height = (height * scale).ceil().clamp(1., limit) as i32;
-        let bitmap = unsafe { pdf.FPDFBitmap_Create(width, height, 0) };
-        if bitmap.is_null() {
-            return Err(RENDER);
-        }
-        let result = (|| {
-            unsafe {
-                pdf.FPDFBitmap_FillRect(bitmap, 0, 0, width, height, 0xffffffff);
-                pdf.FPDF_RenderPageBitmap(bitmap, page, 0, 0, width, height, 0, 0);
-            }
-            let stride = unsafe { pdf.FPDFBitmap_GetStride(bitmap) };
-            let buffer = unsafe { pdf.FPDFBitmap_GetBuffer(bitmap) }.cast::<u8>();
-            if buffer.is_null() || stride != width * 4 {
-                return Err(RENDER);
-            }
-            let pixels = unsafe { std::slice::from_raw_parts(buffer, (stride * height) as usize) };
-            if !self.reads_all_pages() && pixels.chunks_exact(4).all(|pixel| pixel[..3] == [255; 3])
-            {
-                return Ok(None);
-            }
-            let nonce = PAGE_ID.fetch_add(1, Ordering::Relaxed);
-            let path = self
-                .scratch
-                .join(format!("page-{}-{nonce}.bmp", std::process::id()));
-            let mut file = File::options()
-                .write(true)
-                .create_new(true)
-                .open(&path)
-                .map_err(|_| RENDER)?;
-            let scratch = Scratch(path);
-            write_bmp(&mut file, width, height, pixels).map_err(|_| RENDER)?;
-            drop(file);
-            let text = self.image(&scratch.0)?;
-            if text.is_empty() {
-                Err("OCR_NO_TEXT")
-            } else {
-                Ok(Some(text))
-            }
-        })();
-        unsafe { pdf.FPDFBitmap_Destroy(bitmap) };
-        result
+        render::read(self, pdf, page)
     }
 }
 
-fn write_bmp(
+fn winrt_path(path: &Path) -> PathBuf {
+    // StorageFile.GetFileFromPathAsync takes a normal absolute Windows path,
+    // not the extended-length spelling returned by Rust's canonicalize().
+    let text = path.to_string_lossy();
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+    text.strip_prefix(r"\\?\")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| path.to_path_buf())
+}
+
+pub(crate) fn write_bmp(
     mut output: impl Write,
     width: i32,
     height: i32,

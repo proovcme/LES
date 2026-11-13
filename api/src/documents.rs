@@ -1,5 +1,6 @@
 //! Original bytes resolved through the catalog and checked on the streamed handle.
 pub mod browse;
+pub(crate) mod parts;
 use crate::{auth, Context};
 use axum::{
     body::Body,

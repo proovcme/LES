@@ -31,6 +31,23 @@ beforeEach(() => {
 });
 afterEach(async () => { await unmount(component); document.body.innerHTML = ''; vi.unstubAllGlobals(); });
 
+it('selects a retrieval strategy in answer options and restores the preference', async () => {
+  await settle(() => !!document.querySelector('#question'));
+  document.querySelector<HTMLButtonElement>('button[aria-label="Параметры ответа"]')!.click();
+  await settle(() => !!document.querySelector('dialog select'));
+  const modes = document.querySelector<HTMLSelectElement>('dialog select')!;
+  expect([...modes.options].map(item => item.value)).toEqual(['pull', 'push', 'hybrid']);
+  modes.value = 'hybrid';
+  modes.dispatchEvent(new Event('change', { bubbles: true }));
+  flushSync();
+  try {
+    expect(workspace.retrievalMode).toBe('hybrid');
+    expect(new Workspace().retrievalMode).toBe('hybrid');
+  } finally {
+    localStorage.removeItem('les.retrieval-mode');
+  }
+});
+
 it('uses the paperclip to index a file, waits for publication and preserves the draft', async () => {
   await settle(() => !!document.querySelector('#question'));
   workspace.indexedAttachments = true;

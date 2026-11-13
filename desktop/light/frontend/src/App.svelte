@@ -181,7 +181,7 @@
           <div class="composer-actions">
             <input class="sr-only" type="file" bind:this={fileInput} tabindex="-1" aria-label="Выбрать файл" onchange={() => { const file = fileInput.files?.[0]; if (file) void workspace.attach(file, indexFile); fileInput.value = ''; }} />
             <button type="button" class="icon-button quiet" aria-label={workspace.indexedAttachments ? 'Прикрепить файл' : 'Прикрепить файл для чтения'} aria-haspopup={workspace.indexedAttachments ? 'dialog' : undefined} disabled={disabled || !workspace.session} onclick={() => workspace.indexedAttachments ? modal = 'attachment' : chooseFile(false)}><Icon name="paperclip" /></button>
-            <button type="button" class="scope-button quiet" disabled={disabled || !workspace.session} onclick={() => modal = 'scope'} title={scopeLabel}><Icon name="folder" /><span>{scopeLabel}</span></button><button type="button" class="icon-button quiet options-button" aria-label="Параметры ответа" aria-haspopup="dialog" data-active={workspace.reranker} disabled={disabled} onclick={() => modal = 'options'}><Icon name="settings" /></button>
+            <button type="button" class="scope-button quiet" disabled={disabled || !workspace.session} onclick={() => modal = 'scope'} title={scopeLabel}><Icon name="folder" /><span>{scopeLabel}</span></button><button type="button" class="icon-button quiet options-button" aria-label="Параметры ответа" aria-haspopup="dialog" data-active={workspace.reranker || workspace.retrievalMode !== 'pull'} disabled={disabled} onclick={() => modal = 'options'}><Icon name="settings" /></button>
             {#if workspace.busy}<button type="button" class="stop-button" aria-label="Остановить ответ" onclick={() => workspace.stop()}><Icon name="stop" /><span class="send-label">Остановить</span></button>{:else}<button type="submit" class="send-button" disabled={disabled || !workspace.session || !workspace.text.trim()} aria-label="Отправить вопрос"><Icon name="arrow" /><span class="send-label">Отправить</span></button>{/if}
           </div>
         </form>
@@ -226,6 +226,13 @@
   </Modal>
 {:else if modal === 'options'}
   <Modal title="Параметры ответа" close={() => modal = null}>
+    <label class="field retrieval-option">Поиск в выбранных документах
+      <select value={workspace.retrievalMode} onchange={(event) => workspace.setRetrievalMode(event.currentTarget.value)}>
+        <option value="pull">По запросу модели</option>
+        <option value="push">Лес ищет перед ответом</option>
+        <option value="hybrid">Лес ищет, модель может дочитать</option>
+      </select>
+    </label>
     <label class="option"><input type="checkbox" bind:checked={workspace.reranker} /><span><strong>Уточнять результаты поиска</strong><small>Для вопросов по документам. Если доступен реранкер, он пересортирует найденные фрагменты. Ответ может занять больше времени.</small></span></label>
     <div class="modal-footer"><button onclick={() => modal = null}>Готово</button></div>
   </Modal>

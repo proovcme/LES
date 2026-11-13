@@ -255,7 +255,81 @@ def test_docx_headings_runs_and_rectangular_tables_keep_text(tmp_path):
     assert _parse_docx_native(path).endswith('|  |  |\n| --- | --- |\n| В ячейке |  |')
     make('<w:tbl><w:tr><w:tc><w:tcPr><w:gridSpan w:val="2"/></w:tcPr>'
          '<w:p><w:r><w:t>строка</w:t></w:r></w:p></w:tc></w:tr></w:tbl>')
+    assert _parse_docx_native(path).endswith('| строка | строка |')
+    make('<w:tbl><w:tr><w:tc><w:tcPr><w:vMerge/></w:tcPr>'
+         '<w:p/></w:tc></w:tr></w:tbl>')
     assert _parse_docx_native(path) is None
+
+
+def test_docx_localized_styles_outline_and_shared_table_labels(tmp_path):
+    if not native_core.supports('document_docx'):
+        pytest.skip('Build the Rust document core')
+    path = tmp_path / 'Структура.docx'
+    namespace = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+    with ZipFile(path, 'w', compression=ZIP_DEFLATED) as archive:
+        archive.writestr('word/styles.xml', f'''<w:styles xmlns:w="{namespace}">
+          <w:style w:type="paragraph" w:styleId="a"><w:name w:val="Обычный"/></w:style>
+          <w:style w:type="paragraph" w:styleId="head"><w:pPr><w:outlineLvl w:val="1"/></w:pPr></w:style>
+          <w:style w:type="paragraph" w:styleId="derived"><w:basedOn w:val="head"/></w:style>
+          </w:styles>''')
+        archive.writestr('word/document.xml', f'''<w:document xmlns:w="{namespace}"><w:body>
+          <w:p><w:pPr><w:pStyle w:val="derived"/><w:tabs><w:tab w:pos="200"/></w:tabs></w:pPr>
+            <w:r><w:rPr><w:b/></w:rPr><w:t>Раздел</w:t></w:r></w:p>
+          <w:p><w:pPr><w:pStyle w:val="a"/><w:outlineLvl w:val="9"/></w:pPr><w:r><w:t>Основной текст</w:t></w:r></w:p>
+          <w:p><w:hyperlink><w:r><w:t>Подпись ссылки</w:t></w:r></w:hyperlink>
+            <w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText>UNEXECUTED_FIELD</w:instrText></w:r>
+            <w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>Кеш поля</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>
+          <w:tbl><w:tblPr><w:tblBorders><w:top w:val="single"/></w:tblBorders></w:tblPr>
+          <w:tr><w:tc><w:tcPr><w:gridSpan w:val="2"/><w:vMerge w:val="restart"/></w:tcPr><w:p><w:r><w:t>Группа</w:t></w:r></w:p></w:tc>
+            <w:tc><w:p><w:r><w:t>17,35</w:t></w:r></w:p></w:tc></w:tr>
+          <w:tr><w:tc><w:tcPr><w:gridSpan w:val="2"/><w:vMerge/></w:tcPr><w:p/></w:tc>
+            <w:tc><w:p><w:r><w:t>22,40</w:t></w:r></w:p></w:tc></w:tr></w:tbl>
+          </w:body></w:document>''')
+    result = _parse_docx_native(path)
+    assert result.startswith('## Раздел\n\nОсновной текст\n\n')
+    assert '| Группа | Группа | 17,35 |' in result
+    assert '| Группа | Группа | 22,40 |' in result
+    assert 'Подпись ссылкиКеш поля' in result
+    assert 'UNEXECUTED_FIELD' not in result
+    assert '\t' not in result
+
+
+def test_docx_list_labels_restart_and_override_without_losing_clause_identity(tmp_path):
+    namespace='http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+    path=tmp_path/'Lists.docx'
+    def paragraph(text, level=0):
+        return f'<w:p><w:pPr><w:numPr><w:ilvl w:val="{level}"/><w:numId w:val="7"/></w:numPr></w:pPr><w:r><w:t>{text}</w:t></w:r></w:p>'
+    with ZipFile(path,'w',compression=ZIP_DEFLATED) as z:
+        z.writestr('word/numbering.xml',f'''<w:numbering xmlns:w="{namespace}">
+          <w:abstractNum w:abstractNumId="3"><w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/></w:lvl>
+          <w:lvl w:ilvl="1"><w:start w:val="1"/><w:numFmt w:val="lowerLetter"/><w:lvlText w:val="%1.%2)"/></w:lvl></w:abstractNum>
+          <w:num w:numId="7"><w:abstractNumId w:val="3"/><w:lvlOverride w:ilvl="0"><w:startOverride w:val="5"/></w:lvlOverride></w:num></w:numbering>''')
+        z.writestr('word/document.xml',f'<w:document xmlns:w="{namespace}"><w:body>'+paragraph('First')+paragraph('Child',1)+paragraph('Next child',1)+paragraph('Second')+paragraph('Restarted',1)+'</w:body></w:document>')
+    assert _parse_docx_native(path)=='5. First\n\n5.a) Child\n\n5.b) Next child\n\n6. Second\n\n6.a) Restarted'
+
+
+@pytest.mark.parametrize('retry',['orientation','resolution','unreadable'])
+def test_native_ocr_retries_are_bounded_and_do_not_publish_empty_scan_text(tmp_path,monkeypatch,retry):
+    import pypdfium2_raw
+    from backend import pdf_reader
+    api=os.getenv('LES_TEST_NATIVE_API')
+    asset=Path(pypdfium2_raw.__file__).with_name('pdfium.dll')
+    if os.name!='nt' or not api or not asset.is_file():pytest.skip('Windows native OCR worker required')
+    helper=tmp_path/'ocr.ps1'
+    condition={'orientation':'$bytes[54] -eq 255','resolution':'[BitConverter]::ToInt32($bytes,18) -gt 900','unreadable':'$false'}[retry]
+    helper.write_text('param([string]$ImagePath)\n$bytes=[IO.File]::ReadAllBytes($ImagePath)\n'+
+        f'if ({condition}) {{ [Console]::Write(\'{{"text":"RETRY PROOF"}}\') }} else {{ [Console]::Write(\'{{"text":""}}\') }}',encoding='utf-8')
+    path=write_pdf(tmp_path/'scan.pdf',[b'0 0 0 rg 0 150 150 150 re f'])
+    original=path.read_bytes()
+    monkeypatch.setenv('LES_NATIVE_PDF_WORKER',api);monkeypatch.setenv('LES_NATIVE_PDFIUM',str(asset))
+    try:
+        result=pdf_reader._native_worker_result(path,kind='pdf_ocr',timeout_ms=30000,
+            ocr={'dpi':150,'helper':str(helper),'scratch':str(tmp_path),'timeout_ms':20000})
+        if retry=='unreadable':assert result['status']=='failed' and result['code']=='OCR_NO_TEXT'
+        else:assert result['value']['text']=='## Стр. 1\n\nRETRY PROOF'
+        assert not list(tmp_path.glob('*.bmp'))
+        assert path.read_bytes()==original
+    finally:native_core.required('worker_stop')
 
 
 def test_native_windows_pdf_ocr_renders_only_nonblank_scan_pages(tmp_path, monkeypatch):
@@ -294,5 +368,12 @@ if ($bytes[0] -ne 66 -or $bytes[1] -ne 77 -or $bytes.Length -le 54) { exit 1 }
                  'helper': str(adapter), 'scratch': str(tmp_path)})
         assert result['value']['text'].count('TESSERACT 2048') == 4
         assert not list(tmp_path.glob('*.bmp'))
+        # A known white page is skipped above; failed OCR of nonblank content
+        # must remain distinguishable and must not be published as empty text.
+        helper.write_text('param([string]$ImagePath)\n[Console]::Write(\'{"text":""}\')',encoding='utf-8')
+        failed=pdf_reader._native_worker_result(path,kind='pdf_ocr',timeout_ms=15000,
+            ocr={'dpi':150,'helper':str(helper),'scratch':str(tmp_path)})
+        assert failed['status']=='failed' and failed['code']=='OCR_NO_TEXT'
+        assert 'value' not in failed and not list(tmp_path.glob('*.bmp'))
     finally:
         native_core.required('worker_stop')

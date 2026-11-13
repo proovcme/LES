@@ -76,6 +76,7 @@ async fn operation(request: Request, route: Route) -> Result<Operation, Response
         Route::DeletePath(key) => return Ok(Operation::Delete(key)),
         _ => {}
     }
+    let mut media_allowed = true;
     if let Some(content_type) = request.headers().get(header::CONTENT_TYPE) {
         let json = content_type
             .to_str()
@@ -87,13 +88,16 @@ async fn operation(request: Request, route: Route) -> Result<Operation, Response
                     && (subtype.eq_ignore_ascii_case("json")
                         || subtype.to_ascii_lowercase().ends_with("+json"))
             });
-        if !json {
-            return Err(invalid("Ожидается Content-Type: application/json"));
-        }
+        media_allowed = json;
     }
     let bytes = to_bytes(request.into_body(), 1_048_576)
         .await
         .map_err(|_| error(StatusCode::PAYLOAD_TOO_LARGE, "Запрос слишком велик"))?;
+    // Drain the bounded body before returning a media-type error. Leaving an
+    // HTTP/1 upload unread can reset a pooled connection on Windows.
+    if !media_allowed {
+        return Err(invalid("Ожидается Content-Type: application/json"));
+    }
     let body: Value =
         serde_json::from_slice(&bytes).map_err(|_| invalid("Ожидается JSON-объект"))?;
     if !body.is_object() {

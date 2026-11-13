@@ -76,6 +76,21 @@ def test_scores_match_full_bm25_and_keep_dense_payload_identity(index):
     assert ensure_current(client, journal) == contract
 
 
+def test_ancestor_semijoin_preserves_global_idf_and_counts_overlapping_routes_once(index):
+    from backend.sparse_index import search
+    client,journal=index
+    texts=['кабель кабель сечение','кабель сечение','кабель','иной документ']
+    put(client,texts)
+    client.set_payload('docs',payload={'ancestor_ids':['section-a','section-b']},points=[0])
+    client.set_payload('docs',payload={'ancestor_ids':['section-b']},points=[1])
+    client.set_payload('docs',payload={'ancestor_ids':['other']},points=[2])
+    ensure_current(client,journal)
+    actual=dict(search(client,journal,'кабель сечение',limit=20,ancestor_ids=['section-a','section-b'],dataset_ids=['а']))
+    expected=oracle(texts,'кабель сечение')
+    assert actual==pytest.approx({0:expected[0],1:expected[1]},rel=1e-10)
+    assert not search(client,journal,'кабель',ancestor_ids=['missing'])
+
+
 @pytest.fixture
 def native_index(tmp_path):
     # QdrantClient local emulation retains deleted terms in IDF statistics.

@@ -1,5 +1,7 @@
-//! Bounded PDFium reader executed in a disposable child, with no OCR or table inference.
+//! Bounded PDFium reader. Confirmed geometric cells preserve row/column identity.
+mod layout;
 mod preview;
+mod snapshot;
 use pdfium_render::prelude::*;
 use serde_json::{json, Value};
 use std::{
@@ -33,13 +35,24 @@ impl Drop for Library {
     }
 }
 
-fn page_text(pdf: &dyn PdfiumLibraryBindings, page: FPDF_PAGE) -> Result<String, &'static str> {
+fn page_text(
+    pdf: &dyn PdfiumLibraryBindings,
+    page: FPDF_PAGE,
+    native_layout: bool,
+) -> Result<(String, Option<String>), &'static str> {
     // The page belongs to a live document in this single-threaded worker.
     let text = unsafe { pdf.FPDFText_LoadPage(page) };
     if text.is_null() {
         return Err("PDF_TEXT_UNAVAILABLE");
     }
-    let result = text_range(pdf, text);
+    let result = text_range(pdf, text).map(|raw| {
+        (
+            raw,
+            native_layout
+                .then(|| layout::read(pdf, page, text))
+                .flatten(),
+        )
+    });
     unsafe { pdf.FPDFText_ClosePage(text) };
     result
 }
@@ -77,7 +90,25 @@ fn text_range(
     if !(1..=length).contains(&written) {
         return Err("PDF_TEXT_UNAVAILABLE");
     }
-    let value: String = char::decode_utf16(buffer[..written as usize - 1].iter().copied())
+    let rendered = &buffer[..written as usize - 1];
+    // PDFium emits U+FFFE for a discretionary hyphen. Resolve only positions
+    // confirmed by its character flags, never rewrite mathematical minus signs.
+    let mut normalized = Vec::with_capacity(rendered.len());
+    for (offset, code) in rendered.iter().enumerate() {
+        if *code == 0xfffe {
+            let index =
+                unsafe { pdf.FPDFText_GetCharIndexFromTextIndex(text, first + offset as i32) };
+            if index < 0 || unsafe { pdf.FPDFText_IsHyphen(text, index) } != 1 {
+                return Err("PDF_TEXT_UNAVAILABLE");
+            }
+            // GetText removed the original word-wrap break. Preserve its
+            // confirmed source hyphen and boundary, never fabricate a word.
+            normalized.extend_from_slice(&['-' as u16, '\n' as u16]);
+        } else {
+            normalized.push(*code);
+        }
+    }
+    let value: String = char::decode_utf16(normalized.iter().copied())
         .filter_map(Result::ok)
         .collect();
     Ok(value
@@ -130,6 +161,7 @@ fn read_pages(
     pdf: &dyn PdfiumLibraryBindings,
     document: FPDF_DOCUMENT,
     ocr: Option<&crate::pdf_ocr::Ocr<'_>>,
+    tables: Option<&Value>,
 ) -> Result<Value, &'static str> {
     let count = unsafe { pdf.FPDF_GetPageCount(document) };
     if !(0..=10_000).contains(&count) {
@@ -138,26 +170,54 @@ fn read_pages(
     let mut parts = Vec::new();
     let mut bytes = 0;
     let mut needs_ocr = false;
+    let mut page_views = Vec::new();
+    let mut view_bytes = 0;
     for index in 0..count {
         let page = unsafe { pdf.FPDF_LoadPage(document, index) };
         if page.is_null() {
             return Err("PDF_PAGE_UNAVAILABLE");
         }
         let result = (|| {
-            let mut text = page_text(pdf, page)?;
+            let (mut text, native_view) = page_text(pdf, page, tables.is_none())?;
+            let view = if tables.is_some() {
+                crate::document_parser::page_view(&text, (index + 1) as u64, tables)?
+            } else {
+                native_view
+            };
+            if tables.is_some() {
+                if let Some(view) = &view {
+                    text = view.clone();
+                }
+            }
+            if let Some(view) =
+                view.filter(|v| v.chars().count() <= 16000 && view_bytes + v.len() <= 1024 * 1024)
+            {
+                view_bytes += view.len();
+                page_views.push(json!({"page":index+1,"text":view}));
+            }
             let scan = text.chars().take(20).count() < 20
                 && scan_objects(pdf, page, None, 0, text.is_empty())?;
             needs_ocr |= scan;
             if let Some(ocr) = ocr.filter(|ocr| scan || ocr.reads_all_pages()) {
-                text = ocr
-                    .page(pdf, page)
-                    .inspect_err(|code| {
-                        eprintln!(
-                            "{}",
-                            json!({"event":"pdf_ocr_failed","page":index+1,"reason":code})
-                        );
-                    })?
-                    .unwrap_or_default();
+                let recognition = ocr.page(pdf, page).inspect_err(|code| {
+                    eprintln!(
+                        "{}",
+                        json!({"event":"pdf_ocr_failed","page":index+1,"reason":code})
+                    );
+                })?;
+                if scan
+                    && recognition.as_ref().is_some_and(|s| s.trim().is_empty())
+                    && text.trim().is_empty()
+                {
+                    return Err("OCR_READ_FAILED");
+                }
+                let recognized = recognition.unwrap_or_default();
+                if text.trim().is_empty() {
+                    text = recognized;
+                } else if !recognized.trim().is_empty() && recognized.trim() != text.trim() {
+                    text.push('\n');
+                    text.push_str(&recognized);
+                }
             }
             if !text.is_empty() {
                 bytes += text.len() + 32;
@@ -171,7 +231,9 @@ fn read_pages(
         unsafe { pdf.FPDF_ClosePage(page) };
         result?;
     }
-    Ok(json!({"text":parts.join("\n\n"),"needs_ocr":needs_ocr,"pages":count,"ocr":ocr.is_some()}))
+    Ok(
+        json!({"text":parts.join("\n\n"),"page_views":page_views,"needs_ocr":needs_ocr,"pages":count,"ocr":ocr.is_some()}),
+    )
 }
 
 struct Input {
@@ -243,6 +305,11 @@ fn read(library: &Library, path: &Path, options: &Value) -> Result<Value, &'stat
         file,
         length: metadata.len(),
     };
+    let parser_hash = if options["kind"] != "source_preview" && crate::document_parser::enabled()? {
+        Some(les_core::pdf_source::fingerprint(&mut input.file)?)
+    } else {
+        None
+    };
     let mut access = FPDF_FILEACCESS {
         m_FileLen: input.length.try_into().map_err(|_| "PDF_SOURCE_LIMIT")?,
         m_GetBlock: Some(read_at),
@@ -253,14 +320,36 @@ fn read(library: &Library, path: &Path, options: &Value) -> Result<Value, &'stat
     if document.is_null() {
         return Err("PDF_OPEN_FAILED");
     }
+    let tables = if let Some(hash) = parser_hash
+        .as_ref()
+        .filter(|_| options["kind"] != "source_page")
+    {
+        let count = unsafe { pdf.FPDF_GetPageCount(document) };
+        if !(0..=10000).contains(&count) {
+            unsafe { pdf.FPDF_CloseDocument(document) };
+            return Err("PDF_PAGE_LIMIT");
+        }
+        match crate::document_parser::pdf_tables(path, hash, count as u64) {
+            Ok(value) => value,
+            Err(code) => {
+                unsafe { pdf.FPDF_CloseDocument(document) };
+                return Err(code);
+            }
+        }
+    } else {
+        None
+    };
     let result = match options["kind"].as_str() {
-        Some("source_page") => read_page(pdf, document, options),
+        Some("source_page") => read_page(pdf, document, options, parser_hash.as_deref()),
         Some("source_preview") => preview::render(pdf, document, options),
-        _ => read_pages(pdf, document, ocr.as_ref()),
+        _ => read_pages(pdf, document, ocr.as_ref(), tables.as_ref()),
     };
     unsafe { pdf.FPDF_CloseDocument(document) };
     if let Some(hash) = options["source_sha256"].as_str() {
         les_core::pdf_source::verify(&mut input.file, hash)?;
+    }
+    if let Some(hash) = parser_hash {
+        les_core::pdf_source::verify(&mut input.file, &hash)?;
     }
     result
 }
@@ -269,6 +358,7 @@ fn read_page(
     pdf: &dyn PdfiumLibraryBindings,
     document: FPDF_DOCUMENT,
     options: &Value,
+    parser_hash: Option<&str>,
 ) -> Result<Value, &'static str> {
     let number = options["source"]["page"]
         .as_u64()
@@ -295,7 +385,24 @@ fn read_page(
         return Err("PDF_PAGE_UNAVAILABLE");
     }
     let result = (|| {
-        let text = page_text(pdf, page)?;
+        let (raw, native_view) = page_text(pdf, page, parser_hash.is_none())?;
+        if raw.chars().take(20).count() < 20 && scan_objects(pdf, page, None, 0, raw.is_empty())? {
+            return Err("PDF_OCR_REQUIRED");
+        }
+        let tables = parser_hash
+            .map(|hash| {
+                crate::document_parser::pdf_page_tables(hash, count as u64, number, || {
+                    snapshot::page(pdf, document, number)
+                })
+            })
+            .transpose()?;
+        let view = if tables.is_some() {
+            crate::document_parser::page_view(&raw, number, tables.as_ref())?
+        } else {
+            native_view
+        };
+        let structured = view.is_some();
+        let text = view.unwrap_or(raw);
         if text.chars().take(20).count() < 20 && scan_objects(pdf, page, None, 0, text.is_empty())?
         {
             return Err("PDF_OCR_REQUIRED");
@@ -324,7 +431,7 @@ fn read_page(
             json!({"text":excerpt,"page":number,"page_count":count,"offset":offset,
             "next_offset":if query.is_empty() && next<count_chars {Some(next)} else {None},"complete":next==count_chars && offset==0,
             "selection":if query.is_empty(){"page_range"}else{"literal_match"},"matched_query":query,
-            "total_chars":count_chars,"extractor":"les.pdfium.page.v1","source_sha256":options["source_sha256"]}),
+            "total_chars":count_chars,"extractor":if structured && tables.is_some(){"les.pdfium.xberg-page.v1"}else if structured{"les.pdfium.page.layout.v2"}else{"les.pdfium.page.v1"},"source_sha256":options["source_sha256"]}),
         )
     })();
     unsafe { pdf.FPDF_ClosePage(page) };

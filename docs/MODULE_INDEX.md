@@ -1,5 +1,120 @@
 # Модули LES RAG
 
+872: [документные parsers](modules/native-document-parsers.md) — `parsers/`,
+`api/src/document_parser`, `core/src/document/docx/package/docling.rs`.
+Docling владеет обычной структурой Word; LES — специальными вставками,
+OCR и полнотой; Xberg — геометрией PDF-таблиц при прежней идентичности PDFium.
+[Сквозная приёмка на копии](acceptance/native-document-parsers-872.md).
+
+Стенд 871: [граница нативных парсеров](modules/native-parser-comparison.md),
+[завершённое сравнение](acceptance/native-parser-comparison-871.md) и
+[обезличенные измерения](acceptance/native-parser-comparison-871.json).
+В том сравнении владельцы приложения не менялись. Для приёмки адаптера рассматривались
+DoclingDocument/DOCX и Xberg/PDF-таблицы; результаты внедрения указаны выше.
+
+870: core/src/coordinator — Rho runtime, host-политики, I/O и wire-адаптер.
+core/src/agent_loop и старый счётчик harness удалены; API использует
+проекцию истории SDK. [Договор](modules/native-rho-coordinator.md),
+[приёмка и ограничения](acceptance/native-rho-coordinator-870.md).
+Для следующих готовых компонентов — [сверка совместимости](modules/native-component-candidates.md).
+
+Стенд 869: [сравнение SDK и карта удаления координатора](acceptance/native-harness-comparison-869.md).
+Rho выбран для владения циклом; Evidence, reader, бюджет, редакции и
+цитаты сохраняются. Это архитектурное решение по результатам отдельного
+стенда, не подключение SDK к текущему API.
+
+868: core/src/chat_context/prose.rs — точные абзацы смешанного доказательства;
+tabular.rs — разметка вместе с ячейками. api/src/chat/table_facts/addresses.rs
+различает адреса абзацев и строк. [Приёмка](acceptance/native-mixed-evidence-868.md).
+[Готовые компоненты](modules/native-ready-stack.md) проходят отдельное включение.
+
+867: `core/src/retrieval_fusion.rs` — общий RRF/DBSF и отдельный допуск
+кандидатов; Server/Edge используют один модуль. `sources/retrieval.rs`
+передаёт диагностику только начальной подборке, `runner.rs` отделяет
+освобождение схем от ошибки табличного протокола.
+[Математика, приёмка и открытые проблемы](acceptance/native-fusion-867.md).
+
+866: `core/src/lexical.rs::versioned` — явно версионированные v2 и Snowball v3;
+`current` и штатные пути записи/поиска сохраняют v2. Версии и контрольные суммы
+библиотеки закреплены во всех четырёх Rust lock-файлах. Проверка v3 — на копии.
+`retrieval::read` и `runner` — [допуск reader](acceptance/native-reader-admission-866.md).
+
+865: [обзорные справки](acceptance/rag-synthesis-865.md) — непройденная
+приёмка отбора томов, синтеза, допуска reader и ограниченного дочитывания.
+Открытые изменения перечислены в бэклоге, не объявлены выполненными.
+
+865: [источники и контекст](acceptance/native-source-selection-865.md) —
+`sources/retrieval.rs`, `retrieval/packing.rs`, `Evidence::optional_blocks`,
+`table_facts.rs::finish_checked` и схемы/квитанции `chat/tools.rs`.
+`core/src/agent_loop.rs`: подготовка финального окна отделена от одной
+попытки исправления завершения; инструменты и бюджет действий не возобновляются.
+Отдельной стадии выбора файла моделью нет; индекс и модели прежние.
+
+864: [архитектурная сверка](acceptance/rag-architecture-audit-864.md) —
+`chat/budget.rs`, `model.rs`, `tools.rs`, `tools/access.rs`: общий абсолютный срок;
+`sources/retrieval.rs`: назначение поиска и политика начальной подборки;
+`tools/evaluate_light_chat.py`: раздельные метрики доставки и цитирования.
+
+863: [бюджет документа и продолжение поиска](acceptance/native-context-budget-863.md) —
+`core/src/chat_context/assembly.rs` и `core/src/context.rs`: полный документ
+или целые блоки с неполным покрытием; `retrieval.rs` применяет смещение
+ранжированных совпадений, `discovery.rs` сохраняет метаданные продолжения.
+
+862: [числа и ячейки](acceptance/native-numeric-evidence-862.md) —
+`api/src/pdf_text/layout/`, отдельное представление физической страницы в
+`core/src/document/source_nodes.rs`, проекция `retrieval/views.rs` и общий
+вывод адресов строк/колонок `core/src/chat_context/tabular.rs`, проверенное
+копирование значений `api/src/chat/table_facts.rs`.
+
+861: [выбор целой единицы чтения](acceptance/native-context-selection-861.md) —
+`api/src/index_store/sections/documents.rs`, единый бюджет `retrieval/packing.rs`
+и неделимые группы доказательств в `core/src/chat_context/`.
+
+860: [упрощение RAG-координатора](acceptance/native-rag-cleanup-860.md) —
+`api/src/chat/evidence.rs` владеет допуском и подтверждённой передачей;
+`inspection.rs` не хранит состояние. Начальная подготовка и восстановление
+используют `api/src/chat/tools/sources/retrieval.rs::initial`.
+Список набора и поиск имён используют общий `sources/catalog.rs`; он
+применяет и область наборов, и ограничение выбранных файлов. Проекцией
+метаданных обоих инструментов владеет `Evidence`.
+
+859: [допуск прочитанных доказательств](acceptance/native-retrieval-859.md) —
+`api/src/chat/inspection.rs`, `discovery.rs`, `evidence.rs`, квитанция общего
+reader и типизированные блоки в `core/src/chat_context/`. Политика режимов
+профилей задаётся `core/src/chat_profiles/mod.rs` и передаётся Svelte сервером.
+`api/src/transport.rs::reject` ограничивает дочитывание отвергнутых небольших
+HTTP-запросов; квитанции `core/src/receipts.rs` сохраняют причины недоступности
+проверки документа отдельно от подтверждённого изменения оригинала.
+
+858: [диагностика поиска](acceptance/native-retrieval-858.md) — отдельная
+иерархическая навигация, `api/src/chat/tools/sources/retrieval/packing.rs`,
+метаданные обнаружения, проверка чтения и бюджет доказательств в Rust;
+`api/src/chat/budget.rs` ограничивает следующую порцию по свободному окну.
+
+857: [точные части Word в чате](acceptance/native-docx-chat-857.md) —
+`api/src/chat/tools/sources/parts.rs`, выбор схем `api/src/chat/tools.rs`,
+проверка имени/хеша `api/src/documents/parts.rs`.
+
+856: [части DOCX](modules/native-format-conversion.md) — потоковый XML,
+`core/src/document/docx/package/`, `api/src/document_media/`, оригиналы и
+привязанные к редакции ссылки `api/src/documents/parts.rs`.
+
+855: [семантика DOCX](acceptance/real-corpus-855.md) — шрифты специальных
+символов, сетка таблиц, ограниченные Office Math/VML-textbox и точные причины отказа.
+
+854: [исправления по реальному корпусу](acceptance/real-corpus-854.md) —
+индексы фильтров Edge, BM25 semijoin, повтор поиска перед ответом, ссылки,
+нумерация DOCX и ограниченные повторы OCR.
+
+853: [DOCX и реальный корпус](modules/native-format-conversion.md) —
+`core/src/document/docx/`, стили и объединённые ячейки в нативном извлечении.
+
+852: [Режимы поиска в чате](modules/native-chat-retrieval-modes.md) —
+`api/src/chat/runner.rs`, `core/src/chat_request/`, общая публикация BM25.
+
+851: [Наблюдение за папками в Rust](modules/native-folder-watch.md) —
+`api/src/intake.rs`, `core/src/catalog/intake/watch.rs`, Svelte «Данные и проекты».
+
 846: [Импорт OLM и PST, IMAPS и почтовый индекс](modules/native-mail.md) —
 `api/src/mail`, `core/src/catalog/mail` и нативная очередь индексации.
 

@@ -6,7 +6,7 @@ import pytest
 from backend import native_core
 from backend.interface import Chunk
 from proxy.services.chat_prompt_support import _parse_model_tool_calls
-from proxy.services.harness_loop_service import admitted_tool_evidence
+from proxy.services.tool_evidence_service import admitted_tool_evidence
 from proxy.services.lexical_index_service import LexicalIndex
 
 
