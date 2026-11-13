@@ -85,7 +85,15 @@ impl Tools {
                     && (!remote || ["search_sources","read_source","read_pdf_source","read_excel_source"].iter().any(|n|t["name"]==*n))).cloned().collect();
             for contract in &mut contracts {
                 if contract["name"]=="search_sources"{contract["timeout_seconds"]=json!(150);}
-                if contract["name"]=="search_sources"||contract["name"]=="read_source"||contract["name"]=="read_excel_source"{
+                if [
+                    "search_sources",
+                    "read_source",
+                    "read_excel_source",
+                    "dataset_map",
+                ]
+                .iter()
+                .any(|n| contract["name"] == *n)
+                {
                     // The executor counts every nested array item, including
                     // repeated citation identities, receipt IDs and discovery
                     // cards. This is not the number of factual passages (32,
@@ -392,8 +400,8 @@ impl Tools {
                     Ok(result)
                 } else {
                     let mut args = args;
-                    if ["read_source", "read_excel_source"].contains(&name) {
-                        args["_context_budget_chars"] = json!(self.read_max_chars);
+                    if ["search_sources", "read_source", "read_excel_source"].contains(&name) {
+                        args["_context_budget_chars"] = json!(self.read_max_chars.min(16000));
                     }
                     sources::run(context, turn, name, args).await
                 }

@@ -54,7 +54,18 @@ async fn page(
             if documents.len()>=limit as usize {continue;}
             input["offset"]=json!(skip); input["limit"]=json!(limit-documents.len() as u64);skip=0;
             let page=super::super::super::unwrap(crate::library::catalog(&database,"library_documents",input))?;
-            documents.extend(page["documents"].as_array().ok_or("SOURCE_CATALOG_UNAVAILABLE")?.iter().cloned());
+            for doc in page["documents"].as_array().ok_or("SOURCE_CATALOG_UNAVAILABLE")? {
+                documents.push(doc.clone());
+                if documents.len() > 1
+                    && serde_json::to_string(&documents)
+                        .map(|s| s.chars().count())
+                        .unwrap_or(0)
+                        > 20000
+                {
+                    documents.pop();
+                    break;
+                }
+            }
         }
         let next=offset+documents.len() as u64;
         Ok(json!({"documents":documents,"total":total,"offset":offset,"next_offset":if next<total{Some(next)}else{None},

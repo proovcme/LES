@@ -269,7 +269,18 @@ async fn search_with_navigation(
                 if candidates.len() >= 64 { break; }
             }
             let max_chars=args["max_chars"].as_u64().unwrap_or(3000).clamp(1,16000) as usize;
-            let mut reply=passages(&context,turn,&config["collection"],points.clone(),result["revision"].clone(),max_chars,"search_sources",None,true).await?;
+            let context_budget = if navigation {
+                Some(
+                    args["_context_budget_chars"]
+                        .as_u64()
+                        .map(|n| n as usize)
+                        .unwrap_or(14000)
+                        .min(14000),
+                )
+            } else {
+                None
+            };
+            let mut reply=passages(&context,turn,&config["collection"],points.clone(),result["revision"].clone(),max_chars,"search_sources",context_budget,true).await?;
             reply["result"]["candidate_documents"] = json!(candidates);
             let total = ranked.len();
             reply["result"]["selection_policy"] = json!({"seed_limit":limit,"per_document_seed_limit":if navigation{Value::Null}else{policy["document_diversity_k"].clone()},"raw_candidates":raw_points.len(),"eligible_candidates":total,"navigation_requested":navigation});
@@ -288,6 +299,9 @@ async fn search_with_navigation(
                 .filter(|p|seen.insert(json!([p["payload"]["dataset_id"],p["payload"]["file_name"],p["payload"]["parent_id"]]).to_string()))
                 .take(2).map(|p|json!({"dataset_id":p["payload"]["dataset_id"],"doc_name":p["payload"]["file_name"],
                     "parent_id":p["payload"]["parent_id"],"evidence_admissible":false})).collect::<Vec<_>>());
+            if navigation {
+                fit_envelope_budget(&mut reply, 22500, 240);
+            }
             Ok(reply)
         }
         .await;
@@ -373,6 +387,81 @@ mod selection_tests {
             point(4, "a", "one.pdf", "r2"),
         ];
         assert_eq!(diverse(&rows, 1), rows);
+    }
+    #[test]
+    fn envelope_budget_guard_bounds_oversized_passages_and_candidates_within_24k_256() {
+        let long_path = format!("{}Спецификация_оборудования.pdf", "Раздел_ПД_Подраздел/".repeat(12));
+        let mut passages = Vec::new();
+        let mut sources = Vec::new();
+        for i in 0..16 {
+            let source = json!({
+                "doc_id": format!("doc-{i}"),
+                "dataset_id": "ds-1",
+                "doc_name": long_path,
+                "source_sha256": "a".repeat(64),
+                "page": i + 1,
+                "source_page": i + 1,
+                "locator": {"source_sha256": "a".repeat(64), "source_page": i + 1},
+                "url": format!("/api/documents/by-id/doc-{i}/raw?source_sha256={}#page={}", "a".repeat(64), i + 1),
+                "qdrant_point_id": format!("pt-{i}"),
+                "parent_id": format!("parent-{i}"),
+                "source_ref": format!("{long_path}#page={}", i + 1),
+                "context_unit": "document:doc-0:aaaa",
+                "document_fragment_count": 16,
+                "context_origin": "document"
+            });
+            sources.push(source.clone());
+            passages.push(json!({
+                "text": "Позиция спецификации и технические характеристики оборудования. ".repeat(18),
+                "source": source,
+                "chunk_ord": i,
+                "source_ref": format!("{long_path}#page={}", i + 1)
+            }));
+        }
+        let mut reply = envelope(
+            "search_sources",
+            "indexed_sections",
+            json!({
+                "passages": passages,
+                "index_revision": "rev-1",
+                "read_receipt": {
+                    "schema": "les.indexed-read.v1",
+                    "index_revision": "rev-1",
+                    "point_ids": (0..16).map(|i| json!(format!("pt-{i}"))).collect::<Vec<_>>()
+                },
+                "candidate_documents": (0..64).map(|i| json!({
+                    "doc_id": format!("cand-{i}"),
+                    "dataset_id": "ds-1",
+                    "path": long_path,
+                    "file_name": "Спецификация_оборудования.pdf",
+                    "source_sha256": "a".repeat(64),
+                    "page": i + 1,
+                    "evidence_admissible": false
+                })).collect::<Vec<_>>(),
+                "coverage": "complete",
+                "total_fragments": 16,
+                "included_fragments": 16
+            }),
+            sources,
+        );
+        assert!(canonical_chars(&reply) > 24000);
+        fit_envelope_budget(&mut reply, 22500, 240);
+        assert!(canonical_chars(&reply) <= 22500);
+        assert!(json_item_count(&reply) <= 240);
+        assert_eq!(reply["result"]["coverage"], "bounded");
+        let kept = reply["result"]["passages"].as_array().unwrap();
+        assert!(!kept.is_empty() && kept.len() < 16);
+        assert_eq!(
+            kept.len(),
+            reply["sources"].as_array().unwrap().len()
+        );
+        assert_eq!(
+            kept.len(),
+            reply["result"]["read_receipt"]["point_ids"]
+                .as_array()
+                .unwrap()
+                .len()
+        );
     }
 }
 async fn passages(
@@ -524,7 +613,7 @@ async fn passages(
         return Err("INDEX_CHANGED_DURING_SEARCH".into());
     }
     let included = output.len();
-    Ok(envelope(
+    let mut reply = envelope(
         name,
         "indexed_sections",
         json!({"passages":output,"index_revision":revision,
@@ -532,7 +621,113 @@ async fn passages(
                 "point_ids":sources.iter().map(|s|s["qdrant_point_id"].clone()).collect::<Vec<_>>()},
             "coverage":if included==total{"complete"}else{"bounded"},"total_fragments":total,"included_fragments":included}),
         sources,
-    ))
+    );
+    if context_budget.is_some() {
+        let cap = if name == "search_sources" {
+            19500
+        } else {
+            22000
+        };
+        fit_envelope_budget(&mut reply, cap, 230);
+    }
+    Ok(reply)
+}
+
+fn json_item_count(value: &Value) -> usize {
+    match value {
+        Value::Object(map) => map.values().map(json_item_count).sum(),
+        Value::Array(values) => values.len() + values.iter().map(json_item_count).sum::<usize>(),
+        _ => 0,
+    }
+}
+
+fn canonical_chars(value: &Value) -> usize {
+    les_core::tool_execution::canonical_json(value)
+        .map(|s| s.chars().count())
+        .unwrap_or_else(|_| value.to_string().chars().count())
+}
+
+pub(crate) fn fit_envelope_budget(reply: &mut Value, max_chars: usize, max_items: usize) {
+    if canonical_chars(reply) <= max_chars && json_item_count(reply) <= max_items {
+        return;
+    }
+    if let Some(candidates) = reply["result"]["candidate_documents"].as_array_mut() {
+        if candidates.len() > 16 {
+            candidates.truncate(16);
+        }
+    }
+    while reply["result"]["passages"]
+        .as_array()
+        .is_some_and(|p| p.len() > 1)
+        && (canonical_chars(reply) > max_chars || json_item_count(reply) > max_items)
+    {
+        let popped = reply["result"]["passages"]
+            .as_array_mut()
+            .and_then(Vec::pop);
+        if let Some(sources) = reply["sources"].as_array_mut() {
+            sources.pop();
+        }
+        if let Some(ids) = reply["result"]["read_receipt"]["point_ids"].as_array_mut() {
+            ids.pop();
+        }
+        if let Some(dropped) = popped {
+            if dropped["source"]["context_origin"] == "document" {
+                let doc_id = dropped["source"]["doc_id"].clone();
+                let sha = dropped["source"]["source_sha256"].clone();
+                if let Some(passages) = reply["result"]["passages"].as_array_mut() {
+                    for p in passages {
+                        if p["source"]["doc_id"] == doc_id && p["source"]["source_sha256"] == sha {
+                            if let Some(obj) = p["source"].as_object_mut() {
+                                obj.remove("context_unit");
+                                obj.remove("document_fragment_count");
+                                obj.remove("context_origin");
+                            }
+                        }
+                    }
+                }
+                if let Some(sources) = reply["sources"].as_array_mut() {
+                    for s in sources {
+                        if s["doc_id"] == doc_id && s["source_sha256"] == sha {
+                            if let Some(obj) = s.as_object_mut() {
+                                obj.remove("context_unit");
+                                obj.remove("document_fragment_count");
+                                obj.remove("context_origin");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let len = reply["result"]["passages"]
+            .as_array()
+            .map(Vec::len)
+            .unwrap_or(0);
+        reply["result"]["included_fragments"] = json!(len);
+        reply["result"]["coverage"] = json!("bounded");
+    }
+    while reply["result"]["candidate_documents"]
+        .as_array()
+        .is_some_and(|c| c.len() > 1)
+        && (canonical_chars(reply) > max_chars || json_item_count(reply) > max_items)
+    {
+        reply["result"]["candidate_documents"]
+            .as_array_mut()
+            .unwrap()
+            .pop();
+    }
+    if canonical_chars(reply) > max_chars {
+        let over = canonical_chars(reply).saturating_sub(max_chars);
+        if let Some(first) = reply["result"]["passages"]
+            .as_array_mut()
+            .and_then(|p| p.first_mut())
+        {
+            if let Some(text) = first["text"].as_str().map(str::to_owned) {
+                let keep = text.chars().count().saturating_sub(over + 64).max(1);
+                first["text"] = json!(text.chars().take(keep).collect::<String>());
+                reply["result"]["coverage"] = json!("bounded");
+            }
+        }
+    }
 }
 pub(super) async fn read(context: Arc<Context>, turn: &Prepared, args: Value) -> Result<Value> {
     let doc = document(&context, &args).await?;

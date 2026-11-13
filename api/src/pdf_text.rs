@@ -104,6 +104,10 @@ fn text_range(
             // GetText removed the original word-wrap break. Preserve its
             // confirmed source hyphen and boundary, never fabricate a word.
             normalized.extend_from_slice(&['-' as u16, '\n' as u16]);
+        } else if *code == 0x0020
+            && is_generated_kerning_space(pdf, text, first, offset, rendered)
+        {
+            continue;
         } else {
             normalized.push(*code);
         }
@@ -114,6 +118,81 @@ fn text_range(
     Ok(value
         .trim_matches(|c: char| c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c))
         .to_owned())
+}
+
+fn is_generated_kerning_space(
+    pdf: &dyn PdfiumLibraryBindings,
+    text: FPDF_TEXTPAGE,
+    first: i32,
+    offset: usize,
+    rendered: &[u16],
+) -> bool {
+    if offset == 0 || offset + 1 >= rendered.len() {
+        return false;
+    }
+    let prev_code = rendered[offset - 1];
+    let next_code = rendered[offset + 1];
+    if prev_code == 0xfffe || next_code == 0xfffe {
+        return false;
+    }
+    let Some(prev_ch) = char::from_u32(prev_code as u32) else {
+        return false;
+    };
+    let Some(next_ch) = char::from_u32(next_code as u32) else {
+        return false;
+    };
+    if prev_ch.is_whitespace() || next_ch.is_whitespace() {
+        return false;
+    }
+    let pos = first + offset as i32;
+    let index = unsafe { pdf.FPDFText_GetCharIndexFromTextIndex(text, pos) };
+    let prev = unsafe { pdf.FPDFText_GetCharIndexFromTextIndex(text, pos - 1) };
+    let next = unsafe { pdf.FPDFText_GetCharIndexFromTextIndex(text, pos + 1) };
+    if index < 0 || prev < 0 || index != prev + 1 || next != prev + 2 {
+        return false;
+    }
+    if unsafe { pdf.FPDFText_IsGenerated(text, index) } != 1 {
+        return false;
+    }
+    let obj = unsafe { pdf.FPDFText_GetTextObject(text, index) };
+    let prev_obj = unsafe { pdf.FPDFText_GetTextObject(text, prev) };
+    let next_obj = unsafe { pdf.FPDFText_GetTextObject(text, next) };
+    if obj.is_null() || obj != prev_obj || obj != next_obj {
+        return false;
+    }
+    let a1 = unsafe { pdf.FPDFText_GetCharAngle(text, prev) };
+    let a2 = unsafe { pdf.FPDFText_GetCharAngle(text, next) };
+    if !a1.is_finite() || !a2.is_finite() || a1.abs() > 0.05 || a2.abs() > 0.05 {
+        return false;
+    }
+    let f1 = unsafe { pdf.FPDFText_GetFontSize(text, prev) } as f32;
+    let f2 = unsafe { pdf.FPDFText_GetFontSize(text, next) } as f32;
+    let fs = f1.max(f2);
+    if !fs.is_finite() || fs <= 0.0 {
+        return false;
+    }
+    let mut b1 = FS_RECTF {
+        left: 0.0,
+        top: 0.0,
+        right: 0.0,
+        bottom: 0.0,
+    };
+    let mut b2 = FS_RECTF {
+        left: 0.0,
+        top: 0.0,
+        right: 0.0,
+        bottom: 0.0,
+    };
+    if unsafe { pdf.FPDFText_GetLooseCharBox(text, prev, &mut b1) } == 0
+        || unsafe { pdf.FPDFText_GetLooseCharBox(text, next, &mut b2) } == 0
+    {
+        return false;
+    }
+    if (b1.bottom - b2.bottom).abs() > 0.5 || b2.right <= b1.left {
+        return false;
+    }
+    let gap = b2.left - b1.right;
+    gap >= -0.05 * fs && gap <= 0.151 * fs
 }
 
 fn scan_objects(
