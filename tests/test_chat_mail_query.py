@@ -1,148 +1,71 @@
-
-from proxy.services import chat_inference_service
-from proxy.services import chat_request_contracts
-from proxy.services import chat_runtime
-from proxy.services import chat_request_service
-import asyncio
+"""Mail answer ownership is checked through the shipping Rust chat and reader."""
 from email.message import EmailMessage
-from types import SimpleNamespace
+import hashlib
+import json
 
 import pytest
-
-from proxy.routers import chat as chat_router
-from proxy.services.model_connection_contracts import ConnectionLocality
-from proxy.services.model_execution_preset_service import ModelExecutionPreset
-from proxy.services.openai_compatible_transport_service import InferenceResponse
+from tests.test_light_native_chat_turn import native_turn
+from tests.test_light_native_api import wait_for
 
 
 def _write_message(path, *, subject, sender, to, message_id, body, date):
-    msg = EmailMessage()
-    msg["Subject"] = subject
-    msg["From"] = sender
-    msg["To"] = to
-    msg["Date"] = date
-    msg["Message-ID"] = message_id
-    msg.set_content(body)
-    path.write_bytes(msg.as_bytes())
+    message = EmailMessage()
+    for key, value in [('Subject', subject), ('From', sender), ('To', to),
+                       ('Message-ID', message_id), ('Date', date)]:
+        message[key] = value
+    message.set_content(body)
+    path.write_bytes(message.as_bytes())
 
 
-class MailBackend:
-    collection_name = "test_collection"
-
-    def __init__(self, content_dir):
-        self.content_dir = content_dir
-
-    async def list_datasets(self):
-        return [SimpleNamespace(id="mail-ds", name="MAIL_Index")]
-
-    async def retrieve(self, *args, **kwargs):
-        raise AssertionError("production mail search must use the native retrieval contract")
-
-
-@pytest.mark.asyncio
-async def test_chat_does_not_replace_model_with_deterministic_mail_answer(tmp_path, monkeypatch):
-    (tmp_path / "data").mkdir()
-    monkeypatch.setenv("RAG_META_DB_PATH", str(tmp_path / "data" / "les_meta_qwen.db"))
-    root = tmp_path / "storage" / "datasets" / "mail-ds" / "MAIL"
-    root.mkdir(parents=True)
-    _write_message(
-        root / "01.eml",
-        subject="Dropbox notice",
-        sender="Dropbox <no-reply@dropbox.com>",
-        to="User <user@example.com>",
-        message_id="<m1@example.com>",
-        body="Welcome to Dropbox.",
-        date="Tue, 26 May 2026 09:00:00 +0300",
-    )
-
-    chat_runtime.set_chat_state(
-        chat_runtime.ChatRouterState(
-            rag_backend=MailBackend(tmp_path / "storage" / "datasets"),
-            llm_semaphore=asyncio.Semaphore(1),
-            crag_stats={"verified": 0, "no_data": 0, "hallucination": 0},
-            chat_metrics={
-                "latency_search": [],
-                "latency_gen": [],
-                "tokens": [],
-                "crag_pass": 0,
-                "crag_fail": 0,
-            },
-            reranker_available=False,
-            reranker_cls=None,
-            current_mode={"mode": "chat"},
-            metrics_cache={"ram_free_gb": 12.0, "swap_pct": 0.0},
-        )
-    )
-
-    # This checks answer ownership, not the RAM available on the developer's host.
-    from proxy.services import runtime_admission, generation_guard_service
-    fixture_metrics = lambda *_: dict(chat_runtime.get_chat_state().metrics_cache)
-    monkeypatch.setattr(runtime_admission, 'live_memory_metrics', fixture_metrics)
-    monkeypatch.setattr(generation_guard_service, 'live_memory_metrics', fixture_metrics)
-
-    connection = SimpleNamespace(
-        connection_id="test-answer",
-        revision_id="test-answer:r1",
-        display_name="Test answer model",
-        model_id="test-model",
-        locality=ConnectionLocality.LOOPBACK,
-        base_url="http://127.0.0.1:1/v1",
-        secret_ref="",
-        effective_preset=ModelExecutionPreset(
-            preset_id="mail-test",
-            model_family="fixture",
-            input_token_limit=6000,
-            generation_reserve_tokens=512,
-            safety_reserve_tokens=128,
-            normal_tool_count=3,
-            max_tools=5,
-            max_batch_items=5,
-            parallel_read_limit=1,
-            reasoning_enabled=False,
-            source_chain=("test",),
-        ),
-    )
-
-    class Resolver:
-        def resolve(self, _role, *, required_capabilities=frozenset()):
-            return connection
-
-    class Transport:
-        async def complete(self, _connection, _request):
-            return InferenceResponse(
-                text="MODEL_OWNED_MAIL_ANSWER",
-                tool_calls=(),
-                finish_reason="stop",
-                usage={},
-            )
-
-    async def skip_live_capability_refresh(_client):
-        return None
-
-    monkeypatch.setattr(
-        chat_inference_service, "_model_connection_resolver", lambda: (Resolver(), object())
-    )
-    monkeypatch.setattr(
-        chat_request_service, "OpenAICompatibleTransport", lambda **_kwargs: Transport()
-    )
-    monkeypatch.setattr(
-        chat_inference_service,
-        "_refresh_stale_bound_model_capabilities",
-        skip_live_capability_refresh,
-    )
-
-    response = await chat_router.chat(
-        chat_request_contracts.ChatRequest(
-            question="Найди письма про Dropbox",
-            semantic_cache_enabled=False,
-        ),
-        _user=object(),
-    )
-
-    assert response["answer"] == "MODEL_OWNED_MAIL_ANSWER"
-    assert response["versions"]["llm_model"] == "test-model"
-    assert response["versions"]["llm_provider"] == "openai-compatible"
-    assert response["versions"]["connection_revision"] == "test-answer:r1"
-    assert "norm_base" not in response["versions"]
-    assert response["cache"] != "deterministic_mail"
-    assert "Dropbox notice" not in response["answer"]
+@pytest.mark.parametrize('native_turn', ['rag-small'], indirect=True)
+def test_chat_does_not_replace_model_with_deterministic_mail_answer(native_turn, tmp_path):
+    t = native_turn
+    folder = tmp_path / 'Письма с пробелами'
+    folder.mkdir()
+    original = folder / '01.eml'
+    _write_message(original, subject='Dropbox notice',
+                   sender='Dropbox <no-reply@example.com>', to='User <user@example.com>',
+                   message_id='<m1@example.com>', body='Welcome to Dropbox.',
+                   date='Tue, 26 May 2026 09:00:00 +0300')
+    before = original.read_bytes()
+    digest = hashlib.sha256(before).hexdigest()
+    imported = t.client.post('/api/mail/import-local', json={
+        'source_folder': str(folder), 'parse': True,
+    }).raise_for_status().json()
+    assert imported['files'] == 1
+    dataset = imported['dataset_id']
+    import sqlite3
+    def indexed_document():
+        with sqlite3.connect(t.database) as db:
+            return db.execute("SELECT id FROM documents WHERE dataset_id=? AND status='INDEXED' AND chunk_count>0", [dataset]).fetchone()
+    try:
+        wait_for(indexed_document, timeout=40)
+    except AssertionError:
+        raise AssertionError(t.client.get('/api/mail/accounts').json())
+    doc_id = indexed_document()[0]
+    t.scripts.extend([
+        {'tool': 'read_source', 'args': {'doc_id': doc_id, 'q': 'Dropbox', 'max_chars': 4000}},
+        {'text': 'MODEL_OWNED_MAIL_ANSWER [Источник 1]'},
+    ])
+    response = t.client.post('/api/chat', json={
+        'question': 'Найди письма про Dropbox', 'session_id': 'native-mail-owner',
+        'mode': 'agent', 'retrieval_mode': 'pull',
+        'scope': {'scope_type': 'dataset', 'dataset_ids': [dataset], 'selected_sources_only': True},
+    }).raise_for_status()
+    assert response.headers['x-les-handler'] == 'rust.chat'
+    result = response.json()
+    assert result['answer'] == 'MODEL_OWNED_MAIL_ANSWER [Источник 1]'
+    assert result['model']['model_id'] == 'fixture:9b'
+    assert result['model']['revision_id'] == t.revision.revision_id
+    assert result['model']['fallback_used'] is False
+    assert 'norm_base' not in result['model'] and result['crag_status'] != 'DETERMINISTIC'
+    assert len(t.seen) == 2 and not t.scripts
+    assert all(request['model'] == 'fixture:9b' for request in t.seen)
+    assert 'Welcome to Dropbox.' in json.dumps(t.seen[-1]['messages'], ensure_ascii=False)
+    assert result['artifact']['tool_results'][0]['status'] == 'ok'
+    assert result['source_map'][0]['doc_id'] == doc_id
+    assert result['source_map'][0]['source_sha256'] == digest
+    assert t.client.get(result['source_map'][0]['url']).raise_for_status().content == before
+    assert original.read_bytes() == before
+    history = t.client.get('/api/chat/history', params={'session_id': 'native-mail-owner'}).raise_for_status().json()
+    assert 'MODEL_OWNED_MAIL_ANSWER' in json.dumps(history, ensure_ascii=False)

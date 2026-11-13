@@ -13,7 +13,6 @@
         "proxy/routers/settings.py",
         "proxy/routers/workspace_memory.py",
         "proxy/services/source_adapters.py",
-        "tests/test_chat_mail_query.py",
         "tests/test_light_chat_evidence.py",
         "tests/test_light_durable_chat.py",
         "tests/test_light_router_boundary.py",
@@ -2908,7 +2907,6 @@
         "proxy/routers/settings.py",
         "proxy/routers/workspace_memory.py",
         "proxy/services/source_adapters.py",
-        "tests/test_chat_mail_query.py",
         "tests/test_light_chat_evidence.py",
         "tests/test_light_durable_chat.py",
         "tests/test_light_router_boundary.py",
@@ -4697,7 +4695,6 @@
         "proxy/services/chat_prompt_support.py",
         "proxy/services/chat_request_service.py",
         "proxy/services/request_memory_service.py",
-        "tests/test_chat_mail_query.py",
         "tests/test_light_resource_memory.py",
         "tests/test_model_connection_chat_integration.py"
       ],
@@ -4818,7 +4815,6 @@
         "proxy/routers/chat.py",
         "proxy/services/chat_persistence_service.py",
         "proxy/services/chat_request_service.py",
-        "tests/test_chat_mail_query.py",
         "tests/test_model_connection_chat_integration.py"
       ],
       "lines": 120,
@@ -4836,7 +4832,6 @@
     {
       "inbound": [
         "proxy/routers/chat.py",
-        "tests/test_chat_mail_query.py",
         "tests/test_light_durable_chat.py",
         "tests/test_light_runtime_identity.py",
         "tests/test_light_stream_lifecycle.py",
@@ -4897,7 +4892,6 @@
         "proxy/services/generation_guard_service.py",
         "proxy/services/request_memory_service.py",
         "tests/oracles/context_python.py",
-        "tests/test_chat_mail_query.py",
         "tests/test_light_resource_memory.py"
       ],
       "lines": 51,
@@ -5978,7 +5972,6 @@
         "proxy/services/chat_evidence_application_service.py",
         "proxy/services/model_capability_refresh_service.py",
         "tests/oracles/context_python.py",
-        "tests/test_chat_mail_query.py",
         "tests/test_light_admission.py"
       ],
       "lines": 53,
@@ -6667,7 +6660,6 @@
         "proxy/services/request_memory_service.py",
         "tests/native_batch_fixtures.py",
         "tests/oracles/context_python.py",
-        "tests/test_chat_mail_query.py",
         "tests/test_light_admission.py",
         "tests/test_light_capability_refresh.py",
         "tests/test_light_embedding_762.py",
@@ -6827,7 +6819,6 @@
         "proxy/services/model_connection_resolver_service.py",
         "proxy/services/model_reasoning_service.py",
         "tests/oracles/context_governor_779.py",
-        "tests/test_chat_mail_query.py",
         "tests/test_context_governor_service.py",
         "tests/test_light_chat_evidence.py",
         "tests/test_light_document_review.py",
@@ -7128,7 +7119,6 @@
         "proxy/services/chat_request_service.py",
         "proxy/services/model_streaming_service.py",
         "tests/oracles/context_python.py",
-        "tests/test_chat_mail_query.py",
         "tests/test_light_admission.py",
         "tests/test_light_embedding_762.py",
         "tests/test_light_native_model_runtime.py",
@@ -7950,7 +7940,6 @@
         "proxy/services/generation_guard_service.py",
         "proxy/services/request_memory_service.py",
         "proxy/services/runtime_dispatcher.py",
-        "tests/test_chat_mail_query.py",
         "tests/test_light_admission.py",
         "tests/test_light_auto_parse_resume.py",
         "tests/test_light_grounding_760.py",
@@ -10486,19 +10475,11 @@
     },
     {
       "inbound": [],
-      "lines": 148,
+      "lines": 71,
       "module": "tests.test_chat_mail_query",
       "outbound": [
-        "proxy/routers/chat.py",
-        "proxy/services/chat_inference_service.py",
-        "proxy/services/chat_request_contracts.py",
-        "proxy/services/chat_request_service.py",
-        "proxy/services/chat_runtime.py",
-        "proxy/services/generation_guard_service.py",
-        "proxy/services/model_connection_contracts.py",
-        "proxy/services/model_execution_preset_service.py",
-        "proxy/services/openai_compatible_transport_service.py",
-        "proxy/services/runtime_admission.py"
+        "tests/test_light_native_api.py",
+        "tests/test_light_native_chat_turn.py"
       ],
       "path": "tests/test_chat_mail_query.py",
       "status": "TEST_OR_TOOL_ONLY",
@@ -11506,6 +11487,7 @@
     },
     {
       "inbound": [
+        "tests/test_chat_mail_query.py",
         "tests/test_light_collection_safety.py",
         "tests/test_light_native_batch_api.py",
         "tests/test_light_native_chat_turn.py",
@@ -11636,6 +11618,7 @@
     },
     {
       "inbound": [
+        "tests/test_chat_mail_query.py",
         "tests/test_light_native_attachments.py",
         "tests/test_light_native_conversation.py",
         "tests/test_light_native_document_review.py",
@@ -16157,7 +16140,7 @@
     "runtime_support": 5,
     "test_or_tool_only": 279,
     "tracked_python_files": 724,
-    "tracked_python_lines": 173317
+    "tracked_python_lines": 173240
   },
   "warnings": []
 }

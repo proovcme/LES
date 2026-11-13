@@ -20,7 +20,7 @@
 | Метрика | Значение |
 | --- | --- |
 | Python-файлов под git | 724 |
-| Строк Python | 173317 |
+| Строк Python | 173240 |
 | PRODUCT_REACHABLE | 417 |
 | RUNTIME_SUPPORT | 5 |
 | TEST_OR_TOOL_ONLY | 279 |
@@ -61,7 +61,7 @@
 | backend/parquet_writer.py | 834 | 6 |
 | proxy/services/notebook_study_service.py | 833 | 3 |
 | backend/mail_profile.py | 825 | 5 |
-| proxy/services/chat_request_service.py | 800 | 6 |
+| proxy/services/chat_request_service.py | 800 | 5 |
 
 ## Чат Light: фактические потребители
 

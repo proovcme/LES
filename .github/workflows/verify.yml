@@ -33,7 +33,11 @@ jobs:
           enable-cache: true
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: core
+          workspaces: |
+            core -> target
+            runtime -> ../core/target
+            api -> ../core/target
+            parsers -> ../core/target
           cache-on-failure: true
       - name: Prepare build tools
         run: choco install make --yes --no-progress
@@ -87,5 +91,18 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           make test-mail
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+  desktop:
+    name: Windows desktop
+    runs-on: windows-2022
+    timeout-minutes: 45
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_BUILD_JOBS: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/light/src-tauri
+          cache-on-failure: true
       - name: Build Windows desktop shell
         run: cargo build --locked --release --manifest-path desktop/light/src-tauri/Cargo.toml
