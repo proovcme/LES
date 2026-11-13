@@ -13,11 +13,48 @@ pub(super) struct Evidence {
     retried: bool,
     delivered: std::collections::BTreeSet<u64>,
     pages: pages::Pages,
+    pub(super) read_failures: Vec<Value>,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn partial_conversion_keeps_verified_text_and_exposes_unread_sources_without_proof() {
+        let mut flow = Evidence::new(true);
+        flow.add(&json!({"tool":"read_source","status":"ok","result":{
+            "passages":[{"text":"Exact quantity 17.25","source":{"doc_id":"read","source_sha256":"r","retrieval_incomplete":true,"unread_visual_count":2}}],
+            "read_failures":[{"source":{"doc_id":"unread"},"code":"WORKER_TIMEOUT","evidence_admissible":false}]}}));
+        assert_eq!(flow.read_failures.len(), 1);
+        assert_eq!(flow.sources.len(), 1);
+        let blocks = flow.required_blocks();
+        assert_eq!(blocks.len(), 1);
+        assert!(Evidence::text(&blocks[0]).contains("Обзор неполный"));
+        assert!(Evidence::text(&blocks[0]).contains("Объектов без распознанного текста: 2"));
+        assert!(Evidence::text(&blocks[0]).ends_with("Exact quantity 17.25"));
+        assert_eq!(flow.sources[0]["doc_id"], "read");
+    }
+    #[test]
+    fn word_units_do_not_collapse_and_legacy_discovery_never_becomes_proof() {
+        let mut flow = Evidence::new(true);
+        let source = |i| json!({"doc_id":"word","source_sha256":"a".repeat(64),"view_sha256":"b".repeat(64),"ordinal":i});
+        flow.add(
+            &json!({"tool":"read_source","status":"ok","result":{"passages":[
+            {"text":"Header and first complete row","source":source(0)},
+            {"text":"Header and second complete row","source":source(1)}]}}),
+        );
+        assert_eq!(flow.sources.len(), 2);
+        assert_eq!(flow.required_blocks().len(), 2);
+        let mut legacy = source(2);
+        legacy["evidence_admissible"] = json!(false);
+        flow.add(&json!({"tool":"search_sources","status":"ok","operation":"indexed_sections", "result":{
+            "passages":[{"text":"Severed legacy row","source":legacy}],"index_revision":"r",
+            "read_receipt":{"schema":"les.indexed-read.v1","index_revision":"r","point_ids":["x"]}}}));
+        assert_eq!(flow.sources.len(), 2);
+        assert!(!json!(flow.optional_blocks())
+            .to_string()
+            .contains("Severed legacy row"));
+    }
     fn page_part(offset: usize, text: &str, total: usize) -> Value {
         let end = offset + text.chars().count();
         let next = (end < total).then_some(end);
@@ -361,8 +398,14 @@ impl Evidence {
         } else {
             ""
         }.to_owned();
+        if source["retrieval_incomplete"] == true {
+            note.push_str("Часть найденных оригиналов не дочитана из-за ошибки. Обзор неполный: отвечай только по прочитанному, не утверждай, что в непрочитанных файлах нет ответа.\n");
+        }
         if source["visual_content"] == true {
             note.push_str("Документ содержит рисунки/вложения. Текстовая выдержка не подтверждает геометрию, графики и детали изображений. Оригиналы доступны через read_source view=parts; OCR не гарантирует чтение всех надписей.\n");
+        }
+        if let Some(count) = source["unread_visual_count"].as_u64().filter(|n| *n > 0) {
+            note.push_str(&format!("Объектов без распознанного текста: {count}. Их содержимое не подтверждено этой выдержкой.\n"));
         }
         let identity: serde_json::Map<_, _> = [
             "doc_id",
@@ -428,11 +471,22 @@ impl Evidence {
             source["qdrant_point_id"],
             source["offset"],
             source["part_sha256"],
-            source["part_page"]
+            source["part_page"],
+            source["view_sha256"],
+            source["ordinal"]
         ])
     }
     pub(super) fn add(&mut self, result: &Value) {
         let result = super::protocol::effective(result);
+        for failure in result["result"]["read_failures"]
+            .as_array()
+            .into_iter()
+            .flatten()
+        {
+            if !self.read_failures.contains(failure) {
+                self.read_failures.push(failure.clone());
+            }
+        }
         let sources = &self.sources;
         let current = &self.blocks;
         let retained = &self.retained;
@@ -570,6 +624,9 @@ impl Evidence {
         let passages = Self::passages(result);
         for passage in passages {
             let mut source = passage["source"].clone();
+            if source["evidence_admissible"] == false {
+                continue;
+            }
             let Some(text) = passage["text"].as_str().filter(|v| !v.is_empty()) else {
                 continue;
             };

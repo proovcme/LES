@@ -834,3 +834,52 @@ def test_push_pull_and_hybrid_share_retrieval_and_keep_plain_chat_unscoped(nativ
                                'question':'Какова номинальная мощность контрольной установки? Назови число и единицу.',
                                'response_length':'short'}, timeout=150).raise_for_status().json()
         assert check_result(result, 'push') == point
+
+
+def test_word_original_reader_preserves_rows_and_cursor_without_index_or_model(native_turn):
+    from docx import Document
+    from tests.test_light_native_chat_turn import source_pdf
+    t=native_turn
+    parser=os.getenv('LES_TEST_NATIVE_DOCUMENT_PARSERS')
+    if parser:
+        t.env['LES_NATIVE_DOCUMENT_PARSERS']=parser
+        t.children[-1].terminate();t.children[-1].wait(timeout=10)
+        t.start()
+    source_pdf(t)
+    original=t.state/'Таблица 日本語.docx'
+    word=Document();word.add_heading('Нагрузки оборудования',level=1)
+    table=word.add_table(rows=1,cols=3)
+    for cell,text in zip(table.rows[0].cells,['Позиция','Мощность, кВт','Количество']):cell.text=text
+    for i in range(500):
+        for cell,text in zip(table.add_row().cells,[f'Насос {i}',f'{i}.25',str(i+1)]):cell.text=text
+    word.save(original);digest=hashlib.sha256(original.read_bytes()).hexdigest()
+    with sqlite3.connect(t.database) as db:
+        db.execute('UPDATE documents SET file_name=?,source_path=?,file_hash=?',('folder/Таблица.docx',str(original),digest))
+    args={'doc_id':'registered-document','source_sha256':digest,'max_chars':12000,'limit':16}
+    bodies=[];units=[];view=None;end=0;calls=0
+    while True:
+        response=t.client.post('/api/rag/sources/call',json={'tool':'read_source','args':args})
+        response.raise_for_status();value=response.json()['result'];view=view or value['view_sha256']
+        if parser:assert value['extractor']=='les.docling-word.parts.v1'
+        assert value['view_sha256']==view
+        for passage in value['passages']:
+            source=passage['source'];assert source['start_byte']==end
+            body=passage['text'][passage['context_prefix_chars']:]
+            assert hashlib.sha256(body.encode()).hexdigest()==passage['body_sha256']
+            end=source['end_byte'];units.append(source['ordinal']);bodies.append(body)
+        calls+=1
+        if value['next_offset'] is None:break
+        assert value['next_offset']==value['offset']+len(value['passages'])
+        args.update(offset=value['next_offset'],view_sha256=view)
+        assert calls<50
+    assert units==list(range(len(units))) and calls>1
+    full=''.join(bodies)
+    rows=[[cell.strip() for cell in line.split('|')[1:-1]] for line in full.splitlines() if line.startswith('|')]
+    for i in range(500):
+        assert rows.count([f'Насос {i}',f'{i}.25',str(i+1)])==1
+    stale=t.client.post('/api/rag/sources/call',json={'tool':'read_source','args':{**args,'offset':1,'view_sha256':'0'*64}})
+    assert stale.status_code==409 and stale.json()['code']=='SOURCE_VIEW_CHANGED'
+    original.write_bytes(original.read_bytes()+b'changed')
+    stale=t.client.post('/api/rag/sources/call',json={'tool':'read_source','args':args})
+    assert stale.status_code==409 and stale.json()['code']=='SOURCE_REVISION_CHANGED'
+    assert not t.seen, 'Reading an original must not request the answer model'

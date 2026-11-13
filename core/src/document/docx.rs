@@ -29,6 +29,9 @@ const MAX_MAIN_XML: u64 = 128 * 1024 * 1024;
 const MAX_TEXT: usize = 24 * 1024 * 1024;
 
 trait Parts {
+    fn has_separate_text(&self) -> bool {
+        false
+    }
     fn reference(&mut self, _: &BytesStart<'_>) -> Result<(), &'static str> {
         Ok(())
     }
@@ -375,7 +378,7 @@ fn parse_stream<R: BufRead>(
         || document.table.is_some()
         || !document.tables.is_empty()
         || !document.properties.is_empty()
-        || document.paragraphs.is_empty()
+        || (document.paragraphs.is_empty() && !parts.has_separate_text())
     {
         return Err("DOCX_READ_FAILED");
     }
@@ -451,6 +454,9 @@ fn parse_events<R: BufRead>(
                 text_bytes = text_bytes
                     .checked_add(text.len())
                     .ok_or("DOCUMENT_TEXT_LIMIT")?;
+                if text.is_empty() {
+                    continue;
+                }
                 if document.paragraph {
                     if !is_math {
                         document.text.push_str("\n\n");

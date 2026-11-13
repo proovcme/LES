@@ -138,6 +138,9 @@ impl Builder {
                     "pdf_page_view",
                     "pdf_page_view_sha256",
                     "pdf_page_view_schema",
+                    "word_reading_view",
+                    "word_reading_sha256",
+                    "word_reading_schema",
                 ] {
                     payload.remove(field);
                 }

@@ -45,6 +45,7 @@ fn prepare(context: &Context, input: &Value) -> Result<(String, Value, SourceCon
         && args["view"] != "documents"
         && args["view"] != "parts"
         && args["index_revision"].as_str().is_none_or(str::is_empty)
+        && !(name == "read_source" && args["view_sha256"].as_str().is_some_and(|s| !s.is_empty()))
     {
         return Err("SOURCE_CONTINUATION_REVISION_REQUIRED".into());
     }
@@ -182,12 +183,13 @@ pub async fn handle(context: Arc<Context>, request: Request) -> Response {
         Err(e) => {
             eprintln!("{}", json!({"event":"source_tool_failed","code":e.code}));
             let status = match e.code.as_str() {
-                "TOOL_SCHEMA_INVALID" | "SOURCE_CONTINUATION_REVISION_REQUIRED" => {
-                    StatusCode::UNPROCESSABLE_ENTITY
-                }
+                "TOOL_SCHEMA_INVALID"
+                | "SOURCE_CONTINUATION_REVISION_REQUIRED"
+                | "SOURCE_CONTINUATION_VIEW_REQUIRED" => StatusCode::UNPROCESSABLE_ENTITY,
                 "TOOL_SCOPE_VIOLATION" | "TOOL_NOT_ALLOWED" => StatusCode::FORBIDDEN,
                 "SOURCE_DOCUMENT_NOT_FOUND" | "SOURCE_DOCUMENT_MISSING" => StatusCode::NOT_FOUND,
                 "SOURCE_REVISION_CHANGED"
+                | "SOURCE_VIEW_CHANGED"
                 | "PDF_REVISION_CHANGED"
                 | "INDEX_CHANGED_DURING_SEARCH" => StatusCode::CONFLICT,
                 _ => e.status,

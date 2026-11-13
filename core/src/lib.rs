@@ -71,6 +71,7 @@ pub use document::conversion::{
     serve_with as serve_document_formats_with,
     serve_with_parts as serve_document_formats_with_parts,
 };
+pub use document::reading_units as document_reading;
 pub use files::{fingerprint as file_fingerprint, sha256_hex};
 pub use index_sources::plan as plan_index_sources;
 pub fn supports_native_mail_dispatch(path: &std::path::Path) -> bool {
@@ -88,7 +89,9 @@ use std::{
 };
 pub use worker_host::release_batch as release_batch_workers;
 pub use worker_host::run_attachments as run_native_attachments;
+pub use worker_host::run_documents as run_native_documents;
 pub use worker_host::run_embeddings as run_native_embeddings;
+pub use worker_host::run_ocr as run_native_ocr;
 pub use worker_host::run_parsers as run_native_parsers;
 pub use worker_host::{release_idle as release_native_workers, run_pdf as run_native_pdf};
 

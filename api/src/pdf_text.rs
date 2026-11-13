@@ -2,6 +2,7 @@
 mod layout;
 mod preview;
 mod snapshot;
+mod source;
 use pdfium_render::prelude::*;
 use serde_json::{json, Value};
 use std::{
@@ -418,7 +419,9 @@ fn read(library: &Library, path: &Path, options: &Value) -> Result<Value, &'stat
         None
     };
     let result = match options["kind"].as_str() {
-        Some("source_page") => read_page(pdf, document, options, parser_hash.as_deref()),
+        Some("source_page") => {
+            read_page(pdf, document, options, parser_hash.as_deref(), ocr.as_ref())
+        }
         Some("source_preview") => preview::render(pdf, document, options),
         _ => read_pages(pdf, document, ocr.as_ref(), tables.as_ref()),
     };
@@ -437,6 +440,7 @@ fn read_page(
     document: FPDF_DOCUMENT,
     options: &Value,
     parser_hash: Option<&str>,
+    ocr: Option<&crate::pdf_ocr::Ocr>,
 ) -> Result<Value, &'static str> {
     let number = options["source"]["page"]
         .as_u64()
@@ -464,10 +468,20 @@ fn read_page(
     }
     let result = (|| {
         let (raw, native_view) = page_text(pdf, page, parser_hash.is_none())?;
-        if raw.chars().take(20).count() < 20 && scan_objects(pdf, page, None, 0, raw.is_empty())? {
-            return Err("PDF_OCR_REQUIRED");
-        }
+        let scanned =
+            raw.chars().take(20).count() < 20 && scan_objects(pdf, page, None, 0, raw.is_empty())?;
+        let recognized = if scanned {
+            Some(
+                ocr.ok_or("PDF_OCR_REQUIRED")?
+                    .page(pdf, page)?
+                    .filter(|s| !s.trim().is_empty())
+                    .ok_or("OCR_NO_TEXT")?,
+            )
+        } else {
+            None
+        };
         let tables = parser_hash
+            .filter(|_| !scanned)
             .map(|hash| {
                 crate::document_parser::pdf_page_tables(hash, count as u64, number, || {
                     snapshot::page(pdf, document, number)
@@ -480,13 +494,25 @@ fn read_page(
             native_view
         };
         let structured = view.is_some();
-        let text = view.unwrap_or(raw);
-        if text.chars().take(20).count() < 20 && scan_objects(pdf, page, None, 0, text.is_empty())?
+        let text = recognized.or(view).unwrap_or(raw);
+        if !scanned
+            && text.chars().take(20).count() < 20
+            && scan_objects(pdf, page, None, 0, text.is_empty())?
         {
             return Err("PDF_OCR_REQUIRED");
         }
         if text.is_empty() {
             return Err("PDF_PAGE_EMPTY");
+        }
+        if text.len() > 1024 * 1024 {
+            return Err("PDF_TEXT_LIMIT");
+        }
+        if options["snapshot"] == true {
+            return Ok(json!({"text":text,"page":number,"page_count":count,
+                "ocr":scanned,"ocr_engine":if scanned{options["ocr"]["engine"].clone()}else{Value::Null},
+                "ocr_dpi":if scanned{options["ocr"]["dpi"].clone()}else{Value::Null},"ocr_numbers_verified":if scanned{json!(false)}else{Value::Null},
+                "extractor":if scanned{"les.pdfium.ocr-page.v1"}else if structured && tables.is_some(){"les.pdfium.xberg-page.v1"}else if structured{"les.pdfium.page.layout.v2"}else{"les.pdfium.page.v1"},
+                "source_sha256":options["source_sha256"]}));
         }
         let count_chars = text.chars().count() as u64;
         if offset >= count_chars {
@@ -581,6 +607,12 @@ fn source_page(library: &Library, options: &Value) -> Result<Value, &'static str
 
 /// Only server-resolved selectors are accepted by callers of this helper.
 pub(crate) fn supervised_source(input: Value) -> Result<Value, String> {
+    if input["kind"] == "source_page" {
+        return source::read(input);
+    }
+    worker_source(input)
+}
+fn worker_source(input: Value) -> Result<Value, String> {
     let program = std::env::current_exe().map_err(|_| "PDF_READER_UNAVAILABLE")?;
     let library = std::path::PathBuf::from(
         std::env::var_os("LES_NATIVE_PDFIUM").ok_or("PDFIUM_UNAVAILABLE")?,
@@ -590,7 +622,7 @@ pub(crate) fn supervised_source(input: Value) -> Result<Value, String> {
     }
     let value = les_core::run_native_pdf(
         &json!({"schema":"les.worker-host.v1","program":program,"directory":program.parent(),
-        "args":["--serve-pdf-text",library],"context":"les.pdf-text.v1","timeout_ms":30000,"input":input}),
+        "args":["--serve-pdf-text",library],"context":"les.pdf-text.v1","timeout_ms":if input["ocr"].is_object(){90000}else{30000},"input":input}),
     )?;
     let result = &value["result"];
     if value["status"] == "completed" && result["status"] == "completed" {

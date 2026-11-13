@@ -34,15 +34,24 @@ pub(in crate::document) fn convert(
         note_depth: 0,
         unread_visual: 0,
         pictures: BTreeMap::new(),
+        floating: Vec::new(),
     };
     package.relationships = package.rels("word/_rels/document.xml.rels")?;
-    let text = if request["word_parser"] == "docling" {
+    let mut text = if request["word_parser"] == "docling" {
         package.docling()?
     } else {
         let mut text = diagnostic::checked_with(bytes, &mut package)?;
         package.read_related(&mut text)?;
         text
     };
+    // An anchored shape belongs to a separate layout story. Its XML insertion
+    // point is not a textual position inside a word or a table cell.
+    for (index, (_, content)) in package.floating.iter().enumerate() {
+        if content.trim().is_empty() {
+            continue;
+        }
+        text.push_str(&format!("\n\n## Отдельный плавающий объект {}\n\nТекст объекта оригинала; не продолжение абзаца и не ячейка таблицы.\n\n{}",index+1,content));
+    }
     if text.len() > MAX_TEXT {
         return Err("DOCUMENT_TEXT_LIMIT");
     }
@@ -60,6 +69,7 @@ pub(in crate::document) fn convert(
     Ok(
         json!({"text":text,"metadata":{"extractor":if request["word_parser"]=="docling"{"les.docling-word.parts.v1"}else{"les.docx-parts.v1"},"ocr":package.ocr,
         "visual_content":package.visual,"docx_parts_count":package.assets.len(),
+        "floating_objects":package.floating.iter().map(|(id,_)|json!({"part_sha256":id,"placement":"separate_story"})).collect::<Vec<_>>(),
         "unread_visual_count":package.unread_visual,"visual_coverage":"originals_and_structure_preserved_not_semantically_verified",
         "docx_parts_source_sha256":manifest["source_sha256"]}}),
     )
@@ -80,6 +90,7 @@ struct Package<'a, F: Fn(&Value, Option<&[u8]>) -> Result<Value>> {
     note_depth: usize,
     unread_visual: usize,
     pictures: BTreeMap<String, (String, Value)>,
+    floating: Vec<(String, String)>,
 }
 
 impl<F: Fn(&Value, Option<&[u8]>) -> Result<Value>> Package<'_, F> {
@@ -293,6 +304,9 @@ impl<F: Fn(&Value, Option<&[u8]>) -> Result<Value>> Package<'_, F> {
     }
 }
 impl<F: Fn(&Value, Option<&[u8]>) -> Result<Value>> Parts for Package<'_, F> {
+    fn has_separate_text(&self) -> bool {
+        self.floating.iter().any(|(_, s)| !s.trim().is_empty())
+    }
     fn reference(&mut self, element: &BytesStart<'_>) -> Result<()> {
         let kind = if element.name().as_ref() == "w:headerReference" {
             "/header"
@@ -306,6 +320,7 @@ impl<F: Fn(&Value, Option<&[u8]>) -> Result<Value>> Parts for Package<'_, F> {
         Ok(())
     }
     fn render(&mut self, node: &Node, document: &mut Document) -> Result<String> {
+        let mut structure_id = None;
         if matches!(
             node.name.as_str(),
             "w:pict" | "w:drawing" | "w:object" | "mc:AlternateContent"
@@ -325,9 +340,44 @@ impl<F: Fn(&Value, Option<&[u8]>) -> Result<Value>> Parts for Package<'_, F> {
                 &json!({}),
             )?;
             self.visual = true;
+            structure_id = Some(id);
         }
-        self.node(node, document)
+        let text = self.node(node, document)?;
+        if floating(node) {
+            self.floating.push((structure_id.ok_or(BAD)?, text));
+            Ok(String::new())
+        } else {
+            Ok(text)
+        }
     }
+}
+fn floating(node: &Node) -> bool {
+    if node.name == "wp:anchor" {
+        return true;
+    }
+    if node.name == "wp:inline" {
+        return false;
+    }
+    if node.name == "mc:AlternateContent" {
+        return node
+            .children
+            .iter()
+            .find(|n| n.name == "mc:Choice")
+            .is_some_and(floating);
+    }
+    if node.name == "v:shape"
+        && node.attrs.get("style").is_some_and(|s| {
+            s.split(';').any(|p| {
+                p.split_once(':').is_some_and(|(k, v)| {
+                    k.trim().eq_ignore_ascii_case("position")
+                        && v.trim().eq_ignore_ascii_case("absolute")
+                })
+            })
+        })
+    {
+        return true;
+    }
+    node.children.iter().any(floating)
 }
 
 fn canonical(target: &str) -> Result<String> {

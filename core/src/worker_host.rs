@@ -24,6 +24,7 @@ static ML_POOL: OnceLock<Mutex<Option<Session>>> = OnceLock::new();
 static MCP_POOL: OnceLock<Mutex<Option<Session>>> = OnceLock::new();
 static ATTACHMENT_POOL: OnceLock<Mutex<Option<Session>>> = OnceLock::new();
 static PARSER_POOL: OnceLock<Mutex<Option<Session>>> = OnceLock::new();
+static OCR_POOL: OnceLock<Mutex<Option<Session>>> = OnceLock::new();
 static SEQUENCE: AtomicU64 = AtomicU64::new(1);
 static GENERATION: AtomicU64 = AtomicU64::new(0);
 
@@ -250,6 +251,9 @@ pub fn run_documents(request: &Value) -> Result<Value, &'static str> {
 pub fn run_parsers(request: &Value) -> Result<Value, &'static str> {
     run_in(request, &PARSER_POOL, 2 * 1024 * 1024 * 1024)
 }
+pub fn run_ocr(request: &Value) -> Result<Value, &'static str> {
+    run_in(request, &OCR_POOL, 512 * 1024 * 1024)
+}
 pub fn run_tables(request: &Value) -> Result<Value, &'static str> {
     run_in(request, &TABLE_POOL, 2 * 1024 * 1024 * 1024)
 }
@@ -423,6 +427,7 @@ pub fn release_idle() -> Result<Value, &'static str> {
             MCP_POOL.get(),
             ATTACHMENT_POOL.get(),
             PARSER_POOL.get(),
+            OCR_POOL.get(),
         ]
         .into_iter()
         .flatten(),
@@ -438,6 +443,7 @@ pub fn release_batch() -> Result<Value, &'static str> {
             ML_POOL.get(),
             ATTACHMENT_POOL.get(),
             PARSER_POOL.get(),
+            OCR_POOL.get(),
         ]
         .into_iter()
         .flatten(),
@@ -474,6 +480,7 @@ pub fn shutdown() -> Result<Value, &'static str> {
         MCP_POOL.get(),
         ATTACHMENT_POOL.get(),
         PARSER_POOL.get(),
+        OCR_POOL.get(),
     ]
     .into_iter()
     .flatten()

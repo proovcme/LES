@@ -104,7 +104,7 @@
 <svelte:window onbeforeunload={beforeLeave} />
 <a class="skip-link" href="#chat-content">Перейти к диалогу</a>
 <div class="app-shell">
-  <nav class:mobile-open={mobileNav} aria-label="Основная навигация">
+  <nav class="app-nav" class:mobile-open={mobileNav} aria-label="Основная навигация">
     <a class="brand" href="/app/" aria-label="Лес — главный экран"><Icon name="tree" size={30} /><span>ЛЕС<small>RAG</small></span></a>
     <button class="new-chat" disabled={disabled} onclick={() => action(() => workspace.newSession())}><Icon name="plus" />Новый диалог</button>
     <div class="nav-links">

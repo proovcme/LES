@@ -1018,10 +1018,10 @@
     },
     {
       "name": "read_pdf_source",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "title": "Read PDF source",
       "category": "source",
-      "summary": "Read a physical PDF page through Rust/PDFium, never the index. page is 1-based and REQUIRED. For a specific field set q to an EXACT literal word/phrase on the page (not the whole question): returns a verified excerpt around that match, not a full-page review. Without q, reads page text in portions; call this SAME tool with offset=next_offset until null. Use exact dataset_id+doc_name from sources; never invent ids or paths. source_sha256 pins the revision. Scans require OCR; errors are not evidence.",
+      "summary": "Read a real original PDF page. Scans use the configured local OCR; OCR text is explicitly marked and cannot certify table geometry. Continue using next_offset and view_sha256.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1054,6 +1054,11 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 12000
+          },
+          "view_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "Reading snapshot hash from the previous reply. Required for Word and OCR continuations; keep all other selectors unchanged."
           }
         },
         "additionalProperties": false,
@@ -1129,12 +1134,12 @@
       "scopes": [
         "dataset"
       ],
-      "timeout_seconds": 30,
+      "timeout_seconds": 150,
       "retry": "safe",
       "idempotency": "derived",
       "result_budget": {
-        "max_chars": 60000,
-        "max_items": 20
+        "max_chars": 24000,
+        "max_items": 256
       },
       "model_owned_fields": [],
       "provenance": "source_refs_required",
@@ -1228,10 +1233,10 @@
     },
     {
       "name": "read_source",
-      "version": "1.2.0",
-      "title": "Read indexed source",
+      "version": "1.3.0",
+      "title": "Read source sections",
       "category": "source",
-      "summary": "Read indexed sections or preserved Word media. view=text reads chunks. view=parts lists originals/previews with a cursor. To read a specific DOCX picture or attachment, use view=part and its exact member name (for example word/media/image7.emf); prefer member to copying a hash. Optional part_id must belong to the same member. The result only describes that exact member, never a differently named picture. Empty OCR is unread content. Media navigation does not prove image details.",
+      "summary": "Read registered Word originals as structured paragraphs and complete table rows, including OCR and embedded content; other formats use indexed sections. q/clause locates content; offset resumes the same pinned reading view. Original PDF pages use read_pdf_source.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1289,6 +1294,11 @@
             "minLength": 1,
             "maxLength": 256,
             "description": "Index revision from the preceding response; a changed generation requires restarting the read."
+          },
+          "view_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "Reading snapshot hash from the previous reply. Required for Word and OCR continuations; keep all other selectors unchanged."
           }
         },
         "additionalProperties": false,
@@ -1381,12 +1391,12 @@
       "scopes": [
         "dataset"
       ],
-      "timeout_seconds": 30,
+      "timeout_seconds": 150,
       "retry": "safe",
       "idempotency": "derived",
       "result_budget": {
-        "max_chars": 7000,
-        "max_items": 20
+        "max_chars": 24000,
+        "max_items": 256
       },
       "model_owned_fields": [],
       "provenance": "source_refs_required",
@@ -1526,7 +1536,7 @@
     },
     {
       "name": "search_sources",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "title": "Search indexed sources",
       "category": "source",
       "summary": "Search the selected datasets. view=passages (default): dense + lexical retrieval; use short factual queries, separately for each subquestion. view=documents: discover filenames by a short literal name fragment such as a document type, cipher or section; no embeddings, no factual evidence. Continue next_offset until null. Read the discovered document before answering. Short search excerpts do not prove a fact is absent or establish which revision is current.",
@@ -1564,8 +1574,10 @@
             "type": "string",
             "enum": [
               "passages",
-              "documents"
-            ]
+              "documents",
+              "context"
+            ],
+            "description": "passages: ranked search locators with continuations; documents: catalog only; context: the same bounded, structurally read context as automatic chat RAG, without an answer model. Context is not a paginated stream; read_source continues a found document."
           },
           "offset": {
             "type": "integer",

@@ -3,6 +3,7 @@ mod catalog;
 mod parts;
 pub(crate) mod retrieval;
 mod verification;
+mod word;
 use super::{envelope, Context, Prepared, Result};
 use retrieval::search;
 /// Shared data-only scope for chat and MCP; no answer model or dialogue.
@@ -195,6 +196,16 @@ pub(crate) async fn run_scoped(
         source["evidence_kind"] = json!("physical_pdf_page");
         source["offset"] = result["offset"].clone();
         source["next_offset"] = result["next_offset"].clone();
+        for field in [
+            "ocr",
+            "ocr_engine",
+            "ocr_dpi",
+            "ocr_numbers_verified",
+            "view_sha256",
+            "extractor",
+        ] {
+            source[field] = result[field].clone();
+        }
         source["snippet"] = json!(result["text"]
             .as_str()
             .unwrap_or("")

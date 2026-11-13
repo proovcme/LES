@@ -101,6 +101,36 @@ pub(crate) fn fit_envelope_budget(
     if canonical_chars(reply) <= max_chars && json_item_count(reply) <= max_items {
         return Ok(());
     }
+    // Debug ranks are optional transport data. They must never evict the
+    // document body they describe. Reattach only what fits after evidence.
+    let trace = reply["result"]
+        .get("fusion_trace")
+        .and_then(Value::as_array)
+        .cloned();
+    if let Some(rows) = &trace {
+        reply["result"]["fusion_trace"] = json!([]);
+        reply["result"]["fusion_trace_total"] = json!(rows.len());
+        reply["result"]["fusion_trace_truncated"] = json!(!rows.is_empty());
+    }
+    // Exact duplicate origins are navigation, not extra read evidence. Keep
+    // every primary pinned source; omit alias detail explicitly if it would
+    // consume the body budget. Different text/revisions remain separate units.
+    if canonical_chars(reply) > max_chars || json_item_count(reply) > max_items {
+        for source in reply["sources"].as_array_mut().into_iter().flatten() {
+            compact_aliases(source);
+        }
+        for passage in reply["result"]["passages"]
+            .as_array_mut()
+            .into_iter()
+            .flatten()
+        {
+            compact_aliases(&mut passage["source"]);
+        }
+    }
+    let orig_passages = reply["result"]["passages"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     let orig_sources = reply["sources"].as_array().cloned().unwrap_or_default();
     let orig_ids = reply["result"]["read_receipt"]["point_ids"]
         .as_array()
@@ -119,9 +149,6 @@ pub(crate) fn fit_envelope_budget(
     }
     if orig_hints.is_some() {
         reply["result"]["navigation_hints"] = json!([]);
-    }
-    if orig_passages.is_empty() {
-        return Ok(());
     }
     let mut kept_passages = Vec::new();
     let mut kept_sources = Vec::new();
@@ -168,7 +195,7 @@ pub(crate) fn fit_envelope_budget(
     if omitted_any {
         reply["result"]["coverage"] = json!("bounded");
     }
-    if kept_passages.is_empty() {
+    if kept_passages.is_empty() && !orig_passages.is_empty() {
         return Err("CONTEXT_REQUIRED_SECTION_OVERFLOW".into());
     }
     if let Some(hints) = orig_hints {
@@ -196,5 +223,54 @@ pub(crate) fn fit_envelope_budget(
             }
         }
     }
+    if let Some(trace) = trace {
+        let total = trace.len();
+        let mut kept = Vec::new();
+        for row in trace {
+            kept.push(row);
+            reply["result"]["fusion_trace"] = json!(kept);
+            reply["result"]["fusion_trace_truncated"] = json!(kept.len() != total);
+            if canonical_chars(reply) > max_chars || json_item_count(reply) > max_items {
+                kept.pop();
+                reply["result"]["fusion_trace"] = json!(kept);
+                reply["result"]["fusion_trace_truncated"] = json!(true);
+                break;
+            }
+        }
+        reply["result"]["fusion_trace_truncated"] = json!(kept.len() != total);
+    }
     Ok(())
+}
+
+fn compact_aliases(source: &mut Value) {
+    if let Some(aliases) = source
+        .get_mut("equivalent_sources")
+        .and_then(Value::as_array_mut)
+    {
+        let count = aliases.len();
+        if count > 0 {
+            aliases.clear();
+            source["equivalent_sources_omitted"] = json!(count);
+            source["provenance_coverage"] = json!("primary_only");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn diagnostics_and_duplicate_aliases_never_evict_primary_source_body() {
+        let source = json!({"doc_id":"primary","source_sha256":"a".repeat(64),
+            "equivalent_sources":(0..20).map(|n|json!({"doc_id":n,"doc_name":"Long source path ".repeat(30)})).collect::<Vec<_>>()});
+        let text = "|Item|Qty|\n|---|---|\n|Pump|17.25|\n".repeat(20);
+        let mut reply = json!({"sources":[source.clone()],"result":{"passages":[{"text":text,"source":source}],
+            "fusion_trace":(0..64).map(|n|json!({"id":n,"provenance":vec!["dense","lexical"]})).collect::<Vec<_>>()}});
+        fit_envelope_budget(&mut reply, 2500, 100).unwrap();
+        assert_eq!(reply["result"]["passages"][0]["text"], text);
+        assert_eq!(reply["sources"][0]["doc_id"], "primary");
+        assert_eq!(reply["sources"][0]["equivalent_sources_omitted"], 20);
+        assert_eq!(reply["result"]["fusion_trace_truncated"], true);
+        assert!(canonical_chars(&reply) <= 2500 && json_item_count(&reply) <= 100);
+    }
 }

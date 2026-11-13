@@ -4,12 +4,12 @@ use serde_json::{json, Value};
 use std::{collections::HashSet, sync::Arc};
 pub(crate) async fn physical(context: Arc<Context>, sources: &Value) -> Result<()> {
     let mut seen = HashSet::new();
-    for source in sources
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|s| s["evidence_kind"] == "physical_pdf_page")
-    {
+    for source in sources.as_array().into_iter().flatten().filter(|s| {
+        matches!(
+            s["evidence_kind"].as_str(),
+            Some("physical_pdf_page" | "physical_word_section")
+        )
+    }) {
         let id = source["doc_id"].as_str().ok_or("SOURCE_IDENTITY_INVALID")?;
         let expected = source["source_sha256"]
             .as_str()

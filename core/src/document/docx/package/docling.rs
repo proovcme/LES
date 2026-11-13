@@ -7,7 +7,15 @@ mod geometry;
 fn special(name: &str) -> bool {
     matches!(
         name,
-        "w:drawing" | "w:pict" | "w:object" | "mc:AlternateContent" | "m:oMath" | "m:oMathPara"
+        "w:drawing"
+            | "w:pict"
+            | "w:object"
+            | "mc:AlternateContent"
+            | "m:oMath"
+            | "m:oMathPara"
+            | "w:footnoteReference"
+            | "w:endnoteReference"
+            | "w:commentReference"
     )
 }
 
@@ -50,6 +58,53 @@ mod tests {
                 });
             assert_eq!(result.unwrap_err(), "DOCLING_WORD_INCOMPLETE");
         }
+    }
+    #[test]
+    fn referenced_furniture_and_notes_have_one_native_owner_not_missing_body_slots() {
+        let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        for (name, xml) in [
+            (
+                "word/document.xml",
+                r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="r"><w:body><w:p><w:r><w:t>Body</w:t><w:footnoteReference w:id="3"/></w:r></w:p><w:sectPr><w:headerReference r:id="header"/></w:sectPr></w:body></w:document>"#,
+            ),
+            (
+                "word/_rels/document.xml.rels",
+                r#"<Relationships><Relationship Id="header" Type="x/header" Target="header1.xml"/></Relationships>"#,
+            ),
+            (
+                "word/header1.xml",
+                r#"<w:hdr xmlns:w="w"><w:p><w:r><w:t>HEADER</w:t></w:r></w:p></w:hdr>"#,
+            ),
+            (
+                "word/footnotes.xml",
+                r#"<w:footnotes xmlns:w="w"><w:footnote w:id="3"><w:p><w:r><w:t>NOTE</w:t></w:r></w:p></w:footnote><w:footnote w:id="4"><w:p><w:r><w:t>UNREFERENCED</w:t></w:r></w:p></w:footnote></w:footnotes>"#,
+            ),
+        ] {
+            zip.start_file(name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(xml.as_bytes()).unwrap();
+        }
+        let bytes = zip.finish().unwrap().into_inner();
+        let value =
+            super::super::convert(&bytes, &json!({"word_parser":"docling"}), &|input, part| {
+                assert_eq!(input["part_kind"], "word_structure");
+                let bytes = part.unwrap();
+                let mut prepared = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
+                let mut header = String::new();
+                prepared
+                    .by_name("word/header1.xml")
+                    .unwrap()
+                    .read_to_string(&mut header)
+                    .unwrap();
+                assert!(!header.contains("HEADER"));
+                Ok(json!({"text":format!("Body {}",token(bytes))}))
+            })
+            .unwrap();
+        let text = value["text"].as_str().unwrap();
+        for word in ["Body", "HEADER", "NOTE"] {
+            assert_eq!(text.matches(word).count(), 1);
+        }
+        assert!(!text.contains("UNREFERENCED"));
     }
     #[test]
     fn checked_word_math_is_reinserted_with_original_source_identity() {
@@ -147,6 +202,25 @@ fn story(name: &str) -> bool {
 }
 fn write_event(out: &mut Writer<Vec<u8>>, event: Event<'_>) -> Result<()> {
     out.write_event(event).map_err(|_| BAD)
+}
+fn marker(out: &mut Writer<Vec<u8>>, stack: &[String], token: &str) {
+    let paragraph = stack.iter().any(|s| s == "w:p");
+    let run = stack.iter().any(|s| s == "w:r");
+    let mut xml = String::new();
+    if !paragraph {
+        xml.push_str("<w:p>");
+    }
+    if !run {
+        xml.push_str("<w:r>");
+    }
+    xml.push_str(&format!("<w:t>{token}</w:t>"));
+    if !run {
+        xml.push_str("</w:r>");
+    }
+    if !paragraph {
+        xml.push_str("</w:p>");
+    }
+    out.get_mut().extend_from_slice(xml.as_bytes());
 }
 fn restore(
     text: &str,
@@ -265,6 +339,28 @@ impl<F: Fn(&Value, Option<&[u8]>) -> Result<Value>> Package<'_, F> {
         let mut slots = Vec::new();
         let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
         for name in names {
+            // Word stories are not interchangeable body paragraphs. Docling
+            // may omit a first/even header according to section layout. The
+            // existing native reader owns referenced furniture and notes once;
+            // their special slots must not be demanded from Docling's body.
+            let side = if name.starts_with("word/header") && name.ends_with(".xml") {
+                Some("hdr")
+            } else if name.starts_with("word/footer") && name.ends_with(".xml") {
+                Some("ftr")
+            } else {
+                match name.as_str() {
+                    "word/footnotes.xml" => Some("footnotes"),
+                    "word/endnotes.xml" => Some("endnotes"),
+                    "word/comments.xml" => Some("comments"),
+                    _ => None,
+                }
+            };
+            if let Some(root) = side {
+                zip.start_file(&name, zip::write::SimpleFileOptions::default())
+                    .map_err(|_| BAD)?;
+                zip.write_all(format!("<w:{root} xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"/>").as_bytes()).map_err(|_|BAD)?;
+                continue;
+            }
             // Original media/OLE has already been handed to the existing reader by each slot.
             // It must not be decoded a second time into Docling's JSON or memory.
             if name.starts_with("word/media/") || name.starts_with("word/embeddings/") {
@@ -309,16 +405,17 @@ impl<F: Fn(&Value, Option<&[u8]>) -> Result<Value>> Package<'_, F> {
         request["slot_prefix"] = json!(prefix);
         let result = (self.external)(&request, Some(&prepared))?;
         let text = result["text"].as_str().ok_or("DOCLING_WORD_INCOMPLETE")?;
-        let text = restore(
+        let mut text = restore(
             text,
             &prefix,
             &slots,
             self.unread_visual,
             &result["slot_expansions"],
         )?;
-        if text.trim().is_empty() {
+        if text.trim().is_empty() && !self.floating.iter().any(|(_, s)| !s.trim().is_empty()) {
             return Err("NO_SEARCHABLE_TEXT");
         }
+        self.read_related(&mut text)?;
         Ok(text)
     }
     fn slot_xml(
@@ -348,27 +445,24 @@ impl<F: Fn(&Value, Option<&[u8]>) -> Result<Value>> Package<'_, F> {
                         return Err(LIMIT);
                     }
                     let token = format!("{prefix}N{}END", slots.len());
-                    let inside_run = stack.iter().any(|s| s == "w:r");
-                    let inside_p = stack.iter().any(|s| s == "w:p");
-                    let mut fragment = String::new();
-                    if !inside_p {
-                        fragment.push_str("<w:p>");
+                    marker(&mut out, &stack, &token);
+                    slots.push((token, value));
+                }
+                Event::Empty(e) if special(e.name().as_ref()) => {
+                    let node = Node::empty(&e).ok_or(BAD)?;
+                    let value = self.render(&node, &mut document)?;
+                    if slots.len() >= 100000 {
+                        return Err(LIMIT);
                     }
-                    if !inside_run {
-                        fragment.push_str("<w:r>");
-                    }
-                    fragment.push_str(&format!("<w:t>{token}</w:t>"));
-                    if !inside_run {
-                        fragment.push_str("</w:r>");
-                    }
-                    if !inside_p {
-                        fragment.push_str("</w:p>");
-                    }
-                    out.get_mut().extend_from_slice(fragment.as_bytes());
+                    let token = format!("{prefix}N{}END", slots.len());
+                    marker(&mut out, &stack, &token);
                     slots.push((token, value));
                 }
                 Event::Start(e) => {
                     let name = e.name().as_ref().to_owned();
+                    if matches!(name.as_str(), "w:headerReference" | "w:footerReference") {
+                        self.reference(&e)?;
+                    }
                     if matches!(
                         name.as_str(),
                         "w:ins"
@@ -400,7 +494,12 @@ impl<F: Fn(&Value, Option<&[u8]>) -> Result<Value>> Package<'_, F> {
                         .as_bytes(),
                     );
                 }
-                Event::Empty(e) => write_event(&mut out, Event::Empty(e))?,
+                Event::Empty(e) => {
+                    if matches!(e.name().as_ref(), "w:headerReference" | "w:footerReference") {
+                        self.reference(&e)?;
+                    }
+                    write_event(&mut out, Event::Empty(e))?;
+                }
                 Event::End(e) => {
                     if stack.pop().as_deref() != Some(e.name().as_ref()) {
                         return Err(BAD);

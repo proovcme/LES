@@ -120,7 +120,7 @@ pub async fn run(
         candidate_documents = result["result"]["candidate_documents"].clone();
         prefetch = json!({"coverage":result["result"]["coverage"],
             "index_revision":result["result"]["index_revision"],"read_receipt":result["result"]["read_receipt"],"candidates":evidence.sources.len(),"selection_policy":result["result"]["selection_policy"],"candidate_documents":found_documents,
-            "fusion":result["result"]["fusion"],"fusion_trace":result["result"]["fusion_trace"]});
+            "fusion":result["result"]["fusion"],"fusion_trace":result["result"]["fusion_trace"],"read_failures":result["result"]["read_failures"]});
         journal
             .checkpoint(
                 "retrieval_prefetch",
@@ -402,14 +402,26 @@ pub async fn run(
                     "profile_prefix":round_prompt,"request_payload":question,"shortlist":if native{json!([])}else{json!(advertised)},
                     "checkpoint":navigation,"working_memory":turn.memory,"dialogue":turn.dialogue,"evidence":initial,"source_map":evidence.sources,
                     "required_evidence":required,"tool_exchange":if native{json!([])}else{json!(exchanges)},"native_tool_exchange":native_groups,"native_tool_history":native_history});
-                tools.read_max_chars = super::budget::reader_capacity(
+                let capacity = super::budget::reader_capacity(
                     &context_request,
                     proof_blocks,
                     usize::from(native && !exchanges.is_empty()),
-                )?;
-                context_request["request_payload"]["reader_budget_max_chars"] =
-                    json!(tools.read_max_chars);
-                let packed = les_core::chat_context::execute(&context_request)?;
+                );
+                let packed = match capacity {
+                    Ok(chars) => {
+                        tools.read_max_chars = chars;
+                        context_request["request_payload"]["reader_budget_max_chars"] =
+                            json!(chars);
+                        les_core::chat_context::execute(&context_request)?
+                    }
+                    // The capacity probe uses the same packer. Its overflow
+                    // must take the same schema-release path as the full call,
+                    // rather than aborting before that recovery can run.
+                    Err(error) if error.code == "CONTEXT_REQUIRED_SECTION_OVERFLOW" => {
+                        json!({"overflow":true})
+                    }
+                    Err(error) => return Err(error),
+                };
                 if packed["overflow"] == true {
                     if native
                         && !final_answer
@@ -804,7 +816,7 @@ pub async fn run(
                 let completed = json!({"answer":answer,"response":answer,"sources":names,"source_map":visible,"citation_map":visible,
                     "history_id":journal.history,"latency_sec":started.elapsed().as_secs_f64(),"tokens":terminal["usage"]["completion_tokens"].as_u64().unwrap_or(0),"crag_status":"UNVALIDATED","success":true,
                     "source_scope":{"resolved":turn.scope["resolved_dataset_ids"],"used":visible.as_array().into_iter().flatten().map(|s|s["dataset_id"].clone()).collect::<Vec<_>>()},
-                    "query_route":{"channel":"generic","reason":"native_chat"},"retrieval_trace":{"engine":"rust.chat","rounds":agent.rounds,"mode":retrieval_mode,"prefetch":prefetch,"contexts":contexts,"citation_syntax":citations,"grounding_retry":grounding_retry,"citation_retry":citation_retry,"answer_window_retry":answer_window_retry,"source_inspection":evidence.reading_trace()},
+                    "query_route":{"channel":"generic","reason":"native_chat"},"retrieval_trace":{"engine":"rust.chat","status":if evidence.read_failures.is_empty(){"ok"}else{"degraded"},"read_failures":evidence.read_failures,"rounds":agent.rounds,"mode":retrieval_mode,"prefetch":prefetch,"contexts":contexts,"citation_syntax":citations,"grounding_retry":grounding_retry,"citation_retry":citation_retry,"answer_window_retry":answer_window_retry,"source_inspection":evidence.reading_trace()},
                     "artifact":{"completion_status":if !summary.is_null()&&summary["status"]!="recorded"{"incomplete"}else{"completed"},"execution_receipt":receipt,"execution_summary":summary,"validation":if table_facts.is_null(){"not_performed"}else if table_facts["status"]=="insufficient"{"insufficient_evidence"}else{"source_rows_verified"},"table_facts":table_facts,"tool_results":agent.results(),"egress_tag":turn.egress_tag,"attachment":{
                         "attachment_id":turn.attachment["attachment_id"],"name":turn.attachment["name"],"source_sha256":turn.attachment["source_sha256"],"media_type":turn.attachment["media_type"],"truncated":turn.attachment["truncated"]}},"model":turn.connection.public()});
                 agent.accept_completed(json!({"text":answer})).await?;

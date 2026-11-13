@@ -43,6 +43,14 @@ fn model_schema(contract: &Value) -> Value {
         return schema;
     }
     if let Some(properties) = schema["properties"].as_object_mut() {
+        // The tool summary already explains frozen continuations. Repeating
+        // prose in every hash/revision property costs context on every turn;
+        // retain all validation constraints and the full API/MCP contract.
+        for property in properties.values_mut() {
+            if let Some(value) = property.as_object_mut() {
+                value.remove("description");
+            }
+        }
         properties.remove("dataset_id");
         properties.remove("doc_name");
         if contract["name"] == "read_source" {
@@ -219,7 +227,9 @@ impl Tools {
         chosen.into_iter().map(|c| {
             let schema=model_schema(c);
             let description=if c["name"] == "read_source" {
-                "Read indexed text sections by registered doc_id; q or clause locates text, offset continues it. This does not open an original PDF: use read_pdf_source(doc_id,page) for that. For embedded Word images/attachments use the extension tool: describe read_source, then call its full view=parts/part contract. Indexed text and media are different evidence.".to_owned()
+                "Read structured Word originals or indexed text by doc_id. q/clause locates text; continue with offset and the returned index_revision/view_sha256. Physical PDF pages use read_pdf_source. Word images/attachments use the extension's read_source view=parts/part.".to_owned()
+            } else if c["name"] == "read_pdf_source" {
+                "Read an original PDF page by doc_id and 1-based page; configured OCR handles scans. source_sha256 pins the original. Continue with offset and returned view_sha256. Verify OCR numbers against the original.".to_owned()
             } else if schema!=c["input_schema"] {
                 format!("{} Use only the registered doc_id from source references or document search to identify the document. Dataset and filename are resolved by LES.",
                     c["summary"].as_str().unwrap_or("").replace("Use exact dataset_id+doc_name from sources; never invent ids or paths.", ""))

@@ -17,6 +17,24 @@ fn archive(body: &str, members: &[(&str, &[u8])]) -> Vec<u8> {
     zip.finish().unwrap().into_inner()
 }
 #[test]
+fn floating_page_labels_never_become_cell_values_or_parts_of_words() {
+    let body="<w:tbl><w:tr><w:tc><w:p><w:r><w:t>graph</w:t><w:drawing><wp:anchor><wps:txbx><w:txbxContent><w:p><w:r><w:t>4</w:t></w:r></w:p></w:txbxContent></wps:txbx></wp:anchor></w:drawing><w:t>ical</w:t></w:r></w:p></w:tc></w:tr></w:tbl>";
+    let bytes = archive(body, &[]);
+    let value = convert(&bytes, &json!({}), &|_, _| Ok(json!({"stored":true}))).unwrap();
+    let text = value["text"].as_str().unwrap();
+    assert!(text.contains("graphical"));
+    assert!(!text.contains("graph4ical"));
+    let (_, separate) = text.split_once("## Отдельный плавающий объект 1").unwrap();
+    assert!(separate.contains('4'));
+    assert_eq!(
+        value["metadata"]["floating_objects"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}
+#[test]
 fn empty_ocr_preserves_real_image_structure_and_revision_without_claiming_blank() {
     let rels=br#"<Relationships><Relationship Id="picture" Type="x/image" Target="media/proof.png"/><Relationship Id="unused" Type="x/customXml" Target="../customXml/item.xml"/></Relationships>"#;
     let bytes=archive("<w:p><w:r><w:t>Before</w:t><w:pict><v:shape><v:imagedata r:id=\"picture\"/></v:shape></w:pict><w:t>After</w:t></w:r></w:p>",&[("word/_rels/document.xml.rels",rels),("word/media/proof.png",b"original image bytes")]);

@@ -1,5 +1,13 @@
 # Модули LES RAG
 
+877: `core/src/document/structure.rs` — единицы Word и диапазоны без перекрытия;
+`sources/word.rs` — оригинал и ограниченный кеш; `pdf_text/source.rs` — снимки
+физических страниц/OCR; `retrieval/physical.rs` — дочитывание найденного OCR
+до общего отбора; `retrieval/failures.rs` — частичные ошибки оригиналов,
+не подменяющие контроль редакций. `SourceReader.svelte` использует тот же API, что MCP.
+[Договор](modules/native-source-mcp.md). Приёмка кандидата ведётся на копии;
+рабочая установка не переключается.
+
 876: `core/src/context_selection` — общий отбор и каталог; `chat/sources_api.rs`
 и `runtime/src/cli/mcp_tools.rs` — [источники MCP/CLI](modules/native-source-mcp.md)
 через тот же читатель, что у чата, без зависимости от модели ответов.

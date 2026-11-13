@@ -22,7 +22,7 @@ fn group(source: &Value) -> Option<String> {
     {
         return None;
     }
-    Some(json!([id, source["dataset_id"], sha, page]).to_string())
+    Some(json!([id, source["dataset_id"], sha, page, source["view_sha256"]]).to_string())
 }
 impl Pages {
     pub(super) fn canonical(&self, source: &Value) -> Option<&Value> {

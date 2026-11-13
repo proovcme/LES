@@ -4,6 +4,10 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 mod discovery;
 pub use discovery::catalog;
+// Source volume, not the number of short Word paragraphs, is the primary
+// memory bound. Kept below the original 2048 * 100000-character worst case.
+pub const MAX_SOURCE_UNITS: usize = 16384;
+pub const MAX_SOURCE_TEXT_BYTES: usize = 8 * 1024 * 1024;
 
 fn normalized(text: &str) -> String {
     // Preserve line/cell boundaries, case, punctuation and every digit. In
@@ -61,8 +65,17 @@ pub fn select(request: &Value) -> Result<Value, &'static str> {
         .ok_or("CONTEXT_SELECTION_INVALID")?;
     let input = request["units"]
         .as_array()
-        .filter(|v| v.len() <= 2048)
+        .filter(|v| v.len() <= MAX_SOURCE_UNITS)
         .ok_or("CONTEXT_SELECTION_INVALID")?;
+    let bytes = input
+        .iter()
+        .try_fold(0usize, |n, u| {
+            n.checked_add(u["text"].as_str().map_or(0, str::len))
+        })
+        .ok_or("CONTEXT_SOURCE_LIMIT")?;
+    if bytes > MAX_SOURCE_TEXT_BYTES {
+        return Err("CONTEXT_SOURCE_LIMIT");
+    }
     let budget = request["max_chars"]
         .as_u64()
         .filter(|n| *n <= 1_000_000)
@@ -107,6 +120,11 @@ pub fn select(request: &Value) -> Result<Value, &'static str> {
         );
         if let Some(&index) = keys.get(&key) {
             let previous: &mut Value = &mut units[index];
+            if let Some(rank) = unit["rank"].as_u64() {
+                if previous["rank"].as_u64().is_none_or(|old| rank < old) {
+                    previous["rank"] = json!(rank);
+                }
+            }
             previous["equivalent_sources"]
                 .as_array_mut()
                 .unwrap()
@@ -191,7 +209,12 @@ pub fn select(request: &Value) -> Result<Value, &'static str> {
                     0.0
                 }
             } else {
-                0.35 * 10.0 / (10.0 + rank) + 0.65 * coverage(&body[i])
+                let prior = if u.get("rank") == Some(&Value::Null) {
+                    0.0
+                } else {
+                    10.0 / (10.0 + rank)
+                };
+                0.35 * prior + 0.65 * coverage(&body[i])
             }
         })
         .collect();
@@ -203,6 +226,7 @@ pub fn select(request: &Value) -> Result<Value, &'static str> {
         let mut best: Option<(usize, f64)> = None;
         for i in 0..units.len() {
             if chosen.contains(&i)
+                || relevance[i] == 0.0
                 || (group_selection && relevance[i] == 0.0)
                 || used + cost(&units[i], identity_reserve) > budget
                 || text_used + units[i]["text"].as_str().unwrap().chars().count() > text_budget
@@ -256,6 +280,46 @@ mod tests {
     use super::*;
     fn unit(id: &str, text: &str, rank: usize) -> Value {
         json!({"unit_id":id,"text":text,"source":{"doc_id":id,"sha":"revision"},"rank":rank})
+    }
+    #[test]
+    fn expanded_document_paragraphs_do_not_inherit_a_hit_at_every_position() {
+        let mut table = unit(
+            "table",
+            "Electrical supply category | two independent transformers | 17.25 kW",
+            0,
+        );
+        table["rank"] = Value::Null;
+        let mut units = vec![table.clone()];
+        for i in 0..300 {
+            let mut footer = unit(&format!("footer-{i}"), &format!("Footer furniture {i}"), 0);
+            footer["rank"] = Value::Null;
+            units.push(footer);
+        }
+        let result = select(
+            &json!({"question":"Electrical supply category","units":units,"max_chars":4000}),
+        )
+        .unwrap();
+        assert_eq!(result["units"].as_array().unwrap().len(), 1);
+        assert_eq!(result["units"][0]["unit_id"], "table");
+        // A real dense hit remains admissible without literal query overlap.
+        let result = select(&json!({"question":"unmatched synonym","units":[unit("dense","Verified original paragraph",0)],"max_chars":1000})).unwrap();
+        assert_eq!(result["units"][0]["unit_id"], "dense");
+    }
+    #[test]
+    fn many_short_paragraphs_keep_the_last_relevant_unit_with_a_byte_bound() {
+        let mut units=(0..2200).map(|i|json!({"text":format!("Paragraph {i}"),"source":{"doc_id":"doc"},"unit_id":i.to_string()})).collect::<Vec<_>>();
+        units[2199]["text"] = json!("Needle in the final paragraph");
+        let result =
+            select(&json!({"question":"Needle","units":units,"max_chars":400,"max_items":1}))
+                .unwrap();
+        assert_eq!(result["units"][0]["unit_id"], "2199");
+        let units = (0..2049)
+            .map(|i| json!({"text":"x".repeat(4096),"source":{},"unit_id":i.to_string()}))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            select(&json!({"question":"x","units":units,"max_chars":400})).unwrap_err(),
+            "CONTEXT_SOURCE_LIMIT"
+        );
     }
     #[test]
     fn repeated_pages_share_text_but_keep_every_origin() {

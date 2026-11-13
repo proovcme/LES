@@ -62,7 +62,7 @@ pub(crate) fn configured_ocr(owned_state: Option<&Path>) -> Result<Value, &'stat
         } else {
             "RAG_OCR_DPI"
         },
-        if engine == "tesseract" { "300" } else { "150" },
+        "300",
     )
     .parse::<u64>()
     .map_err(|_| "OCR_UNAVAILABLE")?

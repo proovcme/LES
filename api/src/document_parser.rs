@@ -74,6 +74,10 @@ fn invoke(input: Value) -> Result<Value> {
         .as_str()
         .or_else(|| reply["code"].as_str())
         .unwrap_or("");
+    eprintln!(
+        "{}",
+        json!({"event":"document_parser_failed","code":code,"diagnostics":reply["diagnostics"]})
+    );
     let known = [
         "NO_SEARCHABLE_TEXT",
         "DOCLING_WORD_INCOMPLETE",

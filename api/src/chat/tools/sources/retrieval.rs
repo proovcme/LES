@@ -2,14 +2,26 @@
 use super::*;
 use crate::index_batch::configuration::{identity, tokenizer, Settings};
 mod envelope;
+pub(super) mod failures;
 mod matching;
 mod packing;
 mod pagination;
+mod physical;
 mod views;
 use envelope::fit_envelope_budget;
 #[cfg(test)]
 use envelope::{canonical_chars, json_item_count};
 use pagination::Page;
+pub(super) async fn rank_units(points: Vec<Value>, query: String) -> Result<Vec<Value>> {
+    Ok(
+        tokio::task::spawn_blocking(move || matching::rank(points, query))
+            .await
+            .map_err(|_| "SOURCE_READ_FAILED")??,
+    )
+}
+pub(super) fn bound_word(reply: &mut Value) -> Result<()> {
+    fit_envelope_budget(reply, 22000, 230)
+}
 
 fn pinned_revision(args: &Value, revision: &Value) -> Result<()> {
     if args["index_revision"]
@@ -39,6 +51,18 @@ fn a_continuation_never_silently_reads_another_index_generation() {
 fn reading_units(points: &[Value]) -> Vec<Value> {
     let page = |p: &Value| {
         let p = &p["payload"];
+        if let Some(unit) = p["source_unit_id"].as_u64() {
+            return Some(
+                json!([
+                    p["dataset_id"],
+                    p["file_name"],
+                    p["source_sha256"],
+                    "word",
+                    unit
+                ])
+                .to_string(),
+            );
+        }
         p["page"].as_u64().map(|page| {
             json!([p["dataset_id"], p["file_name"], p["source_sha256"], page]).to_string()
         })
@@ -46,10 +70,11 @@ fn reading_units(points: &[Value]) -> Vec<Value> {
     let materialized: std::collections::HashSet<_> = points
         .iter()
         .filter(|p| {
-            p["payload"]["pdf_page_view_schema"] == "les.pdf-page-view.v1"
-                && p["payload"]["pdf_page_view"]
-                    .as_str()
-                    .is_some_and(|v| !v.is_empty())
+            (p["payload"]["word_reading_schema"] == "les.document-reading.v1")
+                || (p["payload"]["pdf_page_view_schema"] == "les.pdf-page-view.v1"
+                    && p["payload"]["pdf_page_view"]
+                        .as_str()
+                        .is_some_and(|v| !v.is_empty()))
         })
         .filter_map(&page)
         .collect();
@@ -147,7 +172,11 @@ pub(in crate::chat) async fn search(
     turn: &SourceContext,
     args: Value,
 ) -> Result<Value> {
-    search_with_navigation(context, turn, args, true).await
+    let navigation = args["view"] != "context";
+    if !navigation && args["offset"].as_u64().is_some_and(|n| n > 0) {
+        return Err("SOURCE_OFFSET_INVALID".into());
+    }
+    search_with_navigation(context, turn, args, navigation).await
 }
 async fn search_with_navigation(
     context: Arc<Context>,
@@ -311,8 +340,13 @@ async fn search_with_navigation(
                 .filter(|p|seen.insert(json!([p["payload"]["dataset_id"],p["payload"]["file_name"],p["payload"]["parent_id"]]).to_string()))
                 .take(2).map(|p|json!({"dataset_id":p["payload"]["dataset_id"],"doc_name":p["payload"]["file_name"],
                     "parent_id":p["payload"]["parent_id"],"evidence_admissible":false})).collect::<Vec<_>>());
-            if navigation {
+            // Public tool replies have a wire limit. Internal prefetch must
+            // retain its complete candidate catalog and fitting page units:
+            // the model packer, not an MCP envelope, owns their admission.
+            if navigation || args["view"] == "context" {
                 fit_envelope_budget(&mut reply, 22500, 240)?;
+            }
+            if navigation {
                 Page::new(offset, total).apply(&mut reply, "total_candidates")?;
             }
             Ok(reply)
@@ -584,6 +618,27 @@ async fn passages(
             "document_budget_chars":if expand_document{Some(max_chars)}else{None}}),
     )
     .await?;
+    let (points, hydrated) = if expand_document {
+        let (points, hydrated) = views::project(points, hydrated)?;
+        let question = turn.request["question"].as_str().unwrap_or("").to_owned();
+        tokio::task::spawn_blocking(move || {
+            packing::read_plan(&points, hydrated, max_chars, context_budget, &question)
+        })
+        .await
+        .map_err(|_| "SOURCE_READ_FAILED")??
+    } else {
+        (points, hydrated)
+    };
+    let (points, hydrated) = if expand_document {
+        super::word::hydrate(context, turn, points, hydrated).await?
+    } else {
+        (points, hydrated)
+    };
+    let (points, hydrated) = if expand_document {
+        physical::hydrate(context, turn, points, hydrated).await?
+    } else {
+        (points, hydrated)
+    };
     let (points, hydrated) = views::project(points, hydrated)?;
     let (selected, total) = if paginated {
         (
@@ -633,6 +688,61 @@ async fn passages(
             .unwrap_or(&p["page"])
             .clone();
         let mut source = reference(&doc, page);
+        if hydrated["read_failures"]
+            .as_array()
+            .is_some_and(|v| !v.is_empty())
+        {
+            source["retrieval_incomplete"] = json!(true);
+        }
+        if p["physical_pdf_read"].is_object() {
+            source["evidence_kind"] = json!("physical_pdf_page");
+            source["page_text_complete"] = json!(true);
+            for field in [
+                "ocr",
+                "ocr_engine",
+                "ocr_dpi",
+                "ocr_numbers_verified",
+                "view_sha256",
+                "extractor",
+                "offset",
+                "next_offset",
+            ] {
+                source[field] = p["physical_pdf_read"][field].clone();
+            }
+        }
+        if p["ocr"] == true
+            && doc["file_name"]
+                .as_str()
+                .is_some_and(|s| s.to_ascii_lowercase().ends_with(".pdf"))
+            && !p["physical_pdf_read"].is_object()
+        {
+            source["evidence_admissible"] = json!(false);
+            source["read_required"] = json!("read_pdf_source");
+        }
+        if super::word::supports(&doc) {
+            if p["reading_representation"] != "word_structure" {
+                // Legacy overlapping fragments remain discovery locators only.
+                // Read the registered original through the same read_source
+                // available to chat, MCP and CLI before treating it as proof.
+                source["evidence_admissible"] = json!(false);
+                source["read_required"] = json!("read_source");
+            } else {
+                for field in [
+                    "ordinal",
+                    "table_id",
+                    "row_start",
+                    "row_end",
+                    "start_byte",
+                    "end_byte",
+                ] {
+                    source[field] = p[field].clone();
+                }
+                if p["word_physical"] == true {
+                    source["evidence_kind"] = json!("physical_word_section");
+                    source["view_sha256"] = p["word_snapshot_sha256"].clone();
+                }
+            }
+        }
         if p["ocr"] == true {
             source["ocr"] = json!(true);
         }
@@ -653,7 +763,7 @@ async fn passages(
                 source[field] = p[field].clone();
             }
         }
-        source["qdrant_point_id"] = point["id"].clone();
+        source["qdrant_point_id"] = p.get("retrieval_anchor_id").unwrap_or(&point["id"]).clone();
         source["parent_id"] = p["parent_id"].clone();
         for field in ["section_heading", "parent_heading"] {
             if p[field].is_string() {
@@ -717,7 +827,14 @@ async fn passages(
         output.push(json!({"text":text,"source":source,"chunk_ord":p["chunk_ord"],"source_ref":p["source_ref"]}));
     }
     if output.is_empty() {
-        return Err("CONTEXT_REQUIRED_SECTION_OVERFLOW".into());
+        if let Some(code) = hydrated["read_failures"][0]["code"].as_str() {
+            return Err(code.into());
+        }
+        // Exhausted search pages are ordinary empty results. A nonempty
+        // reading pool that cannot admit one atomic unit is an overflow.
+        if total > 0 {
+            return Err("CONTEXT_REQUIRED_SECTION_OVERFLOW".into());
+        }
     }
     if store
         .revision(
@@ -735,10 +852,28 @@ async fn passages(
         "indexed_sections",
         json!({"passages":output,"index_revision":revision,
             "read_receipt":{"schema":"les.indexed-read.v1","index_revision":revision,
+                "semantics":"verified_index_locators_and_reading_views",
                 "point_ids":sources.iter().map(|s|s["qdrant_point_id"].clone()).collect::<Vec<_>>()},
-            "coverage":if included==total{"complete"}else{"bounded"},"total_fragments":total,"included_fragments":included}),
+            "coverage":if included==total && hydrated["read_failures"].as_array().is_none_or(Vec::is_empty){"complete"}else{"bounded"},
+            "read_failures":hydrated["read_failures"].as_array().cloned().unwrap_or_default(),
+            "total_fragments":total,"included_fragments":included}),
         sources,
     );
+    if reply["result"]["read_failures"]
+        .as_array()
+        .is_some_and(|a| !a.is_empty())
+    {
+        reply["warnings"] = json!(["Часть найденных оригиналов не прочитана. Доказательства относятся только к успешно прочитанным источникам; нельзя объявлять обзор полным или утверждать отсутствие ответа в непрочитанных файлах."]);
+    }
+    if reply["sources"]
+        .as_array()
+        .is_some_and(|s| s.iter().any(|s| s["evidence_admissible"] == false))
+    {
+        if !reply["warnings"].is_array() {
+            reply["warnings"] = json!([]);
+        }
+        reply["warnings"].as_array_mut().unwrap().push(json!("Помеченные поисковые фрагменты служат только для навигации. Прочитайте оригинал инструментом read_required или запросите view=context; их текст не подтверждает ответ."));
+    }
     if context_budget.is_some() {
         let cap = if name == "search_sources" {
             19500
@@ -762,6 +897,9 @@ pub(super) async fn read(
         .is_some_and(|h| !h.is_empty() && doc["file_hash"] != h)
     {
         return Err("SOURCE_REVISION_CHANGED".into());
+    }
+    if super::word::supports(&doc) {
+        return super::word::read(context, doc, args, Value::Null).await;
     }
     let (config, _, _, _) = configuration(context.clone(), false).await?;
     let store = context
