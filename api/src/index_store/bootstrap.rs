@@ -3,7 +3,9 @@ use super::Store;
 use crate::Context;
 use reqwest::Method;
 use serde_json::{json, Value};
-use std::{sync::Arc, time::Duration};
+#[cfg(feature = "edge")]
+use std::sync::Arc;
+use std::time::Duration;
 impl Store {
     pub(crate) async fn recover_setup(
         &self,

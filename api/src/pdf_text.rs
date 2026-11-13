@@ -493,12 +493,7 @@ fn read_page(
             return Err("PDF_OFFSET_INVALID");
         }
         let query = options["source"]["q"].as_str().unwrap_or("").trim();
-        let (offset, end) = if query.is_empty() {
-            (offset, (offset + limit).min(count_chars))
-        } else {
-            let (start, end) = les_core::pdf_source::literal_window(&text, query, limit as usize)?;
-            (start as u64, end as u64)
-        };
+        let (offset, end, selection) = source_window(&text, query, offset, limit)?;
         let excerpt: String = text
             .chars()
             .skip(offset as usize)
@@ -507,13 +502,70 @@ fn read_page(
         let next = offset + excerpt.chars().count() as u64;
         Ok(
             json!({"text":excerpt,"page":number,"page_count":count,"offset":offset,
-            "next_offset":if query.is_empty() && next<count_chars {Some(next)} else {None},"complete":next==count_chars && offset==0,
-            "selection":if query.is_empty(){"page_range"}else{"literal_match"},"matched_query":query,
+            "next_offset":if next<count_chars {Some(next)} else {None},"complete":next==count_chars && offset==0,
+            "selection":selection,"matched_query":query,
             "total_chars":count_chars,"extractor":if structured && tables.is_some(){"les.pdfium.xberg-page.v1"}else if structured{"les.pdfium.page.layout.v2"}else{"les.pdfium.page.v1"},"source_sha256":options["source_sha256"]}),
         )
     })();
     unsafe { pdf.FPDF_ClosePage(page) };
     result
+}
+
+fn source_window(
+    text: &str,
+    query: &str,
+    offset: u64,
+    limit: u64,
+) -> Result<(u64, u64, &'static str), &'static str> {
+    let total = text.chars().count() as u64;
+    if offset >= total {
+        return Err("PDF_OFFSET_INVALID");
+    }
+    // A literal only chooses the initial location. An explicit continuation is
+    // a character position in that same pinned page, never another literal seek.
+    if !query.is_empty() && offset == 0 {
+        let (start, end) = les_core::pdf_source::literal_window(text, query, limit as usize)?;
+        Ok((start as u64, end as u64, "literal_match"))
+    } else {
+        Ok((
+            offset,
+            offset.saturating_add(limit).min(total),
+            "page_range",
+        ))
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn literal_page_read_continues_with_the_same_query_without_reseeking_or_losing_unicode() {
+    let text = format!(
+        "{}нужный пункт{}",
+        "Предисловие 🌲. ".repeat(10),
+        " Продолжение таблицы 日本語. ".repeat(15)
+    );
+    let query = "нужный пункт";
+    let (start, mut end, _) = source_window(&text, query, 0, 80).unwrap();
+    let mut combined: String = text
+        .chars()
+        .skip(start as usize)
+        .take((end - start) as usize)
+        .collect();
+    while end < text.chars().count() as u64 {
+        let (next_start, next_end, kind) = source_window(&text, query, end, 80).unwrap();
+        assert_eq!(next_start, end);
+        assert_eq!(kind, "page_range");
+        assert!(next_end > next_start);
+        combined.extend(
+            text.chars()
+                .skip(next_start as usize)
+                .take((next_end - next_start) as usize),
+        );
+        end = next_end;
+    }
+    assert_eq!(
+        combined,
+        text.chars().skip(start as usize).collect::<String>()
+    );
 }
 
 fn source_page(library: &Library, options: &Value) -> Result<Value, &'static str> {

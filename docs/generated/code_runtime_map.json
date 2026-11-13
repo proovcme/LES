@@ -11651,7 +11651,7 @@
     },
     {
       "inbound": [],
-      "lines": 247,
+      "lines": 262,
       "module": "tests.test_light_native_cli",
       "outbound": [],
       "path": "tests/test_light_native_cli.py",
@@ -12261,7 +12261,7 @@
     },
     {
       "inbound": [],
-      "lines": 818,
+      "lines": 836,
       "module": "tests.test_light_native_retrieval_modes",
       "outbound": [
         "proxy/services/model_connection_contracts.py",
@@ -16156,7 +16156,7 @@
     "runtime_support": 5,
     "test_or_tool_only": 280,
     "tracked_python_files": 725,
-    "tracked_python_lines": 173384
+    "tracked_python_lines": 173417
   },
   "warnings": []
 }

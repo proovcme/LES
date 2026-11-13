@@ -5,21 +5,42 @@ pub(crate) mod retrieval;
 mod verification;
 use super::{envelope, Context, Prepared, Result};
 use retrieval::search;
+/// Shared data-only scope for chat and MCP; no answer model or dialogue.
+pub(crate) struct SourceContext {
+    pub request: Value,
+    pub scope: Value,
+    pub profile: Value,
+}
+impl From<&Prepared> for SourceContext {
+    fn from(turn: &Prepared) -> Self {
+        Self {
+            request: turn.request.clone(),
+            scope: turn.scope.clone(),
+            profile: turn.profile.clone(),
+        }
+    }
+}
 pub(crate) use verification::physical as verify_physical;
 pub(crate) fn selected_files(turn: &Prepared) -> Vec<Value> {
-    let mut names = turn.request["target_files"]
+    selected_request(&turn.request)
+}
+fn selected_scoped(turn: &SourceContext) -> Vec<Value> {
+    selected_request(&turn.request)
+}
+fn selected_request(request: &Value) -> Vec<Value> {
+    let mut names = request["target_files"]
         .as_array()
         .cloned()
         .unwrap_or_default();
-    if let Some(name) = turn.request["target_file"].as_str() {
+    if let Some(name) = request["target_file"].as_str() {
         if !names.contains(&json!(name)) {
             names.push(json!(name));
         }
     }
     names
 }
-fn bind_selected_name(turn: &Prepared, args: &mut Value) -> Result<()> {
-    bind_name(&selected_files(turn), args)
+fn bind_selected_name(turn: &SourceContext, args: &mut Value) -> Result<()> {
+    bind_name(&selected_scoped(turn), args)
 }
 fn bind_name(selected: &[Value], args: &mut Value) -> Result<()> {
     if let Some(name) = args["doc_name"].as_str() {
@@ -78,7 +99,7 @@ pub(crate) async fn document(context: &Context, args: &Value) -> Result<Value> {
     }
     Ok(doc)
 }
-pub(super) fn scoped(turn: &Prepared, dataset: &Value) -> Result<()> {
+pub(super) fn scoped(turn: &SourceContext, dataset: &Value) -> Result<()> {
     if !turn.scope["resolved_dataset_ids"]
         .as_array()
         .is_some_and(|v| v.contains(dataset))
@@ -87,9 +108,9 @@ pub(super) fn scoped(turn: &Prepared, dataset: &Value) -> Result<()> {
     }
     Ok(())
 }
-pub(crate) fn scoped_document(turn: &Prepared, doc: &Value) -> Result<()> {
+pub(crate) fn scoped_document(turn: &SourceContext, doc: &Value) -> Result<()> {
     scoped(turn, &doc["dataset_id"])?;
-    let selected = selected_files(turn);
+    let selected = selected_scoped(turn);
     if turn.request["selected_sources_only"] == true
         && !selected.is_empty()
         && !selected.contains(&doc["file_name"])
@@ -121,9 +142,12 @@ pub(crate) fn reference(doc: &Value, page: Value) -> Value {
         "locator":{"source_sha256":doc["file_hash"],"source_page":page},
         "url":format!("{}?{}{}",uri.path(),uri.query().unwrap_or(""),page.as_u64().map(|p|format!("#page={p}")).unwrap_or_default())})
 }
-pub async fn run(
+pub async fn run(context: Arc<Context>, turn: &Prepared, name: &str, args: Value) -> Result<Value> {
+    run_scoped(context, &SourceContext::from(turn), name, args).await
+}
+pub(crate) async fn run_scoped(
     context: Arc<Context>,
-    turn: &Prepared,
+    turn: &SourceContext,
     name: &str,
     mut args: Value,
 ) -> Result<Value> {

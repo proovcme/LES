@@ -15,6 +15,28 @@ fn tool(
         "inputSchema":{"type":"object","required":required,"properties":properties,"additionalProperties":false}})
 }
 
+fn source_tool(name: &str, description: &str) -> Value {
+    let registry: Value = serde_json::from_str(include_str!("../../../config/builtin-tools.json"))
+        .expect("compiled source contracts");
+    let contract = registry["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|v| v["name"] == name)
+        .unwrap();
+    let mut schema = contract["input_schema"].clone();
+    if name == "search_sources" {
+        let properties = schema["properties"].as_object_mut().unwrap();
+        let q = properties.remove("q").unwrap();
+        properties.insert("query".into(), q);
+        properties.get_mut("dataset_ids").unwrap()["type"] = json!(["array", "null"]);
+        schema["required"] = json!(["query"]);
+    }
+    let mut value = tool(name, description, true, false, &[], json!({}));
+    value["inputSchema"] = schema;
+    value
+}
+
 pub fn list() -> Value {
     let dataset =
         json!({"type":"string","description":"ID пользовательского набора из list_datasets"});
@@ -29,8 +51,11 @@ pub fn list() -> Value {
         tool("list_datasets","Показать пользовательские наборы Леса и число готовых фрагментов.",true,false,&[],json!({})),
         tool("list_documents","Показать файлы набора, статусы обработки, размеры и ссылки на оригиналы.",true,false,&["dataset_id"],
             json!({"dataset_id":dataset,"q":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":100},"offset":{"type":"integer","minimum":0}})),
-        tool("search_sources","Поиск по источникам с фрагментами и ссылками на оригиналы.",true,false,&["query"],
-            json!({"query":{"type":"string"},"dataset_ids":{"type":["array","null"],"items":{"type":"string"}},"limit":{"type":"integer","minimum":1,"maximum":20}})),
+        source_tool("search_sources","Найти источники: hybrid-поиск, дочитанные фрагменты, точные ссылки и редакция индекса. view=documents — только каталог, не доказательства. Продолжай через next_offset, сохраняя index_revision и параметры запроса. Модель ответов не вызывается."),
+        source_tool("read_source","Дочитать найденный doc_id: индексированные разделы, таблицы и сохранённые части Word. Передавай source_sha256; для продолжения — next_offset и index_revision. coverage=bounded означает частичное чтение, не весь документ."),
+        source_tool("read_pdf_source","Читать настоящую физическую страницу PDF по doc_id и page. Передавай source_sha256; длинную страницу дочитывай с next_offset до null. Ошибка чтения не подтверждает отсутствие информации."),
+        source_tool("read_excel_source","Читать проверенные индексированные разделы книги, с листами и адресами ячеек. Это не вычисление формул и не полная выгрузка всех ячеек. Для последовательного чтения используй read_source."),
+        source_tool("dataset_map","Получить каталог файлов набора. Имена и статусы не являются содержимым: нужный документ следует прочитать. Для продолжения каталога используй list_documents с тем же dataset_id и возвращённым next_offset."),
         tool("read_clause","Прочитать точный нумерованный пункт в выбранном документе с проверяемыми фрагментами.",true,false,&["dataset_id","document_id","number"],
             json!({"dataset_id":dataset,"document_id":{"type":"string","maxLength":240},"number":{"type":"string","pattern":"^[0-9]{1,5}(\\.[0-9]{1,5}){1,5}$"}})),
         tool("create_dataset","Создать пустой датасет. Папку можно подключить отдельным вызовом.",false,false,&["name"],
@@ -226,13 +251,19 @@ pub fn call(name: &str, args: &Value) -> Result<Value> {
             api.document_links(&mut docs);
             Ok(docs)
         }
-        "search_sources" => api.search_library(
-            required(args, "query")?,
-            dataset_ids(args)?,
-            args.get("limit").map_or(Ok(6), |v| {
-                v.as_u64().ok_or("Неверное количество результатов.")
-            })?,
-        ),
+        "search_sources" => {
+            let mut input = args.as_object().ok_or("Укажите параметры поиска.")?.clone();
+            input.remove("query");
+            input.insert("q".into(), required(args, "query")?.into());
+            // Retain the previously advertised null = all-user-datasets contract.
+            if input.get("dataset_ids").is_some_and(Value::is_null) {
+                input.remove("dataset_ids");
+            }
+            api.source_call(name, Value::Object(input))
+        }
+        "read_source" | "read_pdf_source" | "read_excel_source" | "dataset_map" => {
+            api.source_call(name, args.clone())
+        }
         "read_clause" => api.read_clause(
             required(args, "dataset_id")?,
             required(args, "document_id")?,

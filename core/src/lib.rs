@@ -13,6 +13,7 @@ pub mod chat_request;
 pub mod chat_stream;
 pub mod citations;
 mod context;
+pub mod context_selection;
 pub mod conversation_summary;
 pub mod coordinator;
 mod document;
@@ -110,6 +111,8 @@ fn dispatch(bytes: &[u8]) -> Result<Value, &'static str> {
         Some("lexical_replace") => lexical_write::replace(&request["request"]),
         Some("lexical_initialize") => lexical_schema::execute(&request["request"]),
         Some("context") => context::execute(&request["request"]),
+        Some("context_selection") => context_selection::select(&request["request"]),
+        Some("context_catalog") => context_selection::catalog(&request["request"]),
         Some("chat_context") => {
             chat_context::execute(&request["request"]).map(|value| json!({"value":value}))
         }
@@ -160,7 +163,7 @@ fn dispatch(bytes: &[u8]) -> Result<Value, &'static str> {
         Some("model_secret") => model_secrets::execute(&request["request"]),
         Some("agent_files") => Ok(agent_files::execute(&request["request"])),
         Some("health") => Ok(
-            json!({"abi": 1, "operations":["prepare_terms","unicode","lexical_tokens","legacy_sparse","bm25","lexical_replace","lexical_initialize","context","chat_context","conversation_summary","chat_commands","chat_attachments","document_tasks","memory","document","document_source","document_chunks","document_docx","document_tokenizer","document_nodes","document_json","document_json_stream","document_source_nodes","document_conversion","document_dispatch","embedding_chunks","table_snapshot","tables","workbook_calculation","workbook_index","citations","harness","harness_evidence","chat_stream","chat_profile","tool_registry","tool_execution","filesystem","skills","skill_runtime","index_journal","index_points","index_run","index_configuration","index_contract_publish","chat_research","index_sources","retrieval_quality","fingerprint","job_patch","job_recovery","scan_sources","worker_run","worker_pdf","worker_documents","worker_tables","worker_embeddings","worker_mcp","worker_release_idle","worker_stop","workspace","catalog","trust","model_profile","model_request","model_capabilities","model_secret","agent_files"], "tokenizer":"les.lexical.v2"}),
+            json!({"abi": 1, "operations":["prepare_terms","unicode","lexical_tokens","legacy_sparse","bm25","lexical_replace","lexical_initialize","context","context_selection","context_catalog","chat_context","conversation_summary","chat_commands","chat_attachments","document_tasks","memory","document","document_source","document_chunks","document_docx","document_tokenizer","document_nodes","document_json","document_json_stream","document_source_nodes","document_conversion","document_dispatch","embedding_chunks","table_snapshot","tables","workbook_calculation","workbook_index","citations","harness","harness_evidence","chat_stream","chat_profile","tool_registry","tool_execution","filesystem","skills","skill_runtime","index_journal","index_points","index_run","index_configuration","index_contract_publish","chat_research","index_sources","retrieval_quality","fingerprint","job_patch","job_recovery","scan_sources","worker_run","worker_pdf","worker_documents","worker_tables","worker_embeddings","worker_mcp","worker_release_idle","worker_stop","workspace","catalog","trust","model_profile","model_request","model_capabilities","model_secret","agent_files"], "tokenizer":"les.lexical.v2"}),
         ),
         _ => Err("CORE_UNKNOWN_OPERATION"),
     }

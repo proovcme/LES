@@ -1,7 +1,11 @@
 //! Explicit navigation to preserved Word parts; a media listing is not factual evidence.
 use super::*;
 use std::io::Read;
-pub(super) async fn read(context: Arc<Context>, turn: &Prepared, args: Value) -> Result<Value> {
+pub(super) async fn read(
+    context: Arc<Context>,
+    turn: &SourceContext,
+    args: Value,
+) -> Result<Value> {
     let doc = document(&context, &args).await?;
     scoped_document(turn, &doc)?;
     let owner = context.clone();

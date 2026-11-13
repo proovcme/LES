@@ -2,6 +2,70 @@
 use serde_json::Value;
 use std::collections::HashSet;
 
+fn unit(point: &Value, rank: usize) -> Value {
+    let p = &point["payload"];
+    let mut source = serde_json::Map::new();
+    for field in [
+        "dataset_id",
+        "file_name",
+        "source_sha256",
+        "page",
+        "source_page",
+        "parent_id",
+        "source_ref",
+        "sheet_name",
+        "row",
+    ] {
+        if !p[field].is_null() {
+            source.insert(field.into(), p[field].clone());
+        }
+    }
+    serde_json::json!({"text":p["text"].as_str().unwrap_or(""),"unit_id":key(point),
+        "source":source,"rank":rank,"self_contained":p["reading_representation"]=="pdf_cells","heading":format!("{} {}",p["section_heading"].as_str().unwrap_or(""),p["parent_heading"].as_str().unwrap_or("")),"group":serde_json::json!([p["dataset_id"],p["file_name"],p["source_sha256"]]).to_string(),"point":point})
+}
+pub(super) fn catalog(points: &[Value]) -> Result<Value, &'static str> {
+    les_core::context_selection::catalog(
+        &serde_json::json!({"units":points.iter().enumerate().map(|(i,p)|unit(p,i)).collect::<Vec<_>>()}),
+    )
+}
+/// A single core selector owns query relevance and duplicate content for both
+/// the pre-hydration shortlist and the final context. No index score is changed.
+fn select_points(
+    points: &[Value],
+    query: &str,
+    text_budget: usize,
+    context_budget: Option<usize>,
+) -> Result<Vec<Value>, &'static str> {
+    let input: Vec<_> = points.iter().enumerate().map(|(i, p)| unit(p, i)).collect();
+    let result = les_core::context_selection::select(&serde_json::json!({
+        "question":query,"units":input,"max_chars":context_budget.unwrap_or(1_000_000),
+        "text_budget":text_budget,"identity_reserve_chars":if context_budget.is_some(){1024}else{0},"max_items":32
+    }))?;
+    Ok(result["units"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|u| {
+            let mut p = u["point"].clone();
+            let mut aliases = p["payload"]["equivalent_points"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            aliases.extend(
+                u["equivalent_sources"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .cloned(),
+            );
+            if !aliases.is_empty() {
+                p["payload"]["equivalent_points"] = serde_json::json!(aliases);
+            }
+            p
+        })
+        .collect())
+}
+
 fn key(point: &Value) -> String {
     point["id"]
         .as_str()
@@ -76,6 +140,7 @@ pub(super) fn prefix(rows: &[Value], budget: usize, context: Option<usize>) -> V
     window.selected
 }
 
+#[cfg(test)]
 pub(super) fn select(
     seeds: &[Value],
     sections: &Value,
@@ -83,6 +148,16 @@ pub(super) fn select(
     budget: usize,
     context_budget: Option<usize>,
 ) -> (Vec<Value>, usize) {
+    select_query(seeds, sections, documents, budget, context_budget, "").unwrap()
+}
+pub(super) fn select_query(
+    seeds: &[Value],
+    sections: &Value,
+    documents: &Value,
+    budget: usize,
+    context_budget: Option<usize>,
+    query: &str,
+) -> Result<(Vec<Value>, usize), &'static str> {
     let mut all: HashSet<String> = seeds.iter().map(key).collect();
     let mut groups = Vec::new();
     for section in sections.as_array().into_iter().flatten() {
@@ -108,36 +183,17 @@ pub(super) fn select(
         }
     }
     let total = all.len();
-    let mut window = Window::new(budget, context_budget);
-    // Protect ranked hits before spending the remaining budget on expansion.
-    // A fitting complete document must not evict another retrieved source.
-    for seed in seeds {
-        window.admit(std::slice::from_ref(seed));
-    }
-    for seed in seeds {
-        let document = documents.as_array().into_iter().flatten().find(|d| {
-            ["dataset_id", "file_name"]
-                .iter()
-                .all(|f| seed["payload"][*f] == d["scope"][*f])
-        });
-        if let Some(rows) = document.and_then(|d| d["points"].as_array()) {
-            window.admit(rows);
-        }
-    }
-    // Complete fitting parents, then share partial-parent opportunities.
+    // Consider the complete hydrated pool before admission. Earlier sources do
+    // not spend the budget before a lower-ranked complementary unit is scored.
+    let mut pool = seeds.to_vec();
     for rows in &groups {
-        window.admit(rows);
+        pool.extend(rows.iter().cloned());
     }
-    let depth = groups.iter().map(Vec::len).max().unwrap_or(0);
-    for index in 0..depth {
-        for rows in &groups {
-            if let Some(row) = rows.get(index) {
-                window.admit(std::slice::from_ref(row));
-            }
-        }
+    for document in documents.as_array().into_iter().flatten() {
+        pool.extend(document["points"].as_array().into_iter().flatten().cloned());
     }
-    let selected = window.selected;
-    (selected, total)
+    let selected = select_points(&pool, query, budget, context_budget)?;
+    Ok((selected, total))
 }
 
 #[cfg(test)]
@@ -185,11 +241,22 @@ mod tests {
             {"scope":first["payload"],"points":[first,point("d","large",&"x".repeat(40),6),point("e","large",&"y".repeat(40),7)]},
             {"scope":later["payload"],"points":[later,tail]}
         ]);
-        let (selected, total) = select(&[first, later], &sections, &Value::Null, 55, None);
+        let (selected, total) = select_query(
+            &[first, later],
+            &sections,
+            &Value::Null,
+            55,
+            None,
+            "actual answer",
+        )
+        .unwrap();
         assert_eq!(total, 5);
         assert_eq!(
-            selected.iter().map(key).collect::<Vec<_>>(),
-            ["a", "b", "c"]
+            selected
+                .iter()
+                .map(key)
+                .collect::<std::collections::BTreeSet<_>>(),
+            ["a", "b", "c"].into_iter().map(String::from).collect()
         );
         assert!(selected.iter().map(chars).sum::<usize>() <= 55);
     }
@@ -206,7 +273,7 @@ mod tests {
     #[test]
     fn many_small_rows_must_reserve_space_for_their_source_identities() {
         let seeds: Vec<_> = (0..16)
-            .map(|i| point(&i.to_string(), "sheet", "x", i))
+            .map(|i| point(&i.to_string(), "sheet", &format!("x{i}"), i))
             .collect();
         let (selected, total) = select(
             &seeds,
@@ -218,5 +285,11 @@ mod tests {
         assert_eq!(total, 16);
         assert_eq!(selected.len(), 3);
         assert!(selected.iter().map(chars).sum::<usize>() + selected.len() * 1024 <= 3500);
+    }
+    #[test]
+    fn explicit_reading_keeps_identical_text_at_distinct_stream_positions() {
+        let a = point("page-1", "document", "Identical page text", 0);
+        let b = point("page-2", "document", "Identical page text", 1);
+        assert_eq!(prefix(&[a.clone(), b.clone()], 1000, None), vec![a, b]);
     }
 }

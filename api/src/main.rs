@@ -182,6 +182,12 @@ async fn dispatch(State(context): State<Arc<Context>>, request: Request) -> Resp
     {
         return auth::preflight(&context, request.headers()).await;
     }
+    if matches!(
+        request.uri().path(),
+        chat::sources_api::PATH | chat::sources_api::TOOLS_PATH
+    ) {
+        return chat::sources_api::handle(context, request).await;
+    }
     if context.public_chat_rust && chat::http::public_path(request.uri().path()) {
         return chat::http::handle_public(context, request).await;
     }

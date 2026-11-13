@@ -1,5 +1,10 @@
 # Модули LES RAG
 
+876: `core/src/context_selection` — общий отбор и каталог; `chat/sources_api.rs`
+и `runtime/src/cli/mcp_tools.rs` — [источники MCP/CLI](modules/native-source-mcp.md)
+через тот же читатель, что у чата, без зависимости от модели ответов.
+[Приёмка на копии и ограничения](acceptance/native-source-mcp-876.md).
+
 Стенд 875: [полный query-путь Swiftide](acceptance/native-swiftide-query-875.md)
 на прежней копии Edge/SQLite. Замена не принята по содержанию справок;
 зависимости приложения и владельцы модулей сохранены.

@@ -10,6 +10,32 @@ pub(super) async fn read(
     seeds: &[Value],
     budget: usize,
 ) -> Result<Vec<Value>, &'static str> {
+    read_mode(context, store, collection, seeds, budget, false).await
+}
+pub(super) async fn window(
+    context: &Context,
+    store: &Store,
+    collection: &str,
+    seeds: &[Value],
+    budget: usize,
+) -> Result<Vec<Value>, &'static str> {
+    let files: HashSet<_> = seeds
+        .iter()
+        .map(|s| (&s["dataset_id"], &s["file_name"]))
+        .collect();
+    if files.len() > 4 {
+        return Err(SCOPE);
+    }
+    read_mode(context, store, collection, seeds, budget.min(200_000), true).await
+}
+async fn read_mode(
+    context: &Context,
+    store: &Store,
+    collection: &str,
+    seeds: &[Value],
+    budget: usize,
+    window: bool,
+) -> Result<Vec<Value>, &'static str> {
     let mut seen = HashSet::new();
     let mut documents = Vec::new();
     for seed in seeds {
@@ -27,17 +53,18 @@ pub(super) async fn read(
             store,
             collection,
             true,
-            json!({"filter":filter,"limit":33,
+            json!({"filter":filter,"limit":if window{129}else{33},
             "with_payload":true,"with_vector":false}),
         )
         .await?;
         let rows = page["points"].as_array().ok_or(UNAVAILABLE)?;
-        if rows.len() > 33 {
+        if rows.len() > if window { 129 } else { 33 } {
             return Err(LIMIT);
         }
         let mut points = Vec::new();
         let mut ids = HashSet::new();
         let mut chars = 0;
+        let mut truncated = false;
         for row in rows {
             let payload = &row["payload"];
             if payload["dataset_id"] != key[0]
@@ -60,8 +87,20 @@ pub(super) async fn read(
             if !ids.insert(id.clone()) {
                 return Err(CHANGED);
             }
-            chars += payload["text"].as_str().unwrap_or_default().chars().count();
+            let size = payload["text"].as_str().unwrap_or_default().chars().count();
+            if window && (points.len() >= 128 || chars + size > budget) {
+                truncated = true;
+                break;
+            }
+            chars += size;
             points.push(json!({"id":id,"payload":payload}));
+        }
+        if window {
+            points.sort_by_key(|p| p["payload"]["chunk_ord"].as_u64().unwrap_or(0));
+            documents.push(json!({"scope":{"dataset_id":key[0],"file_name":key[1]},"points":points,
+                "coverage":if truncated||!page["next_page_offset"].is_null(){"partial"}else{"complete"},
+                "evidence_window":true}));
+            continue;
         }
         if !page["next_page_offset"].is_null() || points.len() > 32 || chars > budget {
             continue;

@@ -47,7 +47,14 @@ pub(super) fn project(
     let project = |rows: &[Value]| {
         let mut seen = HashSet::new();
         rows.iter()
-            .map(|row| views.get(&key(row)).unwrap_or(row).clone())
+            .map(|row| {
+                let mut projected = views.get(&key(row)).unwrap_or(row).clone();
+                if row["payload"]["equivalent_points"].is_array() {
+                    projected["payload"]["equivalent_points"] =
+                        row["payload"]["equivalent_points"].clone();
+                }
+                projected
+            })
             .filter(|row| seen.insert(row["id"].to_string()))
             .collect::<Vec<_>>()
     };

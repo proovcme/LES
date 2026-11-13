@@ -919,6 +919,20 @@
           "max_chars": {
             "type": "integer",
             "minimum": 1
+          },
+          "index_revision": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "description": "Index revision from the preceding response; a changed generation requires restarting the read."
+          },
+          "source_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
           }
         },
         "additionalProperties": false,
@@ -1025,17 +1039,21 @@
             "minimum": 1
           },
           "source_sha256": {
-            "type": "string"
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
           },
           "offset": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": 0
           },
           "q": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 200
           },
           "max_chars": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 12000
           }
         },
         "additionalProperties": false,
@@ -1265,6 +1283,12 @@
             "minLength": 1,
             "maxLength": 1000,
             "description": "Exact member name from the Word parts manifest. No aliases or path normalization. Used only with view=part. If part_id is also supplied, both must identify the same part."
+          },
+          "index_revision": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "description": "Index revision from the preceding response; a changed generation requires restarting the read."
           }
         },
         "additionalProperties": false,
@@ -1547,6 +1571,12 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 100000
+          },
+          "index_revision": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "description": "Index revision from the preceding response; a changed generation requires restarting the read."
           }
         },
         "additionalProperties": false,

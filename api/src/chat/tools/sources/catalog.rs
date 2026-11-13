@@ -2,7 +2,7 @@
 use super::*;
 pub(super) async fn search(
     context: Arc<Context>,
-    turn: &Prepared,
+    turn: &SourceContext,
     args: &Value,
     datasets: &[Value],
 ) -> Result<Value> {
@@ -15,7 +15,7 @@ pub(super) async fn search(
         vec![],
     ))
 }
-pub(super) async fn map(context: Arc<Context>, turn: &Prepared, args: Value) -> Result<Value> {
+pub(super) async fn map(context: Arc<Context>, turn: &SourceContext, args: Value) -> Result<Value> {
     let dataset = args["dataset_id"].clone();
     let mut result = page(context, turn, &json!({}), &[dataset.clone()], 100).await?;
     result["dataset_id"] = dataset;
@@ -24,7 +24,7 @@ pub(super) async fn map(context: Arc<Context>, turn: &Prepared, args: Value) -> 
 }
 async fn page(
     context: Arc<Context>,
-    turn: &Prepared,
+    turn: &SourceContext,
     args: &Value,
     datasets: &[Value],
     limit: u64,
@@ -40,7 +40,7 @@ async fn page(
         return Err("SOURCE_OFFSET_INVALID".into());
     }
     let selected = if turn.request["selected_sources_only"] == true {
-        selected_files(turn)
+        selected_scoped(turn)
     } else {
         vec![]
     };

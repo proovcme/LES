@@ -25,6 +25,21 @@ def source_excerpt_reply(body):
     return {'text':json.dumps({'answerable':True,'rows':[reference[1]],'sums':[]})}
 
 
+def test_source_api_distinguishes_unready_index_from_empty_evidence_without_calling_chat(native_turn):
+    t=native_turn
+    name='Same display name is not an ID'
+    dataset=t.client.post('/api/rag/datasets',json={'name':name}).raise_for_status().json()['id']
+    route='/api/rag/sources/call'
+    result=t.client.post(route,json={'tool':'search_sources','args':{'q':'query','dataset_ids':[dataset]}})
+    assert result.status_code==503 and result.json()['code']=='SOURCE_INDEX_NOT_READY'
+    catalog=t.client.post(route,json={'tool':'search_sources','args':{'q':'query','view':'documents','dataset_ids':[dataset]}}).raise_for_status()
+    assert catalog.headers['x-les-handler']=='rust.sources'
+    assert catalog.json()['result']['documents']==[] and catalog.json()['sources']==[]
+    rejected=t.client.post(route,json={'tool':'search_sources','args':{'q':'query','dataset_ids':[name]}})
+    assert rejected.status_code==403 and rejected.json()['code']=='TOOL_SCOPE_VIOLATION'
+    assert not t.seen, 'Source discovery must not request an answer model'
+
+
 @pytest.mark.parametrize('native_turn',['rag-small'],indirect=True)
 def test_mixed_page_prose_can_be_selected_without_copying_an_unrelated_table(native_turn,tmp_path):
     t=native_turn;folder=tmp_path/'sources';folder.mkdir()
@@ -149,8 +164,8 @@ def test_actual_read_continuation_can_close_schema_space_before_provider_request
 @pytest.mark.parametrize('native_turn', ['rag-small'], indirect=True)
 def test_search_reads_a_fitting_document_across_page_parents_without_a_file_hint(native_turn,tmp_path):
     t=native_turn;folder=tmp_path/'documents';folder.mkdir()
-    # Each page is a distinct parent. Retrieval's four hits cannot contain all
-    # pages; the question does not name a file or the continuation's marker.
+    # Each page is a distinct parent. A fitting document must survive context
+    # admission without early per-file seed caps or a filename in the question.
     pages=[f'ANCHOR pressure schedule. Physical sheet {i}. Measured value TOKEN_{i:02d}.' for i in range(1,13)]
     write_pdf(folder/'schedule.pdf',pages)
     dataset=t.client.post('/api/rag/datasets',json={'name':'Page boundaries'}).raise_for_status().json()['id']
@@ -168,7 +183,8 @@ def test_search_reads_a_fitting_document_across_page_parents_without_a_file_hint
     assert len(t.seen)==1 and not result['artifact']['tool_results']
     policy=result['retrieval_trace']['prefetch']['selection_policy']
     assert policy['navigation_requested'] is False
-    assert policy['seed_limit']==6 and policy['per_document_seed_limit']==2
+    assert policy['seed_limit']==64 and policy['per_document_seed_limit'] is None
+    assert policy['eligible_candidates']>=12 and policy['hydrated_candidates']>=12
     assert all(c['context']['included_tokens']<=c['context']['input_budget_tokens'] for c in result['retrieval_trace']['contexts'])
 
 
@@ -245,11 +261,13 @@ def test_unread_documents_remain_reachable_without_a_separate_model_selector(nat
                 assert cards['evidence_admissible'] is False and cards['total']==12
                 assert len(cards['documents'])==12
                 chosen.update(cards['documents'][-1])
+                label=chosen['title'].rsplit(' / ',1)[-1]
+                chosen['number']=int(re.fullmatch(r'source_(\d+)\.txt',label)[1])
                 return {'tool':'read_source','args':{'doc_id':chosen['doc_id']}}
         raise AssertionError('The searched document pool was hidden from the reader')
     def answer(body):
         text='\n'.join(m.get('content') or '' for m in body['messages'])
-        number=int(chosen['file_name'][7:-4])
+        number=chosen['number']
         assert f'CONTENT_ONLY_{number}_END' in text
         assert all(f'CONTENT_ONLY_{i}_END' in text for i in chosen['initial_markers'])
         assert all(f'CONTENT_ONLY_{i}_END' not in text for i in range(12) if i!=number and i not in chosen['initial_markers'])
@@ -263,7 +281,7 @@ def test_unread_documents_remain_reachable_without_a_separate_model_selector(nat
     assert len(t.seen)==2 and len(t.embeddings.calls)==before+1
     assert len(result['retrieval_trace']['prefetch']['candidate_documents'])==12
     assert chosen['doc_id'] in {s['doc_id'] for s in result['source_map']}
-    assert len(result['source_map'])==len(chosen['initial_markers']|{int(chosen['file_name'][7:-4])})
+    assert len(result['source_map'])==len(chosen['initial_markers']|{chosen['number']})
     assert {r['doc_id'] for r in result['artifact']['table_facts']['rows']}=={chosen['doc_id']}
     assert [r['tool'] for r in result['artifact']['tool_results']]==['read_source']
 

@@ -324,7 +324,23 @@ pub async fn run(
                     && !final_answer
                     && !direct
                 {
-                    vec![super::inspection::navigation(&candidate_documents, 2400)]
+                    vec![super::inspection::navigation(
+                        &candidate_documents,
+                        turn.connection.profile["input_token_limit"]
+                            .as_u64()
+                            .unwrap_or(8192)
+                            .saturating_sub(
+                                turn.connection.profile["generation_reserve_tokens"]
+                                    .as_u64()
+                                    .unwrap_or(2048),
+                            )
+                            .saturating_sub(
+                                turn.connection.profile["safety_reserve_tokens"]
+                                    .as_u64()
+                                    .unwrap_or(512),
+                            )
+                            .min(8000) as usize,
+                    )]
                 } else {
                     vec![]
                 };

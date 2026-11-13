@@ -129,6 +129,8 @@ pub(super) fn assemble(request: &Value) -> Result<Value> {
         "dataset_id",
         "qdrant_point_id",
         "parent_id",
+        "section_heading",
+        "parent_heading",
         "section_fragment_count",
         "context_origin",
     ];

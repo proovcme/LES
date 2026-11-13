@@ -11,6 +11,28 @@ use envelope::fit_envelope_budget;
 use envelope::{canonical_chars, json_item_count};
 use pagination::Page;
 
+fn pinned_revision(args: &Value, revision: &Value) -> Result<()> {
+    if args["index_revision"]
+        .as_str()
+        .is_some_and(|v| !v.is_empty() && revision != v)
+    {
+        return Err("INDEX_CHANGED_DURING_SEARCH".into());
+    }
+    Ok(())
+}
+#[cfg(test)]
+#[test]
+fn a_continuation_never_silently_reads_another_index_generation() {
+    let args = json!({"index_revision":"generation-a"});
+    assert!(pinned_revision(&args, &json!("generation-a")).is_ok());
+    assert_eq!(
+        pinned_revision(&args, &json!("generation-b"))
+            .unwrap_err()
+            .code,
+        "INDEX_CHANGED_DURING_SEARCH"
+    );
+}
+
 /// A materialized page view replaces all its search chunks at read time. Count
 /// that page once *before* applying the document quota and shortlist limit.
 /// Pages without such a view keep their separate chunks and continuations.
@@ -37,22 +59,6 @@ fn reading_units(points: &[Value]) -> Vec<Value> {
         .filter(|p| match page(p) {
             Some(key) if materialized.contains(&key) => seen.insert(key),
             _ => true,
-        })
-        .cloned()
-        .collect()
-}
-/// Limit repeated search seeds, never the continuation pages read afterwards.
-/// Dataset, full path and revision distinguish different physical sources.
-fn diverse(points: &[Value], per_document: usize) -> Vec<Value> {
-    let mut counts = std::collections::HashMap::<String, usize>::new();
-    points
-        .iter()
-        .filter(|point| {
-            let p = &point["payload"];
-            let key = json!([p["dataset_id"], p["file_name"], p["source_sha256"]]).to_string();
-            let count = counts.entry(key).or_default();
-            *count += 1;
-            *count <= per_document
         })
         .cloned()
         .collect()
@@ -130,7 +136,7 @@ pub(in crate::chat) async fn initial(context: Arc<Context>, turn: &Prepared) -> 
         .clamp(1, 16000);
     search_with_navigation(
         context,
-        turn,
+        &SourceContext::from(turn),
         json!({"q":turn.request["question"],"max_chars":chars}),
         false,
     )
@@ -138,14 +144,14 @@ pub(in crate::chat) async fn initial(context: Arc<Context>, turn: &Prepared) -> 
 }
 pub(in crate::chat) async fn search(
     context: Arc<Context>,
-    turn: &Prepared,
+    turn: &SourceContext,
     args: Value,
 ) -> Result<Value> {
     search_with_navigation(context, turn, args, true).await
 }
 async fn search_with_navigation(
     context: Arc<Context>,
-    turn: &Prepared,
+    turn: &SourceContext,
     args: Value,
     navigation: bool,
 ) -> Result<Value> {
@@ -173,10 +179,7 @@ async fn search_with_navigation(
     if args["view"] == "documents" {
         return super::catalog::search(context, turn, &args, &datasets).await;
     }
-    let remote_scope = turn
-        .egress_tag
-        .as_ref()
-        .map(|_| turn.scope["resolved_dataset_ids"].clone());
+    let remote_scope = Some(turn.scope["resolved_dataset_ids"].clone());
     let (config, revision, prefix, allow_remote) =
         scoped_configuration(context.clone(), true, remote_scope).await?;
     let raw=crate::embedding_inference::execute(context.clone(),&json!({"schema":"les.embedding-inference.v1","revision_id":revision,"inputs":[format!("{prefix}{query}")],
@@ -212,10 +215,10 @@ async fn search_with_navigation(
     } else if let Some(name) = args["doc_name"].as_str().filter(|s| !s.is_empty()) {
         vec![json!(name)]
     } else {
-        selected_files(turn)
+        selected_scoped(turn)
     };
     if turn.request["selected_sources_only"] == true {
-        let selected = selected_files(turn);
+        let selected = selected_scoped(turn);
         if !selected.is_empty() && files.iter().any(|v| !selected.contains(v)) {
             return Err("TOOL_SCOPE_VIOLATION".into());
         }
@@ -239,20 +242,22 @@ async fn search_with_navigation(
     for attempt in 0..16 {
         let result: Result<Value> = async {
             let result = store.hybrid_owned(&context, request.clone()).await?;
+            pinned_revision(&args, &result["revision"])?;
             let raw_points = result["points"].as_array().ok_or("INDEX_READ_INVALID")?;
             // Diversify the automatic shortlist. Explicit tool pagination must
             // still expose every ranked match, including later pages of one file.
-            let ranked = if navigation { reading_units(raw_points) } else {
-                diverse(&reading_units(raw_points), policy["document_diversity_k"].as_u64().unwrap_or(2) as usize)
+            let ranked = reading_units(raw_points);
+            let points: Vec<Value> = if navigation {
+                ranked.iter().skip(offset).take(limit).cloned().collect()
+            } else {
+                // The model limit is not an I/O shortlist. Hydrate candidates
+                // before context admission so a late hit has readable parents.
+                ranked.iter().take(64).cloned().collect()
             };
-            let points: Vec<Value> = ranked
-                .iter()
-                .skip(offset).take(limit)
-                .cloned()
-                .collect();
             // These identities remain discoverable even when the corresponding
             // text did not fit. They are navigation, never admitted evidence.
             let mut candidates = Vec::new();
+            let discovery=packing::catalog(&ranked)?;
             let mut documents = std::collections::HashSet::new();
             // Discovery must describe the searched pool, not only the few hits
             // whose text was read. A relevant lower-ranked document is still
@@ -268,6 +273,7 @@ async fn search_with_navigation(
                     continue;
                 }
                 candidates.push(json!({"doc_id":doc["id"],"dataset_id":doc["dataset_id"],
+                    "title":discovery["entries"].as_array().into_iter().flatten().find(|e|e["source"]["dataset_id"]==p["dataset_id"]&&e["source"]["file_name"]==p["file_name"]).map(|e|e["title"].clone()).unwrap_or(Value::Null),
                     "path":doc["file_name"],
                     "file_name":doc["file_name"].as_str().unwrap_or("").rsplit(['/', '\\']).next().unwrap_or(""),
                     "source_sha256":doc["file_hash"],"page":p.get("source_page").filter(|v|!v.is_null()).unwrap_or(&p["page"]),
@@ -289,7 +295,7 @@ async fn search_with_navigation(
             let mut reply=passages(&context,turn,&config["collection"],points.clone(),result["revision"].clone(),max_chars,"search_sources",context_budget,!navigation,navigation).await?;
             reply["result"]["candidate_documents"] = json!(candidates);
             let total = ranked.len();
-            reply["result"]["selection_policy"] = json!({"seed_limit":limit,"per_document_seed_limit":if navigation{Value::Null}else{policy["document_diversity_k"].clone()},"raw_candidates":raw_points.len(),"eligible_candidates":total,"navigation_requested":navigation});
+            reply["result"]["selection_policy"] = json!({"schema":"les.context-selection.v1","seed_limit":if navigation{limit}else{64},"per_document_seed_limit":Value::Null,"raw_candidates":raw_points.len(),"eligible_candidates":total,"hydrated_candidates":points.len(),"navigation_requested":navigation});
             // Diagnostics belong to the initial request receipt, never to the
             // model's repeated search-tool exchanges or their result budget.
             if !navigation {
@@ -353,7 +359,7 @@ mod selection_tests {
         later["payload"]["page"] = json!(3);
         let rows = vec![tail.clone(), first.clone(), later.clone()];
         let units = reading_units(&rows);
-        assert_eq!(diverse(&units, 2), vec![tail.clone(), later.clone()]);
+        assert_eq!(units, vec![tail.clone(), later.clone()]);
         assert_eq!(rows.len(), 3);
         // Unprojected text must retain its continuation chunks.
         first["payload"]
@@ -367,33 +373,6 @@ mod selection_tests {
     }
     fn point(id: usize, dataset: &str, path: &str, revision: &str) -> Value {
         json!({"id":id,"payload":{"dataset_id":dataset,"file_name":path,"source_sha256":revision}})
-    }
-    #[test]
-    fn repeated_hits_cannot_hide_a_lower_ranked_document() {
-        let rows = vec![
-            point(1, "a", "one.pdf", "r1"),
-            point(2, "a", "one.pdf", "r1"),
-            point(3, "a", "one.pdf", "r1"),
-            point(4, "a", "two.pdf", "r1"),
-        ];
-        assert_eq!(
-            diverse(&rows, 2)
-                .iter()
-                .map(|r| r["id"].clone())
-                .collect::<Vec<_>>(),
-            vec![json!(1), json!(2), json!(4)]
-        );
-        assert_eq!(rows.len(), 4);
-    }
-    #[test]
-    fn names_do_not_merge_datasets_paths_or_revisions() {
-        let rows = vec![
-            point(1, "a", "one.pdf", "r1"),
-            point(2, "b", "one.pdf", "r1"),
-            point(3, "a", "nested/one.pdf", "r1"),
-            point(4, "a", "one.pdf", "r2"),
-        ];
-        assert_eq!(diverse(&rows, 1), rows);
     }
     #[test]
     fn envelope_budget_guard_bounds_oversized_passages_and_candidates_within_24k_256() {
@@ -558,7 +537,7 @@ mod selection_tests {
 }
 async fn passages(
     context: &Context,
-    turn: &Prepared,
+    turn: &SourceContext,
     collection: &Value,
     points: Vec<Value>,
     revision: Value,
@@ -584,7 +563,7 @@ async fn passages(
         let scope = json!({"dataset_id":seed["dataset_id"],"file_name":seed["file_name"],"parent_id":seed["parent_id"]});
         if seed["parent_id"].as_str().is_some_and(|v| !v.is_empty())
             && !scopes.contains(&scope)
-            && scopes.len() < 8
+            && scopes.len() < 64
         {
             scopes.push(scope);
         }
@@ -612,13 +591,22 @@ async fn passages(
             points.len(),
         )
     } else {
-        packing::select(
-            &points,
-            &hydrated["sections"],
-            &hydrated["documents"],
-            max_chars,
-            context_budget,
-        )
+        let candidates = points.clone();
+        let sections = hydrated["sections"].clone();
+        let documents = hydrated["documents"].clone();
+        let question = turn.request["question"].as_str().unwrap_or("").to_owned();
+        tokio::task::spawn_blocking(move || {
+            packing::select_query(
+                &candidates,
+                &sections,
+                &documents,
+                max_chars,
+                context_budget,
+                &question,
+            )
+        })
+        .await
+        .map_err(|_| "SOURCE_READ_FAILED")??
     };
     let selected_ids: std::collections::HashSet<_> =
         selected.iter().map(|p| p["id"].to_string()).collect();
@@ -667,6 +655,35 @@ async fn passages(
         }
         source["qdrant_point_id"] = point["id"].clone();
         source["parent_id"] = p["parent_id"].clone();
+        for field in ["section_heading", "parent_heading"] {
+            if p[field].is_string() {
+                source[field] = p[field].clone();
+            }
+        }
+        let mut equivalents = Vec::new();
+        for alias in p["equivalent_points"].as_array().into_iter().flatten() {
+            let a = &alias["source"];
+            let origin = document(
+                context,
+                &json!({"dataset_id":a["dataset_id"],"file_name":a["file_name"]}),
+            )
+            .await?;
+            scoped_document(turn, &origin)?;
+            if origin["file_hash"] != a["source_sha256"] {
+                return Err("INDEX_CHANGED_DURING_SEARCH".into());
+            }
+            let page = a
+                .get("source_page")
+                .filter(|v| !v.is_null())
+                .unwrap_or(&a["page"])
+                .clone();
+            let mut origin = reference(&origin, page);
+            origin["qdrant_point_id"] = alias["unit_id"].clone();
+            equivalents.push(origin);
+        }
+        if !equivalents.is_empty() {
+            source["equivalent_sources"] = json!(equivalents);
+        }
         if p["reading_representation"].is_string() {
             source["reading_representation"] = p["reading_representation"].clone();
         }
@@ -733,9 +750,19 @@ async fn passages(
     Ok(reply)
 }
 
-pub(super) async fn read(context: Arc<Context>, turn: &Prepared, args: Value) -> Result<Value> {
+pub(super) async fn read(
+    context: Arc<Context>,
+    turn: &SourceContext,
+    args: Value,
+) -> Result<Value> {
     let doc = document(&context, &args).await?;
     scoped_document(turn, &doc)?;
+    if args["source_sha256"]
+        .as_str()
+        .is_some_and(|h| !h.is_empty() && doc["file_hash"] != h)
+    {
+        return Err("SOURCE_REVISION_CHANGED".into());
+    }
     let (config, _, _, _) = configuration(context.clone(), false).await?;
     let store = context
         .index_store
@@ -745,6 +772,7 @@ pub(super) async fn read(context: Arc<Context>, turn: &Prepared, args: Value) ->
         .as_str()
         .ok_or("INDEX_COLLECTION_MISMATCH")?;
     let revision = store.revision(&context, collection).await?;
+    pinned_revision(&args, &revision)?;
     let mut points = Vec::new();
     let mut offset = Value::Null;
     let mut seen = std::collections::HashSet::new();

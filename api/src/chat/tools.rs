@@ -289,7 +289,7 @@ impl Tools {
                 .cloned()
                 .ok_or("TOOL_NOT_ALLOWED")?;
             let mut args = call["args"].clone();
-            let read_grant = bounded_read(name, &mut args, self.read_max_chars);
+            let read_grant = bounded_read(name, &mut args, self.read_max_chars, &contract);
             let source_request = source_request(name, &args);
             let operation = args["operation"].as_str().map(str::to_owned);
             let scope = turn.scope["resolved_dataset_ids"].clone();
@@ -541,7 +541,7 @@ fn source_request(name: &str, args: &Value) -> Option<Value> {
     }
     Some(json!({"kind":"source_request","arguments":values}))
 }
-fn bounded_read(name: &str, args: &mut Value, cap: usize) -> Option<Value> {
+fn bounded_read(name: &str, args: &mut Value, cap: usize, contract: &Value) -> Option<Value> {
     if !["read_source", "read_pdf_source", "read_excel_source"].contains(&name) || !args.is_object()
     {
         return None;
@@ -549,6 +549,15 @@ fn bounded_read(name: &str, args: &mut Value, cap: usize) -> Option<Value> {
     if args.get("max_chars").is_some_and(|v| v.as_u64().is_none()) {
         return None;
     }
+    // The host's default must obey the reader's own contract as well as the
+    // model window. Otherwise a valid page request fails schema admission
+    // before the physical reader can report its actual reason.
+    let cap = cap.min(
+        contract["input_schema"]["properties"]["max_chars"]["maximum"]
+            .as_u64()
+            .and_then(|n| usize::try_from(n).ok())
+            .unwrap_or(cap),
+    );
     let explicit = args["max_chars"].as_u64();
     let requested = explicit.unwrap_or(cap.min(16000) as u64);
     // reader_capacity already converts the token window to characters and
@@ -560,7 +569,7 @@ fn bounded_read(name: &str, args: &mut Value, cap: usize) -> Option<Value> {
     }
     args["max_chars"] = json!(granted);
     Some(
-        json!({"requested_max_chars":requested,"granted_max_chars":granted,"reason":"current_model_context_budget",
+        json!({"requested_max_chars":requested,"granted_max_chars":granted,"reason":"reader_contract_and_model_context_budget",
         "note":"Размер порции ограничен свободным окном модели с резервом для идентификаторов и квитанции. Это не полный просмотр. Продолжай с точным next_offset при неизменном запросе, документе и редакции."}),
     )
 }
