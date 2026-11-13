@@ -261,9 +261,16 @@ pub async fn run(
                     vec![]
                 } else {
                     tools.disclosed_schemas(
-                        turn.connection.profile["normal_tool_count"]
-                            .as_u64()
-                            .unwrap_or(3) as usize,
+                        tools.schema_limit(
+                            turn.connection.profile["normal_tool_count"]
+                                .as_u64()
+                                .unwrap_or(3) as usize,
+                            turn.connection.profile["max_tools"].as_u64().unwrap_or(3) as usize,
+                            turn.scope["document_grounding_enabled"] == true
+                                && disclosed.is_empty()
+                                && !review_active
+                                && tools.table.is_none(),
+                        ),
                         turn.scope["document_grounding_enabled"] == true,
                         &disclosed,
                     )
@@ -308,6 +315,9 @@ pub async fn run(
                 if turn.scope["document_grounding_enabled"] == true {
                     question["source_coverage_note"] = json!("Поисковые выдержки не означают полный просмотр файлов. Отсутствие факта в короткой выдаче не доказывает его отсутствие в документе. Для такого вывода дочитай нужный раздел либо явно ограничь ответ прочитанными фрагментами.");
                     question["context_window_note"] = json!("Полные результаты сохранены в журнале. Предыдущие чтения и пары вызовов могут не поместиться в это окно. Цитируй только доказательства из текущей видимой карты; для отсутствующего фрагмента повтори чтение. Карточка файла или квитанция вызова не заменяет его текст.");
+                    if !direct && !final_answer {
+                        question["reader_contract"] = json!("Оригинал PDF проверяет read_pdf_source(doc_id, page из карты источников). read_source читает индекс и не выполняет просьбу открыть оригинал. Ошибка чтения не подтверждает оригинал.");
+                    }
                 }
                 let navigation = if candidate_documents.is_array()
                     && exchanges.is_empty()
@@ -341,10 +351,9 @@ pub async fn run(
                         json!("Оформи ответ со ссылками [Источник N] на прочитанные доказательства. Используй только номера из видимой карты источников. Каждое фактическое утверждение свяжи с его источником. Не добавляй новые факты и не выдавай отсутствие сведений в выдержках за отсутствие в файле.")
                     };
                 }
-                // Search already has a successful native read. Do not tell the
-                // model to perform another action before it may answer: the
-                // factual contract below permits optional refinement if needed.
-                // Agent keeps its action contract until its tool phase closes.
+                // Search may answer from a verified prefetch while keeping
+                // refinement tools available. Do not force a redundant action
+                // on every factual question; Agent retains its action contract.
                 let round_base = if (final_answer && numeric_grounded)
                     || (turn.profile["mode"] == "search" && evidence.has_reads())
                 {
@@ -356,11 +365,14 @@ pub async fn run(
                     json!(super::inspection::prompt(
                         round_base.as_str().ok_or("CHAT_CONTEXT_INVALID")?
                     ))
-                } else if table_mode {
+                } else if table_mode && advertised.is_empty() {
+                    // Selecting an operation and projecting final source rows
+                    // are different stages. A terminal JSON-only instruction
+                    // here while tools are open suppresses necessary reads.
                     json!(format!(
                         "{}\n\n{}",
                         round_base.as_str().ok_or("CHAT_CONTEXT_INVALID")?,
-                        super::table_facts::instructions(native && !advertised.is_empty())
+                        super::table_facts::CONTRACT
                     ))
                 } else if evidence.requires_sources() {
                     json!(super::inspection::answer_prompt(

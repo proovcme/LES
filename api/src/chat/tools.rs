@@ -45,6 +45,16 @@ fn model_schema(contract: &Value) -> Value {
     if let Some(properties) = schema["properties"].as_object_mut() {
         properties.remove("dataset_id");
         properties.remove("doc_name");
+        if contract["name"] == "read_source" {
+            // The ordinary text reader must not advertise Word media as
+            // document sections. The full media contract remains available
+            // via extension describe/call and the public API/MCP.
+            properties.remove("member");
+            properties.remove("part_id");
+            if let Some(view) = properties.get_mut("view") {
+                view["enum"] = json!(["text"]);
+            }
+        }
     }
     let mut required = schema["required"].as_array().cloned().unwrap_or_default();
     required.retain(|key| key != "dataset_id" && key != "doc_name");
@@ -126,7 +136,22 @@ impl Tools {
     }
     #[cfg(test)]
     pub fn schemas(&self, limit: usize, grounded: bool) -> Vec<Value> {
-        self.disclosed_schemas(limit, grounded, &[])
+        self.disclosed_schemas(self.schema_limit(limit, 5, grounded), grounded, &[])
+    }
+    pub fn schema_limit(&self, normal: usize, maximum: usize, grounded: bool) -> usize {
+        // These are distinct evidence operations. A mixed corpus must not hide
+        // the physical reader behind extension discovery just because a Word
+        // result was also found. The caller budgets the actual schema size.
+        let limit = if grounded
+            && ["read_source", "read_pdf_source"]
+                .iter()
+                .all(|name| self.contracts.iter().any(|c| c["name"] == *name))
+        {
+            normal.max(4)
+        } else {
+            normal.max(1)
+        };
+        limit.min(maximum.max(1))
     }
     pub fn disclosed_schemas(
         &self,
@@ -146,8 +171,8 @@ impl Tools {
                 "table_document",
                 "search_sources",
                 reader,
-                "agent_workspace",
                 other_reader,
+                "agent_workspace",
             ]
         } else {
             [
@@ -185,7 +210,9 @@ impl Tools {
         }
         chosen.into_iter().map(|c| {
             let schema=model_schema(c);
-            let description=if schema!=c["input_schema"] {
+            let description=if c["name"] == "read_source" {
+                "Read indexed text sections by registered doc_id; q or clause locates text, offset continues it. This does not open an original PDF: use read_pdf_source(doc_id,page) for that. For embedded Word images/attachments use the extension tool: describe read_source, then call its full view=parts/part contract. Indexed text and media are different evidence.".to_owned()
+            } else if schema!=c["input_schema"] {
                 format!("{} Use only the registered doc_id from source references or document search to identify the document. Dataset and filename are resolved by LES.",
                     c["summary"].as_str().unwrap_or("").replace("Use exact dataset_id+doc_name from sources; never invent ids or paths.", ""))
             } else { c["summary"].as_str().unwrap_or("").to_owned() };
@@ -546,6 +573,22 @@ mod tests {
         assert_eq!(contract, original);
     }
     #[test]
+    fn ordinary_text_schema_does_not_mislabel_media_as_sections() {
+        let full = json!({"name":"read_source","input_schema":{"type":"object","properties":{
+            "doc_id":{"type":"string"},"view":{"type":"string","enum":["text","parts","part"]},
+            "member":{"type":"string"},"part_id":{"type":"string"},"offset":{"type":"integer","minimum":0}},
+            "required":[],"additionalProperties":false}});
+        let schema = model_schema(&full);
+        assert_eq!(schema["properties"]["view"]["enum"], json!(["text"]));
+        assert!(schema["properties"].get("member").is_none());
+        assert!(schema["properties"].get("part_id").is_none());
+        assert_eq!(schema["properties"]["offset"]["minimum"], 0);
+        assert_eq!(
+            full["input_schema"]["properties"]["view"]["enum"],
+            json!(["text", "parts", "part"])
+        );
+    }
+    #[test]
     fn an_overflow_reference_keeps_tool_identity_and_is_never_evidence() {
         let tools = Tools {
             handle: 0,
@@ -618,6 +661,9 @@ mod tests {
             .schemas(3, true)
             .iter()
             .any(|s| s["function"]["name"] == "read_pdf_source"));
+        assert_eq!(tools.schema_limit(3, 5, true), 4);
+        assert_eq!(tools.schema_limit(2, 2, true), 2);
+        assert_eq!(tools.schema_limit(3, 5, false), 3);
     }
     #[test]
     fn schema_rejection_returns_the_granted_contract_without_argument_echo() {
@@ -720,7 +766,8 @@ mod tests {
                 vec![
                     json!("access"),
                     json!("search_sources"),
-                    json!("read_source")
+                    json!("read_source"),
+                    json!("read_pdf_source")
                 ]
             );
             let disclosed = tools.disclosed_schemas(3, true, &["read_pdf_source".into()]);

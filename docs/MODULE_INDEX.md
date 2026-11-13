@@ -1,5 +1,11 @@
 # Модули LES RAG
 
+873: `api/src/chat/evidence/pages.rs` — проверенная сборка последовательных
+передач одной физической PDF-страницы, без отдельного хранилища текста.
+`api/src/chat/{runner,tools}.rs` — отдельные стадии выбора чтения и
+финального выбора строк; совместный допуск индексного и физического reader.
+[Проверка и ограничения](acceptance/native-reader-admission-873.md).
+
 872: [документные parsers](modules/native-document-parsers.md) — `parsers/`,
 `api/src/document_parser`, `core/src/document/docx/package/docling.rs`.
 Docling владеет обычной структурой Word; LES — специальными вставками,

@@ -142,8 +142,8 @@ def test_truncated_generation_is_saved_but_never_marked_as_a_completed_answer(na
     with sqlite3.connect(t.database) as db:
         assert db.execute('SELECT answer,crag_status,success FROM chat_history').fetchone()==('Незавершённая часть','FAILED',0)
 
-def source_pdf(t):
-    path=write_pdf(t.state/'Оригинал 日本語.pdf',['FIRST PAGE ONLY','Physical second page '+('ABCDE12345 '*120)+'END'])
+def source_pdf(t, pages=None):
+    path=write_pdf(t.state/'Оригинал 日本語.pdf',pages or ['FIRST PAGE ONLY','Physical second page '+('ABCDE12345 '*120)+'END'])
     digest=hashlib.sha256(path.read_bytes()).hexdigest()
     with sqlite3.connect(t.database) as db:
         db.execute("CREATE TABLE datasets(id TEXT PRIMARY KEY,name TEXT,status TEXT,chunk_count INTEGER,dataset_scope TEXT,module_id TEXT)")

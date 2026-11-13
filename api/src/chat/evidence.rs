@@ -1,6 +1,7 @@
 //! Source identities and bounded model-facing evidence projections.
 use super::Result;
 use serde_json::{json, Value};
+mod pages;
 #[derive(Default)]
 pub(super) struct Evidence {
     pub(super) sources: Vec<Value>,
@@ -11,11 +12,88 @@ pub(super) struct Evidence {
     required: bool,
     retried: bool,
     delivered: std::collections::BTreeSet<u64>,
+    pages: pages::Pages,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn page_part(offset: usize, text: &str, total: usize) -> Value {
+        let end = offset + text.chars().count();
+        let next = (end < total).then_some(end);
+        json!({"tool":"read_pdf_source","status":"ok","result":{"text":text,"offset":offset,
+            "next_offset":next,"total_chars":total,"complete":offset==0 && next.is_none(),
+            "selection":"page_range","extractor":"les.pdfium.page.v1","page":1,"source_sha256":"a".repeat(64)},
+            "sources":[{"doc_id":"doc","dataset_id":"ds","doc_name":"Source.pdf","source_sha256":"a".repeat(64),
+                "evidence_kind":"physical_pdf_page","page":1,"offset":offset,"next_offset":next}]})
+    }
+    #[test]
+    fn physical_page_transfers_form_one_read_before_words_and_table_rows_are_interpreted() {
+        let left = "Введение\n|Name|Unit|Qty|\n|---|---|---|\n|Громкоговор";
+        let right = "итель🙂|шт.|2|\n";
+        let full = format!("{left}{right}");
+        let first = page_part(0, left, full.chars().count());
+        let last = page_part(left.chars().count(), right, full.chars().count());
+        let originals = (first.clone(), last.clone());
+        let mut flow = Evidence::new(true);
+        flow.add(&first);
+        flow.add(&last);
+        assert_eq!(flow.sources.len(), 1);
+        assert!(flow.optional_blocks().is_empty());
+        let required = flow.required_blocks();
+        assert_eq!(required.len(), 1);
+        let block = &required[0];
+        assert_eq!(
+            &Evidence::text(block)[block["body_offset"].as_u64().unwrap() as usize..],
+            full
+        );
+        assert_eq!(flow.sources[0]["page_text_complete"], true);
+        assert_eq!(flow.sources[0]["assembled_part_count"], 2);
+        assert!(flow.sources[0]["next_offset"].is_null());
+        let projected = flow.projection(&last, 4000);
+        assert_eq!(projected["sources"][0]["index"], 1);
+        assert_eq!(projected["result"]["text"], "[Источник 1]");
+        flow.confirm_delivery(&json!([{"index":1}]));
+        assert!(flow.can_answer(&json!([{"index":1}])));
+        assert_eq!((first, last), originals); // Durable tool receipts stay unmodified.
+    }
+    #[test]
+    fn page_assembly_never_bridges_missing_ranges_or_other_origins() {
+        for variant in ["gap", "document", "revision", "page", "literal"] {
+            let mut flow = Evidence::new(true);
+            flow.add(&page_part(0, "abcde", 10));
+            let mut suffix = if variant == "gap" {
+                page_part(6, "ghij", 10)
+            } else {
+                page_part(5, "fghij", 10)
+            };
+            match variant {
+                "document" => suffix["sources"][0]["doc_id"] = json!("other"),
+                "revision" => {
+                    suffix["sources"][0]["source_sha256"] = json!("b".repeat(64));
+                    suffix["result"]["source_sha256"] = json!("b".repeat(64));
+                }
+                "page" => {
+                    suffix["sources"][0]["page"] = json!(2);
+                    suffix["result"]["page"] = json!(2);
+                }
+                "literal" => suffix["result"]["selection"] = json!("literal_match"),
+                _ => (),
+            }
+            flow.add(&suffix);
+            assert_eq!(flow.sources.len(), 2, "{variant}");
+            assert!(
+                !json!(flow.required_blocks())
+                    .to_string()
+                    .contains("abcdefghij"),
+                "{variant}"
+            );
+            assert!(
+                flow.sources.iter().all(|s| s["page_text_complete"] != true),
+                "{variant}"
+            );
+        }
+    }
     #[test]
     fn explicit_read_keeps_prior_native_reads_and_continuations_for_comparison() {
         let passage = |doc: &str, page: u64, text: &str| json!({"text":text,"source":{"doc_id":doc,"source_sha256":"r1","page":page,"qdrant_point_id":format!("{doc}-{page}")}});
@@ -354,6 +432,23 @@ impl Evidence {
         ])
     }
     pub(super) fn add(&mut self, result: &Value) {
+        let result = super::protocol::effective(result);
+        let sources = &self.sources;
+        let current = &self.blocks;
+        let retained = &self.retained;
+        let initial = &self.initial;
+        let assembled = self.pages.normalize(result, |key| {
+            let source = sources.iter().find(|s| s["native_identity"] == *key)?;
+            let block = current
+                .iter()
+                .chain(retained.iter().map(|(_, b)| b))
+                .chain(initial.iter().map(|(_, b)| b))
+                .find(|b| b["source_index"] == source["index"])?;
+            Self::text(block)
+                .get(usize::try_from(block["body_offset"].as_u64()?).ok()?..)
+                .map(str::to_owned)
+        });
+        let result = assembled.as_ref().unwrap_or(result);
         // The current read is mandatory. Earlier reads and search candidates
         // remain available as whole optional blocks, with durable originals.
         self.add_passages(
@@ -487,6 +582,7 @@ impl Evidence {
                 .iter()
                 .position(|s| s["native_identity"] == key)
             {
+                Self::page_metadata(&mut self.sources[index], result);
                 if !initial && result["tool"] != "document_review" {
                     self.initial.retain(|(i, _)| *i != index + 1);
                     self.retained.retain(|(i, _)| *i != index + 1);
@@ -529,6 +625,7 @@ impl Evidence {
             };
             source["label"] = json!(label);
             source["header"] = json!(format!("[Источник {index} | {header_label}]"));
+            Self::page_metadata(&mut source, result);
             if result["tool"] != "document_review" {
                 let block = Self::block(&source, text);
                 if initial {
@@ -551,10 +648,27 @@ impl Evidence {
                     .unwrap_or_default()
             })
     }
+    fn page_metadata(source: &mut Value, result: &Value) {
+        if result["tool"] != "read_pdf_source"
+            || result["sources"][0]["evidence_kind"] != "physical_pdf_page"
+        {
+            return;
+        }
+        source["evidence_kind"] = json!("physical_pdf_page");
+        source["offset"] = result["sources"][0]["offset"].clone();
+        source["next_offset"] = result["sources"][0]["next_offset"].clone();
+        let body = &result["result"];
+        source["page_text_complete"] = json!(
+            body["selection"] == "page_range" && body["complete"] == true && body["offset"] == 0
+        );
+        source["assembled_part_count"] = json!(body["assembled_part_count"].as_u64().unwrap_or(1));
+    }
     fn reference(&self, source: &Value) -> Option<Value> {
+        let key = Self::key(source);
+        let key = self.pages.canonical(source).unwrap_or(&key);
         self.sources
             .iter()
-            .find(|s| s["native_identity"] == Self::key(source))
+            .find(|s| s["native_identity"] == *key)
             .map(|s| json!({"index":s["index"],"label":format!("[Источник {}]",s["index"]),
                 "doc_id":s["doc_id"],"doc_name":s["doc_name"].as_str().unwrap_or("").rsplit(['/', '\\']).next().unwrap_or(""),
                 "source_sha256":s["source_sha256"],"page":s["page"]}))

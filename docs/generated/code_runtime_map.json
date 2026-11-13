@@ -10438,6 +10438,7 @@
         "tests/test_light_native_pdf_layout.py",
         "tests/test_light_native_preparation.py",
         "tests/test_light_native_retrieval_modes.py",
+        "tests/test_light_native_source_presentation.py",
         "tests/test_light_ocr.py",
         "tests/test_light_pdf_readers.py",
         "tests/test_light_pdf_source_tool.py"
@@ -11504,6 +11505,7 @@
         "tests/test_light_native_public_upload.py",
         "tests/test_light_native_publication.py",
         "tests/test_light_native_retrieval_modes.py",
+        "tests/test_light_native_source_presentation.py",
         "tests/test_light_native_table_publication.py"
       ],
       "lines": 933,
@@ -11629,7 +11631,8 @@
         "tests/test_light_native_pdf_layout.py",
         "tests/test_light_native_public_chat.py",
         "tests/test_light_native_public_upload.py",
-        "tests/test_light_native_retrieval_modes.py"
+        "tests/test_light_native_retrieval_modes.py",
+        "tests/test_light_native_source_presentation.py"
       ],
       "lines": 375,
       "module": "tests.test_light_native_chat_turn",
@@ -12305,6 +12308,19 @@
         "backend/source_nodes.py"
       ],
       "path": "tests/test_light_native_source_nodes.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
+      "lines": 78,
+      "module": "tests.test_light_native_source_presentation",
+      "outbound": [
+        "tests/pdf_fixtures.py",
+        "tests/test_light_native_api.py",
+        "tests/test_light_native_chat_turn.py"
+      ],
+      "path": "tests/test_light_native_source_presentation.py",
       "status": "TEST_OR_TOOL_ONLY",
       "windows_runtime_explicit": false
     },
@@ -16138,9 +16154,9 @@
     "product_reachable": 417,
     "registered_api_routes": 298,
     "runtime_support": 5,
-    "test_or_tool_only": 279,
-    "tracked_python_files": 724,
-    "tracked_python_lines": 173240
+    "test_or_tool_only": 280,
+    "tracked_python_files": 725,
+    "tracked_python_lines": 173318
   },
   "warnings": []
 }

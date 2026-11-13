@@ -324,7 +324,7 @@ def test_hybrid_finishes_from_a_larger_answer_window_before_committing_partial_t
     session=t.client.post('/api/workspace/sessions',json={'title':'Saved context window'}).raise_for_status().json()['session_id']
     response=t.client.post('/api/chat',json={'question':'Read CONTROL_SCHEDULE quantities. '+('Preserve original reading context. '*90),
         'session_id':session,'mode':mode,'retrieval_mode':'hybrid','scope':{'scope_type':'dataset','dataset_ids':[dataset],'selected_sources_only':True}})
-    assert len(t.seen)==(3 if numeric_error else 2) and not t.scripts
+    assert len(t.seen)==(3 if numeric_error else 2) and not t.scripts, response.text
     if numeric_error=='repeat':
         assert response.status_code==503 and response.json()['code']=='TABLE_VALUE_INVALID'
         with sqlite3.connect(t.database) as db:
