@@ -18,3 +18,4 @@ __pycache__/
 /native/
 **/node_modules/
 /desktop/light/frontend/dist/
+.DS_Store

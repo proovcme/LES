@@ -3,6 +3,7 @@
 use std::path::Path;
 
 const LIMIT: usize = 100 * 1024 * 1024;
+#[cfg(windows)]
 fn u16_at(data: &[u8], at: usize) -> Result<u16, &'static str> {
     Ok(u16::from_le_bytes(
         data.get(at..at + 2)
@@ -11,6 +12,7 @@ fn u16_at(data: &[u8], at: usize) -> Result<u16, &'static str> {
             .unwrap(),
     ))
 }
+#[cfg(windows)]
 fn u32_at(data: &[u8], at: usize) -> Result<u32, &'static str> {
     Ok(u32::from_le_bytes(
         data.get(at..at + 4)
@@ -20,6 +22,7 @@ fn u32_at(data: &[u8], at: usize) -> Result<u32, &'static str> {
     ))
 }
 
+#[cfg(windows)]
 fn table_info(word: &[u8]) -> Result<(bool, usize, usize), &'static str> {
     if u16_at(word, 0)? != 0xa5ec || u16_at(word, 2)? < 0xc1 {
         return Err("DOC_VERSION_UNSUPPORTED");
@@ -43,6 +46,7 @@ fn table_info(word: &[u8]) -> Result<(bool, usize, usize), &'static str> {
     ))
 }
 
+#[cfg(windows)]
 fn decode(word: &[u8], table: &[u8]) -> Result<String, &'static str> {
     let (_, start, size) = table_info(word)?;
     let clx = table

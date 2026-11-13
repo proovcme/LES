@@ -34,7 +34,7 @@ impl Drop for Host {
 }
 impl Host {
     fn start(request: &Value, work: &Path) -> std::result::Result<Self, &'static str> {
-        let mut program = absolute(request, "program").map_err(|_| "SKILL_RUNTIME_MISSING")?;
+        let program = absolute(request, "program").map_err(|_| "SKILL_RUNTIME_MISSING")?;
         if !program.is_file() {
             return Err("SKILL_RUNTIME_MISSING");
         }
