@@ -57,8 +57,8 @@
       "retry": "safe",
       "idempotency": "derived",
       "result_budget": {
-        "max_chars": 7000,
-        "max_items": 20
+        "max_chars": 24000,
+        "max_items": 32
       },
       "model_owned_fields": [],
       "provenance": "source_refs_required",
@@ -137,8 +137,8 @@
       "retry": "safe",
       "idempotency": "derived",
       "result_budget": {
-        "max_chars": 7000,
-        "max_items": 20
+        "max_chars": 24000,
+        "max_items": 32
       },
       "model_owned_fields": [],
       "provenance": "source_refs_required",
@@ -986,8 +986,8 @@
       "retry": "safe",
       "idempotency": "derived",
       "result_budget": {
-        "max_chars": 7000,
-        "max_items": 20
+        "max_chars": 24000,
+        "max_items": 32
       },
       "model_owned_fields": [],
       "provenance": "source_refs_required",
@@ -1361,8 +1361,8 @@
       "retry": "safe",
       "idempotency": "derived",
       "result_budget": {
-        "max_chars": 7000,
-        "max_items": 20
+        "max_chars": 24000,
+        "max_items": 32
       },
       "model_owned_fields": [],
       "provenance": "source_refs_required",
@@ -1613,8 +1613,8 @@
       "retry": "safe",
       "idempotency": "derived",
       "result_budget": {
-        "max_chars": 7000,
-        "max_items": 20
+        "max_chars": 24000,
+        "max_items": 32
       },
       "model_owned_fields": [],
       "provenance": "source_refs_required",

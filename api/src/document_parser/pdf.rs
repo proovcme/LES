@@ -102,6 +102,16 @@ pub(crate) fn pdf_page_tables(
     }
     Ok(value)
 }
+fn normalize_match_text(text: &str) -> String {
+    text.chars()
+        .filter(|&c| c != '\u{00ad}' && c != '\u{200b}')
+        .map(|c| match c {
+            '\u{00a0}' | '\u{2009}' | '\u{202f}' => ' ',
+            '\u{2212}' | '\u{2013}' | '\u{2014}' => '-',
+            other => other,
+        })
+        .collect()
+}
 fn literal_atoms(text: &str) -> std::collections::HashSet<String> {
     // PDF content-stream order may be column-major. Verify literal atoms on the
     // same page, including decimal/sign spelling; geometry owns their arrangement.
@@ -110,6 +120,59 @@ fn literal_atoms(text: &str) -> std::collections::HashSet<String> {
         .map(str::to_owned)
         .collect()
 }
+fn raw_contains_spaced_bounded(raw: &str, atom: &str) -> bool {
+    let atom_chars: Vec<char> = atom.chars().collect();
+    if atom_chars.is_empty() {
+        return true;
+    }
+    let has_digit = atom_chars.iter().any(|c| c.is_numeric());
+    let first = atom_chars[0];
+    for (start, ch) in raw.char_indices() {
+        if ch != first {
+            continue;
+        }
+        if has_digit
+            && raw[..start]
+                .chars()
+                .next_back()
+                .is_some_and(|c| c.is_numeric() || c == '.' || c == ',')
+        {
+            continue;
+        }
+        let mut cursor = start + ch.len_utf8();
+        let mut matched = true;
+        for &target in &atom_chars[1..] {
+            while let Some(next) = raw[cursor..].chars().next() {
+                if next.is_whitespace() {
+                    cursor += next.len_utf8();
+                } else {
+                    break;
+                }
+            }
+            if let Some(next) = raw[cursor..].chars().next() {
+                if next == target {
+                    cursor += next.len_utf8();
+                    continue;
+                }
+            }
+            matched = false;
+            break;
+        }
+        if !matched {
+            continue;
+        }
+        if has_digit
+            && raw[cursor..]
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_numeric() || c == '.' || c == ',')
+        {
+            continue;
+        }
+        return true;
+    }
+    false
+}
 pub(crate) fn page_view(raw: &str, page: u64, tables: Option<&Value>) -> Result<Option<String>> {
     let Some(tables) = tables else {
         return Ok(None);
@@ -117,8 +180,8 @@ pub(crate) fn page_view(raw: &str, page: u64, tables: Option<&Value>) -> Result<
     let entries = tables["tables"]
         .as_array()
         .ok_or("XBERG_PDF_TABLES_INVALID")?;
-    let hay = literal_atoms(raw);
-    let joined: String = raw.chars().filter(|c| !c.is_whitespace()).collect();
+    let normalized_raw = normalize_match_text(raw);
+    let hay = literal_atoms(&normalized_raw);
     let mut out = raw.to_owned();
     let mut found = false;
     for table in entries.iter().filter(|t| t["page"].as_u64() == Some(page)) {
@@ -144,10 +207,12 @@ pub(crate) fn page_view(raw: &str, page: u64, tables: Option<&Value>) -> Result<
                     .get(column)
                     .map_or(Some(""), Value::as_str)
                     .ok_or("XBERG_PDF_TABLES_INVALID")?;
-                if literal_atoms(text).iter().any(|atom| {
+                let normalized_cell = normalize_match_text(text);
+                if literal_atoms(&normalized_cell).iter().any(|atom| {
                     !hay.contains(atom)
-                        && !(atom.chars().all(char::is_alphabetic) && joined.contains(atom))
-                        && !(atom.chars().all(|c| !c.is_alphanumeric()) && raw.contains(atom))
+                        && !raw_contains_spaced_bounded(&normalized_raw, atom)
+                        && !(atom.chars().all(|c| !c.is_alphanumeric())
+                            && normalized_raw.contains(atom))
                 }) {
                     return Err("PDF_TABLE_SOURCE_MISMATCH");
                 }
@@ -238,6 +303,26 @@ mod tests {
         .unwrap()
         .unwrap();
         assert!(text.contains("| Alpha item continued description | 17.25 |"));
+    }
+    #[test]
+    fn kerning_and_unicode_dash_normalization_preserve_numeric_bounds() {
+        let value = json!({"tables":[{"page":1,"cells":[["Труба DN100 – L\u{00a0}=\u{00a0}2500","17.25"]]}]});
+        assert!(page_view(
+            "Труба DN 100 — L = 2\u{00a0}500 17.25",
+            1,
+            Some(&value)
+        )
+        .unwrap()
+        .is_some());
+        let bad_number = json!({"tables":[{"page":1,"cells":[["Труба DN100","17.25"]]}]});
+        assert_eq!(
+            page_view("Труба DN 100 117.25", 1, Some(&bad_number)).unwrap_err(),
+            "PDF_TABLE_SOURCE_MISMATCH"
+        );
+        assert_eq!(
+            page_view("Труба DN 100 17.250", 1, Some(&bad_number)).unwrap_err(),
+            "PDF_TABLE_SOURCE_MISMATCH"
+        );
     }
     #[test]
     fn cached_tables_are_bound_to_exact_revision_and_page_count() {
