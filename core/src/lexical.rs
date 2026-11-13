@@ -1,8 +1,29 @@
-//! Versioned les.lexical.v2 preparation; normalization and stemming have one native owner.
+//! Versioned lexical preparation; legacy defaults and index/query contracts stay explicit.
 use regex::Regex;
 use serde_json::{json, Value};
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::OnceLock;
+
+pub const LEGACY: &str = "les.lexical.v2";
+pub const SNOWBALL: &str = "les.lexical.v3";
+
+fn analyzed<'a>(word: &'a str, tokenizer: &str) -> Cow<'a, str> {
+    if tokenizer == LEGACY {
+        return Cow::Borrowed(stem(word));
+    }
+    // Identifiers and mixed scripts keep their existing exact token form.
+    // Russian morphology applies only to words, never cable/model codes.
+    if !word.chars().all(|c| ('а'..='я').contains(&c) || c == 'ё') {
+        return Cow::Borrowed(word);
+    }
+    static RUSSIAN: OnceLock<qdrant_rust_stemmers::Stemmer> = OnceLock::new();
+    RUSSIAN
+        .get_or_init(|| {
+            qdrant_rust_stemmers::Stemmer::create(qdrant_rust_stemmers::Algorithm::Russian)
+        })
+        .stem(word)
+}
 
 pub(crate) fn token_regex() -> &'static Regex {
     static TOKENS: OnceLock<Regex> = OnceLock::new();
@@ -87,7 +108,10 @@ pub fn stem(word: &str) -> &str {
 }
 
 pub fn prepare(request: &Value) -> Result<Value, &'static str> {
-    if request["tokenizer"] != "les.lexical.v2" {
+    let tokenizer = request["tokenizer"]
+        .as_str()
+        .ok_or("CORE_TOKENIZER_MISMATCH")?;
+    if !matches!(tokenizer, LEGACY | SNOWBALL) {
         return Err("CORE_TOKENIZER_MISMATCH");
     }
     let raw = request.get("raw_texts").is_some();
@@ -143,17 +167,19 @@ pub fn prepare(request: &Value) -> Result<Value, &'static str> {
         if total > 1_000_000 {
             return Err("CORE_TOKEN_LIMIT");
         }
-        let mut counts = BTreeMap::<&str, u64>::new();
+        let mut counts = BTreeMap::<String, u64>::new();
         let mut length = 0_u64;
         for word in tokens {
             if !stops.contains(word) {
-                *counts.entry(stem(word)).or_default() += 1;
+                *counts
+                    .entry(analyzed(word, tokenizer).into_owned())
+                    .or_default() += 1;
                 length += 1;
             }
         }
         documents.push(json!({"terms": counts, "length": length}));
     }
-    Ok(json!({"documents": documents, "tokenizer": "les.lexical.v2"}))
+    Ok(json!({"documents": documents, "tokenizer": tokenizer}))
 }
 
 pub fn tokens(request: &Value) -> Result<Value, &'static str> {
@@ -195,16 +221,59 @@ pub fn tokens(request: &Value) -> Result<Value, &'static str> {
 }
 
 pub fn current(texts: &[String]) -> Result<Value, &'static str> {
+    versioned(texts, LEGACY)
+}
+
+pub fn versioned(texts: &[String], tokenizer: &str) -> Result<Value, &'static str> {
     let config: Value = serde_json::from_str(include_str!("../../config/lexical-v2.json"))
         .map_err(|_| "CORE_LEXICAL_CONFIG_INVALID")?;
-    prepare(
-        &json!({"tokenizer":"les.lexical.v2","raw_texts":texts,"stop_words":config["stop_words"]}),
-    )
+    prepare(&json!({"tokenizer":tokenizer,"raw_texts":texts,"stop_words":config["stop_words"]}))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn russian_word_forms_share_terms_without_mutating_legacy_or_identifiers() {
+        for words in [
+            vec!["том", "тома", "томов"],
+            vec!["заключение", "заключения"],
+            vec!["ведомость", "ведомости"],
+            vec!["оборудование", "оборудования"],
+            vec!["рупорный", "рупорных"],
+        ] {
+            let texts = words.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+            let result = versioned(&texts, SNOWBALL).unwrap();
+            let first = &result["documents"][0]["terms"];
+            assert!(!first.as_object().unwrap().is_empty());
+            assert!(
+                result["documents"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|d| &d["terms"] == first),
+                "{words:?}"
+            );
+        }
+        let old = versioned(&["ведомости".into()], LEGACY).unwrap();
+        assert_eq!(old["documents"][0]["terms"], json!({"ведомос":1}));
+        // Snowball is not a morphological dictionary. Keep its known ambiguous
+        // plural behavior visible instead of adding corpus-specific exceptions.
+        let ambiguous = versioned(&["система".into(), "систем".into()], SNOWBALL).unwrap();
+        assert_ne!(
+            ambiguous["documents"][0]["terms"],
+            ambiguous["documents"][1]["terms"]
+        );
+        let codes = vec!["ГР25.03 АСР-03.1.2 ПВ-3 TN-C-S 0.4 17,35".into()];
+        assert_eq!(
+            versioned(&codes, LEGACY).unwrap()["documents"],
+            versioned(&codes, SNOWBALL).unwrap()["documents"]
+        );
+        assert_eq!(
+            versioned(&codes, "unregistered").unwrap_err(),
+            "CORE_TOKENIZER_MISMATCH"
+        );
+    }
     #[test]
     fn suffix_order_minimum_and_scripts_are_preserved() {
         assert_eq!(stem("оборудования"), "оборудовани");

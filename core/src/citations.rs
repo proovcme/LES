@@ -49,10 +49,14 @@ pub fn execute(request: &Value) -> Result<Value, &'static str> {
     let mut headers = HashMap::new();
     let mut valid = BTreeSet::new();
     let mut handles = HashMap::new();
+    let mut urls = HashMap::<&str, Vec<u32>>::new();
     if let Some(sources) = map {
         for source in sources {
             if let Some(index) = source["index"].as_u64().and_then(|n| u32::try_from(n).ok()) {
                 valid.insert(index);
+                if let Some(url) = source["url"].as_str().filter(|s| s.starts_with("/api/")) {
+                    urls.entry(url).or_default().push(index);
+                }
                 if let Some(handle) = source["evidence_ref"].as_str() {
                     handles.insert(handle.to_uppercase(), index);
                 }
@@ -137,18 +141,60 @@ pub fn execute(request: &Value) -> Result<Value, &'static str> {
     };
     let mut output = String::new();
     let mut cursor = 0;
+    let mut link_cited = BTreeSet::new();
     for code in CODE.find_iter(answer) {
         output.push_str(&transform(&answer[cursor..code.start()]));
-        output.push_str(code.as_str());
+        // Markdown destinations are protected from marker rewriting, but a
+        // model occasionally prepends file:// to a supplied HTTP API path.
+        // Repair only an exact source-map URL; never guess a file or page.
+        let fragment = code.as_str();
+        if fragment.starts_with('[') {
+            if let Some((label, destination)) = fragment.rsplit_once("](") {
+                if let Some(raw) = destination.strip_suffix(')') {
+                    let url = raw.strip_prefix("file://").unwrap_or(raw);
+                    if let Some(indexes) = urls.get(url) {
+                        if raw == url {
+                            output.push_str(fragment);
+                        } else {
+                            output.push_str(&format!("{label}]({url})"));
+                        }
+                        // A page/file URL can represent several visible
+                        // fragments. Do not arbitrarily choose the last one.
+                        link_cited.extend(indexes.iter().copied());
+                        cursor = code.end();
+                        continue;
+                    }
+                }
+            }
+        }
+        output.push_str(fragment);
         cursor = code.end();
     }
     output.push_str(&transform(&answer[cursor..]));
+    cited.extend(link_cited);
     Ok(json!({"answer":output,"indexes":cited,"unknown_indexes":unknown,"header_repairs":repairs}))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn an_exact_bound_markdown_link_counts_without_rewriting_its_label() {
+        let answer = "[План · стр. 2](/api/source?id=x#page=2) ` [код](/api/source?id=y) `";
+        let result=execute(&json!({"answer":answer,"sources":[{"index":2,"url":"/api/source?id=x#page=2"},{"index":7,"url":"/api/source?id=y"}]})).unwrap();
+        assert_eq!(result["answer"], answer);
+        assert_eq!(result["indexes"], json!([2]));
+    }
+    #[test]
+    fn repairs_only_exact_bound_api_destinations_outside_code() {
+        let answer = "[Документ · стр. 7](file:///api/source?id=a#page=7) ` [код](file:///api/source?id=a#page=7) ` [чужая страница](file:///api/source?id=a#page=8) [внешняя](https://example.org)";
+        let result = execute(
+            &json!({"answer":answer,"sources":[{"index":3,"url":"/api/source?id=a#page=7"}]}),
+        )
+        .unwrap();
+        assert_eq!(result["indexes"], json!([3]));
+        assert_eq!(result["answer"], "[Документ · стр. 7](/api/source?id=a#page=7) ` [код](file:///api/source?id=a#page=7) ` [чужая страница](file:///api/source?id=a#page=8) [внешняя](https://example.org)");
+    }
     #[test]
     fn headers_ranges_code_and_unknowns_remain_distinct() {
         let r=execute(&json!({"answer":"Значение *Источник 1 | файл 87.pdf | TABLE]* [Источники 1–2] `код [Источник 2]` [999]", "sources":[{"index":1,"header":"[Источник 1 | файл 87.pdf | TABLE]"},{"index":2}]})).unwrap();

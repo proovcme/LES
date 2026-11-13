@@ -70,6 +70,7 @@ fn payload(request: &Value, value: Map<String, Value>) -> Result<Value> {
     let mut merged = Map::new();
     if let Some(route) = request.get("route_metadata") {
         merged.extend(route.as_object().ok_or(INVALID)?.clone());
+        merged.remove("pdf_page_views");
     }
     // Source identity wins over classification annotations. A route cannot
     // silently change the physical page or turn a projection into another type.
@@ -146,6 +147,23 @@ fn from_pdf(
                 request["ocr"] == true || passport.is_some_and(|p| present(&p["requires_ocr"]));
             let mut meta = json!({"type":"pdf_page_text","source_layer":if ocr {"pdf_ocr_text"} else {"pdf_text_layer"},
                 "page":page,"page_part":number,"page_parts":parts.len(),"source_ref":reference}).as_object().unwrap().clone();
+            if index == 0 {
+                if let Some(view) = request["route_metadata"]["pdf_page_views"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .find(|v| v["page"] == page)
+                    .and_then(|v| v["text"].as_str())
+                    .filter(|v| !v.is_empty() && v.chars().count() <= 16000)
+                {
+                    meta.insert("pdf_page_view".into(), json!(view));
+                    meta.insert(
+                        "pdf_page_view_sha256".into(),
+                        json!(crate::sha256_hex(view.as_bytes())),
+                    );
+                    meta.insert("pdf_page_view_schema".into(), json!("les.pdf-page-view.v1"));
+                }
+            }
             if let Some(p) = passport {
                 for (key, value) in [
                     ("pdf_page_passport_schema", &p["schema"]),
@@ -200,14 +218,16 @@ fn from_markdown(request: &Value, text: &str) -> Result<Vec<Value>> {
     let dataset = request["dataset_id"].as_str().ok_or(INVALID)?;
     let size = integer(request, "size", 1, 1_000_000)?;
     let overlap = integer(request, "overlap", 0, size as u64 - 1)?;
-    let minimum = integer(request, "minimum", 0, 1_000_000)?;
-    let final_minimum = integer(request, "final_minimum", 0, 1_000_000)?;
+    let _minimum = integer(request, "minimum", 0, 1_000_000)?;
+    let _final_minimum = integer(request, "final_minimum", 0, 1_000_000)?;
     let local = match request["unit"].as_str() {
         Some("tokens") => Some(tokenizer::load(&request["tokenizer"])?),
         Some("chars") if !request["tokenizer"].is_object() => None,
         _ => return Err(INVALID),
     };
     let sections = chunks::markdown_sections(&json!({"text":text}))?;
+    // A verified source clause/title is evidence even below a noise floor.
+    // Keep section boundaries and identities; the final builder owns budgets.
     let mut out = Vec::new();
     for (section_index, section) in sections["chunks"]
         .as_array()
@@ -216,6 +236,9 @@ fn from_markdown(request: &Value, text: &str) -> Result<Vec<Value>> {
         .enumerate()
     {
         let section = section.as_str().ok_or(INVALID)?;
+        if !section.chars().any(char::is_alphanumeric) {
+            continue;
+        }
         let parts = if section.chars().count() > 2000 {
             let config = json!({"text":section,"size":size,"overlap":overlap,"kind":"structured"});
             if let Some(local) = local.as_ref() {
@@ -226,12 +249,6 @@ fn from_markdown(request: &Value, text: &str) -> Result<Vec<Value>> {
         } else {
             json!({"chunks":[section]})
         };
-        let floor =
-            if section.chars().count() > 2000 || chunks::trim(text).chars().count() >= minimum {
-                minimum
-            } else {
-                final_minimum
-            };
         for (part_index, part) in parts["chunks"]
             .as_array()
             .ok_or(INVALID)?
@@ -239,7 +256,7 @@ fn from_markdown(request: &Value, text: &str) -> Result<Vec<Value>> {
             .enumerate()
         {
             let part = part.as_str().ok_or(INVALID)?;
-            if chunks::trim(part).chars().count() < floor {
+            if chunks::trim(part).is_empty() {
                 continue;
             }
             let id = uuid5(&format!(

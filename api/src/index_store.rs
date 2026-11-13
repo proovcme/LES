@@ -65,7 +65,12 @@ impl Store {
         }
         context.state_root.join("storage/datasets")
     }
-    pub(crate) async fn refresh_postings(&self) -> Result<(), &'static str> {
+    pub(crate) async fn refresh_postings(
+        &self,
+        context: &Context,
+        collection: &str,
+        fallback: &str,
+    ) -> Result<(), &'static str> {
         #[cfg(feature = "edge")]
         if let Some(edge) = self.edge.get() {
             let edge = edge.clone();
@@ -79,7 +84,42 @@ impl Store {
             })
             .await
             .map_err(|_| "INDEX_SPARSE_OWNER_FAILED")??;
+            return Ok(());
         }
+        #[cfg(feature = "edge")]
+        if self.edge_root.is_some() {
+            return Ok(());
+        }
+        let content = self.content_root(context);
+        let collection = collection.to_owned();
+        let fallback = fallback.to_owned();
+        let client = context.client.clone();
+        let target = self.target.clone();
+        let key = self.key.clone();
+        let runtime = tokio::runtime::Handle::current();
+        tokio::task::spawn_blocking(move || {
+            let writer = les_core::index_publication::Writer::acquire(&content, &collection)?;
+            les_core::index_postings::refresh(
+                &content,
+                &collection,
+                &writer,
+                false,
+                &fallback,
+                |operation, body| {
+                    runtime.block_on(search::server_read(
+                        &client,
+                        &target,
+                        &key,
+                        &collection,
+                        operation,
+                        body,
+                    ))
+                },
+                lexical_progress,
+            )
+        })
+        .await
+        .map_err(|_| "INDEX_SPARSE_OWNER_FAILED")??;
         Ok(())
     }
     pub fn from_env(token: String) -> Result<Option<Self>, &'static str> {
@@ -171,6 +211,13 @@ impl Store {
     }
 }
 
+fn lexical_progress(event: Value) {
+    eprintln!(
+        "{}",
+        json!({"event":"index_lexical_progress","progress":event})
+    );
+}
+
 /// Run before admitting index requests; unrelated API screens stay responsive.
 pub(crate) async fn start_recovery(context: Arc<Context>) -> Result<(), &'static str> {
     #[cfg(feature = "edge")]
@@ -199,6 +246,11 @@ pub(crate) async fn start_recovery(context: Arc<Context>) -> Result<(), &'static
                     if result["status"] == "legacy" {
                         Err("INDEX_RECOVERY_INCOMPLETE")
                     } else {
+                        store
+                            .edge
+                            .get()
+                            .expect("owned Edge shard")
+                            .ensure_search_indexes()?;
                         Ok(())
                     }
                 })

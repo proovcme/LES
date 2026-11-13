@@ -101,12 +101,30 @@ def test_markdown_native_sections_match_previous_parser_text_and_have_stable_ids
     assert prepare(text,**{**kwargs,'file_key':'Другая редакция.md'})!=first
 
 
-def test_markdown_short_standalone_evidence_is_kept_but_short_heading_is_filtered():
+def test_markdown_short_standalone_evidence_and_heading_keep_source_boundaries():
     assert prepare('Короткая самостоятельная запись с доказательством.',
         dataset_id='d',file_key='note.txt',size=300,overlap=30)
     text='# Кратко\n\n## Большой раздел\n\n'+('Длинный полезный текст. '*30)
     nodes=prepare(text,dataset_id='d',file_key='note.md',size=300,overlap=30)
-    assert all(n['text']!='# Кратко' for n in nodes)
+    assert any(n['text']=='# Кратко' for n in nodes)
+    assert '# Кратко' in '\n'.join(n['text'] for n in nodes)
+
+
+def test_short_clauses_formulas_and_final_remainder_survive_both_native_stages():
+    text='# Предел\n\n7 мм.\n\n## Формула\n\nx=3\n\n## Подробности\n\n'+('Описание условия. '*30)+'\n\n## Остаток\n\n9 В.'
+    nodes=prepare(text,dataset_id='d',file_key='Source.docx',size=180,overlap=20,minimum=100,final_minimum=20)
+    source='\n'.join(n['text'] for n in nodes)
+    prepared=native_core.required('document',request={'action':'prepare_nodes','nodes':nodes,'dataset_id':'d','file_name':'Source.docx',
+        'source_sha256':'a'*64,'config':{'unit':'chars','size':180,'minimum':100,'tokenizer':None}})['nodes']
+    prepared=[n for n in prepared if n['payload']['node_role']=='evidence']
+    final='\n'.join(n['text'] for n in prepared)
+    for term in ['7 мм.','x=3','9 В.','# Предел','## Формула','## Остаток']:
+        assert term in source and term in final
+    assert all(len(n['text'])<=180 for n in prepared)
+
+
+def test_empty_table_syntax_is_not_a_searchable_source():
+    assert prepare('| | |\n| --- | --- |\n| | |',dataset_id='d',file_key='Empty.md',size=300,overlap=30)==[]
 
 
 def test_native_selected_tokenizer_does_not_call_python_length_function(tmp_path,monkeypatch):
@@ -120,7 +138,7 @@ def test_native_selected_tokenizer_does_not_call_python_length_function(tmp_path
         unit='tokens',tokenizer=selected.asset,minimum=20)
     assert len(value)>1
     expected=support.StructureAwareSplitter(chunk_size=30,chunk_overlap=3,len_fn=selected)._split(text)
-    assert [n['text'] for n in value]==[v for v in expected if len(v)>=20]
+    assert [n['text'] for n in value]==expected
 
 
 def test_canonical_markdown_route_no_longer_constructs_llama_nodes(monkeypatch,tmp_path):

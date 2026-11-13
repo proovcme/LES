@@ -7,6 +7,8 @@ mod chat;
 mod conversation;
 mod dataset_reader;
 mod document_dispatch;
+mod document_media;
+mod document_parser;
 mod documents;
 #[cfg(feature = "edge")]
 mod edge;
@@ -232,6 +234,11 @@ async fn dispatch(State(context): State<Arc<Context>>, request: Request) -> Resp
     }
     if context.public_chat_rust && documents::browse::handles(&request) {
         return documents::browse::handle(context, request).await;
+    }
+    if matches!(request.method().as_str(), "GET" | "HEAD")
+        && documents::parts::route(request.uri().path()).is_some()
+    {
+        return documents::parts::handle(context, request).await;
     }
     if matches!(request.method().as_str(), "GET" | "HEAD")
         && documents::route(request.uri().path()).is_some()
@@ -534,6 +541,7 @@ fn main() {
                 mail::recover(&context.state_root);
             }
             let context = Arc::new(context);
+            pdf_ocr::cleanup(&context.state_root);
             if context.public_chat_rust && context.upstream.is_none() {
                 tokio::spawn(mail::schedule(context.clone()));
             }

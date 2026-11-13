@@ -1,6 +1,7 @@
 //! SQLite checkpoints for the external folder intake worker.
 use super::*;
 use rusqlite::params;
+mod watch;
 
 const FIELDS: &str = "j.id,'dataset_intake' AS type,'native_external' AS source,j.dataset_id,
     j.dataset_name,j.status,j.phase,j.total,j.processed,j.errors,j.message,j.reason_code,
@@ -34,7 +35,7 @@ pub(super) fn init(conn: &Connection) -> Result<()> {
             source_path TEXT NOT NULL, PRIMARY KEY(job_id,ordinal)
          );",
     )?;
-    Ok(())
+    watch::init(conn)
 }
 
 fn public_job(conn: &Connection, id: &str) -> Result<Value> {
@@ -111,6 +112,7 @@ fn enqueue(conn: &Connection, args: &Args) -> Result<Value> {
                 "Для этого набора уже подключается папка. Дождитесь завершения.",
             ));
         }
+        watch::bind(conn, id, dataset, root, parse_limit, args)?;
         return public_job(conn, id);
     }
     let id: String = conn.query_row("SELECT lower(hex(randomblob(16)))", [], |row| row.get(0))?;
@@ -120,6 +122,7 @@ fn enqueue(conn: &Connection, args: &Args) -> Result<Value> {
          VALUES(?1,?2,?3,?4,?5,'queued','scan','Папка в очереди на проверку',?6,?6)",
         params![id,dataset,name,root,parse_limit,now],
     )?;
+    watch::bind(conn, &id, dataset, root, parse_limit, args)?;
     public_job(conn, &id)
 }
 
@@ -163,6 +166,7 @@ fn claim(conn: &Connection, now: &str) -> Result<Value> {
             .clone();
     }
     claimed["resumed"] = json!(job["status"] == "running");
+    claimed["watch"] = watch::binding(conn, id)?;
     Ok(claimed)
 }
 
@@ -170,7 +174,8 @@ fn manifest(conn: &Connection, id: &str, args: &Args, now: &str) -> Result<Value
     let files = args["files"]
         .as_array()
         .ok_or_else(|| Failure::invalid("Invalid intake manifest"))?;
-    if files.is_empty() || files.len() > 50_000 {
+    let watched = watch::binding(conn, id)?;
+    if (files.is_empty() && watched.is_null()) || files.len() > 50_000 {
         return Err(Failure::invalid("Invalid intake manifest length"));
     }
     let updated = conn.execute(
@@ -180,6 +185,9 @@ fn manifest(conn: &Connection, id: &str, args: &Args, now: &str) -> Result<Value
     )?;
     if updated != 1 {
         return Err(Failure::conflict("Состояние импорта изменилось."));
+    }
+    if !watched.is_null() {
+        watch::observe(conn, &watched, id, text(args, "root")?, files, now)?;
     }
     let mut insert = conn.prepare(
         "INSERT INTO native_intake_files(job_id,ordinal,file_name,source_path) VALUES(?1,?2,?3,?4)",
@@ -203,9 +211,11 @@ fn register(conn: &Connection, id: &str, args: &Args, now: &str) -> Result<Value
         .as_str()
         .ok_or_else(|| Failure::missing("Набор документов удалён."))?;
     let processed = job["processed"].as_i64().unwrap_or_default();
+    let total = job["total"].as_i64().unwrap_or_default();
+    let watched = !watch::binding(conn, id)?.is_null();
     let files = args["files"]
         .as_array()
-        .filter(|files| !files.is_empty() && files.len() <= 25)
+        .filter(|files| files.len() <= 25 && (!files.is_empty() || watched && total == 0))
         .ok_or_else(|| Failure::invalid("Invalid intake batch"))?;
     for (offset, file) in files.iter().enumerate() {
         let ordinal = processed + offset as i64;
@@ -229,21 +239,40 @@ fn register(conn: &Connection, id: &str, args: &Args, now: &str) -> Result<Value
             .ok_or_else(|| Failure::invalid("Invalid source time"))?;
         let existing = first(
             conn,
-            "SELECT id,COALESCE(source_path,'') AS source_path,status,
+            "SELECT id,COALESCE(source_path,'') AS source_path,status,file_hash,
             COALESCE(file_size,0) AS file_size,COALESCE(file_mtime,0) AS file_mtime
             FROM documents WHERE dataset_id=?1 AND file_name=?2 ORDER BY rowid LIMIT 1",
             params![dataset, name],
         )?;
         if let Some(doc_id) = existing["id"].as_str() {
-            if existing["file_size"].as_i64() != Some(size)
-                || existing["file_mtime"].as_f64() != Some(mtime)
+            let compared = file["sha256"]
+                .as_str()
+                .filter(|_| existing["status"] == "INDEXED");
+            let same_content = compared.is_some_and(|hash| existing["file_hash"] == hash);
+            let same_path = existing["source_path"] == path;
+            let same_size = existing["file_size"].as_i64() == Some(size);
+            let same_time = existing["file_mtime"].as_f64() == Some(mtime);
+            if same_content && same_path && same_size {
+                if !same_time {
+                    conn.execute(
+                        "UPDATE documents SET file_mtime=?2 WHERE id=?1",
+                        params![doc_id, mtime],
+                    )?;
+                }
+            } else if (watched && file["changed"] == 1)
+                || compared.is_some()
+                || !same_size
+                || !same_time
                 || existing["status"]
                     .as_str()
                     .is_some_and(|status| status.eq_ignore_ascii_case("missing"))
-                || existing["source_path"] != path
+                || !same_path
             {
                 conn.execute("UPDATE documents SET status='PENDING',file_size=?2,file_mtime=?3,source_path=?4 WHERE id=?1",
                              params![doc_id,size,mtime,path])?;
+                if watched && file["changed"] == 1 {
+                    conn.execute("UPDATE documents SET parse_attempts=0,retryable=0,retry_after=0,last_error='',error_code='',stage='' WHERE id=?1", [doc_id])?;
+                }
             }
         } else {
             conn.execute(
@@ -255,9 +284,9 @@ fn register(conn: &Connection, id: &str, args: &Args, now: &str) -> Result<Value
         }
     }
     let processed = processed + files.len() as i64;
-    let total = job["total"].as_i64().unwrap_or_default();
     let complete = processed == total;
-    let parse = job["parse_limit"].as_i64().unwrap_or_default() > 0;
+    let parse = job["parse_limit"].as_i64().unwrap_or_default() > 0
+        && (!watched || !complete || watch::needs_index(conn, id)?);
     let (status, phase, message) = match (complete, parse) {
         (true, true) => (
             "running",
@@ -279,6 +308,9 @@ fn register(conn: &Connection, id: &str, args: &Args, now: &str) -> Result<Value
     )?;
     if complete && !parse {
         conn.execute("DELETE FROM native_intake_files WHERE job_id=?1", [id])?;
+        if watched {
+            watch::release(conn, id, true)?;
+        }
     }
     Ok(json!({"processed":processed,"total":total,"phase":phase}))
 }
@@ -305,7 +337,12 @@ fn checkpoint(conn: &Connection, id: &str, args: &Args, now: &str) -> Result<Val
     let errors = counts["errors"].as_i64().unwrap_or_default();
     let pending = counts["pending"].as_i64().unwrap_or_default();
     let skipped = counts["skipped"].as_i64().unwrap_or_default();
-    let (status, reason, message, retry_at) = if pending == 0 && errors > 0 {
+    let watched = !watch::binding(conn, id)?.is_null();
+    let deferred = watched && pending > 0 && !reason.is_empty();
+    let (status, reason, message, retry_at) = if deferred {
+        watch::index_deferred(conn, id, reason, note)?;
+        ("failed", reason, note.to_owned(), 0.0)
+    } else if pending == 0 && errors > 0 {
         ("failed", "INDEX_DOCUMENT_ERRORS", format!("Проиндексировано {indexed}, с ошибками: {errors}. Откройте список документов для подробностей."), 0.0)
     } else if pending == 0 && skipped > 0 {
         ("completed", "", format!("Проиндексировано {indexed}, пропущено {skipped}. Причины указаны в списке документов."), 0.0)
@@ -344,6 +381,9 @@ fn checkpoint(conn: &Connection, id: &str, args: &Args, now: &str) -> Result<Val
     }
     if matches!(status, "completed" | "failed") {
         conn.execute("DELETE FROM native_intake_files WHERE job_id=?1", [id])?;
+        if watched {
+            watch::release(conn, id, deferred)?;
+        }
     }
     Ok(
         json!({"status":status,"indexed":indexed,"errors":errors,"pending":pending,"skipped":skipped}),
@@ -357,6 +397,13 @@ pub(super) fn timestamp() -> String {
 }
 
 pub(super) fn execute(conn: &Connection, action: &str, args: &Args) -> Result<Value> {
+    match action {
+        "intake_watch_startup" => return watch::startup(conn),
+        "intake_watch_due" => return watch::due(conn),
+        "intake_watch_list" => return watch::list(conn, args),
+        "intake_watch_set" => return watch::set(conn, args),
+        _ => {}
+    }
     if action == "intake_enqueue" {
         return enqueue(conn, args);
     }
@@ -431,6 +478,7 @@ pub(super) fn execute(conn: &Connection, action: &str, args: &Args) -> Result<Va
         "intake_get" if !table(conn, "native_intakes")? => Ok(Value::Null),
         "intake_get" => public_job(conn, id),
         "intake_manifest" => manifest(conn, id, args, &now),
+        "intake_batch" if !watch::binding(conn, id)?.is_null() => watch::batch(conn, id),
         "intake_batch" => Ok(json!(rows(
             conn,
             "SELECT f.ordinal,f.source_path FROM native_intake_files f
@@ -438,7 +486,8 @@ pub(super) fn execute(conn: &Connection, action: &str, args: &Args) -> Result<Va
              ORDER BY f.ordinal LIMIT 25",
             [id]
         )?)),
-        "intake_index_batch" => Ok(json!(rows(
+        "intake_index_batch" => {
+            let mut selected = rows(
             conn,
             "SELECT d.file_name,d.source_path FROM native_intakes j
              JOIN native_intake_files f ON f.job_id=j.id
@@ -450,7 +499,12 @@ pub(super) fn execute(conn: &Connection, action: &str, args: &Args) -> Result<Va
                       coalesce(nullif(d.file_size,0),9223372036854775807),d.file_name
              LIMIT (SELECT max(0, min(parse_limit, 500)) FROM native_intakes WHERE id=?1)",
             [id]
-        )?)),
+            )?;
+            if !watch::binding(conn, id)?.is_null() {
+                watch::identify_batch(conn, id, &mut selected)?;
+            }
+            Ok(json!(selected))
+        }
         "intake_register" => register(conn, id, args, &now),
         "intake_retry_due" => {
             let changed = conn.execute(
@@ -494,13 +548,20 @@ pub(super) fn execute(conn: &Connection, action: &str, args: &Args) -> Result<Va
             Ok(Value::Null)
         }
         "intake_fail" => {
+            let reason = text(args, "reason")?;
+            let message = text(args, "message")?;
+            let watched = !watch::binding(conn, id)?.is_null();
             conn.execute(
                 "UPDATE native_intakes SET status='failed',errors=1,message=?2,updated_at=?3,finished_at=?3,
                  reason_code=?4
                  WHERE id=?1 AND finished_at IS NULL",
-                params![id,text(args,"message")?,now,text(args,"reason")?],
+                params![id,message,now,reason],
             )?;
             conn.execute("DELETE FROM native_intake_files WHERE job_id=?1", [id])?;
+            if watched {
+                watch::failed(conn, id, reason, message, &now)?;
+                watch::release(conn, id, true)?;
+            }
             Ok(Value::Null)
         }
         _ => Err(Failure::invalid("Unknown intake action")),

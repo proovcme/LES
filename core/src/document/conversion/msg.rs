@@ -7,6 +7,18 @@ pub(super) fn available() -> bool {
     cfg!(windows)
 }
 
+pub(crate) fn compound_stream(bytes: &[u8], name: &str, limit: usize) -> Result<Option<Vec<u8>>> {
+    #[cfg(windows)]
+    {
+        windows::compound_stream(bytes, name, limit)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (bytes, name, limit);
+        Err("DOCUMENT_NATIVE_READER_REQUIRED")
+    }
+}
+
 #[cfg(not(windows))]
 pub(crate) fn read(_: &[u8]) -> Result<Value> {
     Err("MAIL_FORMAT_UNSUPPORTED")
@@ -122,6 +134,21 @@ mod windows {
             .ok_or(INVALID)?;
         std::mem::forget(owner);
         Ok(lock)
+    }
+
+    pub(super) fn compound_stream(
+        bytes: &[u8],
+        name: &str,
+        limit: usize,
+    ) -> Result<Option<Vec<u8>>> {
+        if bytes.len() > 64 * 1024 * 1024
+            || !bytes.starts_with(MAGIC)
+            || name.contains(['/', '\\', '\0'])
+        {
+            return Err(INVALID);
+        }
+        let lock = lock_bytes(bytes)?;
+        Storage::open(&lock)?.stream(name, limit)
     }
 
     struct Storage(Com);

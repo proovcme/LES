@@ -7,6 +7,36 @@ use axum::{
 };
 use std::sync::Arc;
 
+/// Finish a rejected HTTP/1 request without dropping a small unread incoming
+/// body. Otherwise Windows can reset the socket before the response is read.
+/// No parsing, forwarding or retry occurs; unbounded/slow bodies close instead.
+pub async fn reject(request: Request, mut response: Response) -> Response {
+    const LIMIT: usize = 64 * 1024;
+    let length = request
+        .headers()
+        .get(header::CONTENT_LENGTH)
+        .map(|v| v.to_str().ok().and_then(|s| s.parse::<usize>().ok()))
+        .unwrap_or(Some(0));
+    let small = !request.headers().contains_key(header::TRANSFER_ENCODING)
+        && length.is_some_and(|n| n <= LIMIT);
+    let drained = small
+        && matches!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(250),
+                axum::body::to_bytes(request.into_body(), LIMIT)
+            )
+            .await,
+            Ok(Ok(_))
+        );
+    if !drained {
+        response.headers_mut().insert(
+            header::CONNECTION,
+            axum::http::HeaderValue::from_static("close"),
+        );
+    }
+    response
+}
+
 pub fn local_browser(headers: &HeaderMap) -> bool {
     let Some(host) = headers
         .get(header::HOST)
@@ -166,6 +196,40 @@ pub async fn forward(context: Arc<Context>, request: Request) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn early_rejection_drains_small_bodies_but_bounds_slow_and_large_inputs() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let polled = Arc::new(AtomicBool::new(false));
+        let observed = polled.clone();
+        let body = Body::from_stream(futures_util::stream::once(async move {
+            observed.store(true, Ordering::SeqCst);
+            Ok::<_, std::io::Error>(axum::body::Bytes::from_static(b"{}"))
+        }));
+        let request = Request::builder()
+            .header(header::CONTENT_LENGTH, "2")
+            .body(body)
+            .unwrap();
+        let reply = reject(request, error(StatusCode::NOT_FOUND, "Not Found")).await;
+        assert!(polled.load(Ordering::SeqCst));
+        assert_eq!(reply.status(), StatusCode::NOT_FOUND);
+        assert!(!reply.headers().contains_key(header::CONNECTION));
+        let request = Request::builder()
+            .header(header::CONTENT_LENGTH, "70000")
+            .body(Body::empty())
+            .unwrap();
+        let reply = reject(request, error(StatusCode::NOT_FOUND, "Not Found")).await;
+        assert_eq!(reply.headers()[header::CONNECTION], "close");
+        let request = Request::builder()
+            .header(header::CONTENT_LENGTH, "2")
+            .body(Body::from_stream(futures_util::stream::pending::<
+                Result<axum::body::Bytes, std::io::Error>,
+            >()))
+            .unwrap();
+        let start = std::time::Instant::now();
+        let reply = reject(request, error(StatusCode::NOT_FOUND, "Not Found")).await;
+        assert!(start.elapsed() < std::time::Duration::from_secs(2));
+        assert_eq!(reply.headers()[header::CONNECTION], "close");
+    }
     #[test]
     fn foreign_browser_and_hop_headers_are_rejected() {
         let mut headers = HeaderMap::new();

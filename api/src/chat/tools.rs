@@ -12,6 +12,8 @@ pub struct Tools {
     pub contracts: Vec<Value>,
     pub mcp: HashMap<String, (String, Value)>,
     access: String,
+    indexed_reader_first: bool,
+    pub(super) read_max_chars: usize,
     sequence: std::sync::atomic::AtomicU64,
 }
 fn execute(request: Value) -> Result<Value> {
@@ -29,25 +31,56 @@ pub fn envelope(name: &str, operation: &str, result: Value, sources: Vec<Value>)
     json!({"schema":"les_tool_result_v1","tool":name,"operation":operation,"inputs":[],"status":"ok",
         "result":result,"sources":sources,"missing":[],"warnings":[],"decision_required_from_model":false,"trace":"rust.chat.tools"})
 }
+/// Model-facing readers use one registered identity. Public API compatibility
+/// and validation of explicit dataset/path arguments remain in the full contract.
+fn model_schema(contract: &Value) -> Value {
+    let mut schema = contract["input_schema"].clone();
+    if !["read_source", "read_pdf_source", "read_excel_source"]
+        .iter()
+        .any(|name| contract["name"] == *name)
+        || !schema["properties"]["doc_id"].is_object()
+    {
+        return schema;
+    }
+    if let Some(properties) = schema["properties"].as_object_mut() {
+        properties.remove("dataset_id");
+        properties.remove("doc_name");
+    }
+    let mut required = schema["required"].as_array().cloned().unwrap_or_default();
+    required.retain(|key| key != "dataset_id" && key != "doc_name");
+    if !required.contains(&json!("doc_id")) {
+        required.push(json!("doc_id"));
+    }
+    schema["required"] = json!(required);
+    schema.as_object_mut().unwrap().remove("anyOf");
+    schema
+}
 impl Tools {
     pub async fn new(context: &Context, turn: &Prepared) -> Result<Self> {
         let database = context.database.clone();
         let profile = turn.profile.clone();
         let registered = turn.session["registered"] == true && turn.profile["mode"] == "agent";
         let grounded = turn.scope["document_grounding_enabled"] == true;
+        let push = turn.request["retrieval_mode"] == "push";
         let selected_only = turn.request["selected_sources_only"] == true;
+        let indexed_reader_first = prefer_indexed_reader(&sources::selected_files(turn));
         let remote = turn.egress_tag.is_some();
         tokio::task::spawn_blocking(move||->Result<Self>{
             let result=super::unwrap(les_core::tool_registry::execute(&json!({"schema":"les.tool-registry.v1","database":database,"action":"registry"})))?;
             let allowed=profile["tools"].as_array().cloned().unwrap_or_default();
             let mut contracts:Vec<_>=result["tools"].as_array().ok_or("TOOL_REGISTRY_INVALID")?.iter()
                 .filter(|t|allowed.contains(&t["name"])&&(grounded||!["dataset","source"].iter().any(|c|t["category"]==*c))
+                    && (!push || !["dataset","source"].iter().any(|c|t["category"]==*c))
                     && (!selected_only || (t["name"]!="web_search"&&t["name"]!="web_read"))
                     && (!remote || ["search_sources","read_source","read_pdf_source","read_excel_source"].iter().any(|n|t["name"]==*n))).cloned().collect();
             for contract in &mut contracts {
                 if contract["name"]=="search_sources"{contract["timeout_seconds"]=json!(150);}
                 if contract["name"]=="search_sources"||contract["name"]=="read_source"||contract["name"]=="read_excel_source"{
-                    contract["result_budget"]=json!({"max_chars":24000,"max_items":32});
+                    // The executor counts every nested array item, including
+                    // repeated citation identities, receipt IDs and discovery
+                    // cards. This is not the number of factual passages (32,
+                    // enforced by the reader). Keep the independent char cap.
+                    contract["result_budget"]=json!({"max_chars":24000,"max_items":256});
                 }
             }
             if registered && !remote {
@@ -68,7 +101,7 @@ impl Tools {
             }
             let access=access::contract(&contracts);let access_name=access["name"].as_str().ok_or("TOOL_REGISTRY_INVALID")?.to_owned();contracts.push(access);
             let handle=execute(json!({"schema":"les.tool-execution.v1","action":"new","database":database,"cursor_capacity":128,"cursor_ttl_seconds":300.}))?["handle"].as_u64().ok_or("TOOL_EXECUTION_STATE_ERROR")?;
-            Ok(Self{handle,contracts,mcp,access:access_name,sequence:std::sync::atomic::AtomicU64::new(0),table:None,review:None})
+            Ok(Self{handle,contracts,mcp,access:access_name,indexed_reader_first,read_max_chars:16000,sequence:std::sync::atomic::AtomicU64::new(0),table:None,review:None})
         }).await.map_err(|_|"TOOL_REGISTRY_INVALID")?
     }
     pub fn bind_table(&mut self, table: Option<Arc<super::table_document::TableTool>>) {
@@ -103,21 +136,26 @@ impl Tools {
     ) -> Vec<Value> {
         // The access tool keeps every granted read/compute capability reachable without
         // sending dozens of schemas into a small model's context on every round.
+        let (reader, other_reader) = if self.indexed_reader_first {
+            ("read_source", "read_pdf_source")
+        } else {
+            ("read_pdf_source", "read_source")
+        };
         let priority = if grounded {
             [
                 "table_document",
                 "search_sources",
-                "read_pdf_source",
+                reader,
                 "agent_workspace",
-                "read_source",
+                other_reader,
             ]
         } else {
             [
                 "table_document",
                 "agent_workspace",
                 "search_sources",
-                "read_pdf_source",
-                "read_source",
+                reader,
+                other_reader,
             ]
         };
         let mut chosen = vec![self
@@ -145,7 +183,14 @@ impl Tools {
                 }
             }
         }
-        chosen.into_iter().map(|c|json!({"type":"function","function":{"name":c["name"],"description":c["summary"],"parameters":c["input_schema"]}})).collect()
+        chosen.into_iter().map(|c| {
+            let schema=model_schema(c);
+            let description=if schema!=c["input_schema"] {
+                format!("{} Use only the registered doc_id from source references or document search to identify the document. Dataset and filename are resolved by LES.",
+                    c["summary"].as_str().unwrap_or("").replace("Use exact dataset_id+doc_name from sources; never invent ids or paths.", ""))
+            } else { c["summary"].as_str().unwrap_or("").to_owned() };
+            json!({"type":"function","function":{"name":c["name"],"description":description,"parameters":schema}})
+        }).collect()
     }
     pub fn disclosed(&self, payload: &Value) -> Option<String> {
         if payload["tool"] == self.access
@@ -160,14 +205,46 @@ impl Tools {
             None
         }
     }
+    pub fn observe_sources(&mut self, payload: &Value) {
+        let payload = super::protocol::effective(payload);
+        if payload["status"] != "ok" {
+            return;
+        }
+        let names: Vec<_> = payload["sources"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|s| s["doc_name"].as_str())
+            .chain(
+                payload["result"]["documents"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|s| s["file_name"].as_str()),
+            )
+            .chain(
+                payload["result"]["candidate_documents"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|s| s["file_name"].as_str()),
+            )
+            .map(|name| json!(name))
+            .collect();
+        if !names.is_empty() {
+            self.indexed_reader_first = prefer_indexed_reader(&names);
+        }
+    }
     pub fn run<'a>(
         &'a self,
         context: Arc<Context>,
         turn: &'a Prepared,
         call: &'a Value,
         run_id: &'a str,
+        deadline: std::time::Instant,
     ) -> Pin<Box<dyn Future<Output = Result<Value>> + Send + 'a>> {
         Box::pin(async move {
+            super::budget::remaining(deadline)?;
             let started = std::time::Instant::now();
             let name = call["tool"].as_str().ok_or("TOOL_NOT_REGISTERED")?;
             let contract = self
@@ -176,7 +253,9 @@ impl Tools {
                 .find(|c| c["name"] == name)
                 .cloned()
                 .ok_or("TOOL_NOT_ALLOWED")?;
-            let args = call["args"].clone();
+            let mut args = call["args"].clone();
+            let read_grant = bounded_read(name, &mut args, self.read_max_chars);
+            let source_request = source_request(name, &args);
             let operation = args["operation"].as_str().map(str::to_owned);
             let scope = turn.scope["resolved_dataset_ids"].clone();
             let resolved = if let Some(id) = args["doc_id"].as_str().filter(|s| !s.is_empty()) {
@@ -216,7 +295,7 @@ impl Tools {
             "approval_receipt_id":null,"idempotency_key":call_id,"shadow":false,"allowed_attachment_ids":turn.request["attachment_id"].as_str().map(|id|vec![id]).unwrap_or_default()});
             let handle = self.handle;
             let admission = json!({"schema":"les.tool-execution.v1","action":"begin","handle":handle,"request":request,"contract":contract,
-            "admission":{"remaining_seconds":600.,"resolved_dataset_ids":resolved,"local_state_allowed":(name=="agent_workspace"&&turn.session["registered"]==true)||(name=="table_document"&&self.table.is_some())||(name=="document_review"&&self.review.is_some())}});
+            "admission":{"remaining_seconds":super::budget::remaining(deadline)?.as_secs_f64(),"resolved_dataset_ids":resolved,"local_state_allowed":(name=="agent_workspace"&&turn.session["registered"]==true)||(name=="table_document"&&self.table.is_some())||(name=="document_review"&&self.review.is_some())}});
             let admitted = tokio::task::spawn_blocking(move || execute(admission))
                 .await
                 .map_err(|_| "TOOL_EXECUTION_STATE_ERROR")??;
@@ -241,7 +320,7 @@ impl Tools {
                         .run(args)
                         .await
                 } else if name == self.access {
-                    access::run(self, context, turn, name, args, run_id).await
+                    access::run(self, context, turn, name, args, run_id, deadline).await
                 } else if name.starts_with("filesystem_")
                     || [
                         "agent_workspace",
@@ -285,14 +364,30 @@ impl Tools {
                     }
                     Ok(result)
                 } else {
+                    let mut args = args;
+                    if ["read_source", "read_excel_source"].contains(&name) {
+                        args["_context_budget_chars"] = json!(self.read_max_chars);
+                    }
                     sources::run(context, turn, name, args).await
                 }
             };
-            let value =
-                tokio::time::timeout(std::time::Duration::from_secs_f64(timeout), action).await;
+            // The extension wrapper must let its nested execution finish its receipt.
+            // The target receives this same deadline and owns cancellation of its IO.
+            let value = if name == self.access {
+                match super::budget::remaining(deadline) {
+                    Ok(_) => action.await,
+                    Err(error) => Err(error),
+                }
+            } else {
+                let end = deadline.min(started + std::time::Duration::from_secs_f64(timeout));
+                super::budget::until(end, action).await
+            };
             let (raw, failure) = match value {
-                Ok(Ok(raw)) => (raw, Value::Null),
-                Ok(Err(error)) => {
+                Ok(raw) => (raw, Value::Null),
+                Err(error) if error.code == "CHAT_DEADLINE_EXCEEDED" => {
+                    (Value::Null, json!("timeout"))
+                }
+                Err(error) => {
                     let mut raw = envelope(
                         name,
                         operation.as_deref().unwrap_or("native_handler"),
@@ -302,8 +397,13 @@ impl Tools {
                     raw["status"] = json!("error");
                     (raw, Value::Null)
                 }
-                Err(_) => (Value::Null, json!("timeout")),
             };
+            let mut raw = raw;
+            if let Some(grant) = read_grant {
+                if raw["result"].is_object() {
+                    raw["result"]["context_budget"] = grant;
+                }
+            }
             let finish = json!({"schema":"les.tool-execution.v1","action":"finish","handle":handle,"ticket":admitted["ticket"],"raw":raw,"failure":failure});
             let mut finished = tokio::task::spawn_blocking(move || execute(finish))
                 .await
@@ -314,7 +414,11 @@ impl Tools {
                 "{}",
                 json!({"event":"chat_tool_finished","tool":name,"status":finished["envelope"]["status"],"code":finished["envelope"]["code"],"duration_ms":finished["envelope"]["duration_ms"]})
             );
-            Ok(self.payload(name, &finished["envelope"], operation.as_deref()))
+            let mut payload = self.payload(name, &finished["envelope"], operation.as_deref());
+            if let Some(request) = source_request {
+                payload["inputs"] = json!([request]);
+            }
+            Ok(payload)
         })
     }
     fn payload(&self, name: &str, execution: &Value, attempted: Option<&str>) -> Value {
@@ -322,7 +426,9 @@ impl Tools {
         if let Some(m) = metadata.as_object_mut() {
             m.remove("result");
         }
-        if execution["result"]["schema"] == "les_tool_result_v1" {
+        if execution["result"]["schema"] == "les_tool_result_v1"
+            && execution["result"]["tool"] == name
+        {
             let mut result = execution["result"].clone();
             result["execution"] = metadata;
             return result;
@@ -334,10 +440,13 @@ impl Tools {
             } else {
                 "trusted_execution"
             },
-            json!({"code":execution["code"],"reference":execution["cursor"]}),
+            json!({"code":if execution["code"]=="TOOL_OK" {json!("TOOL_RESULT_INVALID")} else {execution["code"].clone()},"reference":execution["cursor"]}),
             vec![],
         );
         result["status"] = json!("error");
+        if execution["code"] == "TOOL_RESULT_BUDGET_EXCEEDED" {
+            result["result"]["instruction"] = json!("The full result is stored, but does not fit this tool response. It is not admitted evidence. Repeat a narrower query or reduce limit/max_chars; do not infer the missing contents.");
+        }
         if execution["code"] == "TOOL_SCHEMA_INVALID" {
             if let Some(contract) = self.contracts.iter().find(|c| c["name"] == name) {
                 let schema = &contract["input_schema"];
@@ -351,9 +460,165 @@ impl Tools {
         result
     }
 }
+/// An explicitly selected non-PDF needs the generic reader in the small initial
+/// tool window. This only orders granted schemas; it never rewrites a tool call
+/// or treats a failed physical read as successful.
+fn prefer_indexed_reader(selected: &[Value]) -> bool {
+    !selected.is_empty()
+        && selected.iter().any(|name| {
+            name.as_str()
+                .is_none_or(|name| !name.to_ascii_lowercase().ends_with(".pdf"))
+        })
+}
+fn source_request(name: &str, args: &Value) -> Option<Value> {
+    if ![
+        "search_sources",
+        "read_source",
+        "read_pdf_source",
+        "read_excel_source",
+    ]
+    .contains(&name)
+    {
+        return None;
+    }
+    let mut values = serde_json::Map::new();
+    for key in [
+        "doc_id",
+        "dataset_id",
+        "dataset_ids",
+        "doc_name",
+        "view",
+        "q",
+        "clause",
+        "page",
+        "offset",
+        "limit",
+        "max_chars",
+    ] {
+        if let Some(value) = args.get(key) {
+            let value = if let Some(text) = value.as_str().filter(|s| s.chars().count() > 2048) {
+                json!({"prefix":text.chars().take(2048).collect::<String>(),"sha256":les_core::sha256_hex(text.as_bytes()),"truncated":true})
+            } else {
+                value.clone()
+            };
+            values.insert(key.into(), value);
+        }
+    }
+    Some(json!({"kind":"source_request","arguments":values}))
+}
+fn bounded_read(name: &str, args: &mut Value, cap: usize) -> Option<Value> {
+    if !["read_source", "read_pdf_source", "read_excel_source"].contains(&name) || !args.is_object()
+    {
+        return None;
+    }
+    if args.get("max_chars").is_some_and(|v| v.as_u64().is_none()) {
+        return None;
+    }
+    let requested = args["max_chars"].as_u64().unwrap_or(3000);
+    let granted = requested.min((cap / 2).max(1) as u64);
+    if requested <= granted {
+        return None;
+    }
+    args["max_chars"] = json!(granted);
+    Some(
+        json!({"requested_max_chars":requested,"granted_max_chars":granted,"reason":"current_model_context_budget",
+        "note":"Размер порции ограничен свободным окном модели с резервом для идентификаторов и квитанции. Это не полный просмотр. Для PDF продолжай по next_cursor; для индексированных разделов уточни чтение."}),
+    )
+}
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn reader_schema_has_one_identity_but_keeps_page_and_revision_constraints() {
+        let contract = json!({"name":"read_pdf_source","input_schema":{"type":"object","properties":{
+            "doc_id":{"type":"string"},"dataset_id":{"type":"string"},"doc_name":{"type":"string"},
+            "page":{"type":"integer","minimum":1},"source_sha256":{"type":"string"}},
+            "required":["page"],"anyOf":[{"required":["doc_id"]},{"required":["dataset_id","doc_name"]}],"additionalProperties":false}});
+        let original = contract.clone();
+        let schema = model_schema(&contract);
+        assert_eq!(schema["required"], json!(["page", "doc_id"]));
+        assert_eq!(schema["properties"]["page"]["minimum"], 1);
+        assert!(schema["properties"]["source_sha256"].is_object());
+        assert!(schema["properties"].get("dataset_id").is_none());
+        assert!(schema["properties"].get("doc_name").is_none());
+        assert!(schema.get("anyOf").is_none());
+        assert_eq!(schema["additionalProperties"], false);
+        assert_eq!(contract, original);
+    }
+    #[test]
+    fn an_overflow_reference_keeps_tool_identity_and_is_never_evidence() {
+        let tools = Tools {
+            handle: 0,
+            contracts: vec![],
+            mcp: HashMap::new(),
+            access: "access".into(),
+            indexed_reader_first: false,
+            read_max_chars: 16000,
+            sequence: std::sync::atomic::AtomicU64::new(0),
+            table: None,
+            review: None,
+        };
+        let receipt = json!({"status":"overflow","code":"TOOL_RESULT_BUDGET_EXCEEDED","cursor":"stored-result",
+            "result":{"schema":"les_tool_result_v1","reference":"stored-result","whole_result_stored":true}});
+        let payload = tools.payload("search_sources", &receipt, None);
+        assert_eq!(payload["tool"], "search_sources");
+        assert_eq!(payload["status"], "error");
+        assert_eq!(payload["result"]["code"], "TOOL_RESULT_BUDGET_EXCEEDED");
+        assert_eq!(payload["result"]["reference"], "stored-result");
+        assert!(payload["sources"].as_array().unwrap().is_empty());
+        let mut agent =
+            les_core::coordinator::Coordinator::new(2, 30., ["search_sources".into()]).unwrap();
+        assert!(matches!(
+            agent.next_blocking().unwrap(),
+            les_core::coordinator::Step::Model { .. }
+        ));
+        agent.model_result(json!({"tool_calls":[{"id":"one","type":"function","function":{"name":"search_sources","arguments":"{}"}}]})).unwrap();
+        assert!(matches!(
+            agent.next_blocking().unwrap(),
+            les_core::coordinator::Step::Tool(_)
+        ));
+        agent.tool_result(payload).unwrap();
+        assert!(matches!(
+            agent.next_blocking().unwrap(),
+            les_core::coordinator::Step::Failed(code) if code=="TOOL_RESULT_BUDGET_EXCEEDED"
+        ));
+    }
+    #[test]
+    fn mixed_discovery_uses_all_formats_independently_of_the_first_ranked_source() {
+        let mut tools = Tools {
+            handle: 0,
+            contracts: ["access", "search_sources", "read_source", "read_pdf_source"]
+                .into_iter()
+                .map(|name| json!({"name":name,"summary":name,"input_schema":{"type":"object"}}))
+                .collect(),
+            mcp: HashMap::new(),
+            access: "access".into(),
+            indexed_reader_first: false,
+            read_max_chars: 16000,
+            sequence: std::sync::atomic::AtomicU64::new(0),
+            table: None,
+            review: None,
+        };
+        for names in [["Source.pdf", "Book.xlsx"], ["Book.xlsx", "Source.pdf"]] {
+            tools.observe_sources(
+                &json!({"status":"ok","sources":names.map(|name|json!({"doc_name":name}))}),
+            );
+            assert!(tools
+                .schemas(3, true)
+                .iter()
+                .any(|s| s["function"]["name"] == "read_source"));
+        }
+        tools.observe_sources(&json!({"status":"ok","result":{"documents":[{"file_name":"Source.pdf"},{"file_name":"Book.xlsx"}]}}));
+        assert!(tools
+            .schemas(3, true)
+            .iter()
+            .any(|s| s["function"]["name"] == "read_source"));
+        tools.observe_sources(&json!({"status":"ok","sources":[{"doc_name":"Only.pdf"}]}));
+        assert!(tools
+            .schemas(3, true)
+            .iter()
+            .any(|s| s["function"]["name"] == "read_pdf_source"));
+    }
     #[test]
     fn schema_rejection_returns_the_granted_contract_without_argument_echo() {
         let schema = json!({"type":"object","properties":{"operation":{"type":"string"}},"required":["operation"],"additionalProperties":false});
@@ -362,6 +627,8 @@ mod tests {
             contracts: vec![json!({"name":"fixture","input_schema":schema})],
             mcp: HashMap::new(),
             access: "access".into(),
+            indexed_reader_first: false,
+            read_max_chars: 16000,
             sequence: std::sync::atomic::AtomicU64::new(0),
             table: None,
             review: None,
@@ -385,6 +652,8 @@ mod tests {
             ],
             mcp: HashMap::new(),
             access: "access".into(),
+            indexed_reader_first: false,
+            read_max_chars: 16000,
             sequence: std::sync::atomic::AtomicU64::new(0),
             table: None,
             review: None,
@@ -416,6 +685,51 @@ mod tests {
             .contracts
             .iter()
             .any(|c| c["name"] == "agent_workspace"));
+    }
+    #[test]
+    fn selected_word_and_mixed_files_expose_generic_reader_without_revoking_pdf() {
+        let contract =
+            |name: &str| json!({"name":name,"summary":name,"input_schema":{"type":"object"}});
+        for selected in [
+            vec![json!("folder/Source.DOCX")],
+            vec![json!("a.pdf"), json!("b.xlsx")],
+        ] {
+            let tools = Tools {
+                handle: 0,
+                contracts: vec![
+                    contract("access"),
+                    contract("search_sources"),
+                    contract("read_pdf_source"),
+                    contract("read_source"),
+                ],
+                mcp: HashMap::new(),
+                access: "access".into(),
+                indexed_reader_first: prefer_indexed_reader(&selected),
+                read_max_chars: 16000,
+                sequence: std::sync::atomic::AtomicU64::new(0),
+                table: None,
+                review: None,
+            };
+            let names: Vec<_> = tools
+                .schemas(3, true)
+                .iter()
+                .map(|s| s["function"]["name"].clone())
+                .collect();
+            assert_eq!(
+                names,
+                vec![
+                    json!("access"),
+                    json!("search_sources"),
+                    json!("read_source")
+                ]
+            );
+            let disclosed = tools.disclosed_schemas(3, true, &["read_pdf_source".into()]);
+            assert!(disclosed
+                .iter()
+                .any(|s| s["function"]["name"] == "read_pdf_source"));
+        }
+        assert!(!prefer_indexed_reader(&[]));
+        assert!(!prefer_indexed_reader(&[json!("folder/Source.PDF")]));
     }
 }
 impl Drop for Tools {

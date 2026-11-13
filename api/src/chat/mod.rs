@@ -1,16 +1,20 @@
 //! Request-owned native chat. No request or model/tool callback is delegated to Python.
+mod budget;
 pub mod commands;
+mod discovery;
 mod document_review;
 mod egress;
 mod error;
 mod evidence;
 pub mod http;
+mod inspection;
 mod journal;
 mod model;
 pub(crate) mod prepare;
 mod protocol;
 mod runner;
 mod table_document;
+mod table_facts;
 mod tools;
 mod view;
 use crate::Context;

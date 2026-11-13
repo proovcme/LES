@@ -60,8 +60,18 @@ fn ledger(r: &Value) -> Result<Value> {
     } else {
         "разделов"
     };
+    // Preserve count-only historical receipts. Native review provides causes.
+    let diagnosed = state["source_errors"]
+        .as_object()
+        .is_some_and(|errors| !errors.is_empty());
+    let source_changed = state["source_errors"].as_object().is_some_and(|errors| {
+        errors
+            .values()
+            .any(|code| code == "REVIEW_ORIGINAL_CHANGED" || code == "INDEX_CHANGED_DURING_SEARCH")
+    });
     let notice=match status {
         "unavailable"=>"Не удалось подтвердить состояние задания. Выполнение действий не подтверждено.".into(),
+        "needs_recheck" if count("blocked_units") > 0 && diagnosed && !source_changed=>"Не удалось проверить доступность источника. Требуется перепроверка после восстановления доступа. Сохранённые решения остаются в журнале; их актуальность сейчас не подтверждена.".into(),
         "needs_recheck"=>"Источник или зависимые выводы изменились. Требуется перепроверка; прежний текст не подтверждает актуальность.".into(),
         "incomplete"=>format!("Проверка не завершена: в журнале сохранены решения для {saved} из {} {subject}. Текст модели не подтверждает выполнение остальных действий.",count("total")),
         "needs_attention"=>format!("Решения записаны, но {} {subject} требуют проверки пользователем.",count("needs_review")),
@@ -70,9 +80,17 @@ fn ledger(r: &Value) -> Result<Value> {
     if state.get("task_id").is_none() || state.get("revision").is_none() {
         return Err("EXECUTION_REQUEST_INVALID");
     }
-    Ok(
-        json!({"schema":"les.execution-receipt.v1","kind":r["kind"],"task_id":state["task_id"],"revision":state["revision"],"status":status,"counts":counts,"saved":saved,"accepted":false,"notice":notice}),
-    )
+    let blocked = count("blocked_units") > 0 && diagnosed;
+    let mut receipt = json!({"schema":"les.execution-receipt.v1","kind":r["kind"],"task_id":state["task_id"],"revision":state["revision"],"status":status,"counts":counts,"saved":saved,"accepted":false,"notice":notice});
+    if blocked {
+        receipt["source_check"] = json!(if source_changed {
+            "changed"
+        } else {
+            "unavailable"
+        });
+        receipt["source_errors"] = state.get("source_errors").cloned().unwrap_or(json!({}));
+    }
+    Ok(receipt)
 }
 fn local(r: &Value) -> Value {
     let p = &r["payload"];

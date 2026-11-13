@@ -31,12 +31,35 @@ fn identity(file: &File) -> Result<(u64, u64), &'static str> {
 
 pub fn fingerprint(request: &Value) -> Result<Value, &'static str> {
     let path = request["path"].as_str().ok_or("CORE_FILE_PATH_INVALID")?;
-    fingerprint_path(path, request["include_mtime"] == true, || {})
+    fingerprint_path(
+        path,
+        request["include_mtime"] == true,
+        request["deny_writers"] == true,
+        || {},
+    )
+}
+
+fn open_source(path: &str, deny_writers: bool) -> Result<File, &'static str> {
+    let mut options = File::options();
+    options.read(true);
+    #[cfg(windows)]
+    if deny_writers {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.share_mode(1); // FILE_SHARE_READ
+    }
+    options.open(path).map_err(|error| {
+        if cfg!(windows) && deny_writers && matches!(error.raw_os_error(), Some(32 | 33)) {
+            "CORE_FILE_CHANGED"
+        } else {
+            "CORE_FILE_UNAVAILABLE"
+        }
+    })
 }
 
 fn fingerprint_path(
     path: &str,
     include_mtime: bool,
+    deny_writers: bool,
     after_read: impl FnOnce(),
 ) -> Result<Value, &'static str> {
     if !std::fs::metadata(path)
@@ -45,7 +68,7 @@ fn fingerprint_path(
     {
         return Err("CORE_NOT_REGULAR_FILE");
     }
-    let mut file = File::open(path).map_err(|_| "CORE_FILE_UNAVAILABLE")?;
+    let mut file = open_source(path, deny_writers)?;
     let before = file.metadata().map_err(|_| "CORE_FILE_UNAVAILABLE")?;
     if !before.is_file() {
         return Err("CORE_NOT_REGULAR_FILE");
@@ -70,7 +93,7 @@ fn fingerprint_path(
     }
     after_read();
     let after = file.metadata().map_err(|_| "CORE_FILE_UNAVAILABLE")?;
-    let current = File::open(path).map_err(|_| "CORE_FILE_CHANGED")?;
+    let current = open_source(path, deny_writers).map_err(|_| "CORE_FILE_CHANGED")?;
     let current_meta = current.metadata().map_err(|_| "CORE_FILE_CHANGED")?;
     if size != before.len()
         || size != after.len()
@@ -115,7 +138,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let path = root.join("source.txt");
         std::fs::write(&path, b"original").unwrap();
-        let result = fingerprint_path(path.to_str().unwrap(), true, || {
+        let result = fingerprint_path(path.to_str().unwrap(), true, false, || {
             std::fs::write(&path, b"changed size").unwrap();
         });
         assert_eq!(result, Err("CORE_FILE_CHANGED"));

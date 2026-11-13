@@ -127,6 +127,20 @@ def test_intake_retries_only_due_failures_in_its_own_manifest(tmp_path):
         assert db.execute("SELECT count(*) FROM documents WHERE status='ERROR'").fetchone()==(4,)
 
 
+def test_manual_attach_keeps_the_receipt_of_an_existing_automatic_watch_job(tmp_path):
+    if not os.getenv('LES_CORE_LIBRARY'):pytest.skip('Build native core')
+    database=tmp_path/'meta.db';MetaDB(str(database))
+    with sqlite3.connect(database) as db:db.execute("INSERT INTO datasets(id,name) VALUES('ds','Receipt')")
+    root=str(tmp_path/'empty')
+    job=catalog_call(database,'intake_enqueue',root=root,dataset_id='ds',parse_limit=1,watch=True,scheduled=True)['id']
+    manual=catalog_call(database,'intake_enqueue',root=root,dataset_id='ds',parse_limit=1,watch=True)
+    assert manual['id']==job
+    catalog_call(database,'intake_claim')
+    catalog_call(database,'intake_manifest',id=job,root=root,files=[])
+    catalog_call(database,'intake_register',id=job,files=[])
+    assert catalog_call(database,'intake_get',id=job)['status']=='completed'
+
+
 @pytest.mark.parametrize('storage',['server','edge'])
 @pytest.mark.parametrize('fresh',[False,True])
 def test_cold_native_intake_model_guard_pdf_and_owner_death(tmp_path,storage,fresh):
@@ -204,19 +218,42 @@ def test_cold_native_intake_model_guard_pdf_and_owner_death(tmp_path,storage,fre
             assert {p['page'] for p in pdf_points if p.get('page') is not None}=={1,2}
             assert {'#page=1','#page=2'} <= {p.get('source_ref','')[p.get('source_ref','').find('#page='):] for p in pdf_points}
             assert {p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in folder.iterdir()}==baseline
-            text.write_text('Updated source revision with different content. '*35,encoding='utf-8')
+            previous = text.stat()
+            revision_bytes = b'Revised source evidence. ' * 40
+            assert len(revision_bytes) == previous.st_size
+            text.write_bytes(revision_bytes)
+            os.utime(text, ns=(previous.st_atime_ns, previous.st_mtime_ns))
+            assert text.stat().st_mtime_ns == previous.st_mtime_ns
+            revised_sha256 = hashlib.sha256(revision_bytes).hexdigest()
             arrived=Event();release=Event()
             def pause(value):
                 arrived.set();release.wait(30)
             embeddings.on_request=pause
             again=client.post('/api/rag/index-external',json={'path':str(folder),'dataset_id':'ds','background':True,'parse_limit':1}).raise_for_status().json()['intake_job_id']
-            assert arrived.wait(20);lost_pid=api.pid;stop(api);embeddings.on_request=None;release.set()
+            wait_for(lambda: arrived.is_set() or progress(again)['status'] in ('completed', 'failed'))
+            assert arrived.is_set(), 'Intake ignored changed bytes with unchanged size and mtime'
+            with sqlite3.connect(database) as db:
+                assert db.execute('SELECT file_hash FROM documents WHERE file_name LIKE ?', ('%'+text.name,)).fetchone() == (baseline[text.name],)
+            def indexed_hashes():
+                with closing(QdrantClient(url=url,api_key=key,check_compatibility=False)) as vectors:
+                    points,_=vectors.scroll('docs',limit=100,with_payload=True)
+                return {p.payload['source_sha256'] for p in points
+                        if p.payload.get('dataset_id')=='ds' and p.payload.get('file_name','').endswith(text.name)}
+            assert indexed_hashes() == {baseline[text.name]}
+            lost_pid=api.pid;stop(api);embeddings.on_request=None;release.set()
             api=launch();wait_for(lambda:progress(again)['status']=='completed',timeout=40)
             assert progress(again)['recoveries']>=1
             with sqlite3.connect(database) as db:
                 assert db.execute("SELECT owner_pid,stop_code FROM les_index_batches WHERE status='interrupted'").fetchone()==(lost_pid,'INDEX_BATCH_OWNER_LOST')
                 assert db.execute("SELECT count(*) FROM documents WHERE status='INDEXED' AND chunk_count>0").fetchone()==(2,)
+                assert db.execute('SELECT file_hash FROM documents WHERE file_name LIKE ?', ('%'+text.name,)).fetchone() == (revised_sha256,)
             assert not list((state/'data/index-publish').iterdir())
+            assert indexed_hashes() == {revised_sha256}
+            before = len(embeddings.calls)
+            os.utime(text, ns=(previous.st_atime_ns, previous.st_mtime_ns + 2_000_000_000))
+            unchanged=client.post('/api/rag/index-external',json={'path':str(folder),'dataset_id':'ds','background':True,'parse_limit':1}).raise_for_status().json()['intake_job_id']
+            wait_for(lambda:progress(unchanged)['status']=='completed')
+            assert len(embeddings.calls) == before
     finally:
         embeddings.on_request=None
         if 'release' in locals():release.set()

@@ -1,4 +1,6 @@
 //! Registered identities and frozen user scope bind every source read.
+mod catalog;
+mod parts;
 pub(crate) mod retrieval;
 mod verification;
 use super::{envelope, Context, Prepared, Result};
@@ -130,19 +132,7 @@ pub async fn run(
         return search(context, turn, args).await;
     }
     if name == "dataset_map" {
-        scoped(turn, &args["dataset_id"])?;
-        let db = context.database.clone();
-        let dataset = args["dataset_id"].clone();
-        let result = tokio::task::spawn_blocking(move || {
-            super::super::unwrap(crate::library::catalog(
-                &db,
-                "library_documents",
-                json!({"dataset_id":dataset,"limit":100,"offset":0}),
-            ))
-        })
-        .await
-        .map_err(|_| "SOURCE_CATALOG_UNAVAILABLE")??;
-        return Ok(envelope(name, "dataset_map", result, vec![]));
+        return catalog::map(context, turn, args).await;
     }
     if name == "read_pdf_source" {
         let doc = document(&context, &args).await?;
@@ -155,8 +145,25 @@ pub async fn run(
         source["doc_id"] = doc["id"].clone();
         source["dataset_id"] = doc["dataset_id"].clone();
         source["doc_name"] = doc["file_name"].clone();
+        if source["source_sha256"].as_str().is_none_or(str::is_empty)
+            && doc["file_hash"].as_str().is_some_and(|s| s.len() == 64)
+        {
+            source["source_sha256"] = doc["file_hash"].clone();
+        }
         let result=tokio::task::spawn_blocking(move||{
-            crate::pdf_text::supervised_source(json!({"kind":"source_page","database":database,"content_root":content_root,"source":source}))
+            let request=json!({"kind":"source_page","database":database,"content_root":content_root,"source":source});
+            match crate::pdf_text::supervised_source(request.clone()) {
+                Err(code) if code=="PDF_QUERY_NOT_FOUND" => {
+                    // A missing literal is not a failed physical page read. Read
+                    // that same pinned page, explicitly reporting the miss.
+                    let mut full=request;
+                    full["source"].as_object_mut().ok_or("PDF_SOURCE_INVALID")?.remove("q");
+                    let mut value=crate::pdf_text::supervised_source(full)?;
+                    value["literal_lookup"]=json!({"matched":false,"code":"PDF_QUERY_NOT_FOUND"});
+                    Ok(value)
+                },
+                result=>result,
+            }
         }).await.map_err(|_|"PDF_READ_FAILED")??;
         let mut provenance = doc;
         provenance["file_hash"] = result["source_sha256"].clone();
@@ -170,9 +177,17 @@ pub async fn run(
             .chars()
             .take(240)
             .collect::<String>());
-        return Ok(envelope(name, "physical_page", result, vec![source]));
+        let missing_literal = result["literal_lookup"]["matched"] == false;
+        let mut reply = envelope(name, "physical_page", result, vec![source]);
+        if missing_literal {
+            reply["warnings"]=json!(["Дословное совпадение не найдено. Прочитан текст той же страницы; это не подтверждает наличие искомой фразы. При next_offset продолжи чтение."]);
+        }
+        return Ok(reply);
     }
     if name == "read_source" {
+        if args["view"].as_str().is_some_and(|s| s != "text") {
+            return parts::read(context, turn, args).await;
+        }
         return retrieval::read(context, turn, args).await;
     }
     if name == "read_excel_source" {

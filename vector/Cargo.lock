@@ -2073,14 +2073,17 @@ dependencies = [
  "mail-parser",
  "ort",
  "parquet",
+ "qdrant-rust-stemmers",
  "quick-xml",
  "regex",
+ "rho-sdk",
  "rusqlite",
  "scraper",
  "serde_json",
  "sha1",
  "sha2 0.10.9",
  "tokenizers",
+ "tokio",
  "zip",
 ]
 
@@ -3265,6 +3268,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
+name = "rho-sdk"
+version = "5.15.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a81e5b3eb5884ee7323e7b600e297be470d1834d3c9b2f529577652c4f48ff90"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "rle-decode-fast"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4044,7 +4062,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63e71662fa4b2a2c3a26f570f037eb95bb1f85397f3cd8076caed2f026a6d100"
 dependencies = [
  "pin-project-lite",
+ "tracing-attributes",
  "tracing-core",
+]
+
+[[package]]
+name = "tracing-attributes"
+version = "0.1.31"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7490cfa5ec963746568740651ac6781f701c9c5ea257c58e057f3ba8cf69e8da"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]

@@ -9,10 +9,13 @@ description = "Bounded native document operations for LES"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+rho-sdk = { version = "=5.15.2", default-features = false }
+tokio = { version = "=1.54.1", features = ["rt", "sync", "time"] }
 serde_json = { version = "=1.0.150", features = ["float_roundtrip", "arbitrary_precision"] }
 sha2 = "=0.10.9"
 sha1 = "=0.10.6"
 regex = "=1.12.3"
+qdrant-rust-stemmers = "=1.3.0"
 rusqlite = { version = "=0.41.1", features = ["bundled", "functions"] }
 chrono = { version = "=0.4.45", default-features = false, features = ["clock", "std"] }
 calamine = "=0.37.0"
@@ -25,7 +28,7 @@ jsonschema = { version = "=0.60.2", default-features = false, features = ["arbit
 mail-parser = { version = "=0.11.9", default-features = false, features = ["full_encoding"] }
 scraper = { version = "=0.27.0", default-features = false }
 parquet = { version = "=60.1.0", default-features = false, features = ["snap"] }
-image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg", "webp"] }
+image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg", "webp", "bmp"] }
 
 [profile.release]
 lto = true

@@ -171,6 +171,21 @@ def test_private_model_bridge_rejects_browser_and_out_of_scope_targets(gateway):
         assert response.headers['x-les-model-bridge-error'] == 'MODEL_BRIDGE_TARGET_REJECTED'
 
 
+def test_rejected_model_posts_deliver_errors_and_leave_the_api_usable(gateway):
+    client, _, _ = gateway
+    path='/api/light/internal-model-http'
+    for i in range(64):
+        denied=client.post(path,headers={'Origin':str(client.base_url).rstrip('/'),
+            'X-Les-Model-Token':MODEL_BRIDGE_TOKEN,'X-Les-Model-Target':'http://127.0.0.1:11434/api/chat'},
+            json={'untrusted':'Данные 日本語 '+str(i)})
+        assert denied.status_code==404 and denied.json()['detail']=='Not Found'
+        invalid=client.post(path,headers={'X-Les-Model-Token':MODEL_BRIDGE_TOKEN,
+            'X-Les-Model-Target':'http://192.0.2.1:11434/api/chat'},json={'untrusted':str(i)})
+        assert invalid.status_code==400
+        assert invalid.headers['x-les-model-bridge-error']=='MODEL_BRIDGE_TARGET_REJECTED'
+    assert client.get('/api/workspace/sessions').status_code==200
+
+
 def test_auth_origin_and_native_route_ownership(gateway):
     client,database,_=gateway
     with httpx.Client(base_url=client.base_url,trust_env=False) as anonymous:
@@ -398,6 +413,20 @@ def test_native_auth_custom_policy_forwarding_and_cors_without_legacy_calls(gate
                                                   'Access-Control-Request-Method':'BREW'}).status_code == 400
     assert not (folder/'legacy-authorization.marker').exists()
     assert not (folder/'policy-calls.log').exists()
+
+
+def test_invalid_media_upload_does_not_break_the_next_keepalive_request(gateway):
+    gateway_client,_,folder=gateway
+    native_trust(folder,'admin')
+    with httpx.Client(base_url=gateway_client.base_url,trust_env=False,timeout=10) as client:
+        def parts():
+            yield b'not-json-first-part'
+            time.sleep(.1)
+            yield b'-last-part'
+        for _ in range(8):
+            result=client.post('/api/auth/keys',content=parts(),headers={'Content-Type':'text/plain'})
+            assert result.status_code==422
+            assert client.get('/api/light/instance').status_code==200
 
 
 def test_native_key_management_preserves_roles_and_serializes_device_binding(gateway):

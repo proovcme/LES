@@ -156,10 +156,18 @@ impl Bridge {
             return self.send_external_embedding(request).await;
         }
         let Some(target) = self.target(request.headers()) else {
-            return failure(StatusCode::BAD_REQUEST, "MODEL_BRIDGE_TARGET_REJECTED");
+            return crate::transport::reject(
+                request,
+                failure(StatusCode::BAD_REQUEST, "MODEL_BRIDGE_TARGET_REJECTED"),
+            )
+            .await;
         };
         let Some(reply) = Reply::parse(target.path(), request.headers()) else {
-            return failure(StatusCode::BAD_REQUEST, "MODEL_BRIDGE_REQUEST_INVALID");
+            return crate::transport::reject(
+                request,
+                failure(StatusCode::BAD_REQUEST, "MODEL_BRIDGE_REQUEST_INVALID"),
+            )
+            .await;
         };
         let (parts, body) = request.into_parts();
         let Some(length) = parts.headers.get(header::CONTENT_LENGTH) else {
@@ -477,5 +485,5 @@ pub async fn handle(context: &Context, request: Request) -> Response {
         ERROR_HEADER,
         header::HeaderValue::from_static("UPSTREAM_UNREACHABLE"),
     );
-    response
+    crate::transport::reject(request, response).await
 }

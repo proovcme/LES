@@ -12,41 +12,40 @@ use std::{
 
 type Result<T> = std::result::Result<T, &'static str>;
 type Writers = HashMap<u64, Connection>;
-fn fuse(r: &Value) -> Result<Value> {
-    let constant = r["rank_constant"]
-        .as_f64()
-        .filter(|v| v.is_finite() && *v > 0.)
-        .ok_or("RRF_CONSTANT_INVALID")?;
-    let mut positions = HashMap::new();
-    let mut rows = Vec::<(Value, f64)>::new();
-    for channel in r["channels"].as_array().ok_or("RRF_REQUEST_INVALID")? {
-        for (rank, id) in channel
-            .as_array()
-            .ok_or("RRF_REQUEST_INVALID")?
-            .iter()
-            .enumerate()
-        {
-            if !(id.is_string() || id.as_u64().is_some()) {
-                return Err("RRF_REQUEST_INVALID");
-            }
-            let key = id.to_string();
-            let index = *positions.entry(key).or_insert_with(|| {
-                rows.push((id.clone(), 0.));
-                rows.len() - 1
-            });
-            rows[index].1 += 1. / (constant + rank as f64);
-        }
+/// Navigation is a separate candidate pool, never a second vote in global RRF.
+/// Preserve candidate scores and identities; exclude already retrieved evidence.
+pub fn hierarchy_candidates(global: &[Value], routed: Vec<Value>, limit: usize) -> Vec<Value> {
+    let mut seen: std::collections::HashSet<_> =
+        global.iter().map(|p| p["id"].to_string()).collect();
+    routed
+        .into_iter()
+        .filter(|p| p["payload"]["node_role"] != "navigation" && seen.insert(p["id"].to_string()))
+        .take(limit)
+        .collect()
+}
+#[cfg(test)]
+mod hierarchy_tests {
+    use super::*;
+    #[test]
+    fn navigation_is_separate_without_duplicate_or_rescored_global_evidence() {
+        let global = vec![
+            json!({"id":"global-a","score":0.3}),
+            json!({"id":"global-b","score":0.2}),
+        ];
+        let snapshot = global.clone();
+        let routed = vec![
+            json!({"id":"new","score":0.09}),
+            json!({"id":"global-a","score":0.8}),
+            json!({"id":"new","score":0.5}),
+            json!({"id":"nav","payload":{"node_role":"navigation"}}),
+        ];
+        assert_eq!(
+            hierarchy_candidates(&global, routed, 4),
+            vec![json!({"id":"new","score":0.09})]
+        );
+        assert_eq!(global, snapshot);
+        assert!(hierarchy_candidates(&global, vec![], 0).is_empty());
     }
-    rows.sort_by(|a, b| b.1.total_cmp(&a.1)); // Stable ties retain first channel's encounter order.
-    let limit = r["limit"].as_i64().ok_or("RRF_REQUEST_INVALID")?;
-    let count = if limit < 0 {
-        rows.len().saturating_sub(limit.unsigned_abs() as usize)
-    } else {
-        limit as usize
-    };
-    Ok(
-        json!({"hits":rows.into_iter().take(count).map(|(id,score)| json!([id,score])).collect::<Vec<_>>()}),
-    )
 }
 fn writers() -> &'static Mutex<Writers> {
     static WRITERS: OnceLock<Mutex<Writers>> = OnceLock::new();
@@ -292,7 +291,9 @@ fn search(r: &Value) -> Result<Value> {
         }
     }
     if let Some(values) = r["ancestor_ids"].as_array().filter(|v| !v.is_empty()) {
-        clauses.push("EXISTS (SELECT 1 FROM ancestors a WHERE a.doc=d.id AND a.ancestor IN (SELECT value FROM json_each(?)))".into());
+        // Materialize the selected descendants once, rather than re-evaluating
+        // the JSON ancestor list for every posting matched by every query term.
+        clauses.push("d.id IN (SELECT a.doc FROM ancestors a WHERE a.ancestor IN (SELECT value FROM json_each(?)))".into());
         args.push(json!(values).to_string().into());
     }
     let limit = r["limit"].as_i64().ok_or("INDEX_SPARSE_REQUEST_INVALID")?;
@@ -314,7 +315,8 @@ fn search(r: &Value) -> Result<Value> {
 
 pub fn execute(r: &Value) -> Result<Value> {
     match string(r, "action")? {
-        "fuse" => fuse(r),
+        "fuse" => crate::retrieval_fusion::ranks(r),
+        "merge" => crate::retrieval_fusion::execute(r),
         "metadata" => Ok(json!({"metadata":metadata(&open(r,false)?)?})),
         "search" => search(r),
         "begin" => {

@@ -205,7 +205,7 @@ pub(crate) async fn ensure(
             }
             let latest=selected(&context)?;
             if latest!=binding || Settings::load(&context.state_root)?.core_values()!=settings.core_values(){return Err("INDEX_SETUP_MODEL_CHANGED".into());}
-            store.finish_setup_held(session.writer())?;
+            store.finish_setup_held(&context, &collection, contract["fingerprint"].as_str().ok_or("INDEX_CONTRACT_INVALID")?, session.writer())?;
             if selected(&context)?!=binding || Settings::load(&context.state_root)?.core_values()!=settings.core_values(){return Err("INDEX_SETUP_MODEL_CHANGED".into());}
             session.finish(&contract)?;
             store.mark_setup_ready();
@@ -247,13 +247,16 @@ pub(crate) async fn ensure(
         let Ok(Some(info)) = info else {
             return;
         };
-        for field in [
-            "dataset_id",
-            "file_name",
-            "embedding_fingerprint",
-            "mail_account_id",
-            "mail_thread_key",
-            "mail_registry_message_id",
+        for (field, kind) in [
+            ("dataset_id", "keyword"),
+            ("file_name", "keyword"),
+            ("node_role", "keyword"),
+            ("ancestor_ids", "keyword"),
+            ("evidence_admissible", "bool"),
+            ("embedding_fingerprint", "keyword"),
+            ("mail_account_id", "keyword"),
+            ("mail_thread_key", "keyword"),
+            ("mail_registry_message_id", "keyword"),
         ] {
             if info["payload_schema"].get(field).is_some() {
                 continue;
@@ -263,7 +266,7 @@ pub(crate) async fn ensure(
                 &collection,
                 Method::PUT,
                 "index",
-                json!({"field_name":field,"field_schema":"keyword"}),
+                json!({"field_name":field,"field_schema":kind}),
             )) {
                 eprintln!(
                     "{}",

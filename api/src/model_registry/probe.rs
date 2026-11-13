@@ -288,13 +288,13 @@ pub(super) async fn run(
         );
     }
     if row["extension_type"] == "ollama" && endpoint.locality != "remote" {
-        let supported = |name: &str| {
+        let supported = |observations: &[Value], name: &str| {
             observations
                 .iter()
                 .any(|v| v["capability"] == name && v["state"] == "supported")
         };
         let context_tokens = row["requested_context_tokens"].as_u64().unwrap_or(8192);
-        if supported("chat_completions") {
+        if supported(&observations, "chat_completions") {
             let payload = json!({"model":model,"messages":[{"role":"user","content":PROBE}],"think":false,"stream":false,
                 "options":{"num_predict":1,"num_ctx":context_tokens},"keep_alive":0});
             if let Ok((200, raw)) = exchange(&endpoint, &auth, "chat", Some(payload), true).await {
@@ -302,6 +302,37 @@ pub(super) async fn run(
                     .is_ok_and(|v| v["message"].is_object() && v["done"] == true)
                 {
                     options["chat_protocol"] = json!("native_chat_v1");
+                    // Verify structured output through the transport used by chat.
+                    // A compatibility response may spend its short limit thinking.
+                    if selected.iter().any(|v| v == "structured_output") {
+                        let schema = json!({"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"],"additionalProperties":false});
+                        let body = json!({"model":model,"messages":[{"role":"user","content":"Return JSON with ok=true."}],"think":false,"stream":false,"format":schema,"options":{"num_predict":128,"num_ctx":context_tokens}});
+                        let ok = match exchange(&endpoint, &auth, "chat", Some(body), true).await {
+                            Ok((200, raw)) => serde_json::from_slice::<Value>(&raw)
+                                .ok()
+                                .filter(|v| v["done"] == true && v["done_reason"] != "length")
+                                .and_then(|v| {
+                                    serde_json::from_str::<Value>(v["message"]["content"].as_str()?)
+                                        .ok()
+                                })
+                                .is_some_and(|v| {
+                                    v.as_object().is_some_and(|o| o.len() == 1)
+                                        && v["ok"].is_boolean()
+                                }),
+                            _ => false,
+                        };
+                        if let Some(observation) = observations
+                            .iter_mut()
+                            .find(|v| v["capability"] == "structured_output")
+                        {
+                            observation["state"] = json!(if ok { "supported" } else { "unknown" });
+                            observation["detail"] = json!(if ok {
+                                "native_json_schema_verified"
+                            } else {
+                                "native_json_schema_unverified"
+                            });
+                        }
+                    }
                     if let Ok((200, raw)) =
                         exchange(&endpoint, &auth, "show", Some(json!({"model":model})), true).await
                     {
@@ -320,7 +351,7 @@ pub(super) async fn run(
                 }
             }
         }
-        if supported("embeddings") {
+        if supported(&observations, "embeddings") {
             let payload = json!({"model":model,"input":[PROBE],"truncate":false,"keep_alive":0,"options":{"num_ctx":context_tokens}});
             if let Ok((200, raw)) = exchange(&endpoint, &auth, "embed", Some(payload), true).await {
                 if serde_json::from_slice::<Value>(&raw)

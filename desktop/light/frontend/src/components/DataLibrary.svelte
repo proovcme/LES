@@ -4,6 +4,7 @@
   import type { Dataset } from '../lib/contracts';
   import Icon from './Icon.svelte';
   import Modal from './Modal.svelte';
+  import FolderWatches from './FolderWatches.svelte';
 
   type Project = { id: number; name: string; status: string };
   type Desktop = Window & { __TAURI__?: { core: { invoke: (name: string, args?: object) => Promise<string | null> } } };
@@ -15,6 +16,8 @@
   let selected = $state('');
   let name = $state('');
   let path = $state('');
+  let followFolder = $state(true);
+  let watchRevision = $state(0);
   let project = $state<number | null>(null);
   let projectName = $state('');
   let busy = $state('');
@@ -55,7 +58,8 @@
     if (project !== null) {
       await post('/api/projects/' + project + '/links', { kind: 'dataset', ref: selected });
     }
-    await post('/api/rag/index-external', { path: root, dataset_id: selected, background: true, parse_limit: 500 });
+    await post('/api/rag/index-external', { path: root, dataset_id: selected, background: true, parse_limit: 500, watch: followFolder });
+    watchRevision += 1;
     path = ''; name = ''; selected = '';
     notice = 'Папка добавлена в очередь. Ход индексации — в разделе «Состояние».';
   }
@@ -121,8 +125,10 @@
           </div>
         </details>
       {/if}
+      <label class="follow-folder"><input type="checkbox" bind:checked={followFolder} disabled={!!busy} /> Обновлять автоматически</label>
       <div class="actions"><button disabled={!!busy || !path.trim() || (!selected && !name.trim() && !suggestedName)}>Добавить папку</button></div>
     </form>
+    {#key watchRevision}<FolderWatches />{/key}
   {:else}
     <div class="intro">
       <h3>Проекты</h3>
@@ -162,6 +168,8 @@
   .destinations summary span { display: inline; margin-left: 8px; font-weight: 400; overflow-wrap: anywhere; color: var(--forest-muted); }
   .destination-fields { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); padding: 0 12px 12px; }
   .actions { display: flex; justify-content: flex-end; }
+  .follow-folder { display: flex; align-items: center; gap: 8px; min-height: 32px; }
+  .follow-folder input { width: 18px; height: 18px; accent-color: var(--forest-accent); }
   .project-list { display: grid; gap: 6px; max-height: 38vh; overflow-y: auto; list-style: none; padding: 0; margin: 16px 0; }
   .project-list li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 6px 8px 6px 12px; border: 1px solid var(--forest-line); border-radius: 10px; }
   .project-list span { overflow-wrap: anywhere; }

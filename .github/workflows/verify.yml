@@ -12,10 +12,14 @@ concurrency:
 jobs:
   windows:
     runs-on: windows-2022
-    timeout-minutes: 40
+    timeout-minutes: 90
     env:
       PYTHONUTF8: '1'
       UV_FROZEN: '1'
+      CARGO_INCREMENTAL: '0'
+      CARGO_BUILD_JOBS: '1'
+      # The core builder and all service builders share dependency artifacts.
+      CARGO_TARGET_DIR: ${{ github.workspace }}/core/target
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -30,10 +34,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            desktop/light/src-tauri
-            core
-            runtime
-            api
+            core -> target
+            runtime -> ../core/target
+            api -> ../core/target
+            parsers -> ../core/target
+          cache-on-failure: true
       - name: Prepare build tools
         run: choco install make --yes --no-progress
       - name: Install frozen Python environment
@@ -50,17 +55,26 @@ jobs:
         run: |
           make test-runtime
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          make test-api
+          cargo fmt --manifest-path api/Cargo.toml --check
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cargo test --locked --manifest-path api/Cargo.toml --features edge
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           uv run python tools/build_native_runtime.py --output native/runtime
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          uv run python tools/build_native_api.py --output native/api
+          uv run python tools/build_native_api.py --output native/api --edge
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           uv run python tools/light_runtime_assets.py --destination native/qdrant
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           "LES_TEST_NATIVE_RUNTIME=$((Resolve-Path native/runtime/les-runtime.exe).Path)" >> $env:GITHUB_ENV
           "LES_TEST_NATIVE_API=$((Resolve-Path native/api/les-api.exe).Path)" >> $env:GITHUB_ENV
           "LES_TEST_NATIVE_QDRANT=$((Resolve-Path native/qdrant/qdrant.exe).Path)" >> $env:GITHUB_ENV
+      - name: Build native Word and PDF table parsers
+        run: |
+          cargo fmt --manifest-path parsers/Cargo.toml --check
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          uv run python tools/native_asset.py parsers --output native/parsers
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          "LES_TEST_NATIVE_DOCUMENT_PARSERS=$((Resolve-Path native/parsers/les-document-parsers.exe).Path)" >> $env:GITHUB_ENV
       - name: Check static frontend
         run: |
           uv run python tools/build_light_frontend.py
@@ -77,5 +91,18 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           make test-mail
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+  desktop:
+    name: Windows desktop
+    runs-on: windows-2022
+    timeout-minutes: 45
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_BUILD_JOBS: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/light/src-tauri
+          cache-on-failure: true
       - name: Build Windows desktop shell
         run: cargo build --locked --release --manifest-path desktop/light/src-tauri/Cargo.toml

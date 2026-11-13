@@ -144,14 +144,14 @@ impl Nodes {
         }
     }
 }
-pub(super) fn fingerprint(path: &str) -> Result<Value> {
-    let value =
-        crate::files::fingerprint(&json!({"path":path,"include_mtime":true})).map_err(|code| {
-            match code {
-                "CORE_FILE_CHANGED" => "SOURCE_CHANGED_DURING_INDEXING",
-                "CORE_FILE_UNAVAILABLE" | "CORE_NOT_REGULAR_FILE" => "INDEX_SOURCE_UNAVAILABLE",
-                other => other,
-            }
-        })?;
+pub(super) fn fingerprint(path: &str, deny_writers: bool) -> Result<Value> {
+    let value = crate::files::fingerprint(
+        &json!({"path":path,"include_mtime":true,"deny_writers":deny_writers}),
+    )
+    .map_err(|code| match code {
+        "CORE_FILE_CHANGED" => "SOURCE_CHANGED_DURING_INDEXING",
+        "CORE_FILE_UNAVAILABLE" | "CORE_NOT_REGULAR_FILE" => "INDEX_SOURCE_UNAVAILABLE",
+        other => other,
+    })?;
     Ok(json!({"file_hash":value["sha256"],"file_mtime":value["mtime"],"file_size":value["size"]}))
 }

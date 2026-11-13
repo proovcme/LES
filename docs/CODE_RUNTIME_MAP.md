@@ -19,11 +19,11 @@
 
 | Метрика | Значение |
 | --- | --- |
-| Python-файлов под git | 716 |
-| Строк Python | 170895 |
+| Python-файлов под git | 724 |
+| Строк Python | 173240 |
 | PRODUCT_REACHABLE | 417 |
 | RUNTIME_SUPPORT | 5 |
-| TEST_OR_TOOL_ONLY | 271 |
+| TEST_OR_TOOL_ONLY | 279 |
 | DORMANT_CANDIDATE | 23 |
 | Зарегистрированных API-маршрутов | 298 |
 | Ошибок разбора | 0 |
@@ -48,7 +48,7 @@
 | sovushka/pages/samovar.py | 1143 | 3 |
 | backend/document_router.py | 1118 | 10 |
 | tools/build_rag_contract_sibling.py | 1116 | 2 |
-| backend/document_catalog.py | 1068 | 18 |
+| backend/document_catalog.py | 1068 | 19 |
 | tools/reindex_datasets_guarded.py | 1016 | 1 |
 | proxy/services/drawing_manifest_service.py | 1012 | 3 |
 | sovushka/components/header.py | 1003 | 2 |
@@ -61,7 +61,7 @@
 | backend/parquet_writer.py | 834 | 6 |
 | proxy/services/notebook_study_service.py | 833 | 3 |
 | backend/mail_profile.py | 825 | 5 |
-| proxy/services/chat_request_service.py | 800 | 6 |
+| proxy/services/chat_request_service.py | 800 | 5 |
 
 ## Чат Light: фактические потребители
 

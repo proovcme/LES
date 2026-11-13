@@ -92,7 +92,13 @@ impl Builder {
             && text
                 .split_once("\n\n")
                 .is_some_and(|(_, body)| !super::chunks::trim(body).is_empty());
-        let minimum = if physical_page { 1 } else { self.minimum };
+        let checked_source =
+            node["payload"]["source_node_builder"] == "rust.document.source-nodes.v1";
+        let minimum = if physical_page || checked_source {
+            1
+        } else {
+            self.minimum
+        };
         let request = json!({"text":text,"size":self.budget,"minimum":minimum});
         let local = self.tokenizer.as_ref();
         let measure = |value: &str| local.unwrap().count(value);
@@ -125,6 +131,17 @@ impl Builder {
                 value["payload"] = json!({});
             }
             let payload = value["payload"].as_object_mut().unwrap();
+            // A physical-page reading view belongs to one live indexed anchor,
+            // not to every embedding slice of that anchor.
+            if child > 0 {
+                for field in [
+                    "pdf_page_view",
+                    "pdf_page_view_sha256",
+                    "pdf_page_view_schema",
+                ] {
+                    payload.remove(field);
+                }
+            }
             let parent_node = payload
                 .get("parent_node_id")
                 .filter(|v| present(v))

@@ -12,7 +12,7 @@ use std::{
     fs::{self, File, Metadata},
     path::{Path, PathBuf},
     sync::Arc,
-    time::{Duration, UNIX_EPOCH},
+    time::Duration,
 };
 use tokio::sync::Notify;
 
@@ -122,8 +122,9 @@ async fn enqueue(context: &Context, body: &Value) -> Response {
         );
     };
     let parse = body.get("parse").map_or(Some(true), Value::as_bool);
+    let watch = body.get("watch").map_or(Some(false), Value::as_bool);
     let limit = body.get("parse_limit").map_or(Some(25), Value::as_i64);
-    let (Some(parse), Some(limit @ 1..=500)) = (parse, limit) else {
+    let (Some(parse), Some(watch), Some(limit @ 1..=500)) = (parse, watch, limit) else {
         return error(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Проверьте параметры индексации.",
@@ -143,7 +144,7 @@ async fn enqueue(context: &Context, body: &Value) -> Response {
             "Проверьте параметры обработки PDF.",
         );
     }
-    let args = json!({"root":path,"dataset_id":dataset,"parse_limit":if parse {limit} else {0}});
+    let args = json!({"root":path,"dataset_id":dataset,"parse_limit":if parse {limit} else {0},"watch":watch});
     let db = context.database.clone();
     let result = tokio::task::spawn_blocking(move || catalog(&db, "intake_enqueue", args)).await;
     let Ok(result) = result else {
@@ -286,7 +287,7 @@ fn is_reparse(metadata: &Metadata) -> bool {
     }
 }
 
-fn scan(root: &Path, policy: &Policy) -> Result<Vec<Value>, Stop> {
+fn scan(root: &Path, policy: &Policy, allow_empty: bool) -> Result<Vec<Value>, Stop> {
     let mut stack = vec![root.to_owned()];
     let mut files = BTreeMap::new();
     while let Some(folder) = stack.pop() {
@@ -357,7 +358,7 @@ fn scan(root: &Path, policy: &Policy) -> Result<Vec<Value>, Stop> {
             }
         }
     }
-    if files.is_empty() {
+    if files.is_empty() && !allow_empty {
         return Err(Stop {
             code: "INTAKE_EMPTY",
             message: "В папке нет поддерживаемых документов.",
@@ -377,6 +378,15 @@ fn call(database: &Path, action: &str, args: Value) -> Result<Value, Stop> {
             message: "Набор документов удалён. Импорт остановлен.",
         });
     }
+    if result["code"] == "INTAKE_SOURCE_CONFLICT" {
+        return Err(Stop {
+            code: "INTAKE_SOURCE_CONFLICT",
+            message: "В наборе уже есть файл с тем же именем из другой папки. Подключите папку к отдельному набору.",
+        });
+    }
+    if result["code"] == "INTAKE_SOURCE_CHANGED" {
+        return Err(changed());
+    }
     eprintln!(
         "{}",
         json!({"event":"intake_sqlite","action":action,"code":result["code"],"sqlite_extended":result["sqlite_extended"]})
@@ -384,11 +394,62 @@ fn call(database: &Path, action: &str, args: Value) -> Result<Value, Stop> {
     Err(STORAGE)
 }
 
-fn register(database: &Path, state: &Path, job: &Value, policy: &Policy) -> Result<(), Stop> {
+fn checked_fingerprint(root: &Path, source: &str, watched: bool) -> Result<Value, Stop> {
+    let path = Path::new(source).canonicalize().map_err(source_error)?;
+    if !path.starts_with(root) || source_path(&path)? != source {
+        return Err(changed());
+    }
+    let fingerprint = les_core::file_fingerprint(
+        &json!({"path":source_name(&path)?,"include_mtime":true,"deny_writers":watched}),
+    )
+    .map_err(|code| match code {
+        "CORE_FILE_CHANGED" | "CORE_NOT_REGULAR_FILE" => Stop {
+            code: "INTAKE_FILE_CHANGED",
+            message: "Файл ещё записывается или изменился во время чтения.",
+        },
+        _ => Stop {
+            code: "INTAKE_SOURCE_UNREADABLE",
+            message: "Не удалось прочитать содержимое файла. Проверьте доступ к источнику.",
+        },
+    })?;
+    if Path::new(source).canonicalize().map_err(source_error)? != path {
+        return Err(changed());
+    }
+    Ok(fingerprint)
+}
+
+fn watch_snapshot(root: &Path, policy: &Policy) -> Result<Vec<Value>, Stop> {
+    let mut files = scan(root, policy, true)?;
+    for file in &mut files {
+        let source = file["source_path"].as_str().ok_or(STORAGE)?;
+        let fingerprint = checked_fingerprint(root, source, true)?;
+        file["file_size"] = fingerprint["size"].clone();
+        file["file_mtime"] = fingerprint["mtime"].clone();
+        file["sha256"] = fingerprint["sha256"].clone();
+    }
+    let confirmed = scan(root, policy, true)?;
+    if !confirmed
+        .iter()
+        .map(|file| (&file["file_name"], &file["source_path"]))
+        .eq(files
+            .iter()
+            .map(|file| (&file["file_name"], &file["source_path"])))
+    {
+        return Err(changed());
+    }
+    Ok(files)
+}
+
+fn register(database: &Path, state: &Path, job: &Value, policy: &Policy) -> Result<bool, Stop> {
     let root = policy.root(job["root"].as_str().unwrap_or_default())?;
     let id = &job["id"];
+    let watched = !job["watch"].is_null();
     if job["phase"] == "scan" {
-        let files = scan(&root, policy)?;
+        let files = if watched {
+            watch_snapshot(&root, policy)?
+        } else {
+            scan(&root, policy, false)?
+        };
         call(
             database,
             "intake_manifest",
@@ -398,38 +459,31 @@ fn register(database: &Path, state: &Path, job: &Value, policy: &Policy) -> Resu
         return Err(changed());
     }
     if job["phase"] == "index" {
-        return Ok(());
+        return Ok(true);
     }
     let dataset = job["dataset_id"].as_str().ok_or(STORAGE)?;
     fs::create_dir_all(state.join("storage/datasets").join(dataset)).map_err(|_| STORAGE)?;
     loop {
         let batch = call(database, "intake_batch", json!({"id":id}))?;
-        let mut files = Vec::new();
-        for item in batch
-            .as_array()
-            .filter(|items| !items.is_empty())
-            .ok_or(STORAGE)?
-        {
-            let source = item["source_path"].as_str().ok_or(STORAGE)?;
-            let path = Path::new(source).canonicalize().map_err(source_error)?;
-            if !path.starts_with(&root) || source_path(&path)? != source {
-                return Err(changed());
+        let files = if watched {
+            batch
+        } else {
+            let mut files = Vec::new();
+            for item in batch
+                .as_array()
+                .filter(|items| !items.is_empty())
+                .ok_or(STORAGE)?
+            {
+                let source = item["source_path"].as_str().ok_or(STORAGE)?;
+                let fingerprint = checked_fingerprint(&root, source, false)?;
+                files.push(json!({"ordinal":item["ordinal"],"source_path":source,
+                    "file_size":fingerprint["size"],"file_mtime":fingerprint["mtime"],"sha256":fingerprint["sha256"]}));
             }
-            let stat = path.metadata().map_err(source_error)?;
-            if !stat.is_file() {
-                return Err(changed());
-            }
-            let modified = stat.modified().map_err(source_error)?;
-            let mtime = match modified.duration_since(UNIX_EPOCH) {
-                Ok(time) => time.as_secs_f64(),
-                Err(error) => -error.duration().as_secs_f64(),
-            };
-            files.push(json!({"ordinal":item["ordinal"],"source_path":source,
-                "file_size":stat.len(),"file_mtime":mtime}));
-        }
+            json!(files)
+        };
         let progress = call(database, "intake_register", json!({"id":id,"files":files}))?;
         if progress["phase"] != "register" {
-            return Ok(());
+            return Ok(progress["phase"] == "index");
         }
     }
 }
@@ -558,6 +612,7 @@ fn index_stop(code: &str) -> Stop {
         "INDEX_SETTINGS_INVALID" => "INDEX_SETTINGS_INVALID",
         "DOCUMENT_TOKENIZER_UNAVAILABLE" => "DOCUMENT_TOKENIZER_UNAVAILABLE",
         "ATTACHMENT_INDEX_LOCAL_MODEL_REQUIRED" => "ATTACHMENT_INDEX_LOCAL_MODEL_REQUIRED",
+        "FOLDER_WATCH_LOCAL_EMBEDDINGS_REQUIRED" => "FOLDER_WATCH_LOCAL_EMBEDDINGS_REQUIRED",
         "DOCUMENT_TOKENIZER_CHANGED" => "DOCUMENT_TOKENIZER_CHANGED",
         "EMBEDDING_MODEL_NOT_ASSIGNED" => "EMBEDDING_MODEL_NOT_ASSIGNED",
         "EMBEDDING_MODEL_NOT_READY" => "EMBEDDING_MODEL_NOT_READY",
@@ -573,6 +628,7 @@ fn index_stop(code: &str) -> Stop {
         "INDEX_SETTINGS_INVALID" => "Не удалось прочитать параметры индексации. Проверьте настройки. Файлы сохранены.",
         "DOCUMENT_TOKENIZER_UNAVAILABLE" | "DOCUMENT_TOKENIZER_CHANGED" => "Токенизатор поиска недоступен или изменён. Восстановите локальные файлы модели. Индекс не изменён.",
         "ATTACHMENT_INDEX_LOCAL_MODEL_REQUIRED" => "Для индексации вложения назначьте локальную модель поиска. Вложение не отправлено наружу.",
+        "FOLDER_WATCH_LOCAL_EMBEDDINGS_REQUIRED" => "Для автообновления назначьте локальную модель поиска. Изменения папки сохранены.",
         "EMBEDDING_MODEL_NOT_ASSIGNED" => "Файлы зарегистрированы. Назначьте модель поиска в настройках.",
         "EMBEDDING_MODEL_NOT_READY" => "Файлы зарегистрированы. Проверьте подключение и доступность модели поиска.",
         "DOCUMENT_NATIVE_DISPATCH_REQUIRED" => "В партии есть формат, для которого нативная обработка ещё недоступна. Файлы зарегистрированы, индексация не начата.",
@@ -596,7 +652,18 @@ async fn start_indexing_inner(context: Arc<Context>, job: &Value) -> Result<(), 
     let id = job["id"].clone();
     let selected = tokio::task::spawn_blocking(move || {
         call(&database, "intake_retry_due", json!({"id":id}))?;
-        call(&database, "intake_index_batch", json!({"id":id}))
+        let mut selected = call(&database, "intake_index_batch", json!({"id":id}))?;
+        for file in selected.as_array_mut().ok_or(STORAGE)? {
+            if let Some(root) = file["watch_root"].as_str() {
+                let source = file["source_path"].as_str().ok_or(STORAGE)?;
+                let canonical = Path::new(source).canonicalize().map_err(source_error)?;
+                if !canonical.starts_with(root) || source_path(&canonical)? != source {
+                    return Err(changed());
+                }
+                file["watch_canonical_source"] = source_name(&canonical)?.into();
+            }
+        }
+        Ok(selected)
     })
     .await
     .map_err(|_| STORAGE)??;
@@ -612,9 +679,33 @@ async fn start_indexing_inner(context: Arc<Context>, job: &Value) -> Result<(), 
     if attachment && !job["attachment_sha256"].is_string() {
         return Err(STORAGE);
     }
-    crate::index_bootstrap::ensure(context.clone(), !attachment, false, false, None, true)
+    let automatic = job["watch"]["automatic"] == 1;
+    if automatic {
+        let database = context.database.clone();
+        let remote = tokio::task::spawn_blocking(move || {
+            call(
+                &database,
+                "model_execution_snapshot",
+                json!({"role":"embeddings"}),
+            )
+            .map(|binding| binding["revision"]["locality"] == "remote")
+        })
         .await
-        .map_err(|code| index_stop(code.split(':').next().unwrap_or(&code)))?;
+        .map_err(|_| STORAGE)??;
+        if remote {
+            return Err(index_stop("FOLDER_WATCH_LOCAL_EMBEDDINGS_REQUIRED"));
+        }
+    }
+    crate::index_bootstrap::ensure(
+        context.clone(),
+        !attachment && !automatic,
+        false,
+        false,
+        None,
+        true,
+    )
+    .await
+    .map_err(|code| index_stop(code.split(':').next().unwrap_or(&code)))?;
     let input = tokio::task::spawn_blocking(move || {
         crate::index_batch::configuration::intake(&owner, &input_job, selected)
     })
@@ -640,6 +731,21 @@ async fn start_indexing_inner(context: Arc<Context>, job: &Value) -> Result<(), 
     }
     if value["owner"] != "rust.index-batch" {
         return Err(index_stop("INDEX_SERVICE_UNAVAILABLE"));
+    }
+    if let Some(code) = value["error"].as_str() {
+        return Err(index_stop(code));
+    }
+    if !job["watch"].is_null()
+        && value["file_errors"].as_array().is_some_and(|files| {
+            files
+                .iter()
+                .any(|file| file["error_code"] == "SOURCE_CHANGED_DURING_INDEXING")
+        })
+    {
+        return Err(Stop {
+            code: "INTAKE_FILE_CHANGED",
+            message: "Файл изменился после сверки. Лес проверит папку снова.",
+        });
     }
     Ok(())
 }
@@ -668,6 +774,9 @@ pub async fn run(context: Arc<Context>) {
         );
         return;
     };
+    let database = context.database.clone();
+    let _ = tokio::task::spawn_blocking(move || call(&database, "intake_watch_startup", json!({})))
+        .await;
     loop {
         let database = context.database.clone();
         let mail_state = context.public_chat_rust.then(|| context.state_root.clone());
@@ -680,6 +789,8 @@ pub async fn run(context: Arc<Context>) {
                     );
                 }
             }
+            // A long import in another dataset must not starve scheduled scans.
+            call(&database, "intake_watch_due", json!({}))?;
             if call(&database, "intake_has_work", json!({}))? == true {
                 call(&database, "intake_claim", json!({}))
             } else {
@@ -738,11 +849,14 @@ async fn process(context: Arc<Context>, job: Value) {
         tokio::task::spawn_blocking(move || register(&database, &state, &input, &policy)).await;
     let id = &job["id"];
     match outcome {
-        Ok(Ok(())) if job["parse_limit"].as_i64().unwrap_or_default() > 0 => {
+        Ok(Ok(true)) => {
             let stop = start_indexing(context.clone(), &job).await.err();
             record(&context, id, "intake_index_checkpoint", stop).await;
         }
-        Ok(Ok(())) => eprintln!("{}", json!({"event":"intake_registered","job_id":id})),
+        Ok(Ok(false)) if job["watch"]["automatic"] != 1 => {
+            eprintln!("{}", json!({"event":"intake_registered","job_id":id}));
+        }
+        Ok(Ok(false)) => {}
         Ok(Err(stop)) => record(&context, id, "intake_fail", Some(stop)).await,
         Err(_) => record(&context, id, "intake_fail", Some(Stop {
             code:"INTAKE_WORKER_STOPPED", message:"Обработчик импорта остановился. Сохранённые документы доступны. Повторите подключение.",

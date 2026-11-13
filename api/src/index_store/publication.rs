@@ -279,7 +279,7 @@ pub(super) async fn recover_file(
     let phase = decision["phase"].as_str().unwrap_or("idle");
     if matches!(phase, "idle" | "sparse_refresh" | "sparse_dirty") {
         drop(writer);
-        store.refresh_postings().await?;
+        store.refresh_postings(context, collection, "").await?;
         return Ok(json!({"status":"idle"}));
     }
     if !decision["document_id"].is_string() {
@@ -337,7 +337,7 @@ pub(super) async fn recover_file(
     recover(&request)?;
     writer.journal("finish", json!({}))?;
     drop(writer);
-    store.refresh_postings().await?;
+    store.refresh_postings(context, collection, "").await?;
     eprintln!(
         "{}",
         json!({"event":"index_file_recovered","dataset_id":request["dataset_id"],
@@ -375,9 +375,17 @@ async fn respond(context: &Context, store: &Store, body: Value) -> Response {
     }
     let dataset = body["dataset_id"].clone();
     let file = body["doc_name"].clone();
+    let collection = body["collection"].clone();
     match publish(context, store, body).await {
         Ok(points) => {
-            if let Err(code) = store.refresh_postings().await {
+            if let Err(code) = store
+                .refresh_postings(
+                    context,
+                    collection.as_str().expect("validated collection"),
+                    "",
+                )
+                .await
+            {
                 eprintln!("{}", json!({"event":"index_lexical_stopped","reason":code}));
                 return error(StatusCode::BAD_GATEWAY, code);
             }

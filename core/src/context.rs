@@ -23,6 +23,14 @@ fn text<'a>(r: &'a Value, key: &str) -> Result<&'a str> {
 fn number(r: &Value, key: &str) -> Result<i64> {
     r[key].as_i64().ok_or("CONTEXT_REQUEST_INVALID")
 }
+fn check_item(item: &Value) -> Result<()> {
+    text(item, "id")?;
+    text(item, "render")?;
+    if number(item, "tokens")? < 0 {
+        return Err("CONTEXT_REQUEST_INVALID");
+    }
+    Ok(())
+}
 fn pack(r: &Value) -> Result<Value> {
     let budget = number(r, "input_limit")?
         .saturating_sub(number(r, "generation_reserve")?)
@@ -36,9 +44,16 @@ fn pack(r: &Value) -> Result<Value> {
             .position(|v| *v == kind)
             .ok_or("CONTEXT_REQUEST_INVALID")?;
         for item in array(c, "objects")? {
-            text(item, "id")?;
-            text(item, "render")?;
-            if number(item, "tokens")? < 0 {
+            check_item(item)?;
+            for value in item["fallback"].as_array().into_iter().flatten() {
+                check_item(value)?;
+                if value.get("fallback").is_some() {
+                    return Err("CONTEXT_REQUEST_INVALID");
+                }
+            }
+            if item.get("fallback").is_some()
+                && item["fallback"].as_array().is_none_or(|a| a.len() > 32)
+            {
                 return Err("CONTEXT_REQUEST_INVALID");
             }
         }
@@ -80,6 +95,7 @@ fn pack(r: &Value) -> Result<Value> {
             continue;
         }
         let mut omitted = Vec::new();
+        let mut partial = Vec::new();
         let objects = array(c, "objects")?;
         for item in objects {
             let tokens = number(item, "tokens")?;
@@ -92,6 +108,22 @@ fn pack(r: &Value) -> Result<Value> {
                 used += cost;
             } else {
                 omitted.push(item);
+                let mut admitted = false;
+                for block in item["fallback"].as_array().into_iter().flatten() {
+                    let tokens = number(block, "tokens")?;
+                    let cost = tokens
+                        .checked_add(i64::from(used > 0))
+                        .ok_or("CONTEXT_REQUEST_INVALID")?;
+                    if cost <= budget - used {
+                        section_tokens[*rank] += i64::from(!selected[*rank].is_empty()) + tokens;
+                        selected[*rank].push(block.clone());
+                        used += cost;
+                        admitted = true;
+                    }
+                }
+                if admitted {
+                    partial.push(item["id"].clone());
+                }
             }
         }
         if !omitted.is_empty() {
@@ -106,7 +138,11 @@ fn pack(r: &Value) -> Result<Value> {
                 digest.update([0]);
             }
             let hash = format!("{:x}", digest.finalize());
-            omissions.push(json!({"kind":ORDER[*rank],"total":objects.len(),"omitted":omitted.len(),"object_ids":ids,"cursor":format!("ctx:{}:{}",ORDER[*rank],&hash[..20]),"reason":"budget_exhausted"}));
+            let mut omission = json!({"kind":ORDER[*rank],"total":objects.len(),"omitted":omitted.len(),"object_ids":ids,"cursor":format!("ctx:{}:{}",ORDER[*rank],&hash[..20]),"reason":"budget_exhausted"});
+            if !partial.is_empty() {
+                omission["partial_object_ids"] = json!(partial);
+            }
+            omissions.push(omission);
         }
     }
     let sections: Vec<_> = ORDER.iter().enumerate().filter(|(i,_)| !selected[*i].is_empty()).map(|(i,kind)| json!({"kind":kind,"indexes":selected[i].iter().map(|v|v["index"].clone()).collect::<Vec<_>>(),"tokens":section_tokens[i]})).collect();

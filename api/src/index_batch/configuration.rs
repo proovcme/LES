@@ -247,6 +247,9 @@ pub(crate) fn intake(
     if attachment && binding["value"]["revision"]["locality"] == "remote" {
         return Err("ATTACHMENT_INDEX_LOCAL_MODEL_REQUIRED");
     }
+    if job["watch"]["automatic"] == 1 && binding["value"]["revision"]["locality"] == "remote" {
+        return Err("FOLDER_WATCH_LOCAL_EMBEDDINGS_REQUIRED");
+    }
     let env = std::env::var_os("LES_ENV_PATH")
         .map(PathBuf::from)
         .unwrap_or_else(|| context.state_root.join(".env"));
@@ -260,7 +263,7 @@ pub(crate) fn intake(
     {
         return Err("EMBEDDING_INDEX_MODEL_MISMATCH");
     }
-    input["embedding_execution"] = json!({"revision_id":resolved.revision["revision_id"],"allow_remote":resolved.endpoint.locality=="remote"});
+    input["embedding_execution"] = json!({"revision_id":resolved.revision["revision_id"],"allow_remote":job["watch"]["automatic"]!=1 && resolved.endpoint.locality=="remote"});
     input["schema"] = json!("les.index-batch.v1");
     input["database"] = json!(context.database);
     input["source_root"] = json!(context.state_root.join("storage/datasets"));

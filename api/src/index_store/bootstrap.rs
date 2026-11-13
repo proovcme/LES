@@ -111,6 +111,9 @@ impl Store {
     }
     pub(crate) fn finish_setup_held(
         &self,
+        context: &Context,
+        collection: &str,
+        fingerprint: &str,
         writer: &les_core::index_publication::Writer,
     ) -> Result<(), &'static str> {
         #[cfg(feature = "edge")]
@@ -125,8 +128,27 @@ impl Store {
                 },
                 writer,
             )?;
+            return Ok(());
         }
-        let _ = writer;
+        let runtime = tokio::runtime::Handle::current();
+        les_core::index_postings::refresh(
+            &self.content_root(context),
+            collection,
+            writer,
+            false,
+            fingerprint,
+            |operation, body| {
+                runtime.block_on(super::search::server_read(
+                    &context.client,
+                    &self.target,
+                    &self.key,
+                    collection,
+                    operation,
+                    body,
+                ))
+            },
+            super::lexical_progress,
+        )?;
         Ok(())
     }
     pub(crate) fn mark_setup_ready(&self) {

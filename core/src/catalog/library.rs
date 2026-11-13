@@ -119,10 +119,19 @@ fn documents(conn: &Connection, args: &Args) -> Result<Value> {
     }
     check_dataset(conn, id)?;
     let q = trim(args.get("q").and_then(Value::as_str).unwrap_or_default()).to_lowercase();
+    let file_filter = args.get("doc_filter").cloned().unwrap_or(json!([]));
+    if !file_filter
+        .as_array()
+        .is_some_and(|a| a.len() <= 2048 && a.iter().all(Value::is_string))
+    {
+        return Err(Failure::invalid("Некорректный выбор документов."));
+    }
+    let file_filter = file_filter.to_string();
     let total = conn.query_row(
         "SELECT count(*) FROM documents WHERE dataset_id=?1 AND les_visible_document(file_name)
-         AND (?2='' OR les_name_matches(file_name,?2))",
-        params![id, q],
+         AND (?2='' OR les_name_matches(file_name,?2))
+         AND (?3='[]' OR file_name IN (SELECT value FROM json_each(?3)))",
+        params![id, q, file_filter],
         |r| r.get::<_, i64>(0),
     )?;
     let items = rows(
@@ -130,8 +139,9 @@ fn documents(conn: &Connection, args: &Args) -> Result<Value> {
         "SELECT id, dataset_id, file_name, COALESCE(status,'') AS status, file_size,
         COALESCE(chunk_count,0) AS chunk_count FROM documents WHERE dataset_id=?1
         AND les_visible_document(file_name) AND (?2='' OR les_name_matches(file_name,?2))
+        AND (?5='[]' OR file_name IN (SELECT value FROM json_each(?5)))
         ORDER BY lower(file_name),id LIMIT ?3 OFFSET ?4",
-        params![id, q, limit, offset],
+        params![id, q, limit, offset, file_filter],
     )?;
     Ok(json!({"dataset_id":id,"limit":limit,"offset":offset,"total":total,"documents":items}))
 }

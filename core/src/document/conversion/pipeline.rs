@@ -109,9 +109,9 @@ fn artifact(
     }
     fs::create_dir_all(root).map_err(|_| "PARQUET_WRITE_FAILED")?;
     let canonical = root.canonicalize().map_err(|_| INVALID)?;
-    let relative = Path::new("_parquet/.les-versions")
-        .join(key.parent().unwrap_or(Path::new("")))
-        .join(key.file_stem().ok_or(INVALID)?);
+    let relative = Path::new("_parquet/.les-versions").join(crate::sha256_hex(
+        key.to_str().ok_or(INVALID)?.replace('\\', "/").as_bytes(),
+    ));
     let folder = root.join(&relative);
     // Check each existing ancestor before creating anything below it.
     let mut ancestor = folder.as_path();
@@ -232,6 +232,10 @@ pub(super) fn prepare(
             if pdf { "pdf_page_text" } else { "markdown" },
             pdf,
         )?;
+        route["metadata"]
+            .as_object_mut()
+            .unwrap()
+            .remove("pdf_page_views");
     } else if suffix == "pptx" {
         let content = presentation::read(bytes)?;
         route["metadata"] = json!({"domain":"DOCUMENT","doc_type":"OTHER","content_type":"text","slide_count":content["slides"],"format_owner":"rust.format-dispatch.v1"});

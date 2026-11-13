@@ -1,12 +1,55 @@
 //! Shared owned-storage reads and Server/Edge hybrid retrieval for native consumers.
 use super::Store;
 use crate::Context;
+use les_core::retrieval_fusion::retrieve as fuse;
 use serde_json::{json, Value};
-use std::{
-    collections::{HashMap, HashSet},
-    time::Duration,
-};
+use std::{collections::HashMap, time::Duration};
 type Result<T> = std::result::Result<T, String>;
+pub(super) async fn server_read(
+    client: &reqwest::Client,
+    target: &reqwest::Url,
+    key: &str,
+    collection: &str,
+    operation: &str,
+    body: &Value,
+) -> std::result::Result<Value, &'static str> {
+    let mut url = target.clone();
+    {
+        let mut path = url
+            .path_segments_mut()
+            .map_err(|_| "INDEX_READ_UNAVAILABLE")?;
+        path.pop_if_empty()
+            .extend(["collections", collection, "points"]);
+        if operation != "retrieve" {
+            path.push(operation);
+        }
+    }
+    let mut reply = client
+        .post(url)
+        .header("api-key", key)
+        .header("content-type", "application/json")
+        .body(body.to_string())
+        .timeout(Duration::from_secs(20))
+        .send()
+        .await
+        .map_err(|_| "INDEX_READ_UNAVAILABLE")?;
+    if !reply.status().is_success() {
+        return Err("INDEX_READ_UNAVAILABLE");
+    }
+    let mut bytes = Vec::new();
+    while let Some(part) = reply.chunk().await.map_err(|_| "INDEX_READ_UNAVAILABLE")? {
+        if bytes.len() + part.len() > 24 * 1024 * 1024 {
+            return Err("INDEX_READ_LIMIT");
+        }
+        bytes.extend(part);
+    }
+    let value: Value = serde_json::from_slice(&bytes).map_err(|_| "INDEX_READ_INVALID")?;
+    if value["status"] != "ok" {
+        return Err("INDEX_READ_UNAVAILABLE");
+    }
+    Ok(value["result"].clone())
+}
+
 impl Store {
     pub(crate) async fn read_owned(
         &self,
@@ -34,42 +77,15 @@ impl Store {
             .await
             .map_err(|_| "INDEX_READ_UNAVAILABLE".to_owned())?;
         }
-        let mut url = self.target.clone();
-        {
-            let mut path = url
-                .path_segments_mut()
-                .map_err(|_| "INDEX_READ_UNAVAILABLE")?;
-            path.pop_if_empty()
-                .extend(["collections", collection, "points"]);
-            if operation != "retrieve" {
-                path.push(operation);
-            }
-        }
-        let mut reply = context
-            .client
-            .post(url)
-            .header("api-key", &self.key)
-            .header("content-type", "application/json")
-            .body(body.to_string())
-            .timeout(Duration::from_secs(20))
-            .send()
-            .await
-            .map_err(|_| "INDEX_READ_UNAVAILABLE")?;
-        if !reply.status().is_success() {
-            return Err("INDEX_READ_UNAVAILABLE".into());
-        }
-        let mut bytes = Vec::new();
-        while let Some(part) = reply.chunk().await.map_err(|_| "INDEX_READ_UNAVAILABLE")? {
-            if bytes.len() + part.len() > 24 * 1024 * 1024 {
-                return Err("INDEX_READ_LIMIT".into());
-            }
-            bytes.extend(part);
-        }
-        let value: Value = serde_json::from_slice(&bytes).map_err(|_| "INDEX_READ_INVALID")?;
-        if value["status"] != "ok" {
-            return Err("INDEX_READ_UNAVAILABLE".into());
-        }
-        Ok(value["result"].clone())
+        Ok(server_read(
+            &context.client,
+            &self.target,
+            &self.key,
+            collection,
+            operation,
+            &body,
+        )
+        .await?)
     }
     pub(crate) async fn hybrid_owned(&self, context: &Context, request: Value) -> Result<Value> {
         if let Some(code) = self.recovery_error() {
@@ -90,17 +106,33 @@ impl Store {
         let collection = request["collection"]
             .as_str()
             .ok_or("INDEX_COLLECTION_MISMATCH")?;
-        let revision = self.revision(context, collection).await?;
+        let mut revision = self.revision(context, collection).await?;
         let limit = request["limit"]
             .as_u64()
             .filter(|v| (1..=512).contains(v))
             .ok_or("INDEX_READ_LIMIT")? as usize;
         let mut filters = request["filters"].clone();
         filters["node_roles"] = json!(["evidence", ""]);
-        let global = self
+        let mut global = self
             .server_leg(context, &request, &filters, &revision, limit)
+            .await;
+        if global
+            .as_ref()
+            .is_err_and(|code| code == "INDEX_SPARSE_STALE")
+        {
+            self.refresh_postings(
+                context,
+                collection,
+                &les_core::sha256_hex(collection.as_bytes()),
+            )
             .await?;
-        let mut points = global;
+            revision = self.revision(context, collection).await?;
+            global = self
+                .server_leg(context, &request, &filters, &revision, limit)
+                .await;
+        }
+        let mut points = global?;
+        let mut hierarchy_candidates = Vec::new();
         if request["hierarchy"] == true {
             filters["node_roles"] = json!(["navigation"]);
             let navigation = self
@@ -123,7 +155,8 @@ impl Store {
                 let children = self
                     .server_leg(context, &request, &filters, &revision, limit)
                     .await?;
-                points = fuse(&[points, children], limit, 61., true)?;
+                hierarchy_candidates =
+                    les_core::bm25::hierarchy_candidates(&points, children, limit);
             }
         }
         points.retain(|p| p["payload"]["text"].as_str().is_some_and(|s| !s.is_empty()));
@@ -131,7 +164,7 @@ impl Store {
             return Err("INDEX_CHANGED_DURING_SEARCH".into());
         }
         Ok(
-            json!({"points":points,"revision":revision,"channels":["dense","bm25_postings"],"hierarchy":request["hierarchy"]==true}),
+            json!({"points":points,"revision":revision,"channels":["dense","bm25_postings"],"fusion":request["fusion"].as_str().unwrap_or("rrf"),"hierarchy":request["hierarchy"]==true,"hierarchy_candidates":hierarchy_candidates}),
         )
     }
     async fn server_leg(
@@ -212,8 +245,10 @@ impl Store {
             &[dense, lexical_points],
             limit,
             request["rank_constant"].as_f64().unwrap_or(2.),
-            false,
+            request["fusion"].as_str().unwrap_or("rrf"),
+            request["preserve_heads"] == true,
         )
+        .map_err(str::to_owned)
     }
 }
 fn query_filter(filters: &Value) -> Value {
@@ -241,60 +276,4 @@ fn query_filter(filters: &Value) -> Value {
         result["must_not"] = json!([{"key":"evidence_admissible","match":{"value":false}}]);
     }
     result
-}
-fn fuse(
-    channels: &[Vec<Value>],
-    limit: usize,
-    constant: f64,
-    hierarchy: bool,
-) -> Result<Vec<Value>> {
-    let mut records = HashMap::new();
-    let mut ranked = Vec::new();
-    for channel in channels {
-        let mut ids = Vec::new();
-        for point in channel {
-            if hierarchy && point["payload"]["node_role"] == "navigation" {
-                continue;
-            }
-            let payload = &point["payload"];
-            let id = if hierarchy {
-                ["node_id", "doc_id"]
-                    .iter()
-                    .find_map(|key| payload[*key].as_str().filter(|v| !v.is_empty()))
-                    .map(|s| json!(s))
-                    .unwrap_or_else(|| {
-                        json!(format!(
-                            "{}:{}",
-                            payload["file_name"].as_str().unwrap_or(""),
-                            payload["text"].as_str().unwrap_or("")
-                        ))
-                    })
-            } else {
-                point["id"].clone()
-            };
-            let key = id.to_string();
-            if hierarchy {
-                records.insert(key, point.clone());
-            } else {
-                records.entry(key).or_insert_with(|| point.clone());
-            }
-            ids.push(id);
-        }
-        ranked.push(json!(ids));
-    }
-    let ranked = les_core::bm25::execute(
-        &json!({"action":"fuse","channels":ranked,"limit":limit,"rank_constant":constant}),
-    )?;
-    let mut seen = HashSet::new();
-    let mut rows = Vec::new();
-    for hit in ranked["hits"].as_array().ok_or("INDEX_READ_INVALID")? {
-        let key = hit[0].to_string();
-        if !seen.insert(key.clone()) {
-            continue;
-        }
-        let mut row = records.remove(&key).ok_or("INDEX_READ_INVALID")?;
-        row["score"] = hit[1].clone();
-        rows.push(row);
-    }
-    Ok(rows)
 }

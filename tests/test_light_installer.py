@@ -57,6 +57,23 @@ def test_corrupt_package_does_not_replace_existing_installation(tmp_path):
     assert installed.read_bytes() == expected
 
 
+def test_edge_preview_requires_a_migrated_index_before_replacing_app(tmp_path):
+    source = package(tmp_path, b"server application")
+    assert invoke(tmp_path, "Install", "-Source", source).returncode == 0
+    source = package(tmp_path, b"edge application")
+    manifest_path = source / "light-package.json"
+    manifest = json.loads(manifest_path.read_text())
+    for name in ("native/edge-preview", "native/vector/les-vector.exe"):
+        component = source / name
+        component.parent.mkdir(parents=True, exist_ok=True)
+        component.write_bytes(b"fixture; must not run")
+        manifest["files"].append({"path": name, "sha256": hashlib.sha256(component.read_bytes()).hexdigest()})
+    manifest_path.write_text(json.dumps(manifest))
+    assert invoke(tmp_path, "Install", "-Source", source).returncode != 0
+    installed = tmp_path / "profile/Programs/LES Light/les-light.exe"
+    assert installed.read_bytes() == b"server application"
+
+
 def test_remover_refuses_unowned_directory(tmp_path):
     target = tmp_path / "profile/Programs/LES Light"
     target.mkdir(parents=True)

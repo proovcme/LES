@@ -37,6 +37,11 @@ pub fn contract() -> Value {
     c
 }
 impl ReviewTool {
+    pub async fn active(&self) -> bool {
+        self.state.lock().await["task_id"]
+            .as_str()
+            .is_some_and(|id| !id.is_empty())
+    }
     pub async fn bind(
         context: &Context,
         turn: &Prepared,
@@ -122,6 +127,10 @@ impl ReviewTool {
                     if e.code == "INDEX_CHANGED_DURING_SEARCH" {
                         return Err(e);
                     }
+                    eprintln!(
+                        "{}",
+                        json!({"event":"review_source_check_failed","unit_id":id,"code":e.code})
+                    );
                     errors[&id] = json!(e.code);
                 }
             }

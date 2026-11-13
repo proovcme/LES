@@ -87,7 +87,8 @@ pub fn retrieval_policy(snapshot: &Value) -> Value {
     let policy = &snapshot["rag_policy"];
     let evidence = bounded(&policy["model_evidence_k"], 6, 1, 64);
     json!({"model_evidence_k":evidence,"retrieval_candidate_k":bounded(&policy["retrieval_candidate_k"],64,1,512).max(evidence),
-        "document_diversity_k":bounded(&policy["document_diversity_k"],2,1,32)})
+        "document_diversity_k":bounded(&policy["document_diversity_k"],2,1,32),
+        "rrf_rank_constant":bounded(&policy["rrf_rank_constant"],10,1,1000)})
 }
 pub fn effective(snapshot: &Value) -> Result<Value> {
     let mut value = snapshot

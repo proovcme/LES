@@ -1,4 +1,4 @@
-"""Frozen pre-migration cases ensure context/tool limits do not change with Rust ownership."""
+"""Frozen ownership cases, including the build 853 correction for a narrow context."""
 import json
 from pathlib import Path
 from backend import native_core
@@ -25,3 +25,13 @@ def test_python_contract_is_only_a_typed_facade():
         'operator':{'input_tokens':24000},'restrictions':{'max_tools':2},
     })
     assert json.loads(json.dumps(asdict(actual)))==result['preset']
+
+
+def test_large_advertised_capacity_cannot_consume_the_requested_small_window():
+    result=native_core.required('model_profile',request={
+        'schema':'les.model-profile.v1',
+        'capacity':{'model_id':'Qwen3.5:2b','context_tokens':262144,'observed':True},
+        'operator':{'input_tokens':8192},'restrictions':None,
+    })['preset']
+    assert result['input_token_limit']==8192
+    assert result['generation_reserve_tokens']==1200
