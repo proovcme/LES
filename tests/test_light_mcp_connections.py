@@ -1,4 +1,6 @@
 import asyncio
+import os
+from pathlib import Path
 import socket
 import threading
 import time
@@ -147,6 +149,27 @@ def test_native_client_does_not_depend_on_python_mcp_sdk(isolated_db, server, mo
         patch.setitem(sys.modules, 'mcp', None)
         item = service.save('Нативный MCP', server[0])
         assert {tool['name'] for tool in asyncio.run(service.discover(item['id']))} == {'echo', 'change'}
+
+
+def test_relocated_package_finds_real_native_mcp_without_environment_override(isolated_db, server, monkeypatch, tmp_path):
+    from backend import native_core
+    executable = 'les-api.exe' if os.name == 'nt' else 'les-api'
+    original = Path(os.getenv('LES_NATIVE_MCP_WORKER') or os.getenv('LES_TEST_NATIVE_API') or
+                    str(Path(service.__file__).resolve().parents[2] / 'native/api' / executable))
+    assert original.is_file(), 'Build the native MCP worker before running the integration gate'
+    relocated = tmp_path / 'Перенесённый ЛЕС'
+    program = relocated / 'native/api' / executable
+    program.parent.mkdir(parents=True)
+    os.link(original, program)
+    monkeypatch.setattr(service, '__file__', str(relocated / 'proxy/services/mcp_connection_service.py'))
+    monkeypatch.delenv('LES_NATIVE_MCP_WORKER', raising=False)
+    try:
+        item = service.save('Работает после переноса', server[0])
+        tools = asyncio.run(service.discover(item['id']))
+        assert {tool['name'] for tool in tools} == {'echo', 'change'}
+        assert service.connections()[0]['id'] == item['id']
+    finally:
+        native_core.required('worker_release_idle')
 
 
 def test_http_connection_survives_stdio_schema_migration(tmp_path, monkeypatch):

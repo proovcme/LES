@@ -51,11 +51,13 @@ jobs:
         run: |
           make test-runtime
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          make test-api
+          cargo fmt --manifest-path api/Cargo.toml --check
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cargo test --locked --manifest-path api/Cargo.toml --features edge
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           uv run python tools/build_native_runtime.py --output native/runtime
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          uv run python tools/build_native_api.py --output native/api
+          uv run python tools/build_native_api.py --output native/api --edge
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           uv run python tools/light_runtime_assets.py --destination native/qdrant
           if ($LASTEXITCODE) { exit $LASTEXITCODE }

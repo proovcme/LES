@@ -11,7 +11,7 @@ from backend.rag_config import rag_meta_db_path
 
 def _native(action, **fields):
     program = Path(os.getenv('LES_NATIVE_MCP_WORKER') or
-        str(Path(__file__).resolve().parents[3] / ('native/api/les-api.exe' if os.name == 'nt' else 'native/api/les-api')))
+        str(Path(__file__).resolve().parents[2] / ('native/api/les-api.exe' if os.name == 'nt' else 'native/api/les-api')))
     if not program.is_absolute() or not program.is_file():
         raise ValueError('Компонент MCP отсутствует или повреждён. Восстановите установку LES RAG')
     database = Path(rag_meta_db_path()).resolve()

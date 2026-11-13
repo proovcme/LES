@@ -1111,6 +1111,7 @@
         "tests/test_light_collection_safety.py",
         "tests/test_light_core_jobs_files.py",
         "tests/test_light_format_worker.py",
+        "tests/test_light_mcp_connections.py",
         "tests/test_light_model_registry_native.py",
         "tests/test_light_native_builtin_calculations.py",
         "tests/test_light_native_chat_context.py",
@@ -11431,9 +11432,10 @@
     },
     {
       "inbound": [],
-      "lines": 163,
+      "lines": 186,
       "module": "tests.test_light_mcp_connections",
       "outbound": [
+        "backend/native_core.py",
         "proxy/services/chat_profile_service.py",
         "proxy/services/mcp_connection_service.py",
         "proxy/services/tool_harness_service.py"
@@ -16155,7 +16157,7 @@
     "runtime_support": 5,
     "test_or_tool_only": 279,
     "tracked_python_files": 724,
-    "tracked_python_lines": 173294
+    "tracked_python_lines": 173317
   },
   "warnings": []
 }
