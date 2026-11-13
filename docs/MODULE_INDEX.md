@@ -1,5 +1,9 @@
 # Модули LES RAG
 
+Стенд 875: [полный query-путь Swiftide](acceptance/native-swiftide-query-875.md)
+на прежней копии Edge/SQLite. Замена не принята по содержанию справок;
+зависимости приложения и владельцы модулей сохранены.
+
 874: `retrieval/{pagination,envelope,packing}.rs` в Rust-чате разделяют
 позицию чтения, целостный JSON-конверт и отбор. [Проверка](acceptance/native-source-pagination-874.md).
 

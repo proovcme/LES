@@ -1,0 +1,99 @@
+{
+  "experiment": "swiftide-query-875",
+  "application_commit": "66ef3dc",
+  "installed": false,
+  "replacement_accepted": false,
+  "model": "qwen3.5:9b",
+  "embedding": "bge-m3",
+  "corpus_documents": 638,
+  "context_tokens": 8192,
+  "context_char_budget": 10000,
+  "max_output_tokens": 1800,
+  "safety_tokens": 512,
+  "proof": {
+    "cases": [
+      {
+        "case": "volumes",
+        "seconds": 21.93,
+        "admitted_sources": 5,
+        "citations": 16,
+        "unknown_citations": 0,
+        "prompt_tokens": 2946,
+        "output_tokens": 774,
+        "retrieved": 32,
+        "status": "completed"
+      },
+      {
+        "case": "electrical",
+        "seconds": 21.61,
+        "admitted_sources": 6,
+        "citations": 13,
+        "unknown_citations": 0,
+        "prompt_tokens": 3305,
+        "output_tokens": 769,
+        "retrieved": 32,
+        "status": "completed"
+      },
+      {
+        "case": "electrical-stages",
+        "seconds": 23.52,
+        "admitted_sources": 5,
+        "citations": 5,
+        "unknown_citations": 0,
+        "prompt_tokens": 4093,
+        "output_tokens": 756,
+        "retrieved": 32,
+        "status": "completed"
+      },
+      {
+        "case": "electrical-management",
+        "seconds": 24.01,
+        "admitted_sources": 5,
+        "citations": 13,
+        "unknown_citations": 0,
+        "prompt_tokens": 2940,
+        "output_tokens": 837,
+        "retrieved": 32,
+        "status": "completed"
+      },
+      {
+        "case": "technical-metering",
+        "seconds": 14.74,
+        "admitted_sources": 7,
+        "citations": 17,
+        "unknown_citations": 0,
+        "prompt_tokens": 2815,
+        "output_tokens": 459,
+        "retrieved": 32,
+        "status": "completed"
+      },
+      {
+        "case": "parking-provision",
+        "seconds": 17.01,
+        "admitted_sources": 7,
+        "citations": 7,
+        "unknown_citations": 0,
+        "prompt_tokens": 3261,
+        "output_tokens": 572,
+        "retrieved": 32,
+        "status": "completed"
+      }
+    ],
+    "unique_original_links": 24,
+    "failed_original_links": 0,
+    "source_occurrences": 35,
+    "unique_originals": 24,
+    "physical_page_occurrences": 16,
+    "revisions": 1,
+    "raw_answers_sha256": "1ac53009ea915fd01a7e247fa966037be2f0c0a39f94005785fc65c6f9ee5aa4"
+  },
+  "pipeline_source_sha256": "fcadb62a4a1dd3647bdd512c973a88d5ca02a4878040ea9fd9118fd26958cb24",
+  "transport_source_sha256": "1793dc205f922ed9125e25a2119a7b4c02adf15fb3b4c43cb5937cafb29a3e3f",
+  "limitations": [
+    "Native index search/reader adapters retained",
+    "Manual semantic review; link validity is not entailment",
+    "Copied corpus; no production switch",
+    "No live PDF re-extraction or crash test in this experiment",
+    "Windows vendor patch retained"
+  ]
+}
