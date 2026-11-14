@@ -1109,6 +1109,7 @@
         "tests/test_datasets_router.py",
         "tests/test_light_collection_safety.py",
         "tests/test_light_core_jobs_files.py",
+        "tests/test_light_engineering_snapshots.py",
         "tests/test_light_format_worker.py",
         "tests/test_light_mcp_connections.py",
         "tests/test_light_model_registry_native.py",
@@ -11102,6 +11103,17 @@
     },
     {
       "inbound": [],
+      "lines": 69,
+      "module": "tests.test_light_engineering_snapshots",
+      "outbound": [
+        "backend/native_core.py"
+      ],
+      "path": "tests/test_light_engineering_snapshots.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
       "lines": 136,
       "module": "tests.test_light_execution_receipts",
       "outbound": [
@@ -16154,9 +16166,9 @@
     "product_reachable": 417,
     "registered_api_routes": 298,
     "runtime_support": 5,
-    "test_or_tool_only": 280,
-    "tracked_python_files": 725,
-    "tracked_python_lines": 173505
+    "test_or_tool_only": 281,
+    "tracked_python_files": 726,
+    "tracked_python_lines": 173574
   },
   "warnings": []
 }

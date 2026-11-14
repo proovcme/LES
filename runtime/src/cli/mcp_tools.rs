@@ -46,6 +46,7 @@ pub fn list() -> Value {
     let scope = json!({"type":"integer","minimum":0,"default":0});
     let path = json!({"type":"string","maxLength":240,"description":"Относительный путь файла в рабочем каталоге Леса"});
     json!({"tools":[
+        tool("uvyazka_integration","Явное локальное подключение Увязки: projects/datasets — список, import — полная проверенная проекция в обычную очередь индексации, viewer — закреплённая ссылка на объект. Поиск импортированных данных — общий search_sources; исходные файлы не меняются.",false,false,&["url","action"],json!({"url":{"type":"string","maxLength":2048},"action":{"enum":["projects","datasets","import","viewer"]},"project_id":{"type":"string","maxLength":512},"dataset_id":{"type":"string","maxLength":512},"offset":{"type":"integer","minimum":0},"target":{"type":"object","required":["project_id","dataset_id","object_id","source_sha256"],"additionalProperties":false,"properties":{"project_id":{"type":"string","maxLength":512,"description":"ID проекта Увязки"},"dataset_id":{"type":"string","maxLength":512},"object_id":{"type":"string","maxLength":512},"source_sha256":{"type":"string","pattern":"^[a-fA-F0-9]{64}$"}}}})),
         tool("web_search","Найти публичные веб-источники. Возвращает названия, выдержки и прямые ссылки; выдержка поиска не заменяет чтение страницы.",true,false,&["q"],json!({"q":{"type":"string","minLength":3,"maxLength":500},"limit":{"type":"integer","minimum":1,"maximum":4}})),
         tool("web_read","Прочитать выбранную публичную веб-страницу. Возвращает текст, название и ссылку на первоисточник.",true,false,&["url"],json!({"url":{"type":"string","maxLength":8192},"max_chars":{"type":"integer","minimum":1,"maximum":4000}})),
         tool("list_datasets","Показать пользовательские наборы Леса и число готовых фрагментов.",true,false,&[],json!({})),
@@ -238,6 +239,11 @@ pub fn call(name: &str, args: &Value) -> Result<Value> {
                 return Err(message.to_string());
             }
             Ok(payload)
+        }
+        "uvyazka_integration" => {
+            required(args, "url")?;
+            required(args, "action")?;
+            api.post("/api/integrations/uvyazka", args.clone(), 185)
         }
         "list_datasets" => api.library(),
         "list_documents" => {

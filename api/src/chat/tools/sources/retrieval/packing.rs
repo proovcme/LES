@@ -13,6 +13,7 @@ fn unit(point: &Value, rank: usize) -> Value {
         "source_page",
         "parent_id",
         "source_ref",
+        "model_locator",
         "sheet_name",
         "row",
     ] {

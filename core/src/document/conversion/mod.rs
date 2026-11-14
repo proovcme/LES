@@ -230,6 +230,26 @@ fn execute_inner(
                 json!({"text":text,"metadata":{"extractor":"les.unicode.v1"}})
             }
             "json" | "jsonl" => {
+                if suffix == "json" {
+                    if let Some(value) = crate::engineering::convert(&bytes)? {
+                        return if request["pipeline"] == "nodes" {
+                            pipeline::prepare(
+                                request,
+                                &bytes,
+                                path,
+                                &suffix,
+                                &source_sha256,
+                                Some(&value),
+                            )
+                        } else {
+                            let mut value = value;
+                            value["source_sha256"] = json!(source_sha256);
+                            value["status"] = json!("completed");
+                            value["owner"] = json!("rust.document.conversion");
+                            Ok(value)
+                        };
+                    }
+                }
                 let text = super::plain_text::decode(&bytes).ok_or("DOCUMENT_ENCODING_REQUIRED")?;
                 let value = super::json_source::convert(
                     &json!({"json_lines":suffix=="jsonl","max_chars":MAX_TEXT}),

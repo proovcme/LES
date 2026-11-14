@@ -21,6 +21,7 @@ mod document_review;
 pub mod document_source;
 pub mod document_tasks;
 pub mod embedding_native;
+pub mod engineering;
 mod files;
 pub mod filesystem;
 pub mod harness_evidence;

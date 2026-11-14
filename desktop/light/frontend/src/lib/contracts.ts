@@ -10,6 +10,7 @@ export interface Attachment { attachment_id: string; name: string }
 export interface IndexedAttachment { intake_job_id: string; dataset_id: string; name: string }
 export interface Draft { revision: number; text: string; attachment: Attachment | null }
 export interface Source {
+  model_locator?: import('./engineering').ModelLocator;
   index: number; doc_id?: string; dataset_id?: string; doc_name?: string;
   label?: string; header?: string; snippet?: string; quote?: string;
   cited_in_answer?: boolean;
@@ -64,6 +65,7 @@ export const sourcePage = (source: Source): number => {
   return Number.isInteger(value) && value > 0 ? value : 1;
 };
 export function sourcePlace(source: Source): string {
+  if (source.model_locator) return ` · ID ${source.model_locator.native_id}`;
   const { sheet, row, cell, anchor } = source.locator ?? {};
   if (sheet && row) return ` · ${sheet} · ${cell || `строка ${row}`}`;
   const paragraph = anchor?.match(/^para(\d+)$/);

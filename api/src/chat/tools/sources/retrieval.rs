@@ -708,6 +708,10 @@ async fn passages(
             .unwrap_or(&p["page"])
             .clone();
         let mut source = reference(&doc, page);
+        if p["model_locator"].is_object() {
+            source["model_locator"] = p["model_locator"].clone();
+            source["evidence_kind"] = json!("engineering_snapshot");
+        }
         if hydrated["read_failures"]
             .as_array()
             .is_some_and(|v| !v.is_empty())

@@ -1,5 +1,10 @@
 # Модули LES RAG
 
+879: `core/src/engineering.rs`, `api/src/engineering.rs` — [адаптер Увязки](modules/uvyazka-bridge.md):
+проверенные снимки в общей очереди, ID объектов и ссылки во вьювер.
+`EngineeringModels.svelte` / `EngineeringSource.svelte` — подключение и источник;
+MCP использует тот же API. Рабочая установка не переключена.
+
 878: `api/src/derived_cache.rs` и `document_cache.rs` — ограниченные производные
 снимки Word, PDF и рисунков; `document_media/vector/labels.rs` — буквальные
 Unicode-подписи; `SourceFigures.svelte` и `runtime/src/cli/mcp.rs` — чтение

@@ -16,9 +16,10 @@
   import ProfileEditor from './components/ProfileEditor.svelte';
   import McpEditor from './components/McpEditor.svelte';
   import UpdatePanel from './components/UpdatePanel.svelte';
+  import EngineeringModels from './components/EngineeringModels.svelte';
 
   let { workspace = new Workspace() }: { workspace?: Workspace } = $props();
-  let modal = $state<'sessions' | 'scope' | 'options' | 'attachment' | 'models' | 'mail' | 'data' | 'profiles' | 'mcp' | 'update' | null>(null);
+  let modal = $state<'sessions' | 'scope' | 'options' | 'attachment' | 'models' | 'mail' | 'data' | 'profiles' | 'mcp' | 'update' | 'engineering' | null>(null);
   let source = $state<Source | null>(null); let mobileNav = $state(false);
   let actionBusy = $state(false); let sessionQuery = $state('');
   let memoryOpen = $state(false); let memoryDirty = $state(false); let memoryEditor: AgentMemory;
@@ -42,7 +43,7 @@
     void bridge.ready.then(() => workspace.initialize()).then(() => {
       const url = new URL(location.href);
       const panel = url.searchParams.get('panel');
-      if (panel === 'data' || panel === 'profiles' || panel === 'mcp' || panel === 'update'
+      if (panel === 'data' || panel === 'profiles' || panel === 'mcp' || panel === 'update' || panel === 'engineering'
         || (panel === 'models' && workspace.nativeModelSettings)) {
         modal = panel;
         url.searchParams.delete('panel');
@@ -115,6 +116,7 @@
         <button class="nav-item" disabled={disabled} onclick={() => { modal = 'mail'; mobileNav = false; }}><Icon name="folder" />Почта</button>
       {/if}
       <button class="nav-item" disabled={disabled} onclick={() => { modal = 'data'; mobileNav = false; }}><Icon name="folder" />Данные</button>
+      <button class="nav-item" disabled={disabled} onclick={() => { modal = 'engineering'; mobileNav = false; }}><Icon name="file" />Чертежи и модели</button>
       <button class="nav-item" disabled={disabled} onclick={() => { modal = 'profiles'; mobileNav = false; }}><Icon name="settings" />Профили чата</button>
       <button class="nav-item" disabled={disabled} onclick={() => { modal = 'mcp'; mobileNav = false; }}><Icon name="settings" />Подключения MCP</button>
       <button class="nav-item" disabled={disabled} onclick={() => navigate('/qdrant-visualizer/index.html', location.origin)}><Icon name="tree" />Лес знаний</button>
@@ -215,6 +217,8 @@
   <McpEditor close={() => modal = null} />
 {:else if modal === 'update'}
   <UpdatePanel close={() => modal = null} />
+{:else if modal === 'engineering'}
+  <EngineeringModels refresh={() => workspace.refreshDatasets()} close={() => modal = null} />
 {:else if modal === 'attachment'}
   <Modal title="Прикрепить файл" close={() => modal = null}>
     <p>Прочитать файл в этом диалоге или сохранить его в наборе «Вложения чата» для поиска.</p>

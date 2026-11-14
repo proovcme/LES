@@ -7,6 +7,7 @@
   import Icon from './Icon.svelte';
   import SourceReader from './SourceReader.svelte';
   import SourceFigures from './SourceFigures.svelte';
+  import EngineeringSource from './EngineeringSource.svelte';
   let { source, close }: { source: Source; close: () => void } = $props();
   let loading = $state(true); let error = $state(''); let documentError = $state('');
   let doc = $state<{ id: string; file_name: string } | null>(null);
@@ -73,20 +74,21 @@
     catch (failure) { documentError = errorMessage(failure); }
   }
 </script>
-<Modal title={source.doc_name || 'Доказательство'} {close} wide>
+<Modal title={source.model_locator?.source_name || source.doc_name || 'Доказательство'} {close} wide>
   <p class="eyebrow">Источник {source.index}{sourcePlace(source)}</p>
   {#if source.locator?.section_heading || source.section_heading}<p>{source.locator?.section_heading || source.section_heading}</p>{/if}
   {#if source.quote || source.snippet}<blockquote class="evidence">{source.quote || source.snippet}</blockquote>{:else}<p class="muted">У этого источника не сохранена цитата. Проверьте оригинал.</p>{/if}
   {#if loading}<p role="status">Проверяю оригинал…</p>{/if}
   {#if error}<p class="error" role="alert">{error}</p>{/if}
+  {#if source.model_locator}<EngineeringSource target={source.model_locator} />{/if}
   {#if doc}
     {#if !source.locator?.source_sha256}<p class="muted">Для этой цитаты редакция файла не сохранена. Доступен текущий оригинал.</p>{/if}
     <div class="source-actions">
       <button class="quiet" onclick={() => reading = !reading}>{reading ? 'Скрыть текст' : 'Прочитать текст'}</button>
       {#if /\.docx$/i.test(doc.file_name)}<button class="quiet" onclick={() => figures = !figures}>{figures ? 'Скрыть рисунки' : 'Рисунки и вложения'}</button>{/if}
-      <button onclick={showOriginal} disabled={preparing}><Icon name="file" />{preparing ? 'Открываю…' : 'Показать оригинал'}</button>
-      <a class="button quiet" href={`${base}/raw?${identity}`} download={doc.file_name}><Icon name="external" />Скачать</a>
-      <button class="quiet" onclick={openNative}>Открыть в приложении</button>
+      <button onclick={showOriginal} disabled={preparing}><Icon name="file" />{preparing ? 'Открываю…' : source.model_locator ? 'Показать снимок данных' : 'Показать оригинал'}</button>
+      <a class="button quiet" href={`${base}/raw?${identity}`} download={doc.file_name}><Icon name="external" />{source.model_locator ? 'Скачать снимок' : 'Скачать'}</a>
+      <button class="quiet" onclick={openNative}>{source.model_locator ? 'Открыть файл снимка' : 'Открыть в приложении'}</button>
     </div>
     {#if reading}
       {#key `${doc.id}:${page}`}
