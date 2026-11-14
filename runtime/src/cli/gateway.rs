@@ -4,7 +4,7 @@ use reqwest::{
     Method, Url,
 };
 use serde_json::{json, Value};
-use std::{collections::HashSet, env, fs::File, io::Read, path::PathBuf, time::Duration};
+use std::{env, fs::File, io::Read, path::PathBuf, time::Duration};
 
 pub type Result<T> = std::result::Result<T, String>;
 const OFFLINE: &str = "LES RAG не запущен. Откройте приложение и повторите запрос";
@@ -91,6 +91,18 @@ fn read_json(reader: impl Read, limit: u64) -> Result<Value> {
 fn decode(response: Response, limit: u64) -> Result<Value> {
     let status = response.status();
     if !status.is_success() {
+        // Keep a safe machine-readable reason rather than replacing every
+        // failed read with the same HTTP-status message. Never print raw bodies.
+        if let Ok(value) = read_json(response, 65536) {
+            if let Some(code) = value["code"].as_str().filter(|s| {
+                !s.is_empty()
+                    && s.len() <= 100
+                    && s.bytes()
+                        .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
+            }) {
+                return Err(format!("{code}: {}", source_failure(code)));
+            }
+        }
         return Err(match status.as_u16() {
             400 => "Лес отклонил параметры запроса. Проверьте название или поля.".into(),
             401 => "Нет доступа к данным LES RAG. Проверьте ключ MCP-подключения".into(),
@@ -104,6 +116,31 @@ fn decode(response: Response, limit: u64) -> Result<Value> {
     read_json(response, limit)
 }
 
+fn source_failure(code: &str) -> &'static str {
+    match code {
+        "SOURCE_REVISION_CHANGED" | "PDF_REVISION_CHANGED" | "INDEX_CHANGED_DURING_SEARCH" => "Редакция изменилась. Повторите поиск; не объединяйте старые и новые выдержки.",
+        "SOURCE_DOCUMENT_NOT_FOUND" | "SOURCE_DOCUMENT_MISSING" => "Исходный документ не найден или отмечен пропавшим.",
+        "SOURCE_UNAVAILABLE" | "PDF_READ_FAILED" | "SOURCE_READ_FAILED" => "Не удалось прочитать оригинал. Это не означает, что в нём нет ответа.",
+        "PDF_TEXT_LIMIT" => "Укажите max_chars от 1 до 12000 и дочитывайте страницу через next_offset.",
+        "PDF_OCR_REQUIRED" => "Страница является сканом. Для чтения оригинала нужен настроенный OCR; индексный фрагмент не заменяет проверку страницы.",
+        "PDF_PAGE_OUT_OF_RANGE" => "Номер страницы выходит за границы оригинала. Проверьте page_count.",
+        "SOURCE_SECTION_NOT_FOUND" => "В выбранной области индексированных разделов совпадений нет. Это не доказывает отсутствие ответа в полном оригинале.",
+        "EMBEDDING_MODEL_NOT_ASSIGNED" => "Назначьте модель поиска в Лесе. Модель ответов для этого не нужна.",
+        "SOURCE_INDEX_NOT_READY" => "В выбранных наборах пока нет готовых поисковых фрагментов. Подготовьте документы к поиску; пустой индекс не означает отсутствие ответа в оригиналах.",
+        "TOOL_SCHEMA_INVALID" => "Проверьте параметры инструмента по его схеме.",
+        "TOOL_SCOPE_VIOLATION" | "CHAT_SCOPE_EMPTY" => "В выбранной области нет доступных источников. Проверьте наборы документов.",
+        "CONTEXT_REQUIRED_SECTION_OVERFLOW" => "Целый фрагмент не помещается. Увеличьте max_chars или прочитайте физическую страницу PDF порциями.",
+            "SOURCE_CONTINUATION_VIEW_REQUIRED" => "Для продолжения чтения передайте view_sha256 из предыдущей порции вместе с next_offset.",
+            "SOURCE_VIEW_CHANGED" => "Изменился снимок прочитанного текста. Начните чтение заново; старые и новые порции нельзя объединять.",
+            "SOURCE_READ_LIMIT" | "CONTEXT_SOURCE_LIMIT" => "Для одного чтения найдено слишком много текста. Уточните область поиска или читайте выбранный документ порциями; источники не были молча пропущены.",
+            "SOURCE_ATOMIC_UNIT_OVERFLOW" => "Целая строка таблицы или абзац не помещается. Увеличьте max_chars; фрагмент не был обрезан.",
+            "OCR_NO_TEXT" => "На странице не удалось распознать текст. Это не подтверждает отсутствие сведений в оригинале.",
+            "OCR_UNAVAILABLE" => "Локальный OCR недоступен. Проверьте установленный обработчик распознавания; ответ по скану не подтверждён.",
+        "SOURCE_CONTINUATION_REVISION_REQUIRED" => "Для продолжения передайте index_revision из предыдущей порции и повторите те же параметры чтения.",
+        _ => "Лес не завершил чтение. Проверьте состояние источника и повторите запрос; не используйте отказ как доказательство.",
+    }
+}
+
 pub struct Api {
     client: Client,
     path: PathBuf,
@@ -112,6 +149,110 @@ pub struct Api {
 }
 
 impl Api {
+    pub(super) fn part_image(&self, link: &str) -> Result<Vec<u8>> {
+        let url = self.owner.base.join(link).map_err(|_| INVALID)?;
+        let pieces = url.path_segments().ok_or(INVALID)?.collect::<Vec<_>>();
+        let valid_hash = |s: &str| {
+            s.len() == 64
+                && s.bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        };
+        let query = url.query_pairs().collect::<Vec<_>>();
+        if url.origin() != self.owner.base.origin()
+            || url.fragment().is_some()
+            || pieces.len() != 6
+            || pieces[..3] != ["api", "documents", "by-id"]
+            || pieces[4] != "parts"
+            || !valid_hash(pieces[5])
+            || query.len() != 1
+            || query[0].0 != "source_sha256"
+            || !valid_hash(&query[0].1)
+        {
+            return Err(
+                "SOURCE_PART_INVALID: preview must belong to the connected LES instance".into(),
+            );
+        }
+        // Use the normal owner check, authorization and no-redirect client.
+        self.get("/api/light/instance")?;
+        let mut request = self
+            .client
+            .get(url.clone())
+            .timeout(Duration::from_secs(25));
+        if !self.key.is_empty() {
+            request = request.header("X-API-Key", &self.key);
+        }
+        let response = request.send().map_err(|_| UNAVAILABLE)?;
+        if !response.status().is_success() {
+            decode(response, 65536)?;
+            return Err(INVALID.into());
+        }
+        if response
+            .headers()
+            .get("content-type")
+            .and_then(|s| s.to_str().ok())
+            .is_none_or(|s| !s.starts_with("image/png"))
+        {
+            return Err(INVALID.into());
+        }
+        let mut bytes = Vec::new();
+        response
+            .take(4 * 1024 * 1024 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|_| UNAVAILABLE)?;
+        if bytes.len() > 4 * 1024 * 1024
+            || bytes.len() < 24
+            || !bytes.starts_with(b"\x89PNG\r\n\x1a\n")
+            || les_core::sha256_hex(&bytes) != pieces[5]
+        {
+            return Err("SOURCE_PART_CORRUPT: image checksum or size mismatch".into());
+        }
+        let w = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
+        let h = u32::from_be_bytes(bytes[20..24].try_into().unwrap());
+        if w == 0 || h == 0 || w as u64 * h as u64 > 25_000_000 {
+            return Err("SOURCE_READ_LIMIT: image dimensions".into());
+        }
+        if Owner::read(&self.path)? != self.owner {
+            return Err(CHANGED.into());
+        }
+        Ok(bytes)
+    }
+    pub fn source_call(&self, name: &str, args: Value) -> Result<Value> {
+        let mut result = self.post(
+            "/api/rag/sources/call",
+            json!({"tool":name,"args":args}),
+            155,
+        )?;
+        self.source_links(&mut result);
+        Ok(result)
+    }
+
+    fn source_links(&self, value: &mut Value) {
+        match value {
+            Value::Object(map) => {
+                for key in ["url", "parts_url", "preview_url"] {
+                    if let Some(link) = map.get_mut(key) {
+                        if let Some(path) = link
+                            .as_str()
+                            .filter(|s| s.starts_with("/api/documents/by-id/"))
+                        {
+                            if let Ok(url) = self.owner.base.join(path) {
+                                *link = json!(url.to_string());
+                            }
+                        }
+                    }
+                }
+                for item in map.values_mut() {
+                    self.source_links(item);
+                }
+            }
+            Value::Array(rows) => {
+                for row in rows {
+                    self.source_links(row);
+                }
+            }
+            _ => {}
+        }
+    }
     pub fn connect() -> Result<Self> {
         let path = state_root()?.join("launcher-status.json");
         let owner = Owner::read(&path)?;
@@ -265,7 +406,7 @@ impl Api {
                     text(&row["id"]),
                     text(&row["dataset_id"]),
                     text(&row["file_name"]),
-                    "",
+                    text(&row["file_hash"]),
                 );
                 row["original_url"] = link.into();
             }
@@ -285,7 +426,7 @@ impl Api {
                 "documents",
                 "by-id",
                 if id.is_empty() { "unknown" } else { id },
-                if revision.is_empty() { "viewer" } else { "raw" },
+                "raw",
             ]);
         url.query_pairs_mut()
             .append_pair("dataset_id", dataset)
@@ -305,122 +446,21 @@ impl Api {
         {
             return Err("Укажите ID документа из list_documents.".into());
         }
-        let mut result = self.get_with_query(
-            &format!("/api/documents/by-id/{document}/clause"),
-            &[("dataset_id", dataset), ("number", number)],
-        )?;
-        if let Some(sources) = result["sources"].as_array_mut() {
-            for source in sources {
-                source["original_url"] = self
-                    .document_link(
-                        document,
-                        dataset,
-                        text(&source["doc_name"]),
-                        text(&source["locator"]["source_sha256"]),
-                    )
-                    .into();
-            }
-        }
-        Ok(result)
+        self.source_call(
+            "read_source",
+            json!({"dataset_id":dataset,"doc_id":document,"clause":number,"max_chars":16000}),
+        )
     }
 
     pub fn search(&self, query: &str, ids: Option<Vec<String>>, limit: u64) -> Result<Value> {
-        self.search_catalog(query, ids, limit, false)
-    }
-
-    pub fn search_library(
-        &self,
-        query: &str,
-        ids: Option<Vec<String>>,
-        limit: u64,
-    ) -> Result<Value> {
-        self.search_catalog(query, ids, limit, true)
-    }
-
-    fn search_catalog(
-        &self,
-        query: &str,
-        ids: Option<Vec<String>>,
-        limit: u64,
-        native: bool,
-    ) -> Result<Value> {
-        let query = query.trim();
-        if query.is_empty() || query.chars().count() > 4000 {
-            return Err("Введите поисковый запрос длиной до 4000 символов".into());
+        if query.trim().is_empty() || query.chars().count() > 4000 || !(1..=20).contains(&limit) {
+            return Err("Введите запрос до 4000 символов и limit от 1 до 20".into());
         }
-        if !(1..=20).contains(&limit) {
-            return Err("Количество результатов должно быть от 1 до 20".into());
+        let mut args = json!({"q":query,"limit":limit});
+        if let Some(ids) = ids {
+            args["dataset_ids"] = json!(ids);
         }
-        let datasets = if native {
-            self.library()?
-        } else {
-            self.datasets()?
-        };
-        let catalog: std::collections::BTreeMap<_, _> = array(&datasets["datasets"])
-            .iter()
-            .filter_map(|row| Some((row["id"].as_str()?, count(&row["declared_chunks"]))))
-            .collect();
-        let mut seen = HashSet::new();
-        let mut selected = ids.unwrap_or_else(|| catalog.keys().map(|id| id.to_string()).collect());
-        selected.retain(|id| seen.insert(id.clone()));
-        if selected.iter().any(|id| !catalog.contains_key(id.as_str())) {
-            return Err("Набор не найден среди пользовательских данных LES RAG".into());
-        }
-        let empty = if selected.is_empty() {
-            Some(json!({"status":"empty"}))
-        } else if !selected.iter().any(|id| catalog[id.as_str()] > 0) {
-            Some(
-                json!({"status":"not_ready","message":"В выбранных наборах пока нет поисковых фрагментов. Проверьте состав и обработку документов в LES RAG."}),
-            )
-        } else {
-            None
-        };
-        if let Some(retrieval) = empty {
-            return Ok(search_result(query, vec![], retrieval));
-        }
-        let result = self.request(Method::POST, "/api/search", Some(json!({
-            "query":query,"dataset_ids":selected,"top_k":limit,"max_chars":1600,"include_context":true,"include_trace":true,
-        })), 25)?;
-        let hits = array(&result["chunks"])
-            .iter()
-            .map(|chunk| self.hit(chunk))
-            .collect();
-        let trace = &result["retrieval_trace"];
-        let status = trace["status"].as_str().unwrap_or("unknown");
-        let code = if status == "ok" {
-            ""
-        } else {
-            text(&trace["error_code"])
-        };
-        let message = if status != "blocked" {
-            ""
-        } else {
-            match code {
-            "native_rrf_failed" => "Поиск по индексу сейчас недоступен. Проверьте состояние Qdrant и готовность документов в LES RAG.",
-            "query_embedding_failed" => "Не удалось получить вектор запроса. Проверьте назначенную модель поиска в LES RAG.",
-            _ => "Поиск сейчас недоступен. Проверьте состояние набора и модели поиска в LES RAG.",
-        }
-        };
-        Ok(search_result(
-            query,
-            hits,
-            json!({"fusion":trace["fusion"],"status":status,"error_code":code,"message":message}),
-        ))
-    }
-
-    fn hit(&self, chunk: &Value) -> Value {
-        let meta = &chunk["metadata"];
-        let dataset = text(&meta["dataset_id"]);
-        let document = text(&chunk["doc_name"]);
-        let id = text(&chunk["doc_id"]);
-        let link = self.document_link(id, dataset, document, text(&meta["source_sha256"]));
-        let context = &chunk["context"];
-        let fragments: Vec<Value> = array(&context["metadata"]["context_fragments"]).iter().map(|item|
-            json!({"excerpt":text(&item["content"]),"page":item["metadata"]["page"],"point_id":item["metadata"]["qdrant_point_id"]})).collect();
-        let section = first_text(&meta["section_heading"], &meta["parent_heading"]);
-        json!({"rank":chunk["rank"],"document":document,"dataset_id":dataset,"document_id":id,
-            "page":meta["page"],"section":(!section.is_empty()).then_some(section),"excerpt":text(&chunk["content"]),
-            "context":text(&context["content"]),"context_fragments":fragments,"original_url":link})
+        self.source_call("search_sources", args)
     }
 }
 
@@ -452,7 +492,4 @@ fn count(value: &Value) -> u64 {
         .as_u64()
         .or_else(|| text(value).parse().ok())
         .unwrap_or_default()
-}
-fn search_result(query: &str, hits: Vec<Value>, retrieval: Value) -> Value {
-    json!({"schema":"les.light.mcp.search.v1","query":query,"count":hits.len(),"hits":hits,"retrieval":retrieval})
 }

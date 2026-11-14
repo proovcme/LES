@@ -185,60 +185,115 @@ fn execute_inner(
         return Err("SOURCE_CHANGED_DURING_INDEXING");
     }
     let table = matches!(suffix.as_str(), "xlsx" | "xlsm" | "xls" | "csv");
-    let mut result = match suffix.as_str() {
-        "eml" | "emlx" => mail::read(&bytes, suffix == "emlx")?,
-        "msg" => msg::read(&bytes)?,
-        "pptx" if request["pipeline"] != "nodes" => presentation::read(&bytes)?,
-        "pptx" => Value::Null,
-        "docx" if full_docx => super::docx::convert(&bytes, request, external)?,
-        "docx" => {
-            json!({"text":super::docx::checked(&bytes)?,"metadata":{"extractor":"les.docx-paragraphs.v1"}})
+    let cache_word = full_docx
+        && matches!(suffix.as_str(), "doc" | "docx")
+        && request["conversion_cache"] == true;
+    let mut cache_request = request.clone();
+    cache_request["source_sha256"] = json!(source_sha256);
+    cache_request["part_kind"] = json!("word_conversion_cache");
+    let cached = if cache_word {
+        external(&cache_request, None)?
+    } else {
+        Value::Null
+    };
+    let mut result = if cached["hit"] == true {
+        if cached["value"]["source_sha256"] != source_sha256 {
+            return Err("SOURCE_CHANGED_DURING_INDEXING");
         }
-        "doc" if request["word_parser"] == "docling" => {
-            let mut input = request.clone();
-            input["source_sha256"] = json!(source_sha256);
-            external(&input, None)?
-        }
-        "doc" => {
-            json!({"text":super::legacy_doc::read(path)?,"metadata":{"extractor":"les.ms-doc.v1"}})
-        }
-        "txt" | "md" => {
-            let text = super::plain_text::decode(&bytes).ok_or("DOCUMENT_ENCODING_REQUIRED")?;
-            if text
-                .chars()
-                .any(|c| c < ' ' && !matches!(c, '\t' | '\r' | '\n' | '\u{c}'))
-            {
-                return Err("DOCUMENT_BINARY_TEXT");
+        cached["value"].clone()
+    } else {
+        match suffix.as_str() {
+            "eml" | "emlx" => mail::read(&bytes, suffix == "emlx")?,
+            "msg" => msg::read(&bytes)?,
+            "pptx" if request["pipeline"] != "nodes" => presentation::read(&bytes)?,
+            "pptx" => Value::Null,
+            "docx" if full_docx => super::docx::convert(&bytes, request, external)?,
+            "docx" => {
+                json!({"text":super::docx::checked(&bytes)?,"metadata":{"extractor":"les.docx-paragraphs.v1"}})
             }
-            json!({"text":text,"metadata":{"extractor":"les.unicode.v1"}})
-        }
-        "json" | "jsonl" => {
-            let text = super::plain_text::decode(&bytes).ok_or("DOCUMENT_ENCODING_REQUIRED")?;
-            let value = super::json_source::convert(
-                &json!({"json_lines":suffix=="jsonl","max_chars":MAX_TEXT}),
-                &text,
-            )?;
-            if value["status"] != "completed" {
-                return Err(value["code"]
-                    .as_str()
-                    .and_then(json_error)
-                    .unwrap_or("JSON_READ_FAILED"));
+            "doc" if request["word_parser"] == "docling" => {
+                let mut input = request.clone();
+                input["source_sha256"] = json!(source_sha256);
+                external(&input, None)?
             }
-            json!({"text":value["text"],"metadata":{"extractor":value["extractor"],"truncated":value["truncated"],"records":value["records"]}})
+            "doc" => {
+                json!({"text":super::legacy_doc::read(path)?,"metadata":{"extractor":"les.ms-doc.v1"}})
+            }
+            "txt" | "md" => {
+                let text = super::plain_text::decode(&bytes).ok_or("DOCUMENT_ENCODING_REQUIRED")?;
+                if text
+                    .chars()
+                    .any(|c| c < ' ' && !matches!(c, '\t' | '\r' | '\n' | '\u{c}'))
+                {
+                    return Err("DOCUMENT_BINARY_TEXT");
+                }
+                json!({"text":text,"metadata":{"extractor":"les.unicode.v1"}})
+            }
+            "json" | "jsonl" => {
+                if suffix == "json" {
+                    if let Some(value) = crate::engineering::convert(&bytes)? {
+                        return if request["pipeline"] == "nodes" {
+                            pipeline::prepare(
+                                request,
+                                &bytes,
+                                path,
+                                &suffix,
+                                &source_sha256,
+                                Some(&value),
+                            )
+                        } else {
+                            let mut value = value;
+                            value["source_sha256"] = json!(source_sha256);
+                            value["status"] = json!("completed");
+                            value["owner"] = json!("rust.document.conversion");
+                            Ok(value)
+                        };
+                    }
+                }
+                let text = super::plain_text::decode(&bytes).ok_or("DOCUMENT_ENCODING_REQUIRED")?;
+                let value = super::json_source::convert(
+                    &json!({"json_lines":suffix=="jsonl","max_chars":MAX_TEXT}),
+                    &text,
+                )?;
+                if value["status"] != "completed" {
+                    return Err(value["code"]
+                        .as_str()
+                        .and_then(json_error)
+                        .unwrap_or("JSON_READ_FAILED"));
+                }
+                json!({"text":value["text"],"metadata":{"extractor":value["extractor"],"truncated":value["truncated"],"records":value["records"]}})
+            }
+            "pdf" => {
+                let mut input = request.clone();
+                input["source_sha256"] = json!(source_sha256);
+                external(&input, None)?
+            }
+            _ if request["pipeline"] == "nodes" => Value::Null,
+            _ => spreadsheet::read(&bytes, &suffix, path, request)?,
         }
-        "pdf" => {
-            let mut input = request.clone();
-            input["source_sha256"] = json!(source_sha256);
-            external(&input, None)?
-        }
-        _ if request["pipeline"] == "nodes" => Value::Null,
-        _ => spreadsheet::read(&bytes, &suffix, path, request)?,
     };
     // Path-based adapters must prove that they read the same registered revision.
     if matches!(suffix.as_str(), "doc" | "pdf")
         && crate::sha256_hex(&self::bytes(path)?) != source_sha256
     {
         return Err("SOURCE_CHANGED_DURING_INDEXING");
+    }
+    if cache_word {
+        if result["text"].as_str().is_none_or(|s| s.trim().is_empty()) {
+            return Err("NO_SEARCHABLE_TEXT");
+        }
+        if result["text"].as_str().is_some_and(|s| s.len() > MAX_TEXT) {
+            return Err("DOCUMENT_TEXT_LIMIT");
+        }
+        result["source_sha256"] = json!(source_sha256);
+        result["status"] = json!("completed");
+        result["owner"] = json!("rust.document.conversion");
+        if cached["hit"] != true {
+            external(
+                &cache_request,
+                Some(&serde_json::to_vec(&result).map_err(|_| "DOCUMENT_OUTPUT_FAILED")?),
+            )?;
+        }
     }
     if request["pipeline"] == "nodes" {
         return pipeline::prepare(

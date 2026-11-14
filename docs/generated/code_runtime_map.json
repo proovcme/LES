@@ -1109,6 +1109,7 @@
         "tests/test_datasets_router.py",
         "tests/test_light_collection_safety.py",
         "tests/test_light_core_jobs_files.py",
+        "tests/test_light_engineering_snapshots.py",
         "tests/test_light_format_worker.py",
         "tests/test_light_mcp_connections.py",
         "tests/test_light_model_registry_native.py",
@@ -11102,6 +11103,17 @@
     },
     {
       "inbound": [],
+      "lines": 69,
+      "module": "tests.test_light_engineering_snapshots",
+      "outbound": [
+        "backend/native_core.py"
+      ],
+      "path": "tests/test_light_engineering_snapshots.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
       "lines": 136,
       "module": "tests.test_light_execution_receipts",
       "outbound": [
@@ -11651,7 +11663,7 @@
     },
     {
       "inbound": [],
-      "lines": 247,
+      "lines": 262,
       "module": "tests.test_light_native_cli",
       "outbound": [],
       "path": "tests/test_light_native_cli.py",
@@ -11775,7 +11787,7 @@
     },
     {
       "inbound": [],
-      "lines": 151,
+      "lines": 189,
       "module": "tests.test_light_native_docx_parts",
       "outbound": [
         "backend/native_core.py",
@@ -11802,7 +11814,7 @@
     },
     {
       "inbound": [],
-      "lines": 120,
+      "lines": 121,
       "module": "tests.test_light_native_edge_recovery",
       "outbound": [
         "backend/document_catalog.py",
@@ -12261,7 +12273,7 @@
     },
     {
       "inbound": [],
-      "lines": 752,
+      "lines": 885,
       "module": "tests.test_light_native_retrieval_modes",
       "outbound": [
         "proxy/services/model_connection_contracts.py",
@@ -16154,9 +16166,9 @@
     "product_reachable": 417,
     "registered_api_routes": 298,
     "runtime_support": 5,
-    "test_or_tool_only": 280,
-    "tracked_python_files": 725,
-    "tracked_python_lines": 173318
+    "test_or_tool_only": 281,
+    "tracked_python_files": 726,
+    "tracked_python_lines": 173574
   },
   "warnings": []
 }

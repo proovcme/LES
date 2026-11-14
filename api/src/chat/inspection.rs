@@ -4,16 +4,44 @@ use serde_json::{json, Value};
 
 /// Compact navigation cards; no excerpt, score or authority claim enters here.
 pub(super) fn candidates(rows: &Value, max_chars: usize) -> Value {
-    let mut shown = Vec::new();
-    for row in rows.as_array().into_iter().flatten().take(64) {
-        let card = json!({"doc_id":row["doc_id"],"file_name":row["file_name"],"page":row["page"]});
-        shown.push(card);
-        if json!(shown).to_string().chars().count() > max_chars {
-            shown.pop();
-            break;
-        }
+    let input: Vec<_> = rows.as_array().into_iter().flatten().take(64).collect();
+    // Reserve every identity before spending any budget on labels. A long
+    // early path must not silently make later documents undiscoverable.
+    let mut shown: Vec<_> = input
+        .iter()
+        .map(|r| json!({"doc_id":r["doc_id"]}))
+        .collect();
+    while !shown.is_empty() && json!(shown).to_string().chars().count() > max_chars {
+        shown.pop();
     }
-    json!({"documents":shown,"total":rows.as_array().map(Vec::len).unwrap_or(0),"evidence_admissible":false})
+    let mut labeled = shown.clone();
+    for card in &mut labeled {
+        card["title"] = json!("");
+    }
+    let base = json!(labeled).to_string().chars().count();
+    if base <= max_chars && !labeled.is_empty() {
+        let each = (max_chars - base) / labeled.len();
+        for (i, card) in labeled.iter_mut().enumerate() {
+            card["title"] = json!(input[i]["title"]
+                .as_str()
+                .or_else(|| input[i]["file_name"].as_str())
+                .unwrap_or("Документ")
+                .chars()
+                .take(each)
+                .collect::<String>());
+        }
+        // JSON escaping may cost more than a character; trim labels only.
+        while json!(labeled).to_string().chars().count() > max_chars {
+            for card in &mut labeled {
+                let mut title = card["title"].as_str().unwrap().to_owned();
+                title.pop();
+                card["title"] = json!(title);
+            }
+        }
+        shown = labeled;
+    }
+    let total = rows.as_array().map(Vec::len).unwrap_or(0);
+    json!({"documents":shown,"total":total,"omitted_documents":total.saturating_sub(shown.len()),"evidence_admissible":false})
 }
 /// Navigation is optional context, below factual evidence in the shared packer.
 pub(super) fn navigation(rows: &Value, max_chars: usize) -> Value {
@@ -93,11 +121,22 @@ mod tests {
         assert_eq!(result["total"], 40);
         assert_eq!(result["evidence_admissible"], false);
         let shown = result["documents"].as_array().unwrap();
-        assert!(!shown.is_empty() && shown.len() < 40);
+        assert_eq!(shown.len(), 40); // All identities fit even when their labels do not.
         assert!(json!(shown).to_string().chars().count() <= 1200);
         assert_eq!(shown[0]["doc_id"], "doc-0");
         assert!(!result.to_string().contains("UNREAD CONTENT"));
         assert!(shown[0].get("source_sha256").is_none());
+    }
+    #[test]
+    fn navigation_preserves_human_hierarchy_without_admitting_body_text() {
+        let rows = json!([{"doc_id":"a","file_name":"opaque-01.pdf","title":"Engineering / Heating / opaque-01.pdf","text":"UNREAD BODY"}]);
+        let c = candidates(&rows, 500);
+        assert!(c["documents"][0]["title"]
+            .as_str()
+            .unwrap()
+            .contains("Heating"));
+        assert!(!c.to_string().contains("UNREAD BODY"));
+        assert_eq!(c["evidence_admissible"], false);
     }
     #[test]
     fn reading_scope_follows_executed_tools_and_never_absorbs_writes_or_computation() {

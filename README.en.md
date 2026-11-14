@@ -27,7 +27,13 @@ flowchart LR
 
 [Ranking](docs/modules/rag-ranking.md) · [Document reading and context](docs/modules/chat-section-context.md) · [Application architecture](docs/LIGHT_ARCHITECTURE.md)
 
-The development branch includes the Rho coordinator, folder watching, and adapters for Docling Word parsing and Xberg PDF tables. These are source candidates, separate from the installer linked below. Overview synthesis and automatic PDF reading still need fixes. [Current status and limitations](docs/SEPARATION.md).
+In the source candidate, MCP uses the same retrieval and source readers as chat.
+An external client can retrieve context, read an original Word document or PDF
+page (including scan OCR), and check its revision without invoking the LES
+answer model. Continuations pin the reading-view hash; table rows remain whole.
+[MCP and CLI source contract](docs/modules/native-source-mcp.md).
+
+The source tree includes the Rho coordinator, folder watching, and adapters for Docling Word parsing and Xberg PDF tables. These changes do not automatically update the installer linked below. Overview synthesis and automatic PDF reading still need fixes. [Current status and limitations](docs/SEPARATION.md).
 
 ## Install and use
 

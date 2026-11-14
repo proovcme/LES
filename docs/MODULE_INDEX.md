@@ -1,5 +1,41 @@
 # Модули LES RAG
 
+880: `api/src/engineering/registered.rs` — список зарегистрированных CAD/BIM
+и явное первичное чтение через Увязку. Форма и MCP используют общий `read_import`;
+подготовка снимка переходит в прежнюю очередь только после проверки редакции.
+[Договор](modules/uvyazka-bridge.md). Установленный сценарий пока не принят.
+
+879: `core/src/engineering.rs`, `api/src/engineering.rs` — [адаптер Увязки](modules/uvyazka-bridge.md):
+проверенные снимки в общей очереди, ID объектов и ссылки во вьювер.
+`EngineeringModels.svelte` / `EngineeringSource.svelte` — подключение и источник;
+MCP использует тот же API. Рабочая установка не переключена.
+
+878: `api/src/derived_cache.rs` и `document_cache.rs` — ограниченные производные
+снимки Word, PDF и рисунков; `document_media/vector/labels.rs` — буквальные
+Unicode-подписи; `SourceFigures.svelte` и `runtime/src/cli/mcp.rs` — чтение
+одного и того же выбранного изображения. [Владельцы и ограничения](modules/source-derived-views.md).
+Проверка идёт на копии без модели ответов; рабочая установка прежняя.
+
+877: `core/src/document/structure.rs` — единицы Word и диапазоны без перекрытия;
+`sources/word.rs` — оригинал и ограниченный кеш; `pdf_text/source.rs` — снимки
+физических страниц/OCR; `retrieval/physical.rs` — дочитывание найденного OCR
+до общего отбора; `retrieval/failures.rs` — частичные ошибки оригиналов,
+не подменяющие контроль редакций. `SourceReader.svelte` использует тот же API, что MCP.
+[Договор](modules/native-source-mcp.md). Приёмка кандидата ведётся на копии;
+рабочая установка не переключается.
+
+876: `core/src/context_selection` — общий отбор и каталог; `chat/sources_api.rs`
+и `runtime/src/cli/mcp_tools.rs` — [источники MCP/CLI](modules/native-source-mcp.md)
+через тот же читатель, что у чата, без зависимости от модели ответов.
+[Приёмка на копии и ограничения](acceptance/native-source-mcp-876.md).
+
+Стенд 875: [полный query-путь Swiftide](acceptance/native-swiftide-query-875.md)
+на прежней копии Edge/SQLite. Замена не принята по содержанию справок;
+зависимости приложения и владельцы модулей сохранены.
+
+874: `retrieval/{pagination,envelope,packing}.rs` в Rust-чате разделяют
+позицию чтения, целостный JSON-конверт и отбор. [Проверка](acceptance/native-source-pagination-874.md).
+
 873: `api/src/chat/evidence/pages.rs` — проверенная сборка последовательных
 передач одной физической PDF-страницы, без отдельного хранилища текста.
 `api/src/chat/{runner,tools}.rs` — отдельные стадии выбора чтения и

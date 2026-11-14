@@ -102,13 +102,152 @@ pub(crate) fn pdf_page_tables(
     }
     Ok(value)
 }
+fn is_atom_char(c: char) -> bool {
+    c.is_alphanumeric() || ".,−-+/%_".contains(c)
+}
+fn normalize_match_text(text: &str) -> String {
+    let chars: Vec<char> = text
+        .chars()
+        .filter(|&c| c != '\u{00ad}' && c != '\u{200b}')
+        .collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if matches!(c, '\u{00a0}' | '\u{2009}' | '\u{202f}') {
+            let prev_digit = out.chars().next_back().is_some_and(|p| p.is_ascii_digit());
+            let next_digit = chars.get(i + 1).is_some_and(|n| n.is_ascii_digit());
+            if !(prev_digit && next_digit) {
+                out.push(' ');
+            }
+            i += 1;
+            continue;
+        }
+        if c == '\u{2212}' {
+            out.push('-');
+            if chars
+                .get(i + 1)
+                .is_some_and(|&s| matches!(s, ' ' | '\u{00a0}' | '\u{2009}' | '\u{202f}'))
+                && chars.get(i + 2).is_some_and(|n| n.is_ascii_digit())
+            {
+                i += 2;
+            } else {
+                i += 1;
+            }
+            continue;
+        }
+        if matches!(c, '\u{2013}' | '\u{2014}') {
+            out.push('-');
+            i += 1;
+            continue;
+        }
+        if c == 'E'
+            && out.chars().next_back().is_some_and(|p| p.is_ascii_digit())
+            && chars
+                .get(i + 1)
+                .is_some_and(|&s| matches!(s, '+' | '-' | '\u{2212}'))
+            && chars.get(i + 2).is_some_and(|n| n.is_ascii_digit())
+        {
+            out.push('e');
+            i += 1;
+            continue;
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
 fn literal_atoms(text: &str) -> std::collections::HashSet<String> {
     // PDF content-stream order may be column-major. Verify literal atoms on the
     // same page, including decimal/sign spelling; geometry owns their arrangement.
-    text.split(|c: char| !(c.is_alphanumeric() || ".,−-+/%_".contains(c)))
+    text.split(|c: char| !is_atom_char(c))
         .filter(|s| !s.is_empty())
         .map(str::to_owned)
         .collect()
+}
+fn raw_contains_spaced_bounded(raw: &str, atom: &str) -> bool {
+    let atom_chars: Vec<char> = atom.chars().collect();
+    if atom_chars.is_empty() {
+        return true;
+    }
+    let has_digit = atom_chars.iter().any(|c| c.is_numeric());
+    let pure_alpha = atom_chars.iter().all(|c| c.is_alphabetic());
+    let first = atom_chars[0];
+    let last = *atom_chars.last().unwrap();
+    for (start, ch) in raw.char_indices() {
+        if ch != first {
+            continue;
+        }
+        if let Some(prev) = raw[..start].chars().next_back() {
+            if is_atom_char(prev) && (has_digit || !first.is_alphabetic() || !prev.is_alphabetic())
+            {
+                continue;
+            }
+        }
+        let mut cursor = start + ch.len_utf8();
+        let mut prev_char = ch;
+        let mut matched = true;
+        for &target in &atom_chars[1..] {
+            let rest = &raw[cursor..];
+            if prev_char.is_alphabetic() && target != '-' {
+                if let Some(after) = rest
+                    .strip_prefix("-\r\n")
+                    .or_else(|| rest.strip_prefix("-\n"))
+                {
+                    if !after.starts_with(char::is_whitespace) {
+                        cursor = raw.len() - after.len();
+                    }
+                }
+            }
+            let rest = &raw[cursor..];
+            if prev_char == '-' {
+                if let Some(after) = rest
+                    .strip_prefix("\r\n")
+                    .or_else(|| rest.strip_prefix('\n'))
+                {
+                    if !after.starts_with(char::is_whitespace) {
+                        cursor = raw.len() - after.len();
+                    }
+                }
+            } else if pure_alpha {
+                if let Some(after) = rest
+                    .strip_prefix("\r\n")
+                    .or_else(|| rest.strip_prefix('\n'))
+                {
+                    if !after.starts_with(char::is_whitespace) {
+                        cursor = raw.len() - after.len();
+                    }
+                }
+            }
+            let rest = &raw[cursor..];
+            if !(prev_char.is_numeric() && target.is_numeric()) {
+                if let Some(after) = rest.strip_prefix(' ') {
+                    if !after.starts_with(char::is_whitespace) {
+                        cursor = raw.len() - after.len();
+                    }
+                }
+            }
+            if let Some(next) = raw[cursor..].chars().next() {
+                if next == target {
+                    cursor += next.len_utf8();
+                    prev_char = target;
+                    continue;
+                }
+            }
+            matched = false;
+            break;
+        }
+        if !matched {
+            continue;
+        }
+        if let Some(next) = raw[cursor..].chars().next() {
+            if is_atom_char(next) && (has_digit || !last.is_alphabetic() || !next.is_alphabetic()) {
+                continue;
+            }
+        }
+        return true;
+    }
+    false
 }
 pub(crate) fn page_view(raw: &str, page: u64, tables: Option<&Value>) -> Result<Option<String>> {
     let Some(tables) = tables else {
@@ -117,8 +256,8 @@ pub(crate) fn page_view(raw: &str, page: u64, tables: Option<&Value>) -> Result<
     let entries = tables["tables"]
         .as_array()
         .ok_or("XBERG_PDF_TABLES_INVALID")?;
-    let hay = literal_atoms(raw);
-    let joined: String = raw.chars().filter(|c| !c.is_whitespace()).collect();
+    let normalized_raw = normalize_match_text(raw);
+    let hay = literal_atoms(&normalized_raw);
     let mut out = raw.to_owned();
     let mut found = false;
     for table in entries.iter().filter(|t| t["page"].as_u64() == Some(page)) {
@@ -144,10 +283,12 @@ pub(crate) fn page_view(raw: &str, page: u64, tables: Option<&Value>) -> Result<
                     .get(column)
                     .map_or(Some(""), Value::as_str)
                     .ok_or("XBERG_PDF_TABLES_INVALID")?;
-                if literal_atoms(text).iter().any(|atom| {
+                let normalized_cell = normalize_match_text(text);
+                if literal_atoms(&normalized_cell).iter().any(|atom| {
                     !hay.contains(atom)
-                        && !(atom.chars().all(char::is_alphabetic) && joined.contains(atom))
-                        && !(atom.chars().all(|c| !c.is_alphanumeric()) && raw.contains(atom))
+                        && !raw_contains_spaced_bounded(&normalized_raw, atom)
+                        && !(atom.chars().all(|c| !c.is_alphanumeric())
+                            && normalized_raw.contains(atom))
                 }) {
                     return Err("PDF_TABLE_SOURCE_MISMATCH");
                 }
@@ -238,6 +379,64 @@ mod tests {
         .unwrap()
         .unwrap();
         assert!(text.contains("| Alpha item continued description | 17.25 |"));
+    }
+    #[test]
+    fn kerning_and_unicode_dash_normalization_preserve_numeric_bounds() {
+        let value = json!({"tables":[{"page":1,"cells":[["Труба DN100 – L\u{00a0}=\u{00a0}2500","17.25"]]}]});
+        assert!(
+            page_view("Труба DN 100 — L = 2\u{00a0}500 17.25", 1, Some(&value))
+                .unwrap()
+                .is_some()
+        );
+        let bad_number = json!({"tables":[{"page":1,"cells":[["Труба DN100","17.25"]]}]});
+        assert_eq!(
+            page_view("Труба DN 100 117.25", 1, Some(&bad_number)).unwrap_err(),
+            "PDF_TABLE_SOURCE_MISMATCH"
+        );
+        assert_eq!(
+            page_view("Труба DN 100 17.250", 1, Some(&bad_number)).unwrap_err(),
+            "PDF_TABLE_SOURCE_MISMATCH"
+        );
+        assert_eq!(
+            page_view("Труба DN 100 −17.25", 1, Some(&bad_number)).unwrap_err(),
+            "PDF_TABLE_SOURCE_MISMATCH"
+        );
+        assert_eq!(
+            page_view("Труба DN 100 -17.25", 1, Some(&bad_number)).unwrap_err(),
+            "PDF_TABLE_SOURCE_MISMATCH"
+        );
+        assert_eq!(
+            page_view("Труба DN 100 − 17.25", 1, Some(&bad_number)).unwrap_err(),
+            "PDF_TABLE_SOURCE_MISMATCH"
+        );
+        assert_eq!(
+            page_view("Труба DN 100 +17.25", 1, Some(&bad_number)).unwrap_err(),
+            "PDF_TABLE_SOURCE_MISMATCH"
+        );
+        assert_eq!(
+            page_view("Труба DN 100 17.25%", 1, Some(&bad_number)).unwrap_err(),
+            "PDF_TABLE_SOURCE_MISMATCH"
+        );
+        let glued_lines = json!({"tables":[{"page":1,"cells":[["Позиция","2500"]]}]});
+        assert_eq!(
+            page_view("Позиция\n2\n500", 1, Some(&glued_lines)).unwrap_err(),
+            "PDF_TABLE_SOURCE_MISMATCH"
+        );
+        assert_eq!(
+            page_view("Позиция\r\n2\r\n500", 1, Some(&glued_lines)).unwrap_err(),
+            "PDF_TABLE_SOURCE_MISMATCH"
+        );
+        assert_eq!(
+            page_view("Позиция 2 500", 1, Some(&glued_lines)).unwrap_err(),
+            "PDF_TABLE_SOURCE_MISMATCH"
+        );
+        let signed = json!({"tables":[{"page":1,"cells":[["Позиция","-17.25"]]}]});
+        assert!(page_view("Позиция −17.25", 1, Some(&signed))
+            .unwrap()
+            .is_some());
+        assert!(page_view("Позиция − 17.25", 1, Some(&signed))
+            .unwrap()
+            .is_some());
     }
     #[test]
     fn cached_tables_are_bound_to_exact_revision_and_page_count() {

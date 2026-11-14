@@ -29,7 +29,12 @@
     {#if message.meta?.retrieval_trace?.status === 'blocked' || message.meta?.total_status === 'blocked' || message.crag === 'BLOCKED'}
       <p class="error" role="status">{message.meta?.blocker?.action || 'Поиск заблокирован. Проверьте состояние набора документов и повторите запрос.'}</p>
     {:else if message.meta?.retrieval_trace?.status === 'degraded'}
-      <p class="notice" role="status">Поиск работает с ограничениями: часть поискового контура недоступна. Проверьте источники перед использованием ответа.</p>
+      {#if message.meta.retrieval_trace.read_failures?.length}
+        <p class="notice" role="status">Обзор неполный: часть найденных оригиналов не удалось прочитать. Ответ опирается на прочитанные источники.</p>
+        <details><summary>Не прочитано: {message.meta.retrieval_trace.read_failures.length}</summary><ul>
+          {#each message.meta.retrieval_trace.read_failures as failure}<li>{failure.source.doc_name || 'Документ'} — {failure.message}</li>{/each}
+        </ul></details>
+      {:else}<p class="notice" role="status">Поиск работает с ограничениями: часть поискового контура недоступна. Проверьте источники перед использованием ответа.</p>{/if}
     {/if}
     {#if missingAttribution}
       <p class="notice" role="status">У вывода нет ссылки на фрагмент документа.</p>

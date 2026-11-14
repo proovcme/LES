@@ -172,26 +172,29 @@ pub(crate) fn context(
             .filter(|v| present(v))
             .or_else(|| payload.get("page").filter(|v| present(v)))
             .or_else(|| payload.get("page_number"));
-        let (key, context_kind) = if let Some(page) = page.filter(|v| !v.is_null()) {
-            let table = payload
-                .get("table_index")
-                .filter(|v| present(v))
-                .map(string)
-                .unwrap_or_default();
-            (
-                format!("page:{}:table:{table}", string(page)),
-                if kind == "table_row" {
-                    "table_page"
-                } else {
-                    "pdf_page"
-                },
-            )
-        } else {
-            (
-                format!("window:{}", ordinal / window.max(1)),
-                "markdown_window",
-            )
-        };
+        let (key, context_kind) =
+            if let Some(unit) = payload.get("source_unit_id").and_then(Value::as_u64) {
+                (format!("word-unit:{unit}"), "word_structure")
+            } else if let Some(page) = page.filter(|v| !v.is_null()) {
+                let table = payload
+                    .get("table_index")
+                    .filter(|v| present(v))
+                    .map(string)
+                    .unwrap_or_default();
+                (
+                    format!("page:{}:table:{table}", string(page)),
+                    if kind == "table_row" {
+                        "table_page"
+                    } else {
+                        "pdf_page"
+                    },
+                )
+            } else {
+                (
+                    format!("window:{}", ordinal / window.max(1)),
+                    "markdown_window",
+                )
+            };
         let index = if let Some(index) = group_lookup.get(&key) {
             *index
         } else {

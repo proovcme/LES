@@ -25,6 +25,21 @@ def source_excerpt_reply(body):
     return {'text':json.dumps({'answerable':True,'rows':[reference[1]],'sums':[]})}
 
 
+def test_source_api_distinguishes_unready_index_from_empty_evidence_without_calling_chat(native_turn):
+    t=native_turn
+    name='Same display name is not an ID'
+    dataset=t.client.post('/api/rag/datasets',json={'name':name}).raise_for_status().json()['id']
+    route='/api/rag/sources/call'
+    result=t.client.post(route,json={'tool':'search_sources','args':{'q':'query','dataset_ids':[dataset]}})
+    assert result.status_code==503 and result.json()['code']=='SOURCE_INDEX_NOT_READY'
+    catalog=t.client.post(route,json={'tool':'search_sources','args':{'q':'query','view':'documents','dataset_ids':[dataset]}}).raise_for_status()
+    assert catalog.headers['x-les-handler']=='rust.sources'
+    assert catalog.json()['result']['documents']==[] and catalog.json()['sources']==[]
+    rejected=t.client.post(route,json={'tool':'search_sources','args':{'q':'query','dataset_ids':[name]}})
+    assert rejected.status_code==403 and rejected.json()['code']=='TOOL_SCOPE_VIOLATION'
+    assert not t.seen, 'Source discovery must not request an answer model'
+
+
 @pytest.mark.parametrize('native_turn',['rag-small'],indirect=True)
 def test_mixed_page_prose_can_be_selected_without_copying_an_unrelated_table(native_turn,tmp_path):
     t=native_turn;folder=tmp_path/'sources';folder.mkdir()
@@ -149,8 +164,8 @@ def test_actual_read_continuation_can_close_schema_space_before_provider_request
 @pytest.mark.parametrize('native_turn', ['rag-small'], indirect=True)
 def test_search_reads_a_fitting_document_across_page_parents_without_a_file_hint(native_turn,tmp_path):
     t=native_turn;folder=tmp_path/'documents';folder.mkdir()
-    # Each page is a distinct parent. Retrieval's four hits cannot contain all
-    # pages; the question does not name a file or the continuation's marker.
+    # Each page is a distinct parent. A fitting document must survive context
+    # admission without early per-file seed caps or a filename in the question.
     pages=[f'ANCHOR pressure schedule. Physical sheet {i}. Measured value TOKEN_{i:02d}.' for i in range(1,13)]
     write_pdf(folder/'schedule.pdf',pages)
     dataset=t.client.post('/api/rag/datasets',json={'name':'Page boundaries'}).raise_for_status().json()['id']
@@ -168,7 +183,8 @@ def test_search_reads_a_fitting_document_across_page_parents_without_a_file_hint
     assert len(t.seen)==1 and not result['artifact']['tool_results']
     policy=result['retrieval_trace']['prefetch']['selection_policy']
     assert policy['navigation_requested'] is False
-    assert policy['seed_limit']==6 and policy['per_document_seed_limit']==2
+    assert policy['seed_limit']==64 and policy['per_document_seed_limit'] is None
+    assert policy['eligible_candidates']>=12 and policy['hydrated_candidates']>=12
     assert all(c['context']['included_tokens']<=c['context']['input_budget_tokens'] for c in result['retrieval_trace']['contexts'])
 
 
@@ -245,11 +261,13 @@ def test_unread_documents_remain_reachable_without_a_separate_model_selector(nat
                 assert cards['evidence_admissible'] is False and cards['total']==12
                 assert len(cards['documents'])==12
                 chosen.update(cards['documents'][-1])
+                label=chosen['title'].rsplit(' / ',1)[-1]
+                chosen['number']=int(re.fullmatch(r'source_(\d+)\.txt',label)[1])
                 return {'tool':'read_source','args':{'doc_id':chosen['doc_id']}}
         raise AssertionError('The searched document pool was hidden from the reader')
     def answer(body):
         text='\n'.join(m.get('content') or '' for m in body['messages'])
-        number=int(chosen['file_name'][7:-4])
+        number=chosen['number']
         assert f'CONTENT_ONLY_{number}_END' in text
         assert all(f'CONTENT_ONLY_{i}_END' in text for i in chosen['initial_markers'])
         assert all(f'CONTENT_ONLY_{i}_END' not in text for i in range(12) if i!=number and i not in chosen['initial_markers'])
@@ -263,7 +281,7 @@ def test_unread_documents_remain_reachable_without_a_separate_model_selector(nat
     assert len(t.seen)==2 and len(t.embeddings.calls)==before+1
     assert len(result['retrieval_trace']['prefetch']['candidate_documents'])==12
     assert chosen['doc_id'] in {s['doc_id'] for s in result['source_map']}
-    assert len(result['source_map'])==len(chosen['initial_markers']|{int(chosen['file_name'][7:-4])})
+    assert len(result['source_map'])==len(chosen['initial_markers']|{chosen['number']})
     assert {r['doc_id'] for r in result['artifact']['table_facts']['rows']}=={chosen['doc_id']}
     assert [r['tool'] for r in result['artifact']['tool_results']]==['read_source']
 
@@ -360,6 +378,72 @@ def test_passage_offsets_advance_ranked_hits_and_report_exhaustion(native_turn,t
     assert len({r['index_revision'] for r in rows})==1
     assert len(t.seen)==2
     assert all('fusion_trace' not in row for row in rows)
+
+
+@pytest.mark.parametrize('native_turn', ['rag-small'], indirect=True)
+@pytest.mark.parametrize('tool', ['read_source', 'search_sources'])
+def test_source_cursor_covers_unequal_pages_once_and_stops_at_end(native_turn, tmp_path, tool):
+    t = native_turn
+    folder = tmp_path / 'source'; folder.mkdir()
+    pages = ['CURSOR_MARKER ALPHA ' + 'source ' * 22 + 'END_ALPHA',
+             'CURSOR_MARKER BETA ' + 'source ' * 22 + 'END_BETA',
+             'CURSOR_MARKER GAMMA evidence END_GAMMA',
+             'CURSOR_MARKER DELTA evidence END_DELTA']
+    original = write_pdf(folder / 'ordered.pdf', pages)
+    digest = hashlib.sha256(original.read_bytes()).hexdigest()
+    dataset = t.client.post('/api/rag/datasets', json={'name': 'Unequal source pages'}).raise_for_status().json()['id']
+    job = t.client.post('/api/rag/index-external', json={'path': str(folder), 'dataset_id': dataset, 'background': True}).raise_for_status().json()['intake_job_id']
+    wait_for(lambda: t.client.get('/api/light/intake', params={'id': job}).json().get('status') == 'completed', timeout=40)
+    with sqlite3.connect(t.database) as db:
+        doc = db.execute('SELECT id FROM documents WHERE dataset_id=?', [dataset]).fetchone()[0]
+    from contextlib import closing
+    from qdrant_client import QdrantClient
+    from qdrant_client.http import models
+    with closing(QdrantClient(url=t.env['LES_LIGHT_QDRANT_URL'], api_key=t.env['LES_LIGHT_QDRANT_API_KEY'], check_compatibility=False)) as index:
+        rows, more = index.scroll('docs', scroll_filter=models.Filter(
+            must=[models.FieldCondition(key='dataset_id', match=models.MatchValue(value=dataset))],
+            must_not=[models.FieldCondition(key='node_role', match=models.MatchValue(value='navigation')),
+                      models.FieldCondition(key='evidence_admissible', match=models.MatchValue(value=False))]),
+            limit=100, with_payload=True, with_vectors=False)
+    assert more is None and len(rows) == 4
+    expected_ids = {str(row.id) for row in rows}
+    offsets = []
+    def step(body):
+        replies = []
+        for message in body['messages']:
+            if message.get('role') == 'tool':
+                value = json.loads(message['content'])
+                if value.get('tool') == tool:
+                    replies.append(value)
+        if replies:
+            last = replies[-1]['result']
+            if last['next_offset'] is None:
+                return source_excerpt_reply(body)
+            offset = last['next_offset']
+        else:
+            offset = 0
+        assert offset not in offsets and len(offsets) < 5
+        offsets.append(offset)
+        args = {'limit': 2, 'max_chars': 250, 'offset': offset}
+        args.update({'doc_id': doc} if tool == 'read_source' else {'q': 'CURSOR_MARKER'})
+        return {'tool': tool, 'args': args}
+    t.scripts.extend([step] * 6)
+    response = t.client.post('/api/chat', json={'question': 'Read CURSOR_MARKER source evidence.', 'mode': 'search', 'retrieval_mode': 'pull',
+        'scope': {'scope_type': 'dataset', 'dataset_ids': [dataset], 'selected_sources_only': True}})
+    assert response.status_code == 200, response.text
+    result = response.json()
+    receipts = [r['result'] for r in result['artifact']['tool_results'] if r['tool'] == tool]
+    assert len(receipts) > 1 and receipts[-1]['next_offset'] is None
+    assert [r['offset'] for r in receipts] == offsets
+    passages = [p for r in receipts for p in r['passages']]
+    identities = [p['source']['qdrant_point_id'] for p in passages]
+    assert len(identities) == len(set(identities)) == 4
+    assert set(identities) == expected_ids
+    assert {p['source']['page'] for p in passages} == {1, 2, 3, 4}
+    assert all(any(end in p['text'] for p in passages) for end in ['END_ALPHA', 'END_BETA', 'END_GAMMA', 'END_DELTA'])
+    assert hashlib.sha256(original.read_bytes()).hexdigest() == digest
+    assert all(r['next_offset'] == r['offset'] + len(r['passages']) for r in receipts[:-1])
+    assert all(c['context']['included_tokens'] <= c['context']['input_budget_tokens'] for c in result['retrieval_trace']['contexts'])
 
 
 @pytest.mark.parametrize('native_turn', ['rag'], indirect=True)
@@ -750,3 +834,52 @@ def test_push_pull_and_hybrid_share_retrieval_and_keep_plain_chat_unscoped(nativ
                                'question':'Какова номинальная мощность контрольной установки? Назови число и единицу.',
                                'response_length':'short'}, timeout=150).raise_for_status().json()
         assert check_result(result, 'push') == point
+
+
+def test_word_original_reader_preserves_rows_and_cursor_without_index_or_model(native_turn):
+    from docx import Document
+    from tests.test_light_native_chat_turn import source_pdf
+    t=native_turn
+    parser=os.getenv('LES_TEST_NATIVE_DOCUMENT_PARSERS')
+    if parser:
+        t.env['LES_NATIVE_DOCUMENT_PARSERS']=parser
+        t.children[-1].terminate();t.children[-1].wait(timeout=10)
+        t.start()
+    source_pdf(t)
+    original=t.state/'Таблица 日本語.docx'
+    word=Document();word.add_heading('Нагрузки оборудования',level=1)
+    table=word.add_table(rows=1,cols=3)
+    for cell,text in zip(table.rows[0].cells,['Позиция','Мощность, кВт','Количество']):cell.text=text
+    for i in range(500):
+        for cell,text in zip(table.add_row().cells,[f'Насос {i}',f'{i}.25',str(i+1)]):cell.text=text
+    word.save(original);digest=hashlib.sha256(original.read_bytes()).hexdigest()
+    with sqlite3.connect(t.database) as db:
+        db.execute('UPDATE documents SET file_name=?,source_path=?,file_hash=?',('folder/Таблица.docx',str(original),digest))
+    args={'doc_id':'registered-document','source_sha256':digest,'max_chars':12000,'limit':16}
+    bodies=[];units=[];view=None;end=0;calls=0
+    while True:
+        response=t.client.post('/api/rag/sources/call',json={'tool':'read_source','args':args})
+        response.raise_for_status();value=response.json()['result'];view=view or value['view_sha256']
+        if parser:assert value['extractor']=='les.docling-word.parts.v1'
+        assert value['view_sha256']==view
+        for passage in value['passages']:
+            source=passage['source'];assert source['start_byte']==end
+            body=passage['text'][passage['context_prefix_chars']:]
+            assert hashlib.sha256(body.encode()).hexdigest()==passage['body_sha256']
+            end=source['end_byte'];units.append(source['ordinal']);bodies.append(body)
+        calls+=1
+        if value['next_offset'] is None:break
+        assert value['next_offset']==value['offset']+len(value['passages'])
+        args.update(offset=value['next_offset'],view_sha256=view)
+        assert calls<50
+    assert units==list(range(len(units))) and calls>1
+    full=''.join(bodies)
+    rows=[[cell.strip() for cell in line.split('|')[1:-1]] for line in full.splitlines() if line.startswith('|')]
+    for i in range(500):
+        assert rows.count([f'Насос {i}',f'{i}.25',str(i+1)])==1
+    stale=t.client.post('/api/rag/sources/call',json={'tool':'read_source','args':{**args,'offset':1,'view_sha256':'0'*64}})
+    assert stale.status_code==409 and stale.json()['code']=='SOURCE_VIEW_CHANGED'
+    original.write_bytes(original.read_bytes()+b'changed')
+    stale=t.client.post('/api/rag/sources/call',json={'tool':'read_source','args':args})
+    assert stale.status_code==409 and stale.json()['code']=='SOURCE_REVISION_CHANGED'
+    assert not t.seen, 'Reading an original must not request the answer model'

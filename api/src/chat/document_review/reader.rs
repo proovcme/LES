@@ -16,7 +16,10 @@ pub(super) async fn snapshot(
         &json!({"dataset_id":selected["dataset_id"],"file_name":selected["file_name"]}),
     )
     .await?;
-    scoped_document(turn, &doc)?;
+    scoped_document(
+        &crate::chat::tools::sources::SourceContext::from(turn),
+        &doc,
+    )?;
     let (config, _, _, _) =
         crate::chat::tools::sources::retrieval::configuration(context.clone(), false).await?;
     let store = context

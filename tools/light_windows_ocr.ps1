@@ -1,6 +1,8 @@
-param([Parameter(Mandatory=$true)][string]$ImagePath)
+# les.ocr-stdio.v1
+param([string]$ImagePath, [switch]$Serve)
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+[Console]::InputEncoding = [Text.UTF8Encoding]::new($false)
 Add-Type -AssemblyName System.Runtime.WindowsRuntime
 $null = [Windows.Storage.StorageFile, Windows.Storage, ContentType=WindowsRuntime]
 $null = [Windows.Storage.Streams.IRandomAccessStream, Windows.Storage.Streams, ContentType=WindowsRuntime]
@@ -18,11 +20,12 @@ function Wait-WinRT($Operation, [Type]$ResultType) {
     $task.Wait()
     return $task.Result
 }
-$stream = $null
-$bitmap = $null
-try {
-    $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
-    if ($null -eq $engine) { throw 'OCR_LANGUAGE_UNAVAILABLE' }
+$engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
+if ($null -eq $engine) { throw 'OCR_LANGUAGE_UNAVAILABLE' }
+function Read-Image([string]$ImagePath) {
+  $stream = $null
+  $bitmap = $null
+  try {
     $file = Wait-WinRT ([Windows.Storage.StorageFile]::GetFileFromPathAsync([IO.Path]::GetFullPath($ImagePath))) ([Windows.Storage.StorageFile])
     $stream = Wait-WinRT ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
     $decoder = Wait-WinRT ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
@@ -38,11 +41,35 @@ try {
         [Windows.Graphics.Imaging.ColorManagementMode]::DoNotColorManage)) ([Windows.Graphics.Imaging.SoftwareBitmap])
     if ($bitmap.PixelWidth -gt [Windows.Media.Ocr.OcrEngine]::MaxImageDimension -or $bitmap.PixelHeight -gt [Windows.Media.Ocr.OcrEngine]::MaxImageDimension) { throw 'OCR_IMAGE_TOO_LARGE' }
     $result = Wait-WinRT ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
-    @{text=(@($result.Lines | ForEach-Object { $_.Text }) -join "`n"); language=$engine.RecognizerLanguage.LanguageTag} | ConvertTo-Json -Compress
-} catch {
-    [Console]::Error.WriteLine($_.Exception.Message)
-    exit 1
-} finally {
+    return @{text=(@($result.Lines | ForEach-Object { $_.Text }) -join "`n"); language=$engine.RecognizerLanguage.LanguageTag}
+  } finally {
     if ($null -ne $bitmap) { $bitmap.Dispose() }
     if ($null -ne $stream) { $stream.Dispose() }
+  }
+}
+if ($Serve) {
+    while ($null -ne ($line = [Console]::ReadLine())) {
+        $requestId = $null
+        try {
+            if ($line.Length -gt 65536) { throw 'OCR_REQUEST_LIMIT' }
+            $request = $line | ConvertFrom-Json
+            $requestId = $request.request_id
+            if ($null -eq $requestId -or [string]::IsNullOrEmpty($request.input.image_path)) { throw 'OCR_REQUEST_INVALID' }
+            $value = Read-Image $request.input.image_path
+            $reply = @{request_id=$requestId; result=@{status='completed'; value=$value}}
+        } catch {
+            [Console]::Error.WriteLine($_.Exception.Message)
+            $reply = @{request_id=$requestId; result=@{status='failed'; code='OCR_READ_FAILED'}}
+        }
+        [Console]::WriteLine(($reply | ConvertTo-Json -Compress -Depth 8))
+        [Console]::Out.Flush()
+    }
+} else {
+    try {
+        if ([string]::IsNullOrEmpty($ImagePath)) { throw 'OCR_IMAGE_PATH_REQUIRED' }
+        Read-Image $ImagePath | ConvertTo-Json -Compress
+    } catch {
+        [Console]::Error.WriteLine($_.Exception.Message)
+        exit 1
+    }
 }

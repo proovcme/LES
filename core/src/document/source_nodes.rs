@@ -218,6 +218,23 @@ fn from_markdown(request: &Value, text: &str) -> Result<Vec<Value>> {
     let dataset = request["dataset_id"].as_str().ok_or(INVALID)?;
     let size = integer(request, "size", 1, 1_000_000)?;
     let overlap = integer(request, "overlap", 0, size as u64 - 1)?;
+    if file.to_ascii_lowercase().ends_with(".docx") || file.to_ascii_lowercase().ends_with(".doc") {
+        // A readable source unit is independent of embedding/token budgets.
+        // The final builder may split its search representation, retaining one
+        // complete, hashed reading anchor for all children.
+        return super::structure::units(text, 4000)?.into_iter().map(|unit| {
+            let ordinal=unit["ordinal"].as_u64().ok_or(INVALID)?;
+            let body=unit["text"].as_str().ok_or(INVALID)?;
+            let mut meta=json!({"type":"word_structure","word_reading_view":unit,
+                "word_reading_schema":"les.document-reading.v1",
+                "word_reading_sha256":crate::sha256_hex(body.as_bytes()),
+                "section_heading":unit["heading"],"source_unit_id":ordinal})
+                .as_object().unwrap().clone();
+            meta.insert("source_ref".into(),json!(format!("{file}#unit={ordinal}")));
+            Ok(json!({"text":body,"doc_id":uuid5(&format!("{dataset}:{file}:word-v1:{ordinal}:{body}")),
+                "payload":payload(request,meta)?}))
+        }).collect();
+    }
     let _minimum = integer(request, "minimum", 0, 1_000_000)?;
     let _final_minimum = integer(request, "final_minimum", 0, 1_000_000)?;
     let local = match request["unit"].as_str() {

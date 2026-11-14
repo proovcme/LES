@@ -14,10 +14,39 @@ fn error(id: &Value, code: i32, message: &str) -> Value {
 fn tool_result(result: Result<Value>) -> Value {
     match result {
         Ok(value) => {
-            json!({"content":[{"type":"text","text":value.to_string()}],"structuredContent":value,"isError":false})
+            let mut content = vec![json!({"type":"text","text":value.to_string()})];
+            if let Some(link) = figure_url(&value) {
+                match super::gateway::Api::connect().and_then(|api|api.part_image(&link)) {
+                    Ok(bytes)=>content.push(json!({"type":"image","mimeType":"image/png","data":les_core::chat_attachments::encode_base64(&bytes)})),
+                    Err(error)=>return json!({"content":[{"type":"text","text":error}],"structuredContent":value,"isError":true}),
+                }
+            }
+            json!({"content":content,"structuredContent":value,"isError":false})
         }
         Err(message) => json!({"content":[{"type":"text","text":message}],"isError":true}),
     }
+}
+fn figure_url(value: &Value) -> Option<String> {
+    if value["tool"] != "read_source"
+        || value["operation"] != "document_parts"
+        || value["result"]["part"]["kind"] != "image"
+    {
+        return None;
+    }
+    let part = &value["result"]["part"];
+    let selected = &value["result"]["part_sha256"];
+    let views = part["views"].as_array();
+    if let Some(view) = views
+        .into_iter()
+        .flatten()
+        .find(|v| v["sha256"] == *selected)
+    {
+        return view["url"].as_str().map(str::to_owned);
+    }
+    if views.is_some_and(|v| v.len() > 1) {
+        return None;
+    }
+    part["preview_url"].as_str().map(str::to_owned)
 }
 
 #[derive(Default)]
@@ -118,6 +147,18 @@ pub fn serve() -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_visual_read_uses_the_exact_view_and_never_guesses_a_crop() {
+        let mut value = json!({"tool":"read_source","operation":"document_parts","result":{"part_sha256":"view-b","part":{"kind":"image",
+            "preview_url":"first","views":[{"sha256":"view-a","url":"first"},{"sha256":"view-b","url":"second"}]}}});
+        assert_eq!(figure_url(&value).as_deref(), Some("second"));
+        value["result"]["part_sha256"] = json!("original");
+        assert_eq!(figure_url(&value), None);
+        value["result"]["part"]["views"] = json!([]);
+        assert_eq!(figure_url(&value).as_deref(), Some("first"));
+        value["operation"] = json!("indexed_sections");
+        assert_eq!(figure_url(&value), None);
+    }
     #[test]
     fn stdio_initializes_and_labels_mutations() {
         let requests = [

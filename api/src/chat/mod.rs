@@ -13,6 +13,7 @@ mod model;
 pub(crate) mod prepare;
 mod protocol;
 mod runner;
+pub mod sources_api;
 mod table_document;
 mod table_facts;
 mod tools;

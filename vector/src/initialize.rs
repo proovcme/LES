@@ -9,6 +9,9 @@ impl Shard {
     pub fn ensure_search_indexes(&self) -> Result<()> {
         let schema = self.info()?["payload_schema"].clone();
         for (field, kind) in [
+            ("dataset_id", "keyword"),
+            ("file_name", "keyword"),
+            ("parent_id", "keyword"),
             ("node_role", "keyword"),
             ("ancestor_ids", "keyword"),
             ("evidence_admissible", "bool"),

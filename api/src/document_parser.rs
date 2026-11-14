@@ -61,6 +61,11 @@ fn asset() -> Result<Option<Asset>> {
 pub(crate) fn enabled() -> Result<bool> {
     Ok(asset()?.is_some())
 }
+pub(crate) fn revision() -> Result<Value> {
+    Ok(asset()?
+        .map(|a| json!(a.hash))
+        .unwrap_or_else(|| json!("native")))
+}
 fn invoke(input: Value) -> Result<Value> {
     let asset = asset()?.ok_or("DOCUMENT_PARSER_UNAVAILABLE")?;
     let reply = les_core::run_native_parsers(
@@ -74,6 +79,10 @@ fn invoke(input: Value) -> Result<Value> {
         .as_str()
         .or_else(|| reply["code"].as_str())
         .unwrap_or("");
+    eprintln!(
+        "{}",
+        json!({"event":"document_parser_failed","code":code,"diagnostics":reply["diagnostics"]})
+    );
     let known = [
         "NO_SEARCHABLE_TEXT",
         "DOCLING_WORD_INCOMPLETE",

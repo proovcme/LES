@@ -1,7 +1,11 @@
 //! Explicit navigation to preserved Word parts; a media listing is not factual evidence.
 use super::*;
 use std::io::Read;
-pub(super) async fn read(context: Arc<Context>, turn: &Prepared, args: Value) -> Result<Value> {
+pub(super) async fn read(
+    context: Arc<Context>,
+    turn: &SourceContext,
+    args: Value,
+) -> Result<Value> {
     let doc = document(&context, &args).await?;
     scoped_document(turn, &doc)?;
     let owner = context.clone();
@@ -27,6 +31,7 @@ fn navigation(entry: &Value) -> Value {
         "preview_url",
         "coverage",
         "ocr",
+        "recognition_method",
     ] {
         if !entry[key].is_null() {
             value.insert(key.into(), entry[key].clone());
@@ -96,9 +101,25 @@ fn read_owned(context: &Context, source: &Value, input: &Value) -> Result<Value>
     let take = input["max_chars"].as_u64().unwrap_or(3000).clamp(1, 16000) as usize;
     let end = (offset + take).min(total);
     let excerpt = text.chars().skip(offset).take(take).collect::<String>();
+    let native = if entry["selected_view"].is_object() {
+        &entry["selected_view"]["native_text_runs"]
+    } else {
+        &entry["native_text_runs"]
+    };
+    let native = native.as_array().cloned().unwrap_or_default();
+    let mut runs = Vec::new();
+    let mut bytes = 0;
+    for run in &native {
+        bytes += run.to_string().len();
+        if runs.len() >= 32 || bytes > 4000 {
+            break;
+        }
+        runs.push(run.clone());
+    }
     Ok(
         json!({"part":navigation(&entry),"part_sha256":id,"source_sha256":source["file_hash"],"text":excerpt,"offset":offset,
         "next_offset":if end<total{Some(end)}else{None},"complete":end==total,
+        "native_text_runs":runs,"native_text_runs_total":native.len(),"native_text_runs_truncated":runs.len()<native.len(),
         "evidence_admissible":false,"visual_verification_required":true,
         "note":"Результат относится только к part.member, это точное имя объекта внутри DOCX. Не подменяйте им другой рисунок и не объявляйте разные имена псевдонимами. Оригинал сохранён без изменения. OCR и структура служат навигации; этот результат сам по себе не подтверждает геометрию или все надписи рисунка."}),
     )

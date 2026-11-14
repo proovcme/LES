@@ -5,10 +5,15 @@
   import { sourcePage, sourcePlace } from '../lib/contracts';
   import Modal from './Modal.svelte';
   import Icon from './Icon.svelte';
+  import SourceReader from './SourceReader.svelte';
+  import SourceFigures from './SourceFigures.svelte';
+  import EngineeringSource from './EngineeringSource.svelte';
   let { source, close }: { source: Source; close: () => void } = $props();
   let loading = $state(true); let error = $state(''); let documentError = $state('');
   let doc = $state<{ id: string; file_name: string } | null>(null);
   let preview = $state(false); let preparing = $state(false);
+  let reading = $state(false);
+  let figures = $state(false);
   let page = $state(1); let imageURL = $state(''); let viewURL = $state('');
   let imageLoading = $state(false);
   let alive = true;
@@ -69,19 +74,31 @@
     catch (failure) { documentError = errorMessage(failure); }
   }
 </script>
-<Modal title={source.doc_name || 'Доказательство'} {close} wide>
+<Modal title={source.model_locator?.source_name || source.doc_name || 'Доказательство'} {close} wide>
   <p class="eyebrow">Источник {source.index}{sourcePlace(source)}</p>
-  {#if source.locator?.section_heading}<p>{source.locator.section_heading}</p>{/if}
+  {#if source.locator?.section_heading || source.section_heading}<p>{source.locator?.section_heading || source.section_heading}</p>{/if}
   {#if source.quote || source.snippet}<blockquote class="evidence">{source.quote || source.snippet}</blockquote>{:else}<p class="muted">У этого источника не сохранена цитата. Проверьте оригинал.</p>{/if}
   {#if loading}<p role="status">Проверяю оригинал…</p>{/if}
   {#if error}<p class="error" role="alert">{error}</p>{/if}
+  {#if source.model_locator}<EngineeringSource target={source.model_locator} />{/if}
   {#if doc}
     {#if !source.locator?.source_sha256}<p class="muted">Для этой цитаты редакция файла не сохранена. Доступен текущий оригинал.</p>{/if}
     <div class="source-actions">
-      <button onclick={showOriginal} disabled={preparing}><Icon name="file" />{preparing ? 'Открываю…' : 'Показать оригинал'}</button>
-      <a class="button quiet" href={`${base}/raw?${identity}`} download={doc.file_name}><Icon name="external" />Скачать</a>
-      <button class="quiet" onclick={openNative}>Открыть в приложении</button>
+      <button class="quiet" onclick={() => reading = !reading}>{reading ? 'Скрыть текст' : 'Прочитать текст'}</button>
+      {#if /\.docx$/i.test(doc.file_name)}<button class="quiet" onclick={() => figures = !figures}>{figures ? 'Скрыть рисунки' : 'Рисунки и вложения'}</button>{/if}
+      <button onclick={showOriginal} disabled={preparing}><Icon name="file" />{preparing ? 'Открываю…' : source.model_locator ? 'Показать снимок данных' : 'Показать оригинал'}</button>
+      <a class="button quiet" href={`${base}/raw?${identity}`} download={doc.file_name}><Icon name="external" />{source.model_locator ? 'Скачать снимок' : 'Скачать'}</a>
+      <button class="quiet" onclick={openNative}>{source.model_locator ? 'Открыть файл снимка' : 'Открыть в приложении'}</button>
     </div>
+    {#if reading}
+      {#key `${doc.id}:${page}`}
+        <SourceReader docId={doc.id} datasetId={source.dataset_id} digest={source.locator?.source_sha256}
+          initialOffset={source.evidence_kind === 'physical_word_section' && typeof source.ordinal === 'number' && Number.isInteger(source.ordinal) && source.ordinal >= 0 && /^[a-f0-9]{64}$/i.test(source.view_sha256 ?? '') ? source.ordinal : 0}
+          viewSHA={source.view_sha256}
+          {page} pdf={doc.file_name.toLowerCase().endsWith('.pdf')} />
+      {/key}
+    {/if}
+    {#if figures}<SourceFigures docId={doc.id} digest={source.locator?.source_sha256} />{/if}
     {#if preview && doc.file_name.toLowerCase().endsWith('.pdf')}
       <form class="page-selector" onsubmit={(event) => { event.preventDefault(); void showOriginal(); }}>
         <label for="source-page">Страница</label><input id="source-page" type="number" min="1" step="1" bind:value={page} required /><button class="quiet" disabled={preparing}>Перейти</button>

@@ -6,6 +6,8 @@ mod catalog;
 mod chat;
 mod conversation;
 mod dataset_reader;
+mod derived_cache;
+mod document_cache;
 mod document_dispatch;
 mod document_media;
 mod document_parser;
@@ -14,6 +16,7 @@ mod documents;
 mod edge;
 mod embedding_inference;
 mod embedding_worker;
+mod engineering;
 mod external_embed;
 mod frontend;
 mod history;
@@ -182,6 +185,12 @@ async fn dispatch(State(context): State<Arc<Context>>, request: Request) -> Resp
     {
         return auth::preflight(&context, request.headers()).await;
     }
+    if matches!(
+        request.uri().path(),
+        chat::sources_api::PATH | chat::sources_api::TOOLS_PATH
+    ) {
+        return chat::sources_api::handle(context, request).await;
+    }
     if context.public_chat_rust && chat::http::public_path(request.uri().path()) {
         return chat::http::handle_public(context, request).await;
     }
@@ -190,6 +199,9 @@ async fn dispatch(State(context): State<Arc<Context>>, request: Request) -> Resp
         && mail::handles(request.method().as_str(), request.uri().path())
     {
         return mail::handle(context, request).await;
+    }
+    if request.uri().path() == engineering::PATH {
+        return engineering::handle(context, request).await;
     }
     if context.public_chat_rust && attachments::public_path(request.uri().path()) {
         return attachments::handle_public(context, request).await;

@@ -34,7 +34,7 @@ impl Drop for Host {
 }
 impl Host {
     fn start(request: &Value, work: &Path) -> std::result::Result<Self, &'static str> {
-        let mut program = absolute(request, "program").map_err(|_| "SKILL_RUNTIME_MISSING")?;
+        let program = absolute(request, "program").map_err(|_| "SKILL_RUNTIME_MISSING")?;
         if !program.is_file() {
             return Err("SKILL_RUNTIME_MISSING");
         }
@@ -71,7 +71,7 @@ impl Host {
         // Windows venv python.exe is a redirector that would need a second process.
         // Resolve its own pyvenv.cfg to the exact base interpreter before applying the one-process guard.
         #[cfg(windows)]
-        if let Some(venv) = program.parent().and_then(Path::parent) {
+        let program = if let Some(venv) = program.parent().and_then(Path::parent) {
             let config = venv.join("pyvenv.cfg");
             if config.is_file() {
                 let mut bytes = Vec::new();
@@ -101,9 +101,13 @@ impl Host {
                 if !base.is_absolute() || !base.is_file() {
                     return Err("SKILL_RUNTIME_MISSING");
                 }
-                program = base;
+                base
+            } else {
+                program
             }
-        }
+        } else {
+            program
+        };
         let mut command = Command::new(program);
         command
             .args(["-I", "-S", "-B", "-X", "utf8", "-c", worker::SCRIPT])

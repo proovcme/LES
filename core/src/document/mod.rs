@@ -9,14 +9,19 @@ mod node_hierarchy;
 pub(crate) mod nodes;
 mod plain_text;
 pub(crate) mod source_nodes;
+mod structure;
 mod tokenizer;
 pub(crate) mod workbook;
 pub(crate) mod workbook_index;
 use serde_json::{json, Value};
+pub fn reading_units(request: &Value) -> Result<Value, &'static str> {
+    structure::execute(request)
+}
 
 pub fn execute(request: &Value) -> Result<Value, &'static str> {
     match request["action"].as_str() {
         Some("convert") => conversion::execute(request),
+        Some("reading_units") => structure::execute(request),
         Some("pdf_page_blocks") => source_nodes::page_blocks(request),
         Some("json_document") => json_source::read(request),
         Some("prepare_nodes") => nodes::execute(request),

@@ -2,6 +2,7 @@
 mod layout;
 mod preview;
 mod snapshot;
+mod source;
 use pdfium_render::prelude::*;
 use serde_json::{json, Value};
 use std::{
@@ -104,6 +105,9 @@ fn text_range(
             // GetText removed the original word-wrap break. Preserve its
             // confirmed source hyphen and boundary, never fabricate a word.
             normalized.extend_from_slice(&['-' as u16, '\n' as u16]);
+        } else if *code == 0x0020 && is_generated_kerning_space(pdf, text, first, offset, rendered)
+        {
+            continue;
         } else {
             normalized.push(*code);
         }
@@ -114,6 +118,81 @@ fn text_range(
     Ok(value
         .trim_matches(|c: char| c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c))
         .to_owned())
+}
+
+fn is_generated_kerning_space(
+    pdf: &dyn PdfiumLibraryBindings,
+    text: FPDF_TEXTPAGE,
+    first: i32,
+    offset: usize,
+    rendered: &[u16],
+) -> bool {
+    if offset == 0 || offset + 1 >= rendered.len() {
+        return false;
+    }
+    let prev_code = rendered[offset - 1];
+    let next_code = rendered[offset + 1];
+    if prev_code == 0xfffe || next_code == 0xfffe {
+        return false;
+    }
+    let Some(prev_ch) = char::from_u32(prev_code as u32) else {
+        return false;
+    };
+    let Some(next_ch) = char::from_u32(next_code as u32) else {
+        return false;
+    };
+    if prev_ch.is_whitespace() || next_ch.is_whitespace() {
+        return false;
+    }
+    let pos = first + offset as i32;
+    let index = unsafe { pdf.FPDFText_GetCharIndexFromTextIndex(text, pos) };
+    let prev = unsafe { pdf.FPDFText_GetCharIndexFromTextIndex(text, pos - 1) };
+    let next = unsafe { pdf.FPDFText_GetCharIndexFromTextIndex(text, pos + 1) };
+    if index < 0 || prev < 0 || index != prev + 1 || next != prev + 2 {
+        return false;
+    }
+    if unsafe { pdf.FPDFText_IsGenerated(text, index) } != 1 {
+        return false;
+    }
+    let obj = unsafe { pdf.FPDFText_GetTextObject(text, index) };
+    let prev_obj = unsafe { pdf.FPDFText_GetTextObject(text, prev) };
+    let next_obj = unsafe { pdf.FPDFText_GetTextObject(text, next) };
+    if obj.is_null() || obj != prev_obj || obj != next_obj {
+        return false;
+    }
+    let a1 = unsafe { pdf.FPDFText_GetCharAngle(text, prev) };
+    let a2 = unsafe { pdf.FPDFText_GetCharAngle(text, next) };
+    if !a1.is_finite() || !a2.is_finite() || a1.abs() > 0.05 || a2.abs() > 0.05 {
+        return false;
+    }
+    let f1 = unsafe { pdf.FPDFText_GetFontSize(text, prev) } as f32;
+    let f2 = unsafe { pdf.FPDFText_GetFontSize(text, next) } as f32;
+    let fs = f1.max(f2);
+    if !fs.is_finite() || fs <= 0.0 {
+        return false;
+    }
+    let mut b1 = FS_RECTF {
+        left: 0.0,
+        top: 0.0,
+        right: 0.0,
+        bottom: 0.0,
+    };
+    let mut b2 = FS_RECTF {
+        left: 0.0,
+        top: 0.0,
+        right: 0.0,
+        bottom: 0.0,
+    };
+    if unsafe { pdf.FPDFText_GetLooseCharBox(text, prev, &mut b1) } == 0
+        || unsafe { pdf.FPDFText_GetLooseCharBox(text, next, &mut b2) } == 0
+    {
+        return false;
+    }
+    if (b1.bottom - b2.bottom).abs() > 0.5 || b2.right <= b1.left {
+        return false;
+    }
+    let gap = b2.left - b1.right;
+    gap >= -0.05 * fs && gap <= 0.151 * fs
 }
 
 fn scan_objects(
@@ -340,7 +419,9 @@ fn read(library: &Library, path: &Path, options: &Value) -> Result<Value, &'stat
         None
     };
     let result = match options["kind"].as_str() {
-        Some("source_page") => read_page(pdf, document, options, parser_hash.as_deref()),
+        Some("source_page") => {
+            read_page(pdf, document, options, parser_hash.as_deref(), ocr.as_ref())
+        }
         Some("source_preview") => preview::render(pdf, document, options),
         _ => read_pages(pdf, document, ocr.as_ref(), tables.as_ref()),
     };
@@ -359,6 +440,7 @@ fn read_page(
     document: FPDF_DOCUMENT,
     options: &Value,
     parser_hash: Option<&str>,
+    ocr: Option<&crate::pdf_ocr::Ocr>,
 ) -> Result<Value, &'static str> {
     let number = options["source"]["page"]
         .as_u64()
@@ -386,10 +468,20 @@ fn read_page(
     }
     let result = (|| {
         let (raw, native_view) = page_text(pdf, page, parser_hash.is_none())?;
-        if raw.chars().take(20).count() < 20 && scan_objects(pdf, page, None, 0, raw.is_empty())? {
-            return Err("PDF_OCR_REQUIRED");
-        }
+        let scanned =
+            raw.chars().take(20).count() < 20 && scan_objects(pdf, page, None, 0, raw.is_empty())?;
+        let recognized = if scanned {
+            Some(
+                ocr.ok_or("PDF_OCR_REQUIRED")?
+                    .page(pdf, page)?
+                    .filter(|s| !s.trim().is_empty())
+                    .ok_or("OCR_NO_TEXT")?,
+            )
+        } else {
+            None
+        };
         let tables = parser_hash
+            .filter(|_| !scanned)
             .map(|hash| {
                 crate::document_parser::pdf_page_tables(hash, count as u64, number, || {
                     snapshot::page(pdf, document, number)
@@ -402,25 +494,32 @@ fn read_page(
             native_view
         };
         let structured = view.is_some();
-        let text = view.unwrap_or(raw);
-        if text.chars().take(20).count() < 20 && scan_objects(pdf, page, None, 0, text.is_empty())?
+        let text = recognized.or(view).unwrap_or(raw);
+        if !scanned
+            && text.chars().take(20).count() < 20
+            && scan_objects(pdf, page, None, 0, text.is_empty())?
         {
             return Err("PDF_OCR_REQUIRED");
         }
         if text.is_empty() {
             return Err("PDF_PAGE_EMPTY");
         }
+        if text.len() > 1024 * 1024 {
+            return Err("PDF_TEXT_LIMIT");
+        }
+        if options["snapshot"] == true {
+            return Ok(json!({"text":text,"page":number,"page_count":count,
+                "ocr":scanned,"ocr_engine":if scanned{options["ocr"]["engine"].clone()}else{Value::Null},
+                "ocr_dpi":if scanned{options["ocr"]["dpi"].clone()}else{Value::Null},"ocr_numbers_verified":if scanned{json!(false)}else{Value::Null},
+                "extractor":if scanned{"les.pdfium.ocr-page.v1"}else if structured && tables.is_some(){"les.pdfium.xberg-page.v1"}else if structured{"les.pdfium.page.layout.v2"}else{"les.pdfium.page.v1"},
+                "source_sha256":options["source_sha256"]}));
+        }
         let count_chars = text.chars().count() as u64;
         if offset >= count_chars {
             return Err("PDF_OFFSET_INVALID");
         }
         let query = options["source"]["q"].as_str().unwrap_or("").trim();
-        let (offset, end) = if query.is_empty() {
-            (offset, (offset + limit).min(count_chars))
-        } else {
-            let (start, end) = les_core::pdf_source::literal_window(&text, query, limit as usize)?;
-            (start as u64, end as u64)
-        };
+        let (offset, end, selection) = source_window(&text, query, offset, limit)?;
         let excerpt: String = text
             .chars()
             .skip(offset as usize)
@@ -429,13 +528,70 @@ fn read_page(
         let next = offset + excerpt.chars().count() as u64;
         Ok(
             json!({"text":excerpt,"page":number,"page_count":count,"offset":offset,
-            "next_offset":if query.is_empty() && next<count_chars {Some(next)} else {None},"complete":next==count_chars && offset==0,
-            "selection":if query.is_empty(){"page_range"}else{"literal_match"},"matched_query":query,
+            "next_offset":if next<count_chars {Some(next)} else {None},"complete":next==count_chars && offset==0,
+            "selection":selection,"matched_query":query,
             "total_chars":count_chars,"extractor":if structured && tables.is_some(){"les.pdfium.xberg-page.v1"}else if structured{"les.pdfium.page.layout.v2"}else{"les.pdfium.page.v1"},"source_sha256":options["source_sha256"]}),
         )
     })();
     unsafe { pdf.FPDF_ClosePage(page) };
     result
+}
+
+fn source_window(
+    text: &str,
+    query: &str,
+    offset: u64,
+    limit: u64,
+) -> Result<(u64, u64, &'static str), &'static str> {
+    let total = text.chars().count() as u64;
+    if offset >= total {
+        return Err("PDF_OFFSET_INVALID");
+    }
+    // A literal only chooses the initial location. An explicit continuation is
+    // a character position in that same pinned page, never another literal seek.
+    if !query.is_empty() && offset == 0 {
+        let (start, end) = les_core::pdf_source::literal_window(text, query, limit as usize)?;
+        Ok((start as u64, end as u64, "literal_match"))
+    } else {
+        Ok((
+            offset,
+            offset.saturating_add(limit).min(total),
+            "page_range",
+        ))
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn literal_page_read_continues_with_the_same_query_without_reseeking_or_losing_unicode() {
+    let text = format!(
+        "{}нужный пункт{}",
+        "Предисловие 🌲. ".repeat(10),
+        " Продолжение таблицы 日本語. ".repeat(15)
+    );
+    let query = "нужный пункт";
+    let (start, mut end, _) = source_window(&text, query, 0, 80).unwrap();
+    let mut combined: String = text
+        .chars()
+        .skip(start as usize)
+        .take((end - start) as usize)
+        .collect();
+    while end < text.chars().count() as u64 {
+        let (next_start, next_end, kind) = source_window(&text, query, end, 80).unwrap();
+        assert_eq!(next_start, end);
+        assert_eq!(kind, "page_range");
+        assert!(next_end > next_start);
+        combined.extend(
+            text.chars()
+                .skip(next_start as usize)
+                .take((next_end - next_start) as usize),
+        );
+        end = next_end;
+    }
+    assert_eq!(
+        combined,
+        text.chars().skip(start as usize).collect::<String>()
+    );
 }
 
 fn source_page(library: &Library, options: &Value) -> Result<Value, &'static str> {
@@ -451,6 +607,26 @@ fn source_page(library: &Library, options: &Value) -> Result<Value, &'static str
 
 /// Only server-resolved selectors are accepted by callers of this helper.
 pub(crate) fn supervised_source(input: Value) -> Result<Value, String> {
+    if input["kind"] == "source_page" {
+        return source::read(input, None);
+    }
+    worker_source(input)
+}
+pub(crate) use source::ReadLease as SourceLease;
+pub(crate) fn source_lease(input: &Value) -> Result<Option<SourceLease>, String> {
+    source::lease(input)
+}
+pub(crate) fn supervised_source_leased(
+    input: Value,
+    lease: Option<&SourceLease>,
+) -> Result<Value, String> {
+    if input["kind"] == "source_page" {
+        source::read(input, lease)
+    } else {
+        worker_source(input)
+    }
+}
+fn worker_source(input: Value) -> Result<Value, String> {
     let program = std::env::current_exe().map_err(|_| "PDF_READER_UNAVAILABLE")?;
     let library = std::path::PathBuf::from(
         std::env::var_os("LES_NATIVE_PDFIUM").ok_or("PDFIUM_UNAVAILABLE")?,
@@ -460,7 +636,7 @@ pub(crate) fn supervised_source(input: Value) -> Result<Value, String> {
     }
     let value = les_core::run_native_pdf(
         &json!({"schema":"les.worker-host.v1","program":program,"directory":program.parent(),
-        "args":["--serve-pdf-text",library],"context":"les.pdf-text.v1","timeout_ms":30000,"input":input}),
+        "args":["--serve-pdf-text",library],"context":"les.pdf-text.v1","timeout_ms":if input["ocr"].is_object(){90000}else{30000},"input":input}),
     )?;
     let result = &value["result"];
     if value["status"] == "completed" && result["status"] == "completed" {

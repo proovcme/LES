@@ -2,6 +2,26 @@
 use super::Result;
 use les_core::document_image::Pixels;
 const BAD: &str = "DOCX_METAFILE_INVALID";
+mod labels;
+pub(super) fn native_labels(bytes: &[u8]) -> Result<Option<serde_json::Value>> {
+    if !(bytes.starts_with(&[1, 0, 0, 0])
+        || bytes.starts_with(&[0xd7, 0xcd, 0xc6, 0x9a])
+        || bytes.get(2..4) == Some(&[9, 0]))
+    {
+        return Ok(None);
+    }
+    let (raw, extent) = validate(bytes)?;
+    #[cfg(windows)]
+    {
+        let enhanced = windows::enhanced(raw, extent)?;
+        Ok(Some(labels::read(&enhanced)?))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (raw, extent);
+        Ok(None)
+    }
+}
 fn u16at(b: &[u8], at: usize) -> Result<u16> {
     Ok(u16::from_le_bytes(
         b.get(at..at + 2).ok_or(BAD)?.try_into().unwrap(),
@@ -153,6 +173,7 @@ mod windows {
             picture: *const MetaPicture,
         ) -> Handle;
         fn DeleteEnhMetaFile(handle: Handle) -> i32;
+        fn GetEnhMetaFileBits(handle: Handle, size: u32, bytes: *mut u8) -> u32;
     }
     #[link(name = "gdiplus")]
     extern "system" {
@@ -218,6 +239,37 @@ mod windows {
         } else {
             Err("DOCX_METAFILE_RENDER_FAILED")
         }
+    }
+    pub(super) fn enhanced(bytes: &[u8], extent: Option<(i32, i32)>) -> Result<Vec<u8>> {
+        let handle = match extent {
+            None => unsafe { SetEnhMetaFileBits(bytes.len() as u32, bytes.as_ptr()) },
+            Some((w, h)) => unsafe {
+                SetWinMetaFileBits(
+                    bytes.len() as u32,
+                    bytes.as_ptr(),
+                    ptr::null_mut(),
+                    &MetaPicture {
+                        mode: 8,
+                        width: w,
+                        height: h,
+                        handle: ptr::null_mut(),
+                    },
+                )
+            },
+        };
+        if handle.is_null() {
+            return Err(BAD);
+        }
+        let handle = Emf(handle);
+        let size = unsafe { GetEnhMetaFileBits(handle.0, 0, ptr::null_mut()) };
+        if size == 0 || size > 32 * 1024 * 1024 {
+            return Err("DOCX_IMAGE_LIMIT");
+        }
+        let mut out = vec![0; size as usize];
+        if unsafe { GetEnhMetaFileBits(handle.0, size, out.as_mut_ptr()) } != size {
+            return Err(BAD);
+        }
+        Ok(out)
     }
     pub(super) fn render(bytes: &[u8], extent: Option<(i32, i32)>) -> Result<Pixels> {
         let mut token = 0;

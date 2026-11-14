@@ -43,6 +43,14 @@ fn model_schema(contract: &Value) -> Value {
         return schema;
     }
     if let Some(properties) = schema["properties"].as_object_mut() {
+        // The tool summary already explains frozen continuations. Repeating
+        // prose in every hash/revision property costs context on every turn;
+        // retain all validation constraints and the full API/MCP contract.
+        for property in properties.values_mut() {
+            if let Some(value) = property.as_object_mut() {
+                value.remove("description");
+            }
+        }
         properties.remove("dataset_id");
         properties.remove("doc_name");
         if contract["name"] == "read_source" {
@@ -85,7 +93,15 @@ impl Tools {
                     && (!remote || ["search_sources","read_source","read_pdf_source","read_excel_source"].iter().any(|n|t["name"]==*n))).cloned().collect();
             for contract in &mut contracts {
                 if contract["name"]=="search_sources"{contract["timeout_seconds"]=json!(150);}
-                if contract["name"]=="search_sources"||contract["name"]=="read_source"||contract["name"]=="read_excel_source"{
+                if [
+                    "search_sources",
+                    "read_source",
+                    "read_excel_source",
+                    "dataset_map",
+                ]
+                .iter()
+                .any(|n| contract["name"] == *n)
+                {
                     // The executor counts every nested array item, including
                     // repeated citation identities, receipt IDs and discovery
                     // cards. This is not the number of factual passages (32,
@@ -211,7 +227,9 @@ impl Tools {
         chosen.into_iter().map(|c| {
             let schema=model_schema(c);
             let description=if c["name"] == "read_source" {
-                "Read indexed text sections by registered doc_id; q or clause locates text, offset continues it. This does not open an original PDF: use read_pdf_source(doc_id,page) for that. For embedded Word images/attachments use the extension tool: describe read_source, then call its full view=parts/part contract. Indexed text and media are different evidence.".to_owned()
+                "Read structured Word originals or indexed text by doc_id. q/clause locates text; continue with offset and the returned index_revision/view_sha256. Physical PDF pages use read_pdf_source. Word images/attachments use the extension's read_source view=parts/part.".to_owned()
+            } else if c["name"] == "read_pdf_source" {
+                "Read an original PDF page by doc_id and 1-based page; configured OCR handles scans. source_sha256 pins the original. Continue with offset and returned view_sha256. Verify OCR numbers against the original.".to_owned()
             } else if schema!=c["input_schema"] {
                 format!("{} Use only the registered doc_id from source references or document search to identify the document. Dataset and filename are resolved by LES.",
                     c["summary"].as_str().unwrap_or("").replace("Use exact dataset_id+doc_name from sources; never invent ids or paths.", ""))
@@ -281,7 +299,7 @@ impl Tools {
                 .cloned()
                 .ok_or("TOOL_NOT_ALLOWED")?;
             let mut args = call["args"].clone();
-            let read_grant = bounded_read(name, &mut args, self.read_max_chars);
+            let read_grant = bounded_read(name, &mut args, self.read_max_chars, &contract);
             let source_request = source_request(name, &args);
             let operation = args["operation"].as_str().map(str::to_owned);
             let scope = turn.scope["resolved_dataset_ids"].clone();
@@ -392,8 +410,8 @@ impl Tools {
                     Ok(result)
                 } else {
                     let mut args = args;
-                    if ["read_source", "read_excel_source"].contains(&name) {
-                        args["_context_budget_chars"] = json!(self.read_max_chars);
+                    if ["search_sources", "read_source", "read_excel_source"].contains(&name) {
+                        args["_context_budget_chars"] = json!(self.read_max_chars.min(16000));
                     }
                     sources::run(context, turn, name, args).await
                 }
@@ -533,7 +551,7 @@ fn source_request(name: &str, args: &Value) -> Option<Value> {
     }
     Some(json!({"kind":"source_request","arguments":values}))
 }
-fn bounded_read(name: &str, args: &mut Value, cap: usize) -> Option<Value> {
+fn bounded_read(name: &str, args: &mut Value, cap: usize, contract: &Value) -> Option<Value> {
     if !["read_source", "read_pdf_source", "read_excel_source"].contains(&name) || !args.is_object()
     {
         return None;
@@ -541,15 +559,28 @@ fn bounded_read(name: &str, args: &mut Value, cap: usize) -> Option<Value> {
     if args.get("max_chars").is_some_and(|v| v.as_u64().is_none()) {
         return None;
     }
-    let requested = args["max_chars"].as_u64().unwrap_or(3000);
-    let granted = requested.min((cap / 2).max(1) as u64);
-    if requested <= granted {
+    // The host's default must obey the reader's own contract as well as the
+    // model window. Otherwise a valid page request fails schema admission
+    // before the physical reader can report its actual reason.
+    let cap = cap.min(
+        contract["input_schema"]["properties"]["max_chars"]["maximum"]
+            .as_u64()
+            .and_then(|n| usize::try_from(n).ok())
+            .unwrap_or(cap),
+    );
+    let explicit = args["max_chars"].as_u64();
+    let requested = explicit.unwrap_or(cap.min(16000) as u64);
+    // reader_capacity already converts the token window to characters and
+    // reserves the call envelope. Halving this character budget again made a
+    // fitting materialized page unreadable on its next cursor position.
+    let granted = requested.min(cap.max(1) as u64);
+    if explicit.is_some() && requested <= granted {
         return None;
     }
     args["max_chars"] = json!(granted);
     Some(
-        json!({"requested_max_chars":requested,"granted_max_chars":granted,"reason":"current_model_context_budget",
-        "note":"Размер порции ограничен свободным окном модели с резервом для идентификаторов и квитанции. Это не полный просмотр. Для PDF продолжай по next_cursor; для индексированных разделов уточни чтение."}),
+        json!({"requested_max_chars":requested,"granted_max_chars":granted,"reason":"reader_contract_and_model_context_budget",
+        "note":"Размер порции ограничен свободным окном модели с резервом для идентификаторов и квитанции. Это не полный просмотр. Продолжай с точным next_offset при неизменном запросе, документе и редакции."}),
     )
 }
 #[cfg(test)]

@@ -6,6 +6,7 @@ import sqlite3
 import subprocess
 import io
 import zipfile
+from pathlib import Path
 from urllib.parse import unquote
 
 import httpx
@@ -14,6 +15,43 @@ from backend import native_core
 from tests.test_light_native_docx_semantics import convert, term
 from tests.test_light_native_api import gateway  # noqa: F401
 from tests.test_light_native_chat_turn import native_turn, PATH, HEADERS  # noqa: F401
+
+
+def test_complete_word_conversion_is_shared_with_indexing_across_process_restart(tmp_path):
+    api = os.getenv('LES_TEST_NATIVE_API')
+    if not api:
+        pytest.skip('Native API required')
+    state = tmp_path/'state'; state.mkdir()
+    path = tmp_path/'source.docx'
+    def write(text):
+        with zipfile.ZipFile(path, 'w') as z:
+            z.writestr('word/document.xml', '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>'+text+'</w:t></w:r></w:p></w:body></w:document>')
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    digest = write('FIRST source value 17.25 and its complete contextual sentence.')
+    common = {'schema':'les.document-convert.v1','path':str(path),'owned_state':str(state),
+              'source_sha256':digest,'ocr_unavailable':True}
+    env = {**os.environ,'LES_RUNTIME_HOME':str(tmp_path/'empty-runtime'), 'PATH':'',
+           'PYTHONHOME':str(tmp_path/'no-python'),'PYTHONPATH':str(tmp_path/'no-code')}
+    env.pop('LES_NATIVE_DOCUMENT_PARSERS', None)
+    def run(args):
+        process = subprocess.run([str(Path(api).resolve()), '--serve-document-formats'],
+            input=json.dumps({'request_id':1,'input':args})+'\n',text=True,encoding='utf-8',
+            capture_output=True,env=env,timeout=30)
+        assert process.returncode == 0, process.stderr
+        return json.loads(process.stdout)['result'], process.stderr
+    indexed, _ = run(common|{'pipeline':'nodes','data_dir':str(tmp_path/'data'),'dataset_id':'ds',
+        'file_key':path.name,'chunking':{'unit':'chars','chunk_size':800,'chunk_overlap':80},'minimum':20,'final_minimum':20})
+    assert indexed['status'] == 'completed' and indexed['value']['nodes']
+    read, log = run(common)
+    assert read['status'] == 'completed' and 'FIRST source value 17.25' in read['value']['text']
+    assert 'word_conversion_cache_hit' in log
+    assert not list((state/'storage/derived-views').glob('*.tmp'))
+    second = write('SECOND source value 117.250 with a different complete sentence.')
+    refused, _ = run(common)
+    assert refused['status'] != 'completed' and refused['code'] == 'SOURCE_CHANGED_DURING_INDEXING'
+    fresh, _ = run(common|{'source_sha256':second})
+    assert fresh['status'] == 'completed' and 'SECOND source value 117.250' in fresh['value']['text']
+    assert 'FIRST source value' not in fresh['value']['text']
 
 
 @pytest.mark.skipif(not os.getenv('LES_CORE_LIBRARY'),reason='Native core required')

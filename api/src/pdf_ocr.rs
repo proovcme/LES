@@ -25,6 +25,7 @@ pub struct Ocr<'a> {
     dpi: f64,
     engine: Engine<'a>,
     timeout: Duration,
+    persistent_revision: Option<String>,
 }
 
 enum Engine<'a> {
@@ -76,12 +77,25 @@ impl<'a> Ocr<'a> {
             .as_u64()
             .unwrap_or(120_000)
             .clamp(100, 600_000);
+        let persistent_revision = if matches!(engine, Engine::Windows)
+            && fs::metadata(helper)
+                .map(|m| m.len() <= 65536)
+                .unwrap_or(false)
+        {
+            let bytes = fs::read(helper).map_err(|_| FAILED)?;
+            bytes
+                .starts_with(b"# les.ocr-stdio.v1")
+                .then(|| les_core::sha256_hex(&bytes))
+        } else {
+            None
+        };
         Ok(Self {
             helper,
             scratch,
             dpi,
             engine,
             timeout: Duration::from_millis(timeout),
+            persistent_revision,
         })
     }
 
@@ -92,6 +106,9 @@ impl<'a> Ocr<'a> {
     pub fn image(&self, path: &Path) -> Result<String, &'static str> {
         if !path.is_absolute() || !path.is_file() {
             return Err(FAILED);
+        }
+        if let Some(revision) = &self.persistent_revision {
+            return self.persistent_image(path, revision);
         }
         let mut command = match self.engine {
             Engine::Windows => {
@@ -173,6 +190,41 @@ impl<'a> Ocr<'a> {
         Ok(json["text"].as_str().ok_or(FAILED)?.trim().to_owned())
     }
 
+    fn persistent_image(&self, path: &Path, revision: &str) -> Result<String, &'static str> {
+        let program = PathBuf::from(std::env::var_os("SystemRoot").ok_or(FAILED)?)
+            .join("System32/WindowsPowerShell/v1.0/powershell.exe");
+        let reply = les_core::run_native_ocr(&serde_json::json!({
+            "schema":"les.worker-host.v1", "program":program,
+            "directory":program.parent().ok_or(FAILED)?,
+            "args":["-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass",
+                "-File",self.helper,"-Serve"],
+            "context":{"protocol":"les.ocr-stdio.v1","helper_sha256":revision},
+            "timeout_ms":self.timeout.as_millis() as u64,
+            "input":{"image_path":winrt_path(path)}
+        }))
+        .map_err(|_| FAILED)?;
+        if reply["status"] != "completed" || reply["result"]["status"] != "completed" {
+            let code = reply["code"].as_str().unwrap_or(FAILED);
+            eprintln!(
+                "{}",
+                serde_json::json!({"event":"ocr_worker_failed","code":code,
+                "worker_pid":reply["worker_pid"],"diagnostics":reply["diagnostics"]})
+            );
+            return Err(
+                if matches!(code, "WORKER_TIMEOUT" | "WORKER_QUEUE_TIMEOUT") {
+                    "OCR_TIMEOUT"
+                } else {
+                    FAILED
+                },
+            );
+        }
+        let text = reply["result"]["value"]["text"].as_str().ok_or(FAILED)?;
+        if text.len() as u64 > MAX_REPLY {
+            return Err(FAILED);
+        }
+        Ok(text.trim().to_owned())
+    }
+
     pub fn page(
         &self,
         pdf: &dyn PdfiumLibraryBindings,
@@ -214,4 +266,38 @@ pub(crate) fn write_bmp(
     output.write_all(&len.to_le_bytes())?;
     output.write_all(&[0; 16])?;
     output.write_all(pixels)
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+    #[test]
+    fn windows_ocr_reuses_session_but_never_turns_a_bad_image_into_empty_success() {
+        let scratch = std::env::temp_dir().join(format!("les-ocr-protocol-{}", std::process::id()));
+        fs::create_dir_all(&scratch).unwrap();
+        let helper = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("tools/light_windows_ocr.ps1");
+        let options =
+            serde_json::json!({"helper":helper,"scratch":scratch,"dpi":300,"engine":"windows"});
+        let ocr = Ocr::new(&options).unwrap();
+        assert!(ocr.persistent_revision.is_some());
+        let image = scratch.join("blank.bmp");
+        write_bmp(
+            File::create(&image).unwrap(),
+            100,
+            40,
+            &vec![255; 100 * 40 * 4],
+        )
+        .unwrap();
+        let invalid = scratch.join("broken.bmp");
+        fs::write(&invalid, b"not a bitmap").unwrap();
+        assert_eq!(ocr.image(&image).unwrap(), "");
+        assert_eq!(ocr.image(&invalid).unwrap_err(), FAILED);
+        assert_eq!(ocr.image(&image).unwrap(), "");
+        fs::remove_file(image).unwrap();
+        fs::remove_file(invalid).unwrap();
+        fs::remove_dir(scratch).unwrap();
+    }
 }

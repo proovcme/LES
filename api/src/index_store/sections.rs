@@ -100,11 +100,11 @@ pub(crate) async fn read(
     }
     let seeds = body["seeds"]
         .as_array()
-        .filter(|items| !items.is_empty() && items.len() <= 50)
+        .filter(|items| !items.is_empty() && items.len() <= 64)
         .ok_or(SCOPE)?;
     let scopes = body["scopes"]
         .as_array()
-        .filter(|items| items.len() <= 8)
+        .filter(|items| items.len() <= 64)
         .ok_or(SCOPE)?;
     let mut ids = Vec::new();
     let mut seen = HashSet::new();
@@ -251,10 +251,17 @@ pub(crate) async fn read(
     } else {
         vec![]
     };
+    let windows = if let Some(budget) = body["document_window_chars"].as_u64() {
+        documents::window(context, store, collection, seeds, budget as usize).await?
+    } else {
+        vec![]
+    };
     if store.revision(context, collection).await? != revision {
         return Err(CHANGED);
     }
-    Ok(json!({"current":current,"sections":sections,"documents":documents}))
+    Ok(
+        json!({"current":current,"sections":sections,"documents":documents,"document_windows":windows}),
+    )
 }
 
 pub(super) async fn handle(context: &Context, store: &Store, body: &Value) -> Response {

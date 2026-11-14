@@ -9,7 +9,7 @@ const FOLDER: &str = "/api/rag/attach-folder";
 pub fn public_path(path: &str) -> bool {
     matches!(path, PUBLIC | LEGACY | FOLDER)
 }
-pub(super) async fn scratch(context: &Context) -> Result<PathBuf> {
+pub(crate) async fn scratch(context: &Context) -> Result<PathBuf> {
     let directory = context.state_root.join("storage/upload-tmp");
     let path = directory.clone();
     context

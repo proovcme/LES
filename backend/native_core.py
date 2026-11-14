@@ -46,7 +46,7 @@ def library_path():
     if configured:
         return Path(configured).resolve()
     name = 'les_core.dll' if sys.platform == 'win32' else ('libles_core.dylib' if sys.platform == 'darwin' else 'libles_core.so')
-    return Path(__file__).resolve().parents[2] / 'native/core' / name
+    return Path(__file__).resolve().parents[1] / 'native/core' / name
 
 
 @lru_cache(maxsize=2)

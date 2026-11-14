@@ -82,18 +82,24 @@ def les(tmp_path):
                 self.send_json({"status":"started","intake_job_id":"test-intake"})
             elif self.path == "/api/light/agent-workspace":
                 self.send_json({"persisted":True,"revision":"fixture-revision"})
-            elif self.path == "/api/search":
-                trace = {"status": "blocked", "error_code": "native_rrf_failed"}
-                if body["query"] == "сбой":
-                    self.send_json({"retrieval_trace": trace})
-                    return
-                self.send_json({"chunks": [{
-                    "rank": 1, "doc_id": "doc/id", "doc_name": "План #1.pdf", "content": "Строка",
-                    "metadata": {"dataset_id": "user-1", "page": 3, "source_path": "private/path"},
-                    "context": {"content": "Раздел", "metadata": {"context_fragments": [{
-                        "content": "Соседняя страница", "metadata": {"page": 4, "qdrant_point_id": "next"},
-                    }]}},
-                }], "retrieval_trace": {"status": "ok", "fusion": "qdrant_rrf"}})
+            elif self.path == "/api/rag/sources/call":
+                args = body['args']
+                if 'hidden' in args.get('dataset_ids', []):
+                    self.send_json({'code':'TOOL_SCOPE_VIOLATION'}, status=403)
+                elif args.get('dataset_ids') == ['user-2']:
+                    self.send_json({'code':'SOURCE_INDEX_NOT_READY'}, status=503)
+                elif args.get('q') == 'сбой':
+                    self.send_json({'code':'INDEX_STORAGE_UNAVAILABLE'}, status=503)
+                elif args.get('source_sha256') == '0'*64:
+                    self.send_json({'code':'SOURCE_REVISION_CHANGED'}, status=409)
+                else:
+                    source = {'doc_id':'doc-id','dataset_id':'user-1','doc_name':'План #1.pdf',
+                        'source_sha256':'a'*64, 'page':3,
+                        'url':'/api/documents/by-id/doc-id/raw?source_sha256='+'a'*64+'#page=3'}
+                    self.send_json({'schema':'les_tool_result_v1','tool':body['tool'],'status':'ok',
+                        'result':{'passages':[{'text':'Строка','source':source}], 'offset':0,
+                            'next_offset':1,'index_revision':'rev-1','coverage':'bounded'},
+                        'sources':[source]})
             else:
                 self.send_json({}, status=404)
 
@@ -173,18 +179,20 @@ def test_cli_uses_existing_session_and_creates_new_session(les):
 
 def test_cli_search_provenance_scope_and_restart_guard(les):
     result = json.loads(command(les, "search", "Где файл #1 日本語?").stdout)
-    hit = result["hits"][0]
-    assert hit["page"] == 3 and hit["context_fragments"][0]["page"] == 4
-    parsed = urlsplit(hit["original_url"])
-    assert parsed.path == "/api/documents/by-id/doc%2Fid/viewer"
-    assert parse_qs(parsed.query) == {"dataset_id": ["user-1"], "doc_name": ["План #1.pdf"]}
-    assert "private/path" not in str(result)
+    hit = result['result']['passages'][0]
+    source = hit['source']
+    assert source['page'] == 3 and source['source_sha256'] == 'a'*64
+    parsed = urlsplit(source['url'])
+    assert parsed.path == '/api/documents/by-id/doc-id/raw' and parsed.fragment == 'page=3'
+    assert parse_qs(parsed.query) == {'source_sha256':['a'*64]}
+    assert result['result']['next_offset'] == 1 and result['result']['index_revision'] == 'rev-1'
     calls = les[2]
-    assert calls[-1][3]["dataset_ids"] == ["user-1", "user-2"]
-    assert calls[-1][3]["include_context"] is True
-    assert command(les, "search", "вопрос", "--dataset", "hidden", check=False).returncode == 1
-    assert json.loads(command(les, "search", "вопрос", "--dataset", "user-2").stdout)["retrieval"]["status"] == "not_ready"
-    assert "Qdrant" in json.loads(command(les, "search", "сбой").stdout)["retrieval"]["message"]
+    assert calls[-1][1] == '/api/rag/sources/call'
+    assert calls[-1][3] == {'tool':'search_sources','args':{'q':'Где файл #1 日本語?','limit':6}}
+    assert command(les, 'search', 'вопрос', '--dataset', 'hidden', check=False).returncode == 1
+    assert 'INDEX_STORAGE_UNAVAILABLE' in command(les, 'search', 'сбой', check=False).stderr
+    assert 'SOURCE_INDEX_NOT_READY' in command(les, 'search', 'вопрос', '--dataset', 'user-2', check=False).stderr
+    assert not any(row[1] in ('/api/chat','/api/search') for row in calls)
     les[3][0] = "different-process"
     before = len(calls)
     assert "Экземпляр LES RAG изменился" in command(les, "status", check=False).stderr
@@ -219,9 +227,16 @@ def test_stdio_mcp_interoperates_with_existing_client(les):
                 assert [row["id"] for row in result.structuredContent["datasets"]] == ["user-1", "user-2"]
                 result = await session.call_tool("search_sources", {"query": "Где план?", "dataset_ids": ["user-1"]})
                 assert not result.isError
-                assert result.structuredContent["hits"][0]["document"] == "План #1.pdf"
+                assert result.structuredContent['result']['passages'][0]['source']['doc_name'] == 'План #1.pdf'
+                assert result.structuredContent['sources'][0]['url'].endswith('#page=3')
+                continued = await session.call_tool('read_source', {'doc_id':'doc-id','source_sha256':'a'*64,'offset':1,'index_revision':'rev-1'})
+                assert not continued.isError
+                assert les[2][-1][3]['args']['index_revision'] == 'rev-1'
+                changed = await session.call_tool('read_pdf_source', {'doc_id':'doc-id','page':3,'source_sha256':'0'*64})
+                assert changed.isError and 'SOURCE_REVISION_CHANGED' in changed.content[0].text
+                assert not any(row[1] == '/api/chat' for row in les[2])
                 rejected = await session.call_tool("search_sources", {"query": "Где план?", "dataset_ids": ["hidden"]})
-                assert rejected.isError and "Набор не найден" in rejected.content[0].text
+                assert rejected.isError and "TOOL_SCOPE_VIOLATION" in rejected.content[0].text
                 created = await session.call_tool("create_dataset", {"name":"Данные 🌲"})
                 assert created.structuredContent == {"id":"created","name":"Данные 🌲"}
                 docs = await session.call_tool("list_documents", {"dataset_id":"user-1"})

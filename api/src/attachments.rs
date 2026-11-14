@@ -9,6 +9,7 @@ use std::{
     sync::Arc,
     time::Duration,
 };
+pub(crate) use upload::scratch;
 pub(crate) use upload::Temporary;
 pub use upload::{handle_public, public_path};
 pub const PRIVATE: &str = "/api/light/internal-attachments";

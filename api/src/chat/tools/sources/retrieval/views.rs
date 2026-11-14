@@ -8,7 +8,8 @@ fn key(point: &Value) -> String {
         p["dataset_id"],
         p["file_name"],
         p["source_sha256"],
-        p["page"]
+        p["page"],
+        p["source_unit_id"]
     ])
     .to_string()
 }
@@ -25,6 +26,33 @@ pub(super) fn project(
             .flat_map(|s| s["points"].as_array().into_iter().flatten())
         {
             let p = &row["payload"];
+            if p["physical_pdf_read"].is_object() {
+                continue;
+            }
+            if let Some(unit) = p.get("word_reading_view") {
+                let text = unit["text"].as_str().ok_or("WORD_READING_VIEW_INVALID")?;
+                if p["word_reading_schema"] != "les.document-reading.v1"
+                    || p["word_reading_sha256"] != les_core::sha256_hex(text.as_bytes())
+                    || unit["ordinal"] != p["source_unit_id"]
+                {
+                    return Err("WORD_READING_VIEW_INVALID");
+                }
+                let mut reading = row.clone();
+                reading["payload"]["text"] = json!(text);
+                reading["payload"]["reading_representation"] = json!("word_structure");
+                for field in [
+                    "heading",
+                    "table_id",
+                    "row_start",
+                    "row_end",
+                    "start_byte",
+                    "end_byte",
+                    "ordinal",
+                ] {
+                    reading["payload"][field] = unit[field].clone();
+                }
+                views.insert(key(row), reading);
+            }
             if let Some(text) = p["pdf_page_view"].as_str() {
                 if p["pdf_page_view_schema"] != "les.pdf-page-view.v1"
                     || !p["page"].is_u64()
@@ -47,7 +75,17 @@ pub(super) fn project(
     let project = |rows: &[Value]| {
         let mut seen = HashSet::new();
         rows.iter()
-            .map(|row| views.get(&key(row)).unwrap_or(row).clone())
+            .map(|row| {
+                if row["payload"]["physical_pdf_read"].is_object() {
+                    return row.clone();
+                }
+                let mut projected = views.get(&key(row)).unwrap_or(row).clone();
+                if row["payload"]["equivalent_points"].is_array() {
+                    projected["payload"]["equivalent_points"] =
+                        row["payload"]["equivalent_points"].clone();
+                }
+                projected
+            })
             .filter(|row| seen.insert(row["id"].to_string()))
             .collect::<Vec<_>>()
     };
@@ -67,6 +105,36 @@ pub(super) fn project(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_word_embedding_slice_reveals_its_entire_hashed_table_unit() {
+        let text = "|Позиция|кВт|\n|---|---|\n|Насос|17.25|\n";
+        let p = json!({"id":"anchor","payload":{"dataset_id":"d","file_name":"a.docx","source_sha256":"s","source_unit_id":7,
+            "text":"17.25","word_reading_schema":"les.document-reading.v1","word_reading_sha256":les_core::sha256_hex(text.as_bytes()),
+            "word_reading_view":{"text":text,"ordinal":7,"table_id":1,"row_start":0,"row_end":3}}});
+        let mut tail = p.clone();
+        tail["id"] = json!("tail");
+        tail["payload"]
+            .as_object_mut()
+            .unwrap()
+            .remove("word_reading_view");
+        let (seeds, view) = project(
+            vec![tail.clone()],
+            json!({"sections":[{"points":[p.clone(),tail]}],"documents":[]}),
+        )
+        .unwrap();
+        assert_eq!(seeds[0]["payload"]["text"], text);
+        assert_eq!(view["sections"][0]["points"].as_array().unwrap().len(), 1);
+        let mut corrupt = p;
+        corrupt["payload"]["word_reading_view"]["text"] = json!("Changed value 117.25");
+        assert_eq!(
+            project(
+                vec![corrupt.clone()],
+                json!({"sections":[{"points":[corrupt]}]})
+            )
+            .unwrap_err(),
+            "WORD_READING_VIEW_INVALID"
+        );
+    }
     fn page(id: &str, dataset: &str, view: bool) -> Value {
         let mut p = json!({"id":id,"payload":{"dataset_id":dataset,"file_name":"a.pdf","source_sha256":"s","page":1,"text":"Search text"}});
         if view {

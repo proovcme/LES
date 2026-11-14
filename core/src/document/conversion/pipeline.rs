@@ -225,13 +225,44 @@ pub(super) fn prepare(
         metadata.insert("doc_type".into(), json!("OTHER"));
         metadata.insert("content_type".into(), json!("text"));
         route["metadata"] = json!(metadata);
-        nodes = source_nodes(
-            &request,
-            content["text"].as_str().ok_or(INVALID)?,
-            &route["metadata"],
-            if pdf { "pdf_page_text" } else { "markdown" },
-            pdf,
-        )?;
+        nodes = if let Some(cards) = content["engineering_cards"].as_array() {
+            let mut collected = Vec::new();
+            for card in cards {
+                let mut object_request = request.clone();
+                object_request["file_key"] = json!(format!(
+                    "{file}/{}",
+                    crate::sha256_hex(card["model_locator"]["object_id"].to_string().as_bytes())
+                ));
+                object_request["minimum"] = json!(0);
+                object_request["final_minimum"] = json!(0);
+                let mut metadata = route["metadata"].clone();
+                metadata["model_locator"] = card["model_locator"].clone();
+                metadata["parent_id"] = json!(crate::sha256_hex(
+                    format!(
+                        "{dataset}:{file}:{source_hash}:{}",
+                        card["model_locator"]["object_id"]
+                    )
+                    .as_bytes()
+                ));
+                metadata["reading_representation"] = json!("engineering_object");
+                collected.extend(source_nodes(
+                    &object_request,
+                    card["text"].as_str().ok_or(INVALID)?,
+                    &metadata,
+                    "engineering_object",
+                    false,
+                )?);
+            }
+            collected
+        } else {
+            source_nodes(
+                &request,
+                content["text"].as_str().ok_or(INVALID)?,
+                &route["metadata"],
+                if pdf { "pdf_page_text" } else { "markdown" },
+                pdf,
+            )?
+        };
         route["metadata"]
             .as_object_mut()
             .unwrap()
