@@ -224,6 +224,35 @@ pub fn current(texts: &[String]) -> Result<Value, &'static str> {
     versioned(texts, LEGACY)
 }
 
+/// Read-time matching, independent of the persisted postings contract. Keep
+/// compound identifiers intact; expose alphabetic hyphenated word components
+/// as well (e.g. IP-camera). Never split numbers, decimals or equipment codes
+/// containing digits into apparently independent matches.
+pub fn reading(texts: &[String]) -> Result<Value, &'static str> {
+    let expanded: Vec<String> = texts
+        .iter()
+        .map(|text| {
+            let normalized = crate::unicode::lexical(text);
+            let mut expanded = normalized.clone();
+            for matched in token_regex().find_iter(&normalized) {
+                let word = matched.as_str();
+                if word.contains('-')
+                    && word
+                        .split('-')
+                        .all(|part| !part.is_empty() && part.chars().all(char::is_alphabetic))
+                {
+                    for part in word.split('-') {
+                        expanded.push(' ');
+                        expanded.push_str(part);
+                    }
+                }
+            }
+            expanded
+        })
+        .collect();
+    versioned(&expanded, SNOWBALL)
+}
+
 pub fn versioned(texts: &[String], tokenizer: &str) -> Result<Value, &'static str> {
     let config: Value = serde_json::from_str(include_str!("../../config/lexical-v2.json"))
         .map_err(|_| "CORE_LEXICAL_CONFIG_INVALID")?;
@@ -233,6 +262,24 @@ pub fn versioned(texts: &[String], tokenizer: &str) -> Result<Value, &'static st
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn reading_matches_compound_words_without_splitting_numeric_identifiers() {
+        let r = reading(&[
+            "IP-видеокамера насос-мотор AXIS-P1375 DN100 117.25".into(),
+            "видеокамеры мотор".into(),
+        ])
+        .unwrap();
+        let doc = r["documents"][0]["terms"].as_object().unwrap();
+        for key in r["documents"][1]["terms"].as_object().unwrap().keys() {
+            assert!(doc.contains_key(key), "{key}");
+        }
+        assert!(doc.contains_key("axis-p1375"));
+        for key in ["axis", "p1375", "100", "17.25", "117", "25"] {
+            assert!(!doc.contains_key(key), "{key}");
+        }
+        let legacy = current(&["IP-видеокамера".into()]).unwrap();
+        assert!(legacy["documents"][0]["terms"].get("видеокамер").is_none());
+    }
     #[test]
     fn russian_word_forms_share_terms_without_mutating_legacy_or_identifiers() {
         for words in [

@@ -883,3 +883,37 @@ def test_word_original_reader_preserves_rows_and_cursor_without_index_or_model(n
     stale=t.client.post('/api/rag/sources/call',json={'tool':'read_source','args':args})
     assert stale.status_code==409 and stale.json()['code']=='SOURCE_REVISION_CHANGED'
     assert not t.seen, 'Reading an original must not request the answer model'
+
+
+def test_word_filtered_compound_match_is_not_reported_as_a_complete_document(native_turn):
+    from docx import Document
+    from tests.test_light_native_chat_turn import source_pdf
+    t = native_turn
+    source_pdf(t)
+    original = t.state / 'compound.docx'
+    word = Document()
+    word.add_heading('Equipment', level=1)
+    for i in range(20):
+        word.add_paragraph(f'Independent background section {i}. ' + 'Technical conditions. ' * 30)
+    table = word.add_table(rows=1, cols=3)
+    for cell, text in zip(table.rows[0].cells, ['Item', 'Description', 'Quantity']):
+        cell.text = text
+    for cell, text in zip(table.add_row().cells, ['A-1', 'Модуль SpeedDome-камерами', '17.25']):
+        cell.text = text
+    word.save(original)
+    digest = hashlib.sha256(original.read_bytes()).hexdigest()
+    with sqlite3.connect(t.database) as db:
+        db.execute('UPDATE documents SET file_name=?,source_path=?,file_hash=?',
+                   ('compound.docx', str(original), digest))
+    args = {'doc_id': 'registered-document', 'source_sha256': digest,
+            'q': 'камера', 'max_chars': 12000, 'limit': 16}
+    value = t.client.post('/api/rag/sources/call', json={'tool': 'read_source', 'args': args}).raise_for_status().json()['result']
+    assert any('17.25' in p['text'] and 'SpeedDome-камерами' in p['text'] for p in value['passages'])
+    assert value['document_fragments'] > value['total_fragments']
+    assert value['reading_scope'] == 'query_matches'
+    assert value['coverage'] == 'bounded' and value['matches_exhausted'] is True
+    assert value['next_offset'] is None
+    wrong_number = t.client.post('/api/rag/sources/call', json={
+        'tool': 'read_source', 'args': {**args, 'q': '117.25'}})
+    assert wrong_number.json()['code'] == 'SOURCE_SECTION_NOT_FOUND'
+    assert not t.seen, 'The shared source reader must not call an answer model'

@@ -78,7 +78,7 @@ pub(super) async fn hydrate(
             }
             let mut payload = json!({"dataset_id":doc["dataset_id"],"file_name":doc["file_name"],"source_sha256":doc["file_hash"],
                 "text":unit["text"],"reading_representation":"word_structure","word_physical":true,
-                "word_snapshot_sha256":view["view_sha256"],"retrieval_anchor_id":point["id"],
+                "word_snapshot_sha256":view["view_sha256"],"retrieval_anchor_id":p.get("retrieval_anchor_id").unwrap_or(&point["id"]),
                 "chunk_ord":unit["ordinal"],"section_heading":unit["heading"],"source_unit_id":unit["ordinal"]});
             // An original document is not a dense hit at every paragraph.
             // Only a compatible indexed unit can inherit an anchor's rank.
@@ -278,6 +278,7 @@ pub(super) async fn read(
         .as_array()
         .cloned()
         .ok_or("DOCUMENT_STRUCTURE_INVALID")?;
+    let document_units = units.len();
     let clause = args["clause"].as_str().unwrap_or("");
     if !clause.is_empty() {
         les_core::chat_request::clause_heading("", clause)?;
@@ -374,5 +375,6 @@ pub(super) async fn read(
     if kept < count {
         reply["result"]["coverage"] = json!("bounded");
     }
+    retrieval::reading_scope(&mut reply, &args, document_units);
     Ok(reply)
 }

@@ -25,7 +25,7 @@ fn tokens(texts: &[String]) -> Result<Vec<BTreeSet<String>>, &'static str> {
     for batch in texts.chunks(256) {
         // Context-only morphology; the persisted lexical analyzer, postings
         // and dense vectors are unchanged. Codes/digits keep exact tokens.
-        let prepared = crate::lexical::versioned(batch, crate::lexical::SNOWBALL)?;
+        let prepared = crate::lexical::reading(batch)?;
         for row in prepared["documents"]
             .as_array()
             .ok_or("CONTEXT_SELECTION_INVALID")?
@@ -389,6 +389,33 @@ mod tests {
             .iter()
             .any(|u| u["unit_id"] == "rating"));
         assert!(r["selection"]["used_chars"].as_u64().unwrap() <= 650);
+    }
+    #[test]
+    fn a_long_parent_cannot_spend_the_whole_budget_before_a_compact_table_row() {
+        let page = unit(
+            "page",
+            &format!(
+                "Pump pressure and flow. {}",
+                "Detailed technical explanation. ".repeat(100)
+            ),
+            0,
+        );
+        let row = unit(
+            "row",
+            "Pump pressure and flow\n|Item|Pressure|Flow|\n|A|17.25 bar|8 l/s|",
+            10,
+        );
+        let budget = cost(&page, 0);
+        let r = select(
+            &json!({"question":"Pump pressure and flow", "units":[page,row],"max_chars":budget}),
+        )
+        .unwrap();
+        assert!(r["units"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|u| u["unit_id"] == "row"));
+        assert!(r["selection"]["used_chars"].as_u64().unwrap() <= budget as u64);
     }
     #[test]
     fn atomic_budget_never_turns_a_partial_unit_into_complete_text() {

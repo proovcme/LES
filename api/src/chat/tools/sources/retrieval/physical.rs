@@ -127,7 +127,8 @@ pub(super) async fn hydrate(
         ));
         page["payload"]["text"] = full["text"].clone();
         page["payload"]["physical_pdf_read"] = full.clone();
-        page["payload"]["retrieval_anchor_id"] = point["id"].clone();
+        page["payload"]["retrieval_anchor_id"] =
+            p.get("retrieval_anchor_id").unwrap_or(&point["id"]).clone();
         page["payload"]["reading_representation"] = json!("physical_pdf_page");
         page["payload"]["ocr"] = full["ocr"].clone();
         pages.insert(identity, page);

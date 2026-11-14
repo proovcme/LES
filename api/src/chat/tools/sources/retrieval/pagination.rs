@@ -37,9 +37,40 @@ impl Page {
     }
 }
 
+/// Exhausting a filtered match list never proves the whole document was read.
+/// Keep cursor exhaustion separate from document coverage for every reader.
+pub(super) fn reading_scope(reply: &mut Value, args: &Value, document_units: usize) {
+    let scope = if args["clause"].as_str().is_some_and(|s| !s.is_empty()) {
+        "clause"
+    } else if args["q"].as_str().is_some_and(|s| !s.trim().is_empty()) {
+        "query_matches"
+    } else {
+        "document"
+    };
+    reply["result"]["reading_scope"] = json!(scope);
+    reply["result"]["document_fragments"] = json!(document_units);
+    reply["result"]["matches_exhausted"] = json!(reply["result"]["next_offset"].is_null());
+    if scope != "document" && reply["result"]["coverage"] == "complete" {
+        reply["result"]["coverage"] = json!("bounded");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn exhausting_query_or_clause_matches_never_claims_document_coverage() {
+        for args in [json!({"q":"pump"}), json!({"clause":"2.1"})] {
+            let mut r = json!({"result":{"passages":[{}]}});
+            Page::new(0, 1).apply(&mut r, "total_fragments").unwrap();
+            reading_scope(&mut r, &args, 171);
+            assert_eq!(r["result"]["coverage"], "bounded");
+            assert_eq!(r["result"]["matches_exhausted"], true);
+            assert_eq!(r["result"]["document_fragments"], 171);
+            assert_eq!(r["result"]["total_fragments"], 1);
+            assert!(r["result"]["next_offset"].is_null());
+        }
+    }
     fn point(i: usize, chars: usize) -> Value {
         json!({"id":format!("p{i}"),"payload":{"text":"x".repeat(chars),"chunk_ord":i}})
     }

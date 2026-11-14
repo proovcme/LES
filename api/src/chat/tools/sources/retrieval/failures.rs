@@ -9,6 +9,11 @@ pub(super) fn recoverable(code: &str) -> bool {
             | "NO_SEARCHABLE_TEXT"
             | "SOURCE_ATOMIC_UNIT_OVERFLOW"
             | "PDF_TEXT_UNAVAILABLE"
+            // A table projection that cannot be proved against this original
+            // page is unread evidence. Never admit it, but do not discard
+            // independently verified pages from the same search.
+            | "PDF_TABLE_SOURCE_MISMATCH"
+            | "XBERG_PDF_TABLES_INVALID"
             | "DOCUMENT_ARCHIVE_INVALID"
             | "DOCUMENT_ARCHIVE_LIMIT"
             | "DOCUMENT_FILE_LIMIT"
@@ -63,7 +68,16 @@ mod tests {
         ] {
             assert!(!record(&mut result, Value::Null, code));
         }
-        assert_eq!(result["read_failures"].as_array().unwrap().len(), 2);
+        assert!(record(
+            &mut result,
+            json!({"doc_id":"table", "page":4}),
+            "PDF_TABLE_SOURCE_MISMATCH"
+        ));
+        assert_eq!(result["read_failures"].as_array().unwrap().len(), 3);
+        assert_eq!(
+            result["read_failures"][2]["read_required"],
+            "read_pdf_source"
+        );
         assert_eq!(result["read_failures"][0]["evidence_admissible"], false);
     }
 }

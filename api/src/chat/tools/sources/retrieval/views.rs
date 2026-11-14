@@ -80,6 +80,25 @@ pub(super) fn project(
                     return row.clone();
                 }
                 let mut projected = views.get(&key(row)).unwrap_or(row).clone();
+                if views.contains_key(&key(row)) {
+                    // A canonical reading unit may live on a different indexed
+                    // point from the retrieved slice. Replacing its text must
+                    // not erase the retrieved score, fused rank or anchor ID.
+                    for field in ["score", "retrieval_fusion"] {
+                        if let Some(value) = row.get(field) {
+                            projected[field] = value.clone();
+                        }
+                    }
+                    for field in ["retrieval_rank", "retrieval_expansion"] {
+                        if let Some(value) = row["payload"].get(field) {
+                            projected["payload"][field] = value.clone();
+                        }
+                    }
+                    projected["payload"]["retrieval_anchor_id"] = row["payload"]
+                        .get("retrieval_anchor_id")
+                        .unwrap_or(&row["id"])
+                        .clone();
+                }
                 if row["payload"]["equivalent_points"].is_array() {
                     projected["payload"]["equivalent_points"] =
                         row["payload"]["equivalent_points"].clone();
@@ -105,6 +124,29 @@ pub(super) fn project(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_reading_projection_preserves_the_retrieved_slice_rank_and_anchor() {
+        let view = page("canonical", "a", true);
+        let mut hit = page("retrieved-slice", "a", false);
+        hit["score"] = json!(0.67);
+        hit["retrieval_fusion"] = json!({"fusion_rank":7,"selection_rank":3});
+        hit["payload"]["retrieval_rank"] = json!(6);
+        let (points, _) = project(
+            vec![hit.clone()],
+            json!({"sections":[{"points":[view,hit.clone()]}],"documents":[]}),
+        )
+        .unwrap();
+        assert_eq!(points.len(), 1);
+        assert_eq!(points[0]["id"], "canonical");
+        assert_eq!(points[0]["score"], hit["score"]);
+        assert_eq!(points[0]["retrieval_fusion"], hit["retrieval_fusion"]);
+        assert_eq!(points[0]["payload"]["retrieval_rank"], 6);
+        assert_eq!(
+            points[0]["payload"]["retrieval_anchor_id"],
+            "retrieved-slice"
+        );
+        assert_eq!(hit["payload"]["text"], "Search text");
+    }
     #[test]
     fn a_word_embedding_slice_reveals_its_entire_hashed_table_unit() {
         let text = "|Позиция|кВт|\n|---|---|\n|Насос|17.25|\n";

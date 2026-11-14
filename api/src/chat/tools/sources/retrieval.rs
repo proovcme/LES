@@ -968,6 +968,7 @@ pub(super) async fn read(
             return Err("INDEX_READ_INVALID".into());
         }
     }
+    let document_units = reading_units(&points).len();
     let clause = args["clause"].as_str().unwrap_or("");
     if !clause.is_empty() {
         les_core::chat_request::clause_heading("", clause)?;
@@ -1034,5 +1035,10 @@ pub(super) async fn read(
         rows.sort_by_key(|p| p["chunk_ord"].as_u64().unwrap_or(0));
     }
     Page::new(read_offset, total_units).apply(&mut reply, "total_fragments")?;
+    pagination::reading_scope(&mut reply, &args, document_units);
     Ok(reply)
+}
+
+pub(super) fn reading_scope(reply: &mut Value, args: &Value, document_units: usize) {
+    pagination::reading_scope(reply, args, document_units);
 }

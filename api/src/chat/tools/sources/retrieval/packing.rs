@@ -4,6 +4,16 @@ use std::collections::HashSet;
 
 fn unit(point: &Value, rank: usize) -> Value {
     let p = &point["payload"];
+    // A reserved retriever head may have entered a small candidate pool from
+    // far below its boundary. Its admission position is not its fused rank.
+    let rank = p["retrieval_rank"]
+        .as_u64()
+        .or_else(|| {
+            point["retrieval_fusion"]["fusion_rank"]
+                .as_u64()
+                .map(|n| n.saturating_sub(1))
+        })
+        .unwrap_or(rank as u64);
     let mut source = serde_json::Map::new();
     for field in [
         "dataset_id",
@@ -22,7 +32,7 @@ fn unit(point: &Value, rank: usize) -> Value {
         }
     }
     serde_json::json!({"text":p["text"].as_str().unwrap_or(""),"unit_id":key(point),
-        "source":source,"rank":if p["retrieval_expansion"]==true{Value::Null}else{serde_json::json!(p["retrieval_rank"].as_u64().unwrap_or(rank as u64))},"self_contained":matches!(p["reading_representation"].as_str(),Some("pdf_cells"|"word_structure"|"physical_pdf_page")),"heading":format!("{} {}",p["section_heading"].as_str().unwrap_or(""),p["parent_heading"].as_str().unwrap_or("")),"group":serde_json::json!([p["dataset_id"],p["file_name"],p["source_sha256"]]).to_string(),"point":point})
+        "source":source,"rank":if p["retrieval_expansion"]==true{Value::Null}else{serde_json::json!(rank)},"self_contained":matches!(p["reading_representation"].as_str(),Some("pdf_cells"|"word_structure"|"physical_pdf_page")),"heading":format!("{} {}",p["section_heading"].as_str().unwrap_or(""),p["parent_heading"].as_str().unwrap_or("")),"group":serde_json::json!([p["dataset_id"],p["file_name"],p["source_sha256"]]).to_string(),"point":point})
 }
 pub(super) fn catalog(points: &[Value]) -> Result<Value, &'static str> {
     les_core::context_selection::catalog(
@@ -216,7 +226,8 @@ fn select_query_inner(
     query: &str,
     preserve_rank: bool,
 ) -> Result<(Vec<Value>, usize), &'static str> {
-    let mut all: HashSet<String> = seeds.iter().map(key).collect();
+    let retrieved: HashSet<String> = seeds.iter().map(key).collect();
+    let mut all = retrieved.clone();
     let mut groups = Vec::new();
     for section in sections.as_array().into_iter().flatten() {
         let mut rows = section["points"].as_array().cloned().unwrap_or_default();
@@ -250,6 +261,15 @@ fn select_query_inner(
     for document in documents.as_array().into_iter().flatten() {
         pool.extend(document["points"].as_array().into_iter().flatten().cloned());
     }
+    for point in &mut pool {
+        if !retrieved.contains(&key(point)) {
+            // Neighbor/parent reads are additional evidence, not additional
+            // retrieval votes. Their position in this materialized pool has
+            // no dense/BM25 rank, even if a stale transient field was supplied.
+            point["payload"]["retrieval_expansion"] = serde_json::json!(true);
+            point["payload"]["retrieval_rank"] = Value::Null;
+        }
+    }
     let selected = select_points(&pool, query, budget, context_budget, preserve_rank)?;
     Ok((selected, total))
 }
@@ -258,6 +278,32 @@ fn select_query_inner(
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn unread_parent_neighbors_cannot_invent_a_retrieved_rank() {
+        let seed = point("hit", "document", "retrieved passage", 0);
+        let mut neighbor = point("neighbor", "document", "unrelated neighboring text", 1);
+        neighbor["payload"]["retrieval_rank"] = json!(0);
+        let (plan, _) = read_plan(
+            &[seed.clone()],
+            json!({"sections":[{"points":[seed.clone(),neighbor]}],"documents":[]}),
+            10000,
+            None,
+            "",
+        )
+        .unwrap();
+        assert_eq!(plan.len(), 1);
+        assert_eq!(plan[0]["id"], seed["id"]);
+    }
+    #[test]
+    fn retaining_a_channel_head_does_not_reset_its_actual_fusion_rank() {
+        let mut point = serde_json::json!({"id":"reserved", "payload":{"text":"candidate"},
+            "retrieval_fusion":{"fusion_rank":80,"selection_rank":4}});
+        assert_eq!(unit(&point, 3)["rank"], 79);
+        point["payload"]["retrieval_rank"] = serde_json::json!(79);
+        assert_eq!(unit(&point, 0)["rank"], 79);
+        point["payload"]["retrieval_expansion"] = serde_json::json!(true);
+        assert!(unit(&point, 0)["rank"].is_null());
+    }
     fn point(id: &str, parent: &str, text: &str, ord: u64) -> Value {
         json!({"id":id,"payload":{"dataset_id":"ds","file_name":parent,"parent_id":parent,"text":text,"chunk_ord":ord}})
     }
@@ -292,8 +338,19 @@ mod tests {
         let tail = point("p3", "document", "continuation", 2);
         let other = point("b", "other", &"x".repeat(18), 0);
         let documents = json!([{"scope":first["payload"],"points":[first,tail]}]);
-        let (selected, total) = select(&[first, other], &Value::Null, &documents, 20, None);
+        // The continuation is relevant to the question. With an empty query,
+        // merely belonging to the file must not invent a retrieval vote.
+        let (selected, total) = select_query(
+            &[first, other],
+            &Value::Null,
+            &documents,
+            20,
+            None,
+            "hit continuation",
+        )
+        .unwrap();
         assert_eq!(selected.iter().map(key).collect::<Vec<_>>(), ["p1", "p3"]);
+        assert_eq!(selected[1]["payload"]["retrieval_expansion"], true);
         assert_eq!(total, 3);
     }
     #[test]
