@@ -160,7 +160,8 @@ fn image(input: &Value, bytes: &[u8], state: &Path) -> Result<Value> {
     let mut helper_file = std::fs::File::open(helper).map_err(|_| "OCR_UNAVAILABLE")?;
     let helper_hash =
         les_core::pdf_source::fingerprint(&mut helper_file).map_err(|_| "OCR_UNAVAILABLE")?;
-    let key=les_core::sha256_hex(json!({"schema":"les.docx-ocr.v1","sha":input["part_sha256"],"options":render_options(&input["part_options"]),"ocr":options,"helper":helper_hash}).to_string().as_bytes());
+    let key=les_core::sha256_hex(les_core::tool_execution::canonical_json(&json!({"schema":"les.docx-ocr.v3","sha":input["part_sha256"],"options":render_options(&input["part_options"]),
+        "ocr":options,"helper":helper_hash,"processor":crate::document_cache::processor_revision()?}))?.as_bytes());
     if let Some(value) = OCR
         .get_or_init(Default::default)
         .lock()
@@ -176,6 +177,33 @@ fn image(input: &Value, bytes: &[u8], state: &Path) -> Result<Value> {
             &value.preview,
         )?;
         return Ok(value.value);
+    }
+    if let Some(cached) = crate::derived_cache::load(state, "picture", &key) {
+        if let (Some(owner), Some(preview)) = (
+            cached["owner"].as_str(),
+            cached["value"]["preview_sha256"].as_str(),
+        ) {
+            if hash(owner) && hash(preview) {
+                let path = storage(state, owner)?.join(preview);
+                if let Ok(meta) = fs::symlink_metadata(&path) {
+                    if meta.is_file()
+                        && !meta.file_type().is_symlink()
+                        && meta.len() <= 16 * 1024 * 1024
+                    {
+                        if let Ok(bytes) = fs::read(&path) {
+                            if les_core::sha256_hex(&bytes) == preview {
+                                persist(
+                                    &storage(state, input["source_sha256"].as_str().ok_or(BAD)?)?,
+                                    preview,
+                                    &bytes,
+                                )?;
+                                return Ok(cached["value"].clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
     let (width, height, pixels) = raster::render(bytes, &input["part_options"])?;
     let preview = les_core::document_image::preview_png(width, height, &pixels)?;
@@ -197,8 +225,40 @@ fn image(input: &Value, bytes: &[u8], state: &Path) -> Result<Value> {
             json!({"text":"","blank":true,"ocr":false,"coverage":"blank_render","preview_sha256":preview_sha}),
         );
     }
-    let text = picture_text(&options, width, height, &pixels)?;
-    let value = json!({"text":text,"blank":false,"ocr":true,"coverage":if text.is_empty(){"no_recognized_text"}else{"ocr_projection"},"preview_sha256":preview_sha});
+    let native = if untransformed(&input["part_options"]) {
+        vector::native_labels(bytes)?
+    } else {
+        None
+    };
+    let native_complete = native.as_ref().is_some_and(|v| {
+        v["complete"] == true && v["runs"].as_array().is_some_and(|r| !r.is_empty())
+    });
+    let text = if native_complete {
+        format!(
+            "Подписи векторного рисунка (геометрические связи не интерпретированы):\n{}",
+            native.as_ref().unwrap()["runs"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(|r| r["text"].as_str())
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    } else {
+        picture_text(&options, width, height, &pixels)?
+    };
+    if text.len() > 2 * 1024 * 1024 {
+        return Err("OCR_TEXT_LIMIT");
+    }
+    let value = json!({"text":text,"blank":false,"ocr":!native_complete,
+        "native_text_runs":native.as_ref().map(|v|v["runs"].clone()),"recognition_method":if native_complete{"native_vector_text"}else{"ocr"},
+        "coverage":if native_complete{"native_vector_labels"}else if text.is_empty(){"no_recognized_text"}else{"ocr_projection"},"preview_sha256":preview_sha});
+    crate::derived_cache::store(
+        state,
+        "picture",
+        &key,
+        &json!({"owner":input["source_sha256"],"value":value}),
+    );
     let mut cache = OCR.get_or_init(Default::default).lock().map_err(|_| BAD)?;
     let bytes = preview.len() + value.to_string().len();
     if cache.len() >= 256
@@ -217,6 +277,30 @@ fn image(input: &Value, bytes: &[u8], state: &Path) -> Result<Value> {
         );
     }
     Ok(value)
+}
+
+fn untransformed(options: &Value) -> bool {
+    for key in ["l", "t", "r", "b"] {
+        if options["picture"]["crop"][key]
+            .as_str()
+            .is_some_and(|s| s.parse::<f64>() != Ok(0.))
+        {
+            return false;
+        }
+    }
+    for key in ["cropleft", "croptop", "cropright", "cropbottom"] {
+        if options["attributes"][key]
+            .as_str()
+            .is_some_and(|s| s.trim_end_matches('f').parse::<f64>() != Ok(0.))
+        {
+            return false;
+        }
+    }
+    let t = &options["picture"]["transform"];
+    !["flipH", "flipV"]
+        .iter()
+        .any(|k| matches!(t[*k].as_str(), Some("1" | "true")))
+        && t["rot"].as_str().is_none_or(|s| s.parse::<i64>() == Ok(0))
 }
 
 fn render_options(input: &Value) -> Value {

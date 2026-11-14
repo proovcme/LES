@@ -608,9 +608,23 @@ fn source_page(library: &Library, options: &Value) -> Result<Value, &'static str
 /// Only server-resolved selectors are accepted by callers of this helper.
 pub(crate) fn supervised_source(input: Value) -> Result<Value, String> {
     if input["kind"] == "source_page" {
-        return source::read(input);
+        return source::read(input, None);
     }
     worker_source(input)
+}
+pub(crate) use source::ReadLease as SourceLease;
+pub(crate) fn source_lease(input: &Value) -> Result<Option<SourceLease>, String> {
+    source::lease(input)
+}
+pub(crate) fn supervised_source_leased(
+    input: Value,
+    lease: Option<&SourceLease>,
+) -> Result<Value, String> {
+    if input["kind"] == "source_page" {
+        source::read(input, lease)
+    } else {
+        worker_source(input)
+    }
 }
 fn worker_source(input: Value) -> Result<Value, String> {
     let program = std::env::current_exe().map_err(|_| "PDF_READER_UNAVAILABLE")?;

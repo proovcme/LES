@@ -61,6 +61,11 @@ fn asset() -> Result<Option<Asset>> {
 pub(crate) fn enabled() -> Result<bool> {
     Ok(asset()?.is_some())
 }
+pub(crate) fn revision() -> Result<Value> {
+    Ok(asset()?
+        .map(|a| json!(a.hash))
+        .unwrap_or_else(|| json!("native")))
+}
 fn invoke(input: Value) -> Result<Value> {
     let asset = asset()?.ok_or("DOCUMENT_PARSER_UNAVAILABLE")?;
     let reply = les_core::run_native_parsers(

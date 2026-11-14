@@ -170,7 +170,17 @@ fn snapshot_at(state: &std::path::Path, doc: &Value, timeout_ms: u64) -> Result<
         Ok(())
     };
     verify()?;
-    let key = json!([state, doc["file_hash"], "les.word-reading.v1"]).to_string();
+    let mut input = json!({"schema":"les.document-convert.v1","path":path,"source_sha256":doc["file_hash"],"owned_state":state});
+    crate::document_dispatch::freeze_ocr(&mut input, state);
+    if crate::document_parser::enabled()? {
+        input["word_parser"] = json!("docling");
+    }
+    let key = json!([
+        state,
+        crate::document_cache::identity(&input)?,
+        "les.word-reading.v2"
+    ])
+    .to_string();
     let mut cache = CACHE
         .get_or_init(Default::default)
         .lock()
@@ -191,25 +201,27 @@ fn snapshot_at(state: &std::path::Path, doc: &Value, timeout_ms: u64) -> Result<
         "{}",
         json!({"event":"native_word_read_started","doc_id":doc["id"]})
     );
-    let mut input = json!({"schema":"les.document-convert.v1","path":path,"source_sha256":doc["file_hash"],"owned_state":state});
-    crate::document_dispatch::freeze_ocr(&mut input, state);
-    let reply = les_core::run_native_documents(
-        &json!({"schema":"les.worker-host.v1","program":program,"directory":program.parent(),
+    let full = if let Some(value) = crate::document_cache::load(&input)? {
+        value
+    } else {
+        let reply = les_core::run_native_documents(
+            &json!({"schema":"les.worker-host.v1","program":program,"directory":program.parent(),
         "args":["--serve-document-formats"],"context":"les.format-dispatch.v1","timeout_ms":timeout_ms,"input":input}),
-    )?;
-    if reply["status"] != "completed" || reply["result"]["status"] != "completed" {
-        eprintln!(
-            "{}",
-            json!({"event":"native_word_read_failed","doc_id":doc["id"],"code":reply["result"]["code"],
+        )?;
+        if reply["status"] != "completed" || reply["result"]["status"] != "completed" {
+            eprintln!(
+                "{}",
+                json!({"event":"native_word_read_failed","doc_id":doc["id"],"code":reply["result"]["code"],
             "host_code":reply["code"],"elapsed_ms":started.elapsed().as_millis(),"worker_pid":reply["worker_pid"],"diagnostics":reply["diagnostics"]})
-        );
-        return Err(reply["result"]["code"]
-            .as_str()
-            .or(reply["code"].as_str())
-            .unwrap_or("SOURCE_READ_FAILED")
-            .into());
-    }
-    let full = &reply["result"]["value"];
+            );
+            return Err(reply["result"]["code"]
+                .as_str()
+                .or(reply["code"].as_str())
+                .unwrap_or("SOURCE_READ_FAILED")
+                .into());
+        }
+        reply["result"]["value"].clone()
+    };
     if full["source_sha256"] != doc["file_hash"] {
         return Err("SOURCE_REVISION_CHANGED".into());
     }

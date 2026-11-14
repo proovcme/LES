@@ -19,6 +19,8 @@ pub(super) async fn hydrate(
 ) -> Result<(Vec<Value>, Value)> {
     let mut pages: HashMap<String, Value> = HashMap::new();
     let mut failed = HashSet::new();
+    let mut leases: HashMap<String, Option<std::sync::Arc<crate::pdf_text::SourceLease>>> =
+        HashMap::new();
     let mut all = points.clone();
     for group in ["sections", "documents"] {
         for section in hydrated[group].as_array().into_iter().flatten() {
@@ -53,9 +55,23 @@ pub(super) async fn hydrate(
         }
         let input = json!({"kind":"source_page","database":context.database,"content_root":context.state_root.join("storage/datasets"),
             "source":{"doc_id":doc["id"],"dataset_id":doc["dataset_id"],"source_sha256":doc["file_hash"],"page":p["page"],"max_chars":12000}});
+        let file_key = json!([doc["id"], doc["file_hash"]]).to_string();
+        if !leases.contains_key(&file_key) {
+            let spec = input.clone();
+            // Failure to acquire a read-only lease is never evidence. Use the
+            // existing per-page hashes when another program owns a write handle.
+            let acquired = tokio::task::spawn_blocking(move || {
+                crate::pdf_text::source_lease(&spec).ok().flatten()
+            })
+            .await
+            .map_err(|_| "PDF_READ_FAILED")?;
+            leases.insert(file_key.clone(), acquired.map(std::sync::Arc::new));
+        }
+        let lease = leases[&file_key].clone();
         let full = tokio::task::spawn_blocking(move || -> std::result::Result<Value, String> {
             let mut input = input;
-            let mut full = crate::pdf_text::supervised_source(input.clone())?;
+            let mut full =
+                crate::pdf_text::supervised_source_leased(input.clone(), lease.as_deref())?;
             if full["total_chars"].as_u64().is_none_or(|n| n > 16000) {
                 return Err("SOURCE_ATOMIC_UNIT_OVERFLOW".into());
             }
@@ -70,7 +86,7 @@ pub(super) async fn hydrate(
                 }
                 input["source"]["offset"] = json!(offset);
                 input["source"]["view_sha256"] = view.clone();
-                full = crate::pdf_text::supervised_source(input.clone())?;
+                full = crate::pdf_text::supervised_source_leased(input.clone(), lease.as_deref())?;
                 if full["offset"] != offset || full["view_sha256"] != view {
                     return Err("SOURCE_VIEW_CHANGED".into());
                 }

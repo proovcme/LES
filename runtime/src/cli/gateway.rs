@@ -149,6 +149,73 @@ pub struct Api {
 }
 
 impl Api {
+    pub(super) fn part_image(&self, link: &str) -> Result<Vec<u8>> {
+        let url = self.owner.base.join(link).map_err(|_| INVALID)?;
+        let pieces = url.path_segments().ok_or(INVALID)?.collect::<Vec<_>>();
+        let valid_hash = |s: &str| {
+            s.len() == 64
+                && s.bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        };
+        let query = url.query_pairs().collect::<Vec<_>>();
+        if url.origin() != self.owner.base.origin()
+            || url.fragment().is_some()
+            || pieces.len() != 6
+            || pieces[..3] != ["api", "documents", "by-id"]
+            || pieces[4] != "parts"
+            || !valid_hash(pieces[5])
+            || query.len() != 1
+            || query[0].0 != "source_sha256"
+            || !valid_hash(&query[0].1)
+        {
+            return Err(
+                "SOURCE_PART_INVALID: preview must belong to the connected LES instance".into(),
+            );
+        }
+        // Use the normal owner check, authorization and no-redirect client.
+        self.get("/api/light/instance")?;
+        let mut request = self
+            .client
+            .get(url.clone())
+            .timeout(Duration::from_secs(25));
+        if !self.key.is_empty() {
+            request = request.header("X-API-Key", &self.key);
+        }
+        let response = request.send().map_err(|_| UNAVAILABLE)?;
+        if !response.status().is_success() {
+            decode(response, 65536)?;
+            return Err(INVALID.into());
+        }
+        if response
+            .headers()
+            .get("content-type")
+            .and_then(|s| s.to_str().ok())
+            .is_none_or(|s| !s.starts_with("image/png"))
+        {
+            return Err(INVALID.into());
+        }
+        let mut bytes = Vec::new();
+        response
+            .take(4 * 1024 * 1024 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|_| UNAVAILABLE)?;
+        if bytes.len() > 4 * 1024 * 1024
+            || bytes.len() < 24
+            || !bytes.starts_with(b"\x89PNG\r\n\x1a\n")
+            || les_core::sha256_hex(&bytes) != pieces[5]
+        {
+            return Err("SOURCE_PART_CORRUPT: image checksum or size mismatch".into());
+        }
+        let w = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
+        let h = u32::from_be_bytes(bytes[20..24].try_into().unwrap());
+        if w == 0 || h == 0 || w as u64 * h as u64 > 25_000_000 {
+            return Err("SOURCE_READ_LIMIT: image dimensions".into());
+        }
+        if Owner::read(&self.path)? != self.owner {
+            return Err(CHANGED.into());
+        }
+        Ok(bytes)
+    }
     pub fn source_call(&self, name: &str, args: Value) -> Result<Value> {
         let mut result = self.post(
             "/api/rag/sources/call",

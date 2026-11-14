@@ -91,6 +91,7 @@ def test_cold_recovery_without_python_backend(tmp_path, phase):
             schema=http.get('/collections/les_test').raise_for_status().json()['result']['payload_schema']
             assert schema['node_role']['data_type']=='keyword'
             assert schema['ancestor_ids']['data_type']=='keyword'
+            assert all(schema[field]['data_type']=='keyword' for field in ('dataset_id','file_name','parent_id'))
             assert schema['evidence_admissible']['data_type']=='bool'
             found = http.post('/api/light/internal-index-store', headers={'x-les-index-token': 'a' * 64},
                 json={'action': 'hybrid_search', 'collection': 'les_test', 'text': 'кабелепровод',

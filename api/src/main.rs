@@ -6,6 +6,8 @@ mod catalog;
 mod chat;
 mod conversation;
 mod dataset_reader;
+mod derived_cache;
+mod document_cache;
 mod document_dispatch;
 mod document_media;
 mod document_parser;

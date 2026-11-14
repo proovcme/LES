@@ -173,7 +173,8 @@ impl<F: Fn(&Value, Option<&[u8]>) -> Result<Value>> Package<'_, F> {
         let value = self.call(kind, name, bytes, extra)?;
         let ocr = value["ocr"] == true || value["metadata"]["ocr"] == true;
         self.assets.entry(name.into()).or_insert_with(||json!({"member":name,"kind":kind,
-            "sha256":crate::sha256_hex(bytes),"bytes":bytes.len(),"ocr":ocr,"coverage":value["coverage"],"preview_sha256":value["preview_sha256"],"text":value["text"]}));
+            "sha256":crate::sha256_hex(bytes),"bytes":bytes.len(),"ocr":ocr,"coverage":value["coverage"],"preview_sha256":value["preview_sha256"],"text":value["text"],
+            "native_text_runs":value["native_text_runs"],"recognition_method":value["recognition_method"]}));
         if let Some(preview) = value["preview_sha256"].as_str() {
             let entry = self.assets.get_mut(name).ok_or(BAD)?;
             if entry["views"].is_null() {
@@ -184,7 +185,8 @@ impl<F: Fn(&Value, Option<&[u8]>) -> Result<Value>> Package<'_, F> {
                 if views.len() >= 1024 {
                     return Err(LIMIT);
                 }
-                views.push(json!({"sha256":preview,"options":extra,"text":value["text"],"ocr":value["ocr"],"coverage":value["coverage"]}));
+                views.push(json!({"sha256":preview,"options":extra,"text":value["text"],"ocr":value["ocr"],"coverage":value["coverage"],
+                    "native_text_runs":value["native_text_runs"],"recognition_method":value["recognition_method"]}));
             }
         }
         self.ocr |= ocr;
@@ -249,8 +251,13 @@ impl<F: Fn(&Value, Option<&[u8]>) -> Result<Value>> Package<'_, F> {
             String::new()
         } else {
             format!(
-                "[Текст рисунка {name}; part_id={}; OCR, сверяйте с оригиналом]\n{text}",
-                sha
+                "[Текст рисунка {name}; part_id={}; {}, сверяйте с оригиналом]\n{text}",
+                sha,
+                if value["ocr"] == true {
+                    "OCR"
+                } else {
+                    "текстовые записи оригинала"
+                }
             )
         })
     }

@@ -33,7 +33,7 @@ pub(super) fn bytes(raw: &[u8]) -> Result<Value> {
         json!({"data_url":format!("data:{mime};base64,{}",base64(raw)),"mime":mime,"width":w,"height":h,"source_sha256":crate::sha256_hex(raw)}),
     )
 }
-pub(crate) fn base64(raw: &[u8]) -> String {
+pub fn base64(raw: &[u8]) -> String {
     const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(raw.len().div_ceil(3) * 4);
     for group in raw.chunks(3) {

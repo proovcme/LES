@@ -126,7 +126,19 @@ pub fn serve() -> Result<(), &'static str> {
         if docling {
             input["word_parser"] = json!("docling");
         }
+        input["conversion_cache"] = json!(true);
         les_core::convert_document_with_parts(&input, &|input, part| match part {
+            _ if input["part_kind"] == "word_conversion_cache" => {
+                if let Some(bytes) = part {
+                    let value: Value =
+                        serde_json::from_slice(bytes).map_err(|_| "DOCUMENT_OUTPUT_FAILED")?;
+                    crate::document_cache::store(input, &value)?;
+                    Ok(json!({"stored":true}))
+                } else {
+                    let value = crate::document_cache::load(input)?;
+                    Ok(json!({"hit":value.is_some(),"value":value}))
+                }
+            }
             Some(bytes) if input["part_kind"] == "word_structure" => {
                 crate::document_parser::word(input, bytes)
             }

@@ -222,25 +222,40 @@ pub fn select(request: &Value) -> Result<Value, &'static str> {
     let mut covered = BTreeSet::new();
     let mut used = 0;
     let mut text_used = 0;
+    let costs = units
+        .iter()
+        .map(|u| cost(u, identity_reserve))
+        .collect::<Vec<_>>();
+    let lengths = units
+        .iter()
+        .map(|u| u["text"].as_str().unwrap().chars().count())
+        .collect::<Vec<_>>();
+    // A selected unit never changes. Update maximum redundancy once per new
+    // selection instead of comparing every old pair again on every round.
+    let mut redundant = vec![0.0_f64; units.len()];
     while chosen.len() < limit {
         let mut best: Option<(usize, f64)> = None;
         for i in 0..units.len() {
             if chosen.contains(&i)
                 || relevance[i] == 0.0
                 || (group_selection && relevance[i] == 0.0)
-                || used + cost(&units[i], identity_reserve) > budget
-                || text_used + units[i]["text"].as_str().unwrap().chars().count() > text_budget
+                || used + costs[i] > budget
+                || text_used + lengths[i] > text_budget
             {
                 continue;
             }
-            let novel = body[i].difference(&covered).cloned().collect();
-            let redundancy = chosen
-                .iter()
-                .map(|&j| {
-                    let union = body[i].union(&body[j]).count().max(1);
-                    body[i].intersection(&body[j]).count() as f64 / union as f64
-                })
-                .fold(0.0_f64, f64::max);
+            // Only query terms contribute to coverage. Materializing the
+            // entire document vocabulary minus `covered` has identical value.
+            let novel_coverage = if total_weight == 0.0 {
+                0.0
+            } else {
+                weights
+                    .iter()
+                    .filter(|(term, _)| body[i].contains(*term) && !covered.contains(*term))
+                    .map(|(_, w)| *w)
+                    .sum::<f64>()
+                    / total_weight
+            };
             // Weighted coverage + maximal marginal relevance. No topic rules,
             // file-name boosts, hidden model, or answer-dependent thresholds.
             // Budgeted MMR uses marginal value per sqrt(cost): a long parent
@@ -250,8 +265,8 @@ pub fn select(request: &Value) -> Result<Value, &'static str> {
                 // pretending text dissimilarity established relevance.
                 relevance[i]
             } else {
-                (0.7 * relevance[i] + 0.3 * coverage(&novel) - 0.3 * redundancy)
-                    / (cost(&units[i], identity_reserve).max(1) as f64).sqrt()
+                (0.7 * relevance[i] + 0.3 * novel_coverage - 0.3 * redundant[i])
+                    / (costs[i].max(1) as f64).sqrt()
             };
             if best.is_none_or(|(_, s)| score > s) {
                 best = Some((i, score));
@@ -260,10 +275,22 @@ pub fn select(request: &Value) -> Result<Value, &'static str> {
         let Some((index, _)) = best else {
             break;
         };
-        used += cost(&units[index], identity_reserve);
-        text_used += units[index]["text"].as_str().unwrap().chars().count();
+        used += costs[index];
+        text_used += lengths[index];
         covered.extend(body[index].iter().cloned());
         chosen.push(index);
+        for i in 0..units.len() {
+            if relevance[i] == 0.0
+                || chosen.contains(&i)
+                || used + costs[i] > budget
+                || text_used + lengths[i] > text_budget
+            {
+                continue;
+            }
+            let intersection = body[i].intersection(&body[index]).count();
+            let union = (body[i].len() + body[index].len() - intersection).max(1);
+            redundant[i] = redundant[i].max(intersection as f64 / union as f64);
+        }
     }
     Ok(
         json!({"units":chosen.iter().map(|&i|units[i].clone()).collect::<Vec<_>>(),

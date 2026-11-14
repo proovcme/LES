@@ -11775,7 +11775,7 @@
     },
     {
       "inbound": [],
-      "lines": 151,
+      "lines": 189,
       "module": "tests.test_light_native_docx_parts",
       "outbound": [
         "backend/native_core.py",
@@ -11802,7 +11802,7 @@
     },
     {
       "inbound": [],
-      "lines": 120,
+      "lines": 121,
       "module": "tests.test_light_native_edge_recovery",
       "outbound": [
         "backend/document_catalog.py",
@@ -16156,7 +16156,7 @@
     "runtime_support": 5,
     "test_or_tool_only": 280,
     "tracked_python_files": 725,
-    "tracked_python_lines": 173466
+    "tracked_python_lines": 173505
   },
   "warnings": []
 }

@@ -184,6 +184,7 @@ async fn search_with_navigation(
     args: Value,
     navigation: bool,
 ) -> Result<Value> {
+    let started = std::time::Instant::now();
     let requested = args["dataset_ids"].as_array().cloned().unwrap_or_else(|| {
         turn.scope["resolved_dataset_ids"]
             .as_array()
@@ -213,6 +214,7 @@ async fn search_with_navigation(
         scoped_configuration(context.clone(), true, remote_scope).await?;
     let raw=crate::embedding_inference::execute(context.clone(),&json!({"schema":"les.embedding-inference.v1","revision_id":revision,"inputs":[format!("{prefix}{query}")],
         "dimension":config["embedding"]["vector_size"].as_str().and_then(|s|s.parse::<u64>().ok()),"timeout_seconds":120,"allow_remote":allow_remote,"response_limit":1048576,"release_after":true})).await?;
+    let embedding_ms = started.elapsed().as_millis();
     let end = raw
         .iter()
         .position(|c| *c == b'\n')
@@ -270,7 +272,9 @@ async fn search_with_navigation(
         "limit":policy["retrieval_candidate_k"],"rank_constant":policy["rrf_rank_constant"],"fusion":config["fusion"],"preserve_heads":!navigation,"filters":{"dataset_ids":datasets,"doc_filter":files},"hierarchy":navigation});
     for attempt in 0..16 {
         let result: Result<Value> = async {
+            let store_started = std::time::Instant::now();
             let result = store.hybrid_owned(&context, request.clone()).await?;
+            let store_ms = store_started.elapsed().as_millis();
             pinned_revision(&args, &result["revision"])?;
             let raw_points = result["points"].as_array().ok_or("INDEX_READ_INVALID")?;
             // Diversify the automatic shortlist. Explicit tool pagination must
@@ -322,6 +326,9 @@ async fn search_with_navigation(
                 None
             };
             let mut reply=passages(&context,turn,&config["collection"],points.clone(),result["revision"].clone(),max_chars,"search_sources",context_budget,!navigation,navigation).await?;
+            eprintln!("{}", json!({"event":"source_search_timing","embedding_ms":embedding_ms,
+                "store_ms":store_ms,"reading_and_catalog_ms":store_started.elapsed().as_millis().saturating_sub(store_ms),
+                "total_ms":started.elapsed().as_millis(),"navigation":navigation}));
             reply["result"]["candidate_documents"] = json!(candidates);
             let total = ranked.len();
             reply["result"]["selection_policy"] = json!({"schema":"les.context-selection.v1","seed_limit":if navigation{limit}else{64},"per_document_seed_limit":Value::Null,"raw_candidates":raw_points.len(),"eligible_candidates":total,"hydrated_candidates":points.len(),"navigation_requested":navigation});
@@ -611,6 +618,7 @@ async fn passages(
             vec![],
         ));
     }
+    let stage = std::time::Instant::now();
     let hydrated = crate::index_store::sections::read(
         context,
         store,
@@ -618,6 +626,7 @@ async fn passages(
             "document_budget_chars":if expand_document{Some(max_chars)}else{None}}),
     )
     .await?;
+    let sections_ms = stage.elapsed().as_millis();
     let (points, hydrated) = if expand_document {
         let (points, hydrated) = views::project(points, hydrated)?;
         let question = turn.request["question"].as_str().unwrap_or("").to_owned();
@@ -629,16 +638,22 @@ async fn passages(
     } else {
         (points, hydrated)
     };
+    let plan_ms = stage.elapsed().as_millis().saturating_sub(sections_ms);
+    let word_started = std::time::Instant::now();
     let (points, hydrated) = if expand_document {
         super::word::hydrate(context, turn, points, hydrated).await?
     } else {
         (points, hydrated)
     };
+    let word_ms = word_started.elapsed().as_millis();
+    let pdf_started = std::time::Instant::now();
     let (points, hydrated) = if expand_document {
         physical::hydrate(context, turn, points, hydrated).await?
     } else {
         (points, hydrated)
     };
+    let pdf_ms = pdf_started.elapsed().as_millis();
+    let packing_started = std::time::Instant::now();
     let (points, hydrated) = views::project(points, hydrated)?;
     let (selected, total) = if paginated {
         (
@@ -663,6 +678,11 @@ async fn passages(
         .await
         .map_err(|_| "SOURCE_READ_FAILED")??
     };
+    eprintln!(
+        "{}",
+        json!({"event":"source_context_timing","sections_ms":sections_ms,"plan_ms":plan_ms,
+        "word_ms":word_ms,"pdf_ms":pdf_ms,"packing_ms":packing_started.elapsed().as_millis()})
+    );
     let selected_ids: std::collections::HashSet<_> =
         selected.iter().map(|p| p["id"].to_string()).collect();
     let mut output = Vec::new();

@@ -1,5 +1,11 @@
 # Модули LES RAG
 
+878: `api/src/derived_cache.rs` и `document_cache.rs` — ограниченные производные
+снимки Word, PDF и рисунков; `document_media/vector/labels.rs` — буквальные
+Unicode-подписи; `SourceFigures.svelte` и `runtime/src/cli/mcp.rs` — чтение
+одного и того же выбранного изображения. [Владельцы и ограничения](modules/source-derived-views.md).
+Проверка идёт на копии без модели ответов; рабочая установка прежняя.
+
 877: `core/src/document/structure.rs` — единицы Word и диапазоны без перекрытия;
 `sources/word.rs` — оригинал и ограниченный кеш; `pdf_text/source.rs` — снимки
 физических страниц/OCR; `retrieval/physical.rs` — дочитывание найденного OCR

@@ -6,11 +6,13 @@
   import Modal from './Modal.svelte';
   import Icon from './Icon.svelte';
   import SourceReader from './SourceReader.svelte';
+  import SourceFigures from './SourceFigures.svelte';
   let { source, close }: { source: Source; close: () => void } = $props();
   let loading = $state(true); let error = $state(''); let documentError = $state('');
   let doc = $state<{ id: string; file_name: string } | null>(null);
   let preview = $state(false); let preparing = $state(false);
   let reading = $state(false);
+  let figures = $state(false);
   let page = $state(1); let imageURL = $state(''); let viewURL = $state('');
   let imageLoading = $state(false);
   let alive = true;
@@ -81,6 +83,7 @@
     {#if !source.locator?.source_sha256}<p class="muted">Для этой цитаты редакция файла не сохранена. Доступен текущий оригинал.</p>{/if}
     <div class="source-actions">
       <button class="quiet" onclick={() => reading = !reading}>{reading ? 'Скрыть текст' : 'Прочитать текст'}</button>
+      {#if /\.docx$/i.test(doc.file_name)}<button class="quiet" onclick={() => figures = !figures}>{figures ? 'Скрыть рисунки' : 'Рисунки и вложения'}</button>{/if}
       <button onclick={showOriginal} disabled={preparing}><Icon name="file" />{preparing ? 'Открываю…' : 'Показать оригинал'}</button>
       <a class="button quiet" href={`${base}/raw?${identity}`} download={doc.file_name}><Icon name="external" />Скачать</a>
       <button class="quiet" onclick={openNative}>Открыть в приложении</button>
@@ -93,6 +96,7 @@
           {page} pdf={doc.file_name.toLowerCase().endsWith('.pdf')} />
       {/key}
     {/if}
+    {#if figures}<SourceFigures docId={doc.id} digest={source.locator?.source_sha256} />{/if}
     {#if preview && doc.file_name.toLowerCase().endsWith('.pdf')}
       <form class="page-selector" onsubmit={(event) => { event.preventDefault(); void showOriginal(); }}>
         <label for="source-page">Страница</label><input id="source-page" type="number" min="1" step="1" bind:value={page} required /><button class="quiet" disabled={preparing}>Перейти</button>
