@@ -1,5 +1,10 @@
 # Модули LES RAG
 
+880: `api/src/engineering/registered.rs` — список зарегистрированных CAD/BIM
+и явное первичное чтение через Увязку. Форма и MCP используют общий `read_import`;
+подготовка снимка переходит в прежнюю очередь только после проверки редакции.
+[Договор](modules/uvyazka-bridge.md). Установленный сценарий пока не принят.
+
 879: `core/src/engineering.rs`, `api/src/engineering.rs` — [адаптер Увязки](modules/uvyazka-bridge.md):
 проверенные снимки в общей очереди, ID объектов и ссылки во вьювер.
 `EngineeringModels.svelte` / `EngineeringSource.svelte` — подключение и источник;

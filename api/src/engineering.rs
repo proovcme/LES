@@ -1,4 +1,5 @@
 //! Explicit loopback companion bridge; snapshots use the ordinary indexing queue.
+mod registered;
 use crate::{auth, error, json_response, Context};
 use axum::{body::to_bytes, extract::Request, http::StatusCode, response::Response};
 use serde_json::{json, Value};
@@ -266,7 +267,8 @@ async fn perform(context: Arc<Context>, body: Value) -> Result<Value> {
                 )
                 .await
         }
-        Some("import") => {
+        Some("sources") => companion.registered_sources(&body).await,
+        Some("import" | "read_import") => {
             if context.intake.is_none() {
                 return Err("ATTACHMENT_INDEX_UNAVAILABLE".into());
             }
@@ -276,8 +278,12 @@ async fn perform(context: Arc<Context>, body: Value) -> Result<Value> {
                 .try_acquire_owned()
                 .map_err(|_| "ATTACHMENT_QUEUE_BUSY")?;
             let project = id(&body, "project_id")?;
-            let dataset = id(&body, "dataset_id")?;
-            let value = companion.snapshot(project, dataset).await?;
+            let dataset = if body["action"] == "read_import" {
+                companion.read_registered(&body).await?
+            } else {
+                id(&body, "dataset_id")?.to_owned()
+            };
+            let value = companion.snapshot(project, &dataset).await?;
             let bytes = serde_json::to_vec(&value).map_err(|_| "ENGINEERING_RESPONSE_INVALID")?;
             if bytes.len() > MAX_BYTES {
                 return Err("ENGINEERING_SNAPSHOT_LIMIT".into());
@@ -409,6 +415,9 @@ fn message(code: &str) -> &'static str {
     match code {
         "ENGINEERING_ENDPOINT_INVALID"=>"Укажите локальный адрес Увязки с портом, например http://127.0.0.1:8765/.",
         "ENGINEERING_UNAVAILABLE"=>"Увязка не отвечает. Запустите её и проверьте адрес.",
+        "ENGINEERING_PERMISSION_DENIED"=>"Увязка отклонила чтение. Проверьте её локальную панель и совместимость подключения; исходники не изменены.",
+        "ENGINEERING_READ_FAILED"=>"Увязка не смогла прочитать выбранный файл. Проверьте оригинал и установленный читатель; данные не поставлены в индекс.",
+        "ENGINEERING_READ_TIMEOUT"=>"Увязка не успела ответить. Чтение может продолжаться в ней; повторите действие. Неполные данные в индекс не отправлены.",
         "ENGINEERING_VIEWER_UPDATE_REQUIRED"=>"Для открытия точного объекта нужен вьювер Увязки с поддержкой ссылок LES. Обновите Увязку; ссылка на другой объект не подставляется.",
         "ENGINEERING_SOURCE_CHANGED"=>"Редакция исходного файла изменилась или недоступна. Обновите снимок в Увязке; старые данные не опубликованы заново.",
         "ENGINEERING_SNAPSHOT_LIMIT"|"ENGINEERING_OBJECT_LIMIT"|"ENGINEERING_RESPONSE_LIMIT"=>"Снимок превышает предел этого подключения. Ничего не обрезано и не поставлено в индекс.",
