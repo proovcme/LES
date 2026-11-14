@@ -2,6 +2,7 @@
 use super::*;
 use rich::Node;
 mod docling;
+mod section_headers;
 type Result<T> = std::result::Result<T, &'static str>;
 const BAD: &str = "DOCX_PART_INVALID";
 const LIMIT: &str = "DOCX_PART_LIMIT";
@@ -35,6 +36,7 @@ pub(in crate::document) fn convert(
         unread_visual: 0,
         pictures: BTreeMap::new(),
         floating: Vec::new(),
+        header_bindings: Vec::new(),
     };
     package.relationships = package.rels("word/_rels/document.xml.rels")?;
     let mut text = if request["word_parser"] == "docling" {
@@ -71,6 +73,7 @@ pub(in crate::document) fn convert(
         "visual_content":package.visual,"docx_parts_count":package.assets.len(),
         "floating_objects":package.floating.iter().map(|(id,_)|json!({"part_sha256":id,"placement":"separate_story"})).collect::<Vec<_>>(),
         "unread_visual_count":package.unread_visual,"visual_coverage":"originals_and_structure_preserved_not_semantically_verified",
+        "docx_table_headers":package.header_bindings,
         "docx_parts_source_sha256":manifest["source_sha256"]}}),
     )
 }
@@ -91,6 +94,7 @@ struct Package<'a, F: Fn(&Value, Option<&[u8]>) -> Result<Value>> {
     unread_visual: usize,
     pictures: BTreeMap<String, (String, Value)>,
     floating: Vec<(String, String)>,
+    header_bindings: Vec<Value>,
 }
 
 impl<F: Fn(&Value, Option<&[u8]>) -> Result<Value>> Package<'_, F> {

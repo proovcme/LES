@@ -54,7 +54,7 @@ fn source_nodes(
     super::super::source_nodes::run(
         &json!({"schema":"les.document-source-nodes.v1","kind":if pdf {"pdf"} else {"markdown"},"ocr":metadata["ocr"],
         "dataset_id":request["dataset_id"],"file_key":request["file_key"],"size":size,"overlap":overlap,
-        "unit":chunking["unit"],"tokenizer":chunking["tokenizer"],"minimum":request["minimum"],"final_minimum":request["final_minimum"],
+        "unit":chunking["unit"],"structural":chunking["structural"],"tokenizer":chunking["tokenizer"],"minimum":request["minimum"],"final_minimum":request["final_minimum"],
         "payload_type":payload_type,"route_metadata":metadata}),
         |op, value| match op {
             0 => {

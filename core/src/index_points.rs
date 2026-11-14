@@ -159,7 +159,10 @@ fn write_points(
         for node in nodes {
             let content = node["text"].as_str().ok_or(INVALID)?;
             let sparse = if names.is_some() {
-                let Some(sparse) = crate::legacy_sparse::vector(content) else {
+                let Some(sparse) = crate::legacy_sparse::vector(&crate::search_context::input(
+                    &node["payload"],
+                    content,
+                )) else {
                     skipped += 1;
                     continue;
                 };
@@ -176,8 +179,8 @@ fn write_points(
         let mut missing = Vec::new();
         let mut texts = Vec::new();
         for (index, (node, _)) in selected.iter().enumerate() {
-            let content = text(node, "text")?;
-            let hash = text(&node["payload"], "content_hash")?;
+            let content = crate::search_context::input(&node["payload"], text(node, "text")?);
+            let hash = crate::search_context::cache_key(&node["payload"]).ok_or(INVALID)?;
             if let Some(cached) = cache.get(hash) {
                 reused += 1;
                 vectors.push(json!(cached));

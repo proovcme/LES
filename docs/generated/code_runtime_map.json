@@ -1721,7 +1721,6 @@
         "tests/oracles/project_python.py",
         "tests/test_chunking_w2.py",
         "tests/test_forest_visualizer.py",
-        "tests/test_light_collection_safety.py",
         "tests/test_light_native_intake_execution.py",
         "tests/test_light_native_preparation.py",
         "tests/test_rag_config.py",
@@ -10928,13 +10927,12 @@
     },
     {
       "inbound": [],
-      "lines": 283,
+      "lines": 286,
       "module": "tests.test_light_collection_safety",
       "outbound": [
         "backend/document_catalog.py",
         "backend/index_replacement.py",
         "backend/native_core.py",
-        "backend/rag_config.py",
         "tests/native_batch_fixtures.py",
         "tests/test_light_native_api.py",
         "tests/test_light_native_batch_api.py"
@@ -12001,7 +11999,7 @@
         "tests/test_light_native_mail.py",
         "tests/test_light_native_retrieval_modes.py"
       ],
-      "lines": 262,
+      "lines": 263,
       "module": "tests.test_light_native_intake_execution",
       "outbound": [
         "backend/document_catalog.py",
@@ -16168,7 +16166,7 @@
     "runtime_support": 5,
     "test_or_tool_only": 281,
     "tracked_python_files": 726,
-    "tracked_python_lines": 173608
+    "tracked_python_lines": 173612
   },
   "warnings": []
 }

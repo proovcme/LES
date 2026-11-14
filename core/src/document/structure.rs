@@ -27,14 +27,6 @@ pub(crate) fn units(text: &str, budget: usize) -> Result<Vec<Value>, &'static st
             // numeric row to be a label. The original header remains in body.
             if lines.get(i + 1).is_some_and(|l| separator(l)) {
                 header = format!("{}{}", lines[i], lines[i + 1]);
-                // Some exporters emit an empty Markdown header above the real
-                // column labels. Preserve the next original row as opening
-                // context; do not invent labels or drop the empty source row.
-                if !lines[i].chars().any(char::is_alphanumeric) {
-                    if let Some(row) = lines.get(i + 2).filter(|r| r.trim().starts_with('|')) {
-                        header.push_str(row);
-                    }
-                }
             }
         }
         let mut row = 0;
@@ -148,7 +140,7 @@ fn emit(
     out.push(json!({"ordinal":out.len(),"kind":if table{"table_rows"}else{"paragraph"},
         "heading":heading,"table_id":if table{json!(table_id)}else{Value::Null},
         "row_start":if table{json!(first)}else{Value::Null},"row_end":if table{json!(end)}else{Value::Null},
-        "start_byte":start,"end_byte":start+body.len(),"context_prefix":prefix,"body":body,
+        "start_byte":start,"end_byte":start+body.len(),"context_prefix":prefix,"body":body,"table_header":header,
         "oversized":rendered.chars().count()>budget,"text":rendered}));
 }
 pub(crate) fn execute(request: &Value) -> Result<Value, &'static str> {
@@ -191,7 +183,7 @@ mod tests {
         assert!(large["body"].as_str().unwrap().contains(&row));
         assert_eq!(large["oversized"], true);
         let last = blocks.last().unwrap();
-        assert!(last["context_prefix"]
+        assert!(!last["context_prefix"]
             .as_str()
             .unwrap()
             .contains("|Обозначение|Количество|"));

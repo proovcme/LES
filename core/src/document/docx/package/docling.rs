@@ -22,6 +22,28 @@ fn special(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn large_main_story_keeps_its_own_limit_instead_of_the_media_limit() {
+        let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        zip.start_file(
+            "word/document.xml",
+            zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated),
+        )
+        .unwrap();
+        zip.write_all(b"<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body>").unwrap();
+        zip.write_all(&vec![b' '; MAX_PART as usize + 1]).unwrap();
+        zip.write_all(b"<w:p><w:r><w:t>Large story</w:t></w:r></w:p></w:body></w:document>")
+            .unwrap();
+        let bytes = zip.finish().unwrap().into_inner();
+        let result =
+            super::super::convert(&bytes, &json!({"word_parser":"docling"}), &|_, prepared| {
+                assert!(prepared.is_some());
+                Ok(json!({"text":"Large story"}))
+            })
+            .unwrap();
+        assert_eq!(result["text"], "Large story");
+    }
     fn original() -> Vec<u8> {
         let mut z = zip::ZipWriter::new(Cursor::new(Vec::new()));
         z.start_file(
@@ -317,6 +339,27 @@ fn restore(
 }
 impl<F: Fn(&Value, Option<&[u8]>) -> Result<Value>> Package<'_, F> {
     pub(super) fn docling(&mut self) -> Result<String> {
+        // Main XML already has a larger, separate streaming-story limit.
+        // The media/OLE member limit must not reject a formerly readable body.
+        let original_main = {
+            let member = self.archive.by_name("word/document.xml").map_err(|_| BAD)?;
+            if member.size() > MAX_MAIN_XML {
+                return Err("DOCUMENT_XML_LIMIT");
+            }
+            let mut bytes = Vec::new();
+            member
+                .take(MAX_MAIN_XML + 1)
+                .read_to_end(&mut bytes)
+                .map_err(|_| BAD)?;
+            if bytes.len() as u64 > MAX_MAIN_XML {
+                return Err("DOCUMENT_XML_LIMIT");
+            }
+            bytes
+        };
+        let (prepared_main, headers) = self.section_headers(&original_main)?;
+        drop(original_main);
+        let mut prepared_main = Some(prepared_main);
+        self.header_bindings = headers;
         let names = (0..self.archive.len())
             .map(|i| {
                 self.archive
@@ -376,8 +419,10 @@ impl<F: Fn(&Value, Option<&[u8]>) -> Result<Value>> Package<'_, F> {
             } else {
                 MAX_XML
             };
-            let mut xml = Vec::new();
-            {
+            let xml = if name == "word/document.xml" {
+                prepared_main.take().ok_or(BAD)?
+            } else {
+                let mut xml = Vec::new();
                 let member = self.archive.by_name(&name).map_err(|_| BAD)?;
                 if member.size() > maximum {
                     return Err("DOCUMENT_XML_LIMIT");
@@ -389,7 +434,8 @@ impl<F: Fn(&Value, Option<&[u8]>) -> Result<Value>> Package<'_, F> {
                 if xml.len() as u64 > maximum {
                     return Err("DOCUMENT_XML_LIMIT");
                 }
-            }
+                xml
+            };
             let old = self.enter(&name)?;
             let normalized = geometry::normalize(&xml)?;
             let rendered = self.slot_xml(&normalized, &prefix, &mut slots);

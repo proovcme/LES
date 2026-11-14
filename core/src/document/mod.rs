@@ -14,6 +14,14 @@ mod tokenizer;
 pub(crate) mod workbook;
 pub(crate) mod workbook_index;
 use serde_json::{json, Value};
+/// Registration and conversion share one list; mail keeps its own read adapter.
+pub fn indexable_extensions() -> Vec<String> {
+    conversion::EXTENSIONS
+        .iter()
+        .chain(["eml", "emlx", "msg"].iter())
+        .map(|suffix| format!(".{suffix}"))
+        .collect()
+}
 pub fn reading_units(request: &Value) -> Result<Value, &'static str> {
     structure::execute(request)
 }

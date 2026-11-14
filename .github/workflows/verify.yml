@@ -70,6 +70,19 @@ jobs:
           "LES_TEST_NATIVE_RUNTIME=$((Resolve-Path native/runtime/les-runtime.exe).Path)" >> $env:GITHUB_ENV
           "LES_TEST_NATIVE_API=$((Resolve-Path native/api/les-api.exe).Path)" >> $env:GITHUB_ENV
           "LES_TEST_NATIVE_QDRANT=$((Resolve-Path native/qdrant/qdrant.exe).Path)" >> $env:GITHUB_ENV
+      - name: Retain native candidates for isolated acceptance
+        uses: actions/upload-artifact@v4
+        with:
+          name: LES-native-candidate-${{ github.sha }}
+          path: |
+            native/core/les_core.dll
+            native/core/core-receipt.json
+            native/runtime/les-runtime.exe
+            native/runtime/runtime-receipt.json
+            native/api/les-api.exe
+            native/api/api-receipt.json
+          if-no-files-found: error
+          retention-days: 7
       - name: Build native Word and PDF table parsers
         run: |
           cargo fmt --manifest-path parsers/Cargo.toml --check

@@ -1,5 +1,7 @@
 //! Reconstruct a frozen batch from the existing index contract, never from a model guess.
 use serde_json::{json, Value};
+#[cfg(test)]
+mod tests;
 use sha1::{Digest, Sha1};
 
 const MISMATCH: &str = "INDEX_CONTRACT_MISMATCH";
@@ -57,9 +59,15 @@ pub fn execute(input: &Value) -> Result<Value, &'static str> {
     {
         return Err(mismatch("fingerprint"));
     }
+    let structural = match (
+        contract["document_embedding_mode"].as_str(),
+        contract["chunker_revision"].as_str(),
+    ) {
+        (Some("raw-v1"), Some("structure-aware-final-budget-v2")) => false,
+        (Some("metadata-v1"), Some("structure-aware-final-budget-v3")) => true,
+        _ => return Err(mismatch("document_embedding_mode")),
+    };
     for (key, expected) in [
-        ("document_embedding_mode", "raw-v1"),
-        ("chunker_revision", "structure-aware-final-budget-v2"),
         ("qdrant_schema", "named"),
         ("hierarchy_schema", "les.rag.hierarchy.v1"),
         ("hierarchy_builder", "deterministic-heading-stack-v1"),
@@ -177,9 +185,11 @@ pub fn execute(input: &Value) -> Result<Value, &'static str> {
     };
     let mut configured_size = number(settings, size_key, size, 1, 1_000_000)?;
     let configured_overlap = number(settings, overlap_key, overlap, 0, 1_000_000)?;
-    if unit == "tokens" {
+    if unit == "tokens" && (!structural || backend == "coreml") {
         let budget = number(settings, "COREML_EMBED_SEQ_LEN", 512, 33, 1_000_000)? - 32;
-        if configured_size + configured_overlap > budget {
+        if structural {
+            configured_size = configured_size.min(budget);
+        } else if configured_size + configured_overlap > budget {
             configured_size = budget.saturating_sub(configured_overlap).max(64);
         }
     }
@@ -216,7 +226,7 @@ pub fn execute(input: &Value) -> Result<Value, &'static str> {
         "cache_enabled":(["1","true","yes","on"].contains(&setting(settings,"RAG_CHUNK_HASH_CACHE","true").to_lowercase().as_str())),
         "max_attempts":number(settings,"RAG_PARSE_MAX_ATTEMPTS",4,1,100)?,"release_workers_after":true,
         "chunking":{"unit":unit,"chunk_size":size,"chunk_overlap":overlap},
-        "node_preparation":{"unit":unit,"size":size,"minimum":minimum,"window":number(settings,"RAG_PARENT_WINDOW_CHUNKS",4,1,1000)?,"tokenizer":tokenizer},
+        "node_preparation":{"unit":unit,"size":size,"minimum":minimum,"overlap":overlap,"structural":structural,"window":number(settings,"RAG_PARENT_WINDOW_CHUNKS",4,1,1000)?,"tokenizer":tokenizer},
         "format_worker":{"timeout_ms":(seconds.clamp(0.1,3600.)*1000.) as u64,
             "minimum":number(settings,"RAG_MIN_CHUNK_CHARS",100,1,1_000_000)?,"final_minimum":minimum,
             "table_row_limit":number(settings,"RAG_TABLE_ROW_INDEX_MAX_CHUNKS",600,1,1_000_000)?,

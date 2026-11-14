@@ -8,6 +8,26 @@ mod packing;
 mod pagination;
 mod physical;
 mod views;
+fn original_reader(name: &str) -> &'static str {
+    match name
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "pdf" => "read_pdf_source",
+        "xlsx" | "xlsm" | "xls" | "csv" | "parquet" => "read_excel_source",
+        _ => "read_source",
+    }
+}
+#[cfg(test)]
+#[test]
+fn incomplete_search_slices_point_to_the_original_format_reader() {
+    assert_eq!(original_reader("Папка/Скан.PDF"), "read_pdf_source");
+    assert_eq!(original_reader("Schedule.XLSX"), "read_excel_source");
+    assert_eq!(original_reader("Manual.docx"), "read_source");
+}
 use envelope::fit_envelope_budget;
 #[cfg(test)]
 use envelope::{canonical_chars, json_item_count};
@@ -743,6 +763,14 @@ async fn passages(
             source["evidence_admissible"] = json!(false);
             source["read_required"] = json!("read_pdf_source");
         }
+        if p["source_read_required"] == true
+            && p["word_physical"] != true
+            && !p["physical_pdf_read"].is_object()
+        {
+            source["evidence_admissible"] = json!(false);
+            source["read_required"] =
+                json!(original_reader(doc["file_name"].as_str().unwrap_or("")));
+        }
         if super::word::supports(&doc) {
             if p["reading_representation"] != "word_structure" {
                 // Legacy overlapping fragments remain discovery locators only.
@@ -878,7 +906,8 @@ async fn passages(
             "read_receipt":{"schema":"les.indexed-read.v1","index_revision":revision,
                 "semantics":"verified_index_locators_and_reading_views",
                 "point_ids":sources.iter().map(|s|s["qdrant_point_id"].clone()).collect::<Vec<_>>()},
-            "coverage":if included==total && hydrated["read_failures"].as_array().is_none_or(Vec::is_empty){"complete"}else{"bounded"},
+            "coverage":if included==total && hydrated["read_failures"].as_array().is_none_or(Vec::is_empty) && hydrated["read_plan"]["omitted_original_anchors"].as_u64().unwrap_or(0)==0{"complete"}else{"bounded"},
+            "complete_corpus":false,"coverage_scope":"selected_retrieval_candidates","read_plan":hydrated["read_plan"],
             "read_failures":hydrated["read_failures"].as_array().cloned().unwrap_or_default(),
             "total_fragments":total,"included_fragments":included}),
         sources,
@@ -897,6 +926,12 @@ async fn passages(
             reply["warnings"] = json!([]);
         }
         reply["warnings"].as_array_mut().unwrap().push(json!("Помеченные поисковые фрагменты служат только для навигации. Прочитайте оригинал инструментом read_required или запросите view=context; их текст не подтверждает ответ."));
+    }
+    if reply["result"]["coverage"] == "bounded" {
+        if !reply["warnings"].is_array() {
+            reply["warnings"] = json!([]);
+        }
+        reply["warnings"].as_array_mut().unwrap().push(json!("В контекст вошла ограниченная подборка. Полнота обзора всего набора и отсутствие ответа в остальных фрагментах не проверены."));
     }
     if context_budget.is_some() {
         let cap = if name == "search_sources" {

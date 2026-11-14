@@ -54,6 +54,17 @@ fn cost(unit: &Value, identity_reserve: usize) -> usize {
         });
     unit["text"].as_str().unwrap_or("").chars().count() + header.max(identity_reserve)
 }
+fn content_key(unit: &Value) -> String {
+    format!(
+        "{}\0{}",
+        if unit["self_contained"] == true {
+            String::new()
+        } else {
+            normalized(unit["heading"].as_str().unwrap_or(""))
+        },
+        normalized(unit["text"].as_str().unwrap_or(""))
+    )
+}
 
 /// Input units have text, source, unit_id, optional group (physical document),
 /// optional rank (retrieved rank; hydrated units inherit their parent's rank).
@@ -87,6 +98,7 @@ pub fn select(request: &Value) -> Result<Value, &'static str> {
         .unwrap_or(0)
         .min(16384) as usize;
     let mut units: Vec<Value> = Vec::new();
+    let originals_pending = request["originals_pending"] == true;
     let mut keys = HashMap::new();
     let mut identities = BTreeSet::new();
     for unit in input {
@@ -109,17 +121,27 @@ pub fn select(request: &Value) -> Result<Value, &'static str> {
         if body_key.is_empty() {
             continue;
         }
-        let key = format!(
-            "{}\0{}",
-            if unit["self_contained"] == true {
-                String::new()
-            } else {
-                normalized(unit["heading"].as_str().unwrap_or(""))
-            },
-            body_key
-        );
+        // An equal search excerpt cannot establish equality of unread parents.
+        // After original reading, complete equal units can share their text.
+        let key = if originals_pending {
+            format!(
+                "{}\0{}",
+                unit.get("read_identity").unwrap_or(&unit["source"]),
+                content_key(unit)
+            )
+        } else {
+            content_key(unit)
+        };
         if let Some(&index) = keys.get(&key) {
             let previous: &mut Value = &mut units[index];
+            if let Some(rank) = unit["source_rank"].as_u64() {
+                if previous["source_rank"]
+                    .as_u64()
+                    .is_none_or(|old| rank < old)
+                {
+                    previous["source_rank"] = json!(rank);
+                }
+            }
             if let Some(rank) = unit["rank"].as_u64() {
                 if previous["rank"].as_u64().is_none_or(|old| rank < old) {
                     previous["rank"] = json!(rank);
@@ -151,13 +173,21 @@ pub fn select(request: &Value) -> Result<Value, &'static str> {
     let terms = tokens(&texts)?;
     let q = &terms[0];
     let body = &terms[1..];
+    // Keep exploratory origins separate without letting copied text inflate IDF.
+    let mut unique_content = BTreeSet::new();
+    let statistics = (0..units.len())
+        .filter(|&i| unique_content.insert(content_key(&units[i])))
+        .collect::<Vec<_>>();
     let mut weights = BTreeMap::new();
     for term in q {
-        let df = body.iter().filter(|t| t.contains(term)).count();
+        let df = statistics
+            .iter()
+            .filter(|&&i| body[i].contains(term))
+            .count();
         if df > 0 {
             weights.insert(
                 term.clone(),
-                (1.0 + (units.len() as f64 - df as f64 + 0.5) / (df as f64 + 0.5)).ln(),
+                (1.0 + (statistics.len() as f64 - df as f64 + 0.5) / (df as f64 + 0.5)).ln(),
             );
         }
     }
@@ -210,7 +240,12 @@ pub fn select(request: &Value) -> Result<Value, &'static str> {
                 }
             } else {
                 let prior = if u.get("rank") == Some(&Value::Null) {
-                    0.0
+                    // A document-level hit is weaker than an exact unit hit:
+                    // it contributes only where this original unit matches the
+                    // question. Source membership alone never admits a unit.
+                    u["source_rank"]
+                        .as_u64()
+                        .map_or(0.0, |rank| 10.0 / (10.0 + rank as f64) * coverage(&body[i]))
                 } else {
                     10.0 / (10.0 + rank)
                 };
@@ -219,6 +254,17 @@ pub fn select(request: &Value) -> Result<Value, &'static str> {
         })
         .collect();
     let mut chosen: Vec<usize> = Vec::new();
+    let source_limit = request["max_sources"].as_u64().unwrap_or(64).min(64) as usize;
+    let groups = units
+        .iter()
+        .map(|u| {
+            u["group"]
+                .as_str()
+                .map(str::to_owned)
+                .unwrap_or_else(|| u["source"].to_string())
+        })
+        .collect::<Vec<_>>();
+    let mut selected_sources = BTreeSet::new();
     let mut covered = BTreeSet::new();
     let mut used = 0;
     let mut text_used = 0;
@@ -237,6 +283,8 @@ pub fn select(request: &Value) -> Result<Value, &'static str> {
         let mut best: Option<(usize, f64)> = None;
         for i in 0..units.len() {
             if chosen.contains(&i)
+                || (!selected_sources.contains(&groups[i])
+                    && selected_sources.len() >= source_limit)
                 || relevance[i] == 0.0
                 || (group_selection && relevance[i] == 0.0)
                 || used + costs[i] > budget
@@ -258,15 +306,20 @@ pub fn select(request: &Value) -> Result<Value, &'static str> {
             };
             // Weighted coverage + maximal marginal relevance. No topic rules,
             // file-name boosts, hidden model, or answer-dependent thresholds.
-            // Budgeted MMR uses marginal value per sqrt(cost): a long parent
-            // cannot consume the window merely by containing more query words.
+            // Normalize both resource costs by the actual request windows. Absolute
+            // inverse length rewarded fragmentation without bound. Every
+            // fitting unit now has a bounded length penalty (1..sqrt(2)),
+            // while compact complete evidence still leaves room for other facts.
             let score = if total_weight == 0.0 {
                 // No lexical signal: keep retrieval order, rather than
                 // pretending text dissimilarity established relevance.
                 relevance[i]
             } else {
                 (0.7 * relevance[i] + 0.3 * novel_coverage - 0.3 * redundant[i])
-                    / (costs[i].max(1) as f64).sqrt()
+                    / (1.0
+                        + (costs[i] as f64 / budget.max(1) as f64)
+                            .max(lengths[i] as f64 / text_budget.max(1) as f64))
+                    .sqrt()
             };
             if best.is_none_or(|(_, s)| score > s) {
                 best = Some((i, score));
@@ -279,7 +332,16 @@ pub fn select(request: &Value) -> Result<Value, &'static str> {
         text_used += lengths[index];
         covered.extend(body[index].iter().cloned());
         chosen.push(index);
+        selected_sources.insert(groups[index].clone());
         for i in 0..units.len() {
+            if originals_pending
+                && units[i].get("read_identity").unwrap_or(&units[i]["source"])
+                    != units[index]
+                        .get("read_identity")
+                        .unwrap_or(&units[index]["source"])
+            {
+                continue;
+            }
             if relevance[i] == 0.0
                 || chosen.contains(&i)
                 || used + costs[i] > budget
@@ -305,6 +367,164 @@ pub fn select(request: &Value) -> Result<Value, &'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn an_independent_text_quota_is_not_hidden_by_a_large_envelope_ceiling() {
+        let page = unit(
+            "page",
+            &format!(
+                "Pump pressure and flow. {}",
+                "Detailed technical explanation. ".repeat(100)
+            ),
+            0,
+        );
+        let row = unit(
+            "row",
+            "Pump pressure and flow\n|Item|Pressure|Flow|\n|A|17.25 bar|8 l/s|",
+            10,
+        );
+        let text_budget = page["text"].as_str().unwrap().chars().count();
+        let result = select(
+            &json!({"question":"Pump pressure and flow","units":[page,row],
+            "max_chars":1000000,"text_budget":text_budget}),
+        )
+        .unwrap();
+        assert!(result["units"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|u| u["unit_id"] == "row"));
+        assert!(result["selection"]["used_text_chars"].as_u64().unwrap() <= text_budget as u64);
+    }
+    #[test]
+    fn tiny_partial_references_cannot_evict_the_best_complete_unit_by_size_bonus() {
+        let complete = unit(
+            "complete",
+            &format!(
+                "Flow 17.25; pressure 2.5; power 60; temperature 20. {}",
+                "Additional source information. ".repeat(210)
+            ),
+            0,
+        );
+        let mut units = vec![complete];
+        for i in 0..12 {
+            units.push(unit(
+                &format!("fragment-{i}"),
+                &format!(
+                    "{} drawing reference {i}",
+                    ["Flow", "Pressure", "Power", "Temperature"][i % 4]
+                ),
+                i + 1,
+            ));
+        }
+        let result = select(
+            &json!({"question":"Flow pressure power temperature","units":units,
+            "max_chars":8000,"max_items":8,"identity_reserve_chars":1024}),
+        )
+        .unwrap();
+        assert!(result["units"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|u| u["unit_id"] == "complete"));
+        assert!(result["selection"]["used_chars"].as_u64().unwrap() <= 8000);
+    }
+    #[test]
+    fn equal_original_units_keep_the_best_document_prior_without_a_unit_vote() {
+        let mut low = unit("copy-a", "Pump pressure 17", 0);
+        low["rank"] = Value::Null;
+        low["source_rank"] = json!(70);
+        let mut high = unit("copy-b", "Pump pressure 17", 0);
+        high["rank"] = Value::Null;
+        high["source_rank"] = json!(0);
+        for units in [json!([low.clone(), high.clone()]), json!([high, low])] {
+            let result =
+                select(&json!({"question":"Pump pressure","units":units,"max_chars":4000}))
+                    .unwrap();
+            assert_eq!(result["units"].as_array().unwrap().len(), 1);
+            assert_eq!(result["units"][0]["source_rank"], 0);
+            assert!(result["units"][0]["rank"].is_null());
+            assert_eq!(
+                result["units"][0]["equivalent_sources"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                1
+            );
+        }
+    }
+    #[test]
+    fn legacy_document_prior_requires_content_and_never_invents_unit_rank() {
+        let mut hit = unit("located", "Pump pressure rating", 0);
+        hit["rank"] = Value::Null;
+        hit["source_rank"] = json!(0);
+        let mut unrelated = unit("other", "Architectural finishes", 0);
+        unrelated["rank"] = Value::Null;
+        unrelated["source_rank"] = json!(0);
+        let result =
+            select(&json!({"question":"Pump pressure", "units":[hit,unrelated],"max_chars":4000}))
+                .unwrap();
+        let rows = result["units"].as_array().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["unit_id"], "located");
+        assert!(rows[0]["rank"].is_null());
+    }
+    #[test]
+    fn equal_search_excerpts_do_not_collapse_unread_originals() {
+        let a = unit("a", "Pump pressure rating 17.25", 0);
+        let b = unit("b", "Pump pressure rating 17.25", 1);
+        let r = select(
+            &json!({"question":"Pump pressure rating","units":[a.clone(),b.clone()],
+            "max_chars":4000,"max_items":2,"max_sources":2,"originals_pending":true}),
+        )
+        .unwrap();
+        assert_eq!(r["units"].as_array().unwrap().len(), 2);
+        assert!(r["units"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|u| u["equivalent_sources"].as_array().unwrap().is_empty()));
+        let final_read =
+            select(&json!({"question":"Pump pressure rating","units":[a,b],"max_chars":4000}))
+                .unwrap();
+        assert_eq!(final_read["units"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            final_read["units"][0]["equivalent_sources"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+    #[test]
+    fn source_limit_is_a_budget_constraint_not_a_rank_truncation() {
+        let mut input = (0..12)
+            .map(|i| {
+                unit(
+                    &format!("source-{i}"),
+                    &format!(
+                        "General equipment catalogue {i}. {}",
+                        "Ordinary description. ".repeat(40)
+                    ),
+                    i,
+                )
+            })
+            .collect::<Vec<_>>();
+        input.push(unit("late", "Pump pressure 17.25 bar; flow 8 litres", 60));
+        let result = select(&json!({"question":"Pump pressure and flow","units":input,
+            "max_chars":10000,"max_sources":2}))
+        .unwrap();
+        let rows = result["units"].as_array().unwrap();
+        assert!(rows
+            .iter()
+            .any(|u| u["unit_id"] == "late" && u["rank"] == 60));
+        assert!(
+            rows.iter()
+                .map(|u| u["source"].to_string())
+                .collect::<BTreeSet<_>>()
+                .len()
+                <= 2
+        );
+    }
     fn unit(id: &str, text: &str, rank: usize) -> Value {
         json!({"unit_id":id,"text":text,"source":{"doc_id":id,"sha":"revision"},"rank":rank})
     }

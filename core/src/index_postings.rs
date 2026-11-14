@@ -93,13 +93,18 @@ pub fn refresh(
             loop {
                 let page = read(
                     "scroll",
-                    &json!({"offset":offset,"filter":filter,"limit":128,"with_payload":["text","dataset_id","file_name","node_role","ancestor_ids"],"with_vector":false}),
+                    &json!({"offset":offset,"filter":filter,"limit":128,"with_payload":["text","dataset_id","file_name","node_role","ancestor_ids","search_context_schema","search_context_prefix"],"with_vector":false}),
                 )?;
                 let points = page["points"].as_array().ok_or("INDEX_READ_INVALID")?;
                 if !points.is_empty() {
                     let texts = points
                         .iter()
-                        .map(|p| p["payload"]["text"].as_str().unwrap_or("").to_owned())
+                        .map(|p| {
+                            crate::search_context::input(
+                                &p["payload"],
+                                p["payload"]["text"].as_str().unwrap_or(""),
+                            )
+                        })
                         .collect::<Vec<_>>();
                     let lexical = crate::lexical::current(&texts)?;
                     let rows=points.iter().zip(lexical["documents"].as_array().ok_or("CORE_LEXICAL_RESPONSE_INVALID")?).map(|(p,t)|json!({"id":p["id"].to_string(),"payload":p["payload"],"terms":t["terms"]})).collect::<Vec<_>>();

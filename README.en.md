@@ -20,12 +20,12 @@ flowchart LR
     G --> H["Answer and links<br/>to original files"]
 ```
 
-1. **Indexing.** A background job parses documents and runs OCR when needed. Chunks retain links to their section, page, or sheet. The catalog and index live separately from the source folders. A publication journal helps recover interrupted updates.
-2. **Retrieval.** SQLite BM25 finds terms and identifiers; Qdrant finds semantic matches. Reciprocal rank fusion (RRF) combines these two rankings within the selected datasets and filters. The hierarchy separately suggests sections for navigation and further reading; it does not cast another vote or reorder global results. The default Rust chat does not yet support reranking; Qdrant Server is the default vector store.
-3. **Reading and context.** LES can expand a match to its parent section and nearby chunks. The model receives a bounded context drawn from evidence, conversation history, and memory. It can read a physical PDF page by document ID.
+1. **Indexing.** A background job parses documents and runs OCR when needed. Structural chunks retain headings, table captions, and links to their section, page, or sheet. The embedding model's tokenizer checks the final input limit; an oversized row requires reading the original. The catalog and index live separately from the source folders. A publication journal helps recover interrupted updates.
+2. **Retrieval.** SQLite BM25 finds terms and identifiers; Qdrant finds semantic matches. Reciprocal rank fusion (RRF) combines these two rankings within the selected datasets and filters. The hierarchy separately suggests sections for navigation and further reading; it does not cast another vote or reorder global results. The selected local profile keeps BGE with reranking off. Server and Edge share the publication contract; updating the app does not automatically migrate an existing index.
+3. **Reading and context.** Retrieved anchors lead to a verified Word original or physical PDF page. After reading, a shared selector removes exact duplicates and admits complete units into a bounded context. A matching paragraph number cannot inherit retrieval rank unless its content hash also matches. Partial evidence is explicitly distinguished from reading the entire dataset.
 4. **Answers and evidence.** Answers stream. Citation links are tied to the retrieved source file and revision, including the page or sheet when known. LES reports when the selected sources provide no evidence. A citation lets you verify the answer; it does not guarantee the model's conclusion.
 
-[Ranking](docs/modules/rag-ranking.md) · [Document reading and context](docs/modules/chat-section-context.md) · [Application architecture](docs/LIGHT_ARCHITECTURE.md)
+[Ranking](docs/modules/rag-ranking.md) · [Chunk structure and context selection](docs/modules/structured-search-context.md) · [Application architecture](docs/LIGHT_ARCHITECTURE.md)
 
 In the source candidate, MCP uses the same retrieval and source readers as chat.
 An external client can retrieve context, read an original Word document or PDF

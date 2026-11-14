@@ -71,6 +71,8 @@ fn payload(request: &Value, value: Map<String, Value>) -> Result<Value> {
     if let Some(route) = request.get("route_metadata") {
         merged.extend(route.as_object().ok_or(INVALID)?.clone());
         merged.remove("pdf_page_views");
+        // Document-level layout proof is not repeated in every search point.
+        merged.remove("docx_table_headers");
     }
     // Source identity wins over classification annotations. A route cannot
     // silently change the physical page or turn a projection into another type.
@@ -87,6 +89,46 @@ fn push(out: &mut Vec<Value>, node: Value) -> Result<()> {
     }
     out.push(node);
     Ok(())
+}
+fn reading_parts(text: &str) -> Result<Value> {
+    Ok(
+        json!({"chunks":super::structure::units(text,12000)?.into_iter()
+        .map(|unit|unit["text"].clone()).collect::<Vec<_>>()}),
+    )
+}
+#[cfg(test)]
+#[test]
+fn intermediate_page_units_do_not_sever_rows_or_lose_table_captions() {
+    let header = "|Position|Quantity|Mass|\n|---|---|---|\n";
+    let rows = (0..800)
+        .map(|i| format!("|Valve {i}|1|69.0|\n"))
+        .collect::<Vec<_>>();
+    let text = format!("# Equipment\n{header}{}", rows.join(""));
+    let v = reading_parts(&text).unwrap();
+    let parts = v["chunks"].as_array().unwrap();
+    assert!(parts.len() > 1);
+    for row in &rows {
+        assert_eq!(
+            parts
+                .iter()
+                .filter(|p| p.as_str().unwrap().contains(row.trim()))
+                .count(),
+            1
+        );
+    }
+    assert!(parts
+        .iter()
+        .filter(|p| p.as_str().unwrap().contains("Valve"))
+        .all(|p| p.as_str().unwrap().contains(header)));
+    let request = json!({"file_key":"manual.pdf","dataset_id":"set","size":1800,"overlap":150,"structural":true});
+    let pages = from_pdf(&request, &format!("## Page 1\n{text}"), &|_, _| {
+        panic!("no IO needed")
+    })
+    .unwrap();
+    assert!(pages
+        .iter()
+        .filter(|p| p["text"].as_str().unwrap().contains("Valve"))
+        .all(|p| p["text"].as_str().unwrap().contains(header)));
 }
 fn from_pdf(
     request: &Value,
@@ -122,10 +164,16 @@ fn from_pdf(
         if text.is_empty() || text == "[no text extracted]" {
             continue;
         }
-        let parts = chunks::execute(
-            &json!({"text":text,"kind":"page","size":size,"overlap":overlap}),
-            None,
-        )?;
+        // A token splitter cannot recover a caption removed by an earlier
+        // character splitter. Keep reading units intact until the final budget.
+        let parts = if request["structural"] == true {
+            reading_parts(text)?
+        } else {
+            chunks::execute(
+                &json!({"text":text,"kind":"page","size":size,"overlap":overlap}),
+                None,
+            )?
+        };
         let parts = parts["chunks"].as_array().ok_or(INVALID)?;
         let passport = passports
             .get(&page.to_string())
@@ -256,7 +304,9 @@ fn from_markdown(request: &Value, text: &str) -> Result<Vec<Value>> {
         if !section.chars().any(char::is_alphanumeric) {
             continue;
         }
-        let parts = if section.chars().count() > 2000 {
+        let parts = if request["structural"] == true {
+            reading_parts(section)?
+        } else if section.chars().count() > 2000 {
             let config = json!({"text":section,"size":size,"overlap":overlap,"kind":"structured"});
             if let Some(local) = local.as_ref() {
                 chunks::execute(&config, Some(&|v| local.count(v)))?

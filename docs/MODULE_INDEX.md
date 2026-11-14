@@ -1,5 +1,11 @@
 # Модули LES RAG
 
+882: [структурные чанки, шапки и контекст](modules/structured-search-context.md) —
+`document/{source_nodes,embedding_chunks,nodes}`, `search_context`,
+`context_selection`, `sources/retrieval/packing` и секции Word.
+Модель поиска и реранкер этот перенос не меняет. Состояние реальной приёмки
+указывается отдельно; наличие модуля не доказывает качество ответов.
+
 880: `api/src/engineering/registered.rs` — список зарегистрированных CAD/BIM
 и явное первичное чтение через Увязку. Форма и MCP используют общий `read_import`;
 подготовка снимка переходит в прежнюю очередь только после проверки редакции.

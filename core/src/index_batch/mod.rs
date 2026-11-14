@@ -66,6 +66,7 @@ fn convert_document(
     }
     let mut chunking = request["chunking"].clone();
     chunking["tokenizer"] = request["node_preparation"]["tokenizer"].clone();
+    chunking["structural"] = request["node_preparation"]["structural"].clone();
     let dataset = input["dataset_id"].as_str().ok_or_else(|| error(INVALID))?;
     let data_dir = Path::new(
         request["content_root"]

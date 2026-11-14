@@ -3,6 +3,7 @@ use super::chunks::{offsets, trim, Measure};
 use regex::Regex;
 use serde_json::{json, Value};
 use std::{borrow::Cow, sync::LazyLock};
+mod structured;
 
 static DATA_URI: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)data:[^\s\x1c-\x1f;,]{1,120}(?:;[^\s\x1c-\x1f,]{1,80})*;base64,[A-Za-zİıſK0-9+/=\s\x1c-\x1f]{128,}").unwrap()
@@ -51,6 +52,18 @@ pub(super) fn execute(
     let clean = SPACES.replace_all(&clean, "  ");
     let clean = NEWLINES.replace_all(&clean, "\n\n\n");
     let clean = trim(&clean);
+    if request["structural"] == true {
+        let parts = structured::execute(
+            clean,
+            budget,
+            request["overlap"].as_u64().unwrap_or(0) as usize,
+            request["search_prefix"].as_str().unwrap_or(""),
+            measure,
+        )?;
+        return Ok(
+            json!({"parts":parts,"quality":{"data_uri_removed":uris,"base64_runs_removed":binary,"control_chars_removed":controls,"sanitized":uris!=0||binary!=0||controls!=0}}),
+        );
+    }
     let mut parts = Vec::new();
     let indices = offsets(clean);
     let count = indices.len() - 1;

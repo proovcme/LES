@@ -63,7 +63,8 @@ def test_native_configuration_preserves_signed_identity_and_rejects_corruption()
     contract=signed_contract()
     value=native_core.required('index_configuration',request={'contract':contract,'settings':settings()})
     assert value['embedding_fingerprint']==contract['point_embedding_fingerprint']
-    assert value['node_preparation']=={'unit':'chars','size':800,'minimum':20,'window':4,'tokenizer':None}
+    assert value['node_preparation']=={'unit':'chars','size':800,'minimum':20,'window':4,'tokenizer':None,
+                                       'structural':False,'overlap':80}
     assert value['chunking']=={'unit':'chars','chunk_size':800,'chunk_overlap':80}
     contract['chunk_size']=801
     with pytest.raises(native_core.NativeCoreError,match='INDEX_CONTRACT_MISMATCH'):

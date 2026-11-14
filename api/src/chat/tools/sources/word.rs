@@ -66,10 +66,25 @@ pub(super) async fn hydrate(
             }
             Err(failure) => return Err(failure),
         };
+        // A legacy text index can locate a document without a compatible unit
+        // hash. Retain that document prior separately; never invent a unit hit.
+        let source_rank = anchors
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| {
+                let a = &a["payload"];
+                a["dataset_id"] == doc["dataset_id"]
+                    && a["file_name"] == doc["file_name"]
+                    && a["source_sha256"] == doc["file_hash"]
+                    && a["retrieval_expansion"] != true
+            })
+            .map(|(i, a)| a["payload"]["retrieval_rank"].as_u64().unwrap_or(i as u64))
+            .min();
         for unit in view["units"]
             .as_array()
             .ok_or("DOCUMENT_STRUCTURE_INVALID")?
         {
+            let reading_hash = les_core::sha256_hex(unit["text"].as_str().unwrap_or("").as_bytes());
             text_bytes += unit["text"].as_str().map_or(0, str::len);
             if output.len() >= les_core::context_selection::MAX_SOURCE_UNITS
                 || text_bytes > les_core::context_selection::MAX_SOURCE_TEXT_BYTES
@@ -92,11 +107,13 @@ pub(super) async fn hydrate(
                         && a["source_sha256"] == doc["file_hash"]
                         && a["word_reading_schema"] == "les.document-reading.v1"
                         && a["source_unit_id"] == unit["ordinal"]
+                        && a["word_reading_sha256"].as_str() == Some(reading_hash.as_str())
                 })
                 .map(|(i, a)| a["payload"]["retrieval_rank"].as_u64().unwrap_or(i as u64))
                 .min();
             payload["retrieval_expansion"] = json!(matched.is_none());
             payload["retrieval_rank"] = json!(matched);
+            payload["retrieval_source_rank"] = json!(source_rank);
             for field in [
                 "ocr",
                 "visual_content",

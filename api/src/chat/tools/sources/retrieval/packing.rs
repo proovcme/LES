@@ -31,8 +31,16 @@ fn unit(point: &Value, rank: usize) -> Value {
             source.insert(field.into(), p[field].clone());
         }
     }
+    let address = if p["source_unit_id"].is_u64() {
+        serde_json::json!(["word", p["source_unit_id"]])
+    } else if p["page"].is_u64() {
+        serde_json::json!(["page", p["page"]])
+    } else {
+        serde_json::json!(["parent", p["parent_id"]])
+    };
     serde_json::json!({"text":p["text"].as_str().unwrap_or(""),"unit_id":key(point),
-        "source":source,"rank":if p["retrieval_expansion"]==true{Value::Null}else{serde_json::json!(rank)},"self_contained":matches!(p["reading_representation"].as_str(),Some("pdf_cells"|"word_structure"|"physical_pdf_page")),"heading":format!("{} {}",p["section_heading"].as_str().unwrap_or(""),p["parent_heading"].as_str().unwrap_or("")),"group":serde_json::json!([p["dataset_id"],p["file_name"],p["source_sha256"]]).to_string(),"point":point})
+        "read_identity":serde_json::json!([p["dataset_id"],p["file_name"],p["source_sha256"],address]),
+        "source":source,"source_rank":p["retrieval_source_rank"],"rank":if p["retrieval_expansion"]==true{Value::Null}else{serde_json::json!(rank)},"self_contained":matches!(p["reading_representation"].as_str(),Some("pdf_cells"|"word_structure"|"physical_pdf_page")),"heading":format!("{} {}",p["section_heading"].as_str().unwrap_or(""),p["parent_heading"].as_str().unwrap_or("")),"group":serde_json::json!([p["dataset_id"],p["file_name"],p["source_sha256"]]).to_string(),"point":point})
 }
 pub(super) fn catalog(points: &[Value]) -> Result<Value, &'static str> {
     les_core::context_selection::catalog(
@@ -50,7 +58,7 @@ fn select_points(
 ) -> Result<Vec<Value>, &'static str> {
     let input: Vec<_> = points.iter().enumerate().map(|(i, p)| unit(p, i)).collect();
     let result = les_core::context_selection::select(&serde_json::json!({
-        "question":query,"units":input,"max_chars":context_budget.unwrap_or(1_000_000),
+        "question":query,"units":input,"originals_pending":preserve_rank,"max_chars":context_budget.unwrap_or(1_000_000),
         "text_budget":text_budget,"identity_reserve_chars":if context_budget.is_some(){1024}else{0},"max_items":32
     }))?;
     Ok(result["units"]
@@ -184,26 +192,32 @@ pub(super) fn select_query(
     )
 }
 
-/// Plan original I/O with the same selector and budget as final context. The
-/// complete candidate catalog remains available; unplanned locators are not proof.
+/// Bound original I/O by anchors/sources. The size of an indexed parent must
+/// not discard a source before its original has yielded small readable units.
 pub(super) fn read_plan(
     seeds: &[Value],
     mut hydrated: Value,
-    budget: usize,
-    context_budget: Option<usize>,
+    _budget: usize,
+    _context_budget: Option<usize>,
     query: &str,
 ) -> Result<(Vec<Value>, Value), &'static str> {
     let (planned, _) = select_query_inner(
         seeds,
         &hydrated["sections"],
         &hydrated["documents"],
-        budget,
-        context_budget,
+        1_000_000,
+        None,
         query,
         true,
     )?;
     let rows: std::collections::HashMap<_, _> =
         planned.iter().map(|p| (key(p), p.clone())).collect();
+    let original_ids: HashSet<_> = seeds.iter().map(key).collect();
+    let planned_originals = original_ids
+        .iter()
+        .filter(|id| rows.contains_key(*id))
+        .count();
+    hydrated["read_plan"] = serde_json::json!({"input_anchors":original_ids.len(),"planned_units":planned.len(),"omitted_original_anchors":original_ids.len()-planned_originals,"max_units":32,"context_budget_applied_after_original_read":true});
     for group in ["sections", "documents"] {
         for section in hydrated[group].as_array_mut().into_iter().flatten() {
             if let Some(points) = section["points"].as_array_mut() {
@@ -308,18 +322,40 @@ mod tests {
         json!({"id":id,"payload":{"dataset_id":"ds","file_name":parent,"parent_id":parent,"text":text,"chunk_ord":ord}})
     }
     #[test]
-    fn original_read_plan_uses_common_budget_and_preserves_preselection_rank() {
+    fn original_read_plan_defers_text_budget_until_after_original_read() {
         let heavy = point("large", "calculation.docx", &"unrelated ".repeat(100), 0);
         let needed = point("needed", "basis.docx", "supply category requirement", 1);
         let hydrated =
             json!({"sections":[{"points":[heavy.clone(), needed.clone()]}],"documents":[]});
         let (plan, trimmed) =
             read_plan(&[heavy, needed], hydrated, 80, None, "supply category").unwrap();
-        assert_eq!(plan.len(), 1);
-        assert_eq!(plan[0]["id"], "needed");
-        assert_eq!(plan[0]["payload"]["retrieval_rank"], 1);
-        assert_eq!(trimmed["sections"][0]["points"].as_array().unwrap(), &plan);
-        assert!(plan.iter().map(chars).sum::<usize>() <= 80);
+        assert_eq!(plan.len(), 2);
+        let needed = plan.iter().find(|p| p["id"] == "needed").unwrap();
+        assert_eq!(needed["payload"]["retrieval_rank"], 1);
+        assert!(plan
+            .iter()
+            .any(|p| p["id"] == "large" && p["payload"]["retrieval_rank"] == 0));
+        assert_eq!(
+            trimmed["sections"][0]["points"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(key)
+                .collect::<HashSet<_>>(),
+            plan.iter().map(key).collect::<HashSet<_>>()
+        );
+        let (selected, _) = select_query(
+            &plan,
+            &Value::Null,
+            &Value::Null,
+            80,
+            None,
+            "supply category",
+        )
+        .unwrap();
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0]["id"], "needed");
+        assert!(selected.iter().map(chars).sum::<usize>() <= 80);
     }
     #[test]
     fn whole_first_document_cannot_evict_a_later_ranked_source() {
