@@ -96,6 +96,25 @@ fn convert_document(
         return Err(error("FORMAT_WORKER_RESPONSE_INVALID"));
     }
     let mut result = value["value"].clone();
+    let warnings = ["pdf_table_projection_warnings", "pdf_ocr_warnings"]
+        .iter()
+        .flat_map(|key| {
+            result["route"]["metadata"][*key]
+                .as_array()
+                .into_iter()
+                .flatten()
+        })
+        .collect::<Vec<_>>();
+    if !warnings.is_empty() {
+        let codes = warnings
+            .iter()
+            .filter_map(|w| w["code"].as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        eprintln!(
+            "{}",
+            json!({"event":"native_document_read_warnings","dataset_id":dataset,"source_sha256":input["source_sha256"],"entries":warnings.len(),"codes":codes,"nodes":result["count"]})
+        );
+    }
     result["route"]
         .as_object_mut()
         .ok_or_else(|| error(INVALID))?

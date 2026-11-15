@@ -22,6 +22,14 @@ Required gates:
 - Targeted regressions, core/API tests, `make verify`, `make test`, publication
   checks and CI before merge. No test expectation is weakened to accept loss.
 
+Token accounting separates the configured text budget, including metadata
+prefixes, from provider-added control tokens. The native counter excludes those
+control tokens: a local BGE protocol probe measured 7 content tokens versus 9
+reported by Ollama. A 512-token text chunk must not be reported as a total
+512-token provider input. The new-index point check pins the tokenizer hash,
+checks every prefixed text chunk and separately probes the largest input with
+provider truncation disabled against the provider's reported context limit.
+
 Earlier build 882 results are documented separately in
 [structured-rag-882.md](structured-rag-882.md); they are not evidence for this
 implementation. In particular, its failed CI and context coverage do not
@@ -152,6 +160,9 @@ was called.
 |---|---:|---:|
 | Needed-source delivery, 90 positive cases | 58.70% | 56.85% |
 | Reference-text 5-gram coverage, 69 cases | 43.33% | 46.38% |
+| Expected physical page hit, 12 cases | 91.67% | 83.33% |
+| Expected-page coverage, 12 cases | 87.50% | 79.17% |
+| Expected Excel row hit, 2 cases | 100% | 100% |
 | Observed search latency p50 | 5.06 s | 6.61 s |
 | Tool-level search errors | 0 | 0 |
 
@@ -188,3 +199,29 @@ retrieval shortlist, answer budget or frozen scorer. A generic 64-source
 regression also covers a reserved channel head with a late true rank. This
 change is not yet validated on the corpus and does not retroactively improve
 the measurements above.
+
+The first full new-index run also exposed exhausted `WORKER_TIMEOUT` failures
+in real PDF imports. One confirmed original has 195 pages; the optional whole-book
+table job repeatedly exceeded its deadline before indexing could retain the
+original text. Other documents continued processing. This is an unaccepted
+ingestion failure, not an empty successful publication.
+
+The subsequent source change separates this optional timeout from original
+reading, retains page-specific uncertainty, reuses a source/revision-bound failed
+attempt during the OCR pass and retries uncertain geometry through the physical
+page reader. Revision, invalid-cache, OCR and memory guards are not waived.
+It also allows an explicit folder indexing request to retry exhausted errors
+without reindexing unchanged ready files or automatically looping on unchanged
+watch failures. Native boundary regressions are added; the real failed imports,
+full point proof and frozen MCP comparisons must still repeat. No new score or
+passing ingestion claim is assigned to those source changes yet.
+
+The same run found a separate `OCR_NO_TEXT` failure in a 318-page PDF, at page
+308. Native text is available on hundreds of its pages; visual inspection of the
+failed page showed a decorative blank form with serial/page markings. The index
+converter now records such a page as unrecognized and retains readable pages
+before and after it, with explicit partial-visual coverage. An entirely
+unrecognized document and a strict standalone OCR request still fail. Other OCR
+errors are not hidden. This boundary is covered by a three-page regression;
+the real corpus repeat remains required. This is not a claim that all scans or
+figures were successfully recognized.

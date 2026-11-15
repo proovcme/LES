@@ -214,14 +214,16 @@ pub(crate) async fn run_scoped(
             .take(240)
             .collect::<String>());
         let missing_literal = result["literal_lookup"]["matched"] == false;
-        let unverified_table = result["table_projection_warning"].is_string();
+        let table_notice = result["table_projection_warning"]
+            .as_str()
+            .map(crate::document_parser::projection_notice);
         let mut reply = envelope(name, "physical_page", result, vec![source]);
         let mut warnings = Vec::new();
         if missing_literal {
             warnings.push("Дословное совпадение не найдено. Прочитан текст той же страницы; это не подтверждает наличие искомой фразы. При next_offset продолжи чтение.");
         }
-        if unverified_table {
-            warnings.push(crate::document_parser::TABLE_PROJECTION_NOTICE);
+        if let Some(notice) = table_notice {
+            warnings.push(notice);
         }
         if !warnings.is_empty() {
             reply["warnings"] = json!(warnings);

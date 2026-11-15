@@ -95,6 +95,7 @@ pub(crate) fn external(request: &Value) -> Result<Value, &'static str> {
     let library = std::env::var_os("LES_NATIVE_PDFIUM").ok_or("PDFIUM_UNAVAILABLE")?;
     let mut options = request.clone();
     options["kind"] = json!("pdf_text");
+    options["allow_partial_ocr"] = json!(true);
     options
         .as_object_mut()
         .ok_or("DOCUMENT_DISPATCH_INVALID")?
@@ -109,14 +110,20 @@ pub(crate) fn external(request: &Value) -> Result<Value, &'static str> {
             configured_ocr(request["owned_state"].as_str().map(Path::new))?
         };
         options["kind"] = json!("pdf_ocr");
+        options["pdf_table_projection_state"] = value["pdf_table_projection_state"].clone();
         value = crate::pdf_text::convert(Path::new(&library), path, &options)?;
     }
     if value["text"].as_str().is_none_or(|s| s.trim().is_empty()) {
         return Err("NO_SEARCHABLE_TEXT");
     }
-    Ok(
-        json!({"kind":"pdf","text":value["text"],"metadata":{"page_count":value["pages"],"pdf_page_views":value["page_views"],"pdf_table_projection_warnings":value["table_projection_warnings"],"ocr":value["ocr"],"extractor":"les.pdfium.layout.v2"}}),
-    )
+    let mut metadata = json!({"page_count":value["pages"],"pdf_page_views":value["page_views"],"pdf_table_projection_warnings":value["table_projection_warnings"],"ocr":value["ocr"],"extractor":"les.pdfium.layout.v2"});
+    if let Some(unread) = value["ocr_warnings"].as_array().filter(|v| !v.is_empty()) {
+        metadata["pdf_ocr_warnings"] = json!(unread);
+        metadata["visual_content"] = json!(true);
+        metadata["unread_visual_count"] = json!(unread.len());
+        metadata["visual_coverage"] = json!("partial");
+    }
+    Ok(json!({"kind":"pdf","text":value["text"],"metadata":metadata}))
 }
 
 pub fn serve() -> Result<(), &'static str> {

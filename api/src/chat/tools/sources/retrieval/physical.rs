@@ -1,4 +1,4 @@
-//! Upgrade indexed OCR locators through the canonical original-page reader.
+//! Upgrade OCR and uncertain-layout locators through the original-page reader.
 use super::*;
 use std::collections::{HashMap, HashSet};
 fn key(point: &Value) -> String {
@@ -32,7 +32,8 @@ pub(super) async fn hydrate(
         let scan = p["ocr"] == true
             || p["pdf_requires_ocr"] == true
             || p["source_layer"] == "pdf_ocr_text";
-        if !scan
+        let needs_original = scan || p["table_projection_warning"].is_string();
+        if !needs_original
             || !p["file_name"]
                 .as_str()
                 .is_some_and(|s| s.to_ascii_lowercase().ends_with(".pdf"))

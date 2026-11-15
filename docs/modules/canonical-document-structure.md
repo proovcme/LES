@@ -56,6 +56,31 @@ once after reading, under the final context limit. Typed cells and paragraphs
 provide model addresses and numeric receipts directly; Markdown is presentation.
 Literal operators, pipes and brackets are escaped only for display.
 
+A timeout in the auxiliary PDF-table worker does not discard independently
+readable original text. The index retains all original pages with an explicit
+`PDF_TABLE_LAYOUT_TIMEOUT` geometry warning; source identity, invalid-cache and
+memory-admission failures remain hard errors. The OCR pass reuses that same
+request's failed optional attempt only when source SHA and parser revision match,
+avoiding a second whole-book timeout. Uncertain indexed pages enter the same
+physical reader as OCR locators; a successful page projection that passes source
+checks can clear the
+warning, while a plain text read cannot silently certify the cells. Original text
+must still be nonempty, revision checked and bounded. Warning causes are logged
+outside searchable text and remain attached to the affected pages.
+
+Index conversion can retain readable PDF pages when OCR reports no text on
+another page. It records that page and reuses the existing partial-visual
+coverage markers; it cannot advertise the whole document as completely read.
+A document with no readable pages still fails instead of publishing an empty
+index. Other OCR failures remain errors, as does a direct strict OCR request.
+Physical reading of an unrecognized page still reports its actual failure.
+The original image remains available in the unchanged PDF.
+
+An explicit folder indexing request retries exhausted errors in its own manifest,
+with a new attempt budget. Unchanged ready files, unrelated documents and a
+registration-only request retain their previous state. Automatic watch polls do
+not restart exhausted unchanged failures indefinitely.
+
 Paragraph addresses remain selectable when a neighboring reading unit contains
 the table. Address availability does not itself turn a prose task into arithmetic.
 The existing single answer-window retry checks delivery of verified reads,

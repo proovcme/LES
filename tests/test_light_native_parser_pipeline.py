@@ -285,6 +285,78 @@ def test_rejected_pdf_table_preserves_original_for_index_and_physical_reader(con
     assert hashlib.sha256(path.read_bytes()).hexdigest()==original_hash
 
 
+def test_known_auxiliary_timeout_keeps_all_pages_and_does_not_poison_page_reading(converter,tmp_path):
+    import re
+    table=grid(tmp_path/'Grid.pdf')
+    stream=re.search(rb'stream\r?\n(.*?)\r?\nendstream',table.read_bytes(),re.S).group(1)
+    path=write_pdf(tmp_path/'Complete original.pdf',[
+        b'BT /F1 12 Tf 30 220 Td (FIRST ORIGINAL PAGE MUST REMAIN AVAILABLE) Tj ET',stream])
+    sha=hashlib.sha256(path.read_bytes()).hexdigest()
+    parser_sha=hashlib.sha256(Path(os.environ['LES_TEST_NATIVE_DOCUMENT_PARSERS']).read_bytes()).hexdigest()
+    state={'code':'WORKER_TIMEOUT','source_sha256':sha,'parser_revision':parser_sha}
+    extracted=converter(path,pdf_table_projection_state=state)
+    assert extracted['status']=='completed',extracted
+    value=extracted['value']
+    assert 'FIRST ORIGINAL PAGE' in value['text'] and '17.25' in value['text']
+    assert value['metadata']['page_count']==2
+    assert value['metadata']['pdf_table_projection_warnings']==[
+        {'page':1,'code':'PDF_TABLE_LAYOUT_TIMEOUT'},{'page':2,'code':'PDF_TABLE_LAYOUT_TIMEOUT'}]
+    indexed=converter(path,pdf_table_projection_state=state,pipeline='nodes',
+                      data_dir=str(converter.state/'data'),dataset_id='ds',file_key=path.name,
+                      chunking={'unit':'chars','chunk_size':800,'chunk_overlap':80},minimum=1,final_minimum=1)
+    assert indexed['status']=='completed' and indexed['value']['nodes'],indexed
+    page_nodes=[n for n in indexed['value']['nodes'] if n['payload'].get('page') in {1,2}]
+    assert {n['payload']['page'] for n in page_nodes}=={1,2}
+    assert all(n['payload']['table_projection_warning']=='PDF_TABLE_LAYOUT_TIMEOUT' for n in page_nodes)
+    db=converter.state/'source.db'
+    with sqlite3.connect(db) as c:
+        c.execute('CREATE TABLE documents(id TEXT,dataset_id TEXT,file_name TEXT,source_path TEXT,file_hash TEXT)')
+        c.execute('INSERT INTO documents VALUES(?,?,?,?,?)',('source-id','ds',path.name,str(path),sha))
+    answer=converter(path,pdf=True,kind='source_page',database=str(db),snapshot=True,
+                     source={'doc_id':'source-id','page':2,'max_chars':12000})
+    assert answer['status']=='completed',answer
+    page=answer['value']
+    assert page['source_sha256']==sha and page['page']==2
+    assert page['table_projection_warning'] is None
+    assert '| Alpha item | pcs | 17.25 |' in page['text']
+    # A failure from another source must not suppress the real parser.
+    wrong=converter(path,pdf_table_projection_state={**state,'source_sha256':'0'*64})
+    assert wrong['status']=='completed' and wrong['value']['metadata']['pdf_table_projection_warnings']==[],wrong
+    assert hashlib.sha256(path.read_bytes()).hexdigest()==sha
+
+
+@pytest.mark.skipif(os.name!='nt',reason='Windows native OCR contract')
+def test_unrecognized_page_is_explicitly_partial_without_losing_readable_pdf(converter,tmp_path):
+    helper=tmp_path/'empty-ocr.ps1'
+    helper.write_text('param([string]$ImagePath)\n[Console]::Write(\'{"text":""}\')',encoding='utf8')
+    scratch=tmp_path/'ocr-scratch';scratch.mkdir()
+    ocr={'engine':'windows','helper':str(helper.resolve()),'scratch':str(scratch.resolve()),'dpi':150}
+    scan=b'0 0 0 rg 0 150 150 150 re f'
+    path=write_pdf(tmp_path/'Readable with unrecognized image.pdf',[
+        'READABLE ORIGINAL CHAPTER REMAINS AVAILABLE.',scan,'FINAL ORIGINAL PAGE AFTER UNREAD IMAGE.'])
+    sha=hashlib.sha256(path.read_bytes()).hexdigest()
+    result=converter(path,ocr_unavailable=False,ocr=ocr)
+    assert result['status']=='completed',result
+    value=result['value'];metadata=value['metadata']
+    assert 'READABLE ORIGINAL CHAPTER' in value['text'] and 'OCR_NO_TEXT' not in value['text']
+    assert 'FINAL ORIGINAL PAGE AFTER UNREAD IMAGE' in value['text']
+    assert metadata['pdf_ocr_warnings']==[{'page':2,'code':'OCR_NO_TEXT'}]
+    assert metadata['visual_content'] is True and metadata['visual_coverage']=='partial'
+    assert metadata['unread_visual_count']==1 and metadata['page_count']==3
+    indexed=converter(path,ocr_unavailable=False,ocr=ocr,pipeline='nodes',
+                      data_dir=str(converter.state/'data'),dataset_id='ds',file_key=path.name,
+                      chunking={'unit':'chars','chunk_size':800,'chunk_overlap':80},minimum=1,final_minimum=1)
+    assert indexed['status']=='completed' and indexed['value']['nodes'],indexed
+    assert {n['payload'].get('page') for n in indexed['value']['nodes']}=={1,3}
+    assert all(n['payload']['visual_coverage']=='partial' for n in indexed['value']['nodes'])
+    assert all('pdf_ocr_warnings' not in n['payload'] for n in indexed['value']['nodes'])
+    empty=write_pdf(tmp_path/'Only unreadable image.pdf',[scan])
+    rejected=converter(empty,ocr_unavailable=False,ocr=ocr)
+    assert rejected['status']=='failed' and rejected['code']=='OCR_NO_TEXT',rejected
+    assert 'nodes' not in rejected
+    assert hashlib.sha256(path.read_bytes()).hexdigest()==sha
+
+
 def test_excel_values_and_missing_formula_cache_still_use_existing_reader(converter,tmp_path):
     from openpyxl import Workbook
     import xml.etree.ElementTree as ET

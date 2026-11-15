@@ -80,6 +80,7 @@ fn payload(request: &Value, value: Map<String, Value>) -> Result<Value> {
                         key.as_str(),
                         "pdf_page_views"
                             | "pdf_table_projection_warnings"
+                            | "pdf_ocr_warnings"
                             | "docx_table_headers"
                             | "docling_structure"
                     )

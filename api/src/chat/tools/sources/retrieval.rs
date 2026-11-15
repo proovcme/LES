@@ -108,6 +108,10 @@ fn reading_units(points: &[Value]) -> Vec<Value> {
         .cloned()
         .collect()
 }
+fn visuals_complete(payload: &Value) -> bool {
+    payload["visual_coverage"] != "partial"
+        && payload["unread_visual_count"].as_u64().unwrap_or(0) == 0
+}
 fn query_text(settings: &Settings, query: &str) -> Result<String> {
     match settings.get("RAG_QUERY_EMBEDDING_MODE","raw-v1") {
         "raw-v1"=>Ok(query.into()),
@@ -703,6 +707,7 @@ async fn passages(
         json!({"event":"source_context_timing","sections_ms":sections_ms,"plan_ms":plan_ms,
         "word_ms":word_ms,"pdf_ms":pdf_ms,"packing_ms":packing_started.elapsed().as_millis()})
     );
+    let all_visuals_read = selected.iter().all(|p| visuals_complete(&p["payload"]));
     let selected_ids: std::collections::HashSet<_> =
         selected.iter().map(|p| p["id"].to_string()).collect();
     let mut output = Vec::new();
@@ -751,12 +756,15 @@ async fn passages(
                 "ocr_numbers_verified",
                 "view_sha256",
                 "extractor",
-                "table_projection_warning",
                 "offset",
                 "next_offset",
             ] {
                 source[field] = p["physical_pdf_read"][field].clone();
             }
+            source["table_projection_warning"] = crate::document_parser::read_projection_warning(
+                &p["table_projection_warning"],
+                &p["physical_pdf_read"],
+            );
         }
         if p["ocr"] == true
             && doc["file_name"]
@@ -866,10 +874,11 @@ async fn passages(
             let rows = document["points"].as_array().unwrap();
             // Only a fully selected document becomes an atomic context unit.
             // Selection adds all its points contiguously or none as a unit.
-            if document["read_plan_original_units"]
-                .as_u64()
-                .unwrap_or(rows.len() as u64)
-                == rows.len() as u64
+            if visuals_complete(p)
+                && document["read_plan_original_units"]
+                    .as_u64()
+                    .unwrap_or(rows.len() as u64)
+                    == rows.len() as u64
                 && rows
                     .iter()
                     .all(|r| selected_ids.contains(&r["id"].to_string()))
@@ -914,7 +923,7 @@ async fn passages(
             "read_receipt":{"schema":"les.indexed-read.v1","index_revision":revision,
                 "semantics":"verified_index_locators_and_reading_views",
                 "point_ids":sources.iter().map(|s|s["qdrant_point_id"].clone()).collect::<Vec<_>>()},
-            "coverage":if included==total && hydrated["read_failures"].as_array().is_none_or(Vec::is_empty) && hydrated["read_plan"]["omitted_original_anchors"].as_u64().unwrap_or(0)==0{"complete"}else{"bounded"},
+            "coverage":if included==total && all_visuals_read && hydrated["read_failures"].as_array().is_none_or(Vec::is_empty) && hydrated["read_plan"]["omitted_original_anchors"].as_u64().unwrap_or(0)==0{"complete"}else{"bounded"},
             "complete_corpus":false,"coverage_scope":"selected_retrieval_candidates","read_plan":hydrated["read_plan"],
             "read_failures":hydrated["read_failures"].as_array().cloned().unwrap_or_default(),
             "total_fragments":total,"included_fragments":included}),

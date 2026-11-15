@@ -418,8 +418,8 @@ impl Evidence {
         if source["retrieval_incomplete"] == true {
             note.push_str("Часть найденных оригиналов не дочитана из-за ошибки. Обзор неполный: отвечай только по прочитанному, не утверждай, что в непрочитанных файлах нет ответа.\n");
         }
-        if source["table_projection_warning"].is_string() {
-            note.push_str(crate::document_parser::TABLE_PROJECTION_NOTICE);
+        if let Some(code) = source["table_projection_warning"].as_str() {
+            note.push_str(crate::document_parser::projection_notice(code));
             note.push('\n');
         }
         if source["visual_content"] == true {

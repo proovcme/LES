@@ -128,6 +128,28 @@ def test_intake_retries_only_due_failures_in_its_own_manifest(tmp_path):
         assert db.execute("SELECT count(*) FROM documents WHERE status='ERROR'").fetchone()==(4,)
 
 
+@pytest.mark.parametrize('parse',[False,True])
+def test_explicit_folder_index_retries_exhausted_errors_without_reindexing_ready_files(tmp_path,parse):
+    if not os.getenv('LES_CORE_LIBRARY'):pytest.skip('Build native core')
+    database=tmp_path/'meta.db';MetaDB(str(database))
+    with sqlite3.connect(database) as db:
+        db.execute("INSERT INTO datasets(id,name) VALUES('ds','Explicit retry')")
+        for ident,name,status in [('failed','failed.txt','ERROR'),('ready','ready.txt','INDEXED'),('outside','outside.txt','ERROR')]:
+            db.execute("INSERT INTO documents(id,dataset_id,file_name,status,source_path,file_size,file_mtime,file_hash,chunk_count,parse_attempts,error_code,last_error) VALUES(?,'ds',?,?,?,?,1,?,7,4,'WORKER_TIMEOUT','Original failure')",
+                       (ident,name,status,name,10,'a'*64))
+    job=catalog_call(database,'intake_enqueue',root='source',dataset_id='ds',parse_limit=1 if parse else 0)['id']
+    catalog_call(database,'intake_claim')
+    files=[{'file_name':name,'source_path':name} for name in ['failed.txt','ready.txt']]
+    catalog_call(database,'intake_manifest',id=job,root='source',files=files)
+    batch=catalog_call(database,'intake_batch',id=job)
+    catalog_call(database,'intake_register',id=job,files=[{**f,'file_size':10,'file_mtime':1.,'sha256':'a'*64} for f in batch])
+    with sqlite3.connect(database) as db:
+        assert db.execute("SELECT status,parse_attempts,last_error FROM documents WHERE id='failed'").fetchone()==(
+            ('PENDING',0,'') if parse else ('ERROR',4,'Original failure'))
+        assert db.execute("SELECT status,parse_attempts,chunk_count,file_hash FROM documents WHERE id='ready'").fetchone()==('INDEXED',4,7,'a'*64)
+        assert db.execute("SELECT status,parse_attempts,last_error FROM documents WHERE id='outside'").fetchone()==('ERROR',4,'Original failure')
+
+
 def test_manual_attach_keeps_the_receipt_of_an_existing_automatic_watch_job(tmp_path):
     if not os.getenv('LES_CORE_LIBRARY'):pytest.skip('Build native core')
     database=tmp_path/'meta.db';MetaDB(str(database))
