@@ -1,6 +1,6 @@
 //! Overview discovery uses the storage engines' document groups before top-k.
 //! Dataset-local requests avoid conflating equal file names in different scopes.
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 type Result<T> = std::result::Result<T, &'static str>;
 
 pub fn dense_requests(query: &Value, datasets: &Value) -> Result<Vec<Value>> {

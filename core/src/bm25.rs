@@ -1,12 +1,12 @@
 //! Transactional postings owner. No source documents, models or journal publication here.
-use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
-use serde_json::{Value, json};
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
+use serde_json::{json, Value};
 use std::{
     collections::HashMap,
     path::Path,
     sync::{
-        Mutex, OnceLock,
         atomic::{AtomicU64, Ordering},
+        Mutex, OnceLock,
     },
 };
 

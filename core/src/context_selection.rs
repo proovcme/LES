@@ -1,6 +1,6 @@
 //! Query-aware, whole-unit context admission. Retrieval scores and the index are immutable.
 //! Exact content duplicates share text, never identity or revision authority.
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 mod discovery;
 pub use discovery::catalog;
@@ -515,13 +515,11 @@ mod tests {
             "max_chars":1000000,"text_budget":text_budget}),
         )
         .unwrap();
-        assert!(
-            result["units"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|u| u["unit_id"] == "row")
-        );
+        assert!(result["units"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|u| u["unit_id"] == "row"));
         assert!(result["selection"]["used_text_chars"].as_u64().unwrap() <= text_budget as u64);
     }
     #[test]
@@ -550,13 +548,11 @@ mod tests {
             "max_chars":8000,"max_items":8,"identity_reserve_chars":1024}),
         )
         .unwrap();
-        assert!(
-            result["units"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|u| u["unit_id"] == "complete")
-        );
+        assert!(result["units"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|u| u["unit_id"] == "complete"));
         assert!(result["selection"]["used_chars"].as_u64().unwrap() <= 8000);
     }
     #[test]
@@ -609,13 +605,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(r["units"].as_array().unwrap().len(), 2);
-        assert!(
-            r["units"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .all(|u| u["equivalent_sources"].as_array().unwrap().is_empty())
-        );
+        assert!(r["units"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|u| u["equivalent_sources"].as_array().unwrap().is_empty()));
         let final_read =
             select(&json!({"question":"Pump pressure rating","units":[a,b],"max_chars":4000}))
                 .unwrap();
@@ -647,10 +641,9 @@ mod tests {
             "max_chars":10000,"max_sources":2}))
         .unwrap();
         let rows = result["units"].as_array().unwrap();
-        assert!(
-            rows.iter()
-                .any(|u| u["unit_id"] == "late" && u["rank"] == 60)
-        );
+        assert!(rows
+            .iter()
+            .any(|u| u["unit_id"] == "late" && u["rank"] == 60));
         assert!(
             rows.iter()
                 .map(|u| u["source"].to_string())
@@ -714,13 +707,11 @@ mod tests {
             r["units"][0]["equivalent_sources"][0]["source"]["doc_id"],
             "b"
         );
-        assert!(
-            r["units"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|u| u["unit_id"] == "c")
-        );
+        assert!(r["units"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|u| u["unit_id"] == "c"));
     }
     #[test]
     fn lower_ranked_complementary_evidence_survives_repeated_boilerplate() {
@@ -739,13 +730,11 @@ mod tests {
             30,
         ));
         let r = select(&json!({"question":"Pump pressure rating and flow capacity", "units":units,"max_chars":650})).unwrap();
-        assert!(
-            r["units"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|u| u["unit_id"] == "rating")
-        );
+        assert!(r["units"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|u| u["unit_id"] == "rating"));
         assert!(r["selection"]["used_chars"].as_u64().unwrap() <= 650);
     }
     #[test]
@@ -768,13 +757,11 @@ mod tests {
             &json!({"question":"Pump pressure and flow", "units":[page,row],"max_chars":budget}),
         )
         .unwrap();
-        assert!(
-            r["units"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|u| u["unit_id"] == "row")
-        );
+        assert!(r["units"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|u| u["unit_id"] == "row"));
         assert!(r["selection"]["used_chars"].as_u64().unwrap() <= budget as u64);
     }
     #[test]
