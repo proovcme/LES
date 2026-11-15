@@ -101,6 +101,9 @@ pub(super) fn fit_compact_context(reply: &mut Value) -> Result<()> {
 }
 
 pub(super) fn fit_overview_context(reply: &mut Value, text_budget: usize) -> Result<()> {
+    if super::ready::requested()? {
+        return fit_ready_overview(reply, text_budget);
+    }
     reply["result"]["context_policy"] = json!("document-coverage-v1");
     let documents = |value: &Value| {
         value["sources"]
@@ -123,6 +126,63 @@ pub(super) fn fit_overview_context(reply: &mut Value, text_budget: usize) -> Res
     reply["result"]["overview"]["omitted_primary_documents"] =
         json!(readable.saturating_sub(delivered));
     Ok(())
+}
+
+fn fit_ready_overview(reply: &mut Value, text_budget: usize) -> Result<()> {
+    let readable = super::ready::document_count(reply);
+    super::ready::prepare(reply)?;
+    if let Some(overview) = reply["result"]["overview"].as_object_mut() {
+        for key in [
+            "readable_primary_documents",
+            "delivered_primary_documents",
+            "omitted_primary_documents",
+        ] {
+            overview.remove(key);
+        }
+    }
+    reply["result"]["overview"]["schema"] = json!("les.overview-coverage.v3");
+    reply["result"]["overview"]["coverage_unit"] = json!("independently_pinned_document_origins");
+    reply["result"]["overview"]["readable_documents"] = json!(readable);
+    reply["result"]["overview"]["delivered_documents"] = json!(readable);
+    reply["result"]["overview"]["omitted_documents"] = json!(readable);
+    // Sole admission uses the actual compact serialization of the ready bodies
+    // and all their origins, never the old indexed/physical completeness flag.
+    fit_budget(reply, 22500, 240, Some(text_budget), true)?;
+    let delivered = super::ready::document_count(reply);
+    reply["result"]["overview"]["delivered_documents"] = json!(delivered);
+    reply["result"]["overview"]["omitted_documents"] = json!(readable.saturating_sub(delivered));
+    Ok(())
+}
+
+#[cfg(test)]
+#[test]
+fn one_ready_body_leaves_room_for_a_later_independent_source() {
+    use super::ready::tests::{origin, reply};
+    let repeated = "A".repeat(5000);
+    let independent = "B".repeat(3000);
+    let input = reply(vec![
+        (repeated.as_str(), origin("a", 'a', 7)),
+        (repeated.as_str(), origin("b", 'b', 1)),
+        (independent.as_str(), origin("c", 'c', 2)),
+    ]);
+    let mut baseline = input.clone();
+    fit_budget(&mut baseline, 22500, 240, Some(12000), true).unwrap();
+    assert!(!baseline["sources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|s| s["doc_id"] == "c"));
+    let mut candidate = input;
+    fit_ready_overview(&mut candidate, 12000).unwrap();
+    assert!(candidate["sources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|s| s["doc_id"] == "c"));
+    assert_eq!(candidate["result"]["overview"]["delivered_documents"], 3);
+    assert_eq!(candidate["result"]["overview"]["omitted_documents"], 0);
+    assert!(canonical_chars(&super::super::packet::encode(&candidate).unwrap()) <= 22500);
+    assert_eq!(candidate["result"]["passages"].as_array().unwrap().len(), 2);
 }
 
 /// A context snapshot has no continuation cursor. Its only admission pass

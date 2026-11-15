@@ -6,10 +6,11 @@ from tests.test_light_native_api import wait_for
 
 
 @pytest.fixture(autouse=True)
-def overview_copy(monkeypatch):
+def overview_copy(monkeypatch,request):
     monkeypatch.setenv('LES_EXPERIMENT_EVIDENCE_PACKET','compact-v1')
     monkeypatch.setenv('LES_EXPERIMENT_OVERVIEW','documents-v2')
     monkeypatch.setenv('LES_EXPERIMENT_SAVED_READING','canonical-v1')
+    monkeypatch.setenv('LES_EXPERIMENT_OVERVIEW_ADMISSION',getattr(request,'param','baseline-v1'))
 
 
 @pytest.mark.parametrize('native_turn',['rag-small'],indirect=True)
@@ -51,3 +52,46 @@ def test_overview_public_tool_keeps_same_filename_in_two_datasets_and_original_l
             rejected=t.client.post('/api/rag/sources/call',json={'tool':'search_sources','args':args})
             assert rejected.status_code==422 and rejected.json()['code']=='SOURCE_SNAPSHOT_OFFSET_INVALID'
             assert 'read_source' in rejected.json()['message']
+
+
+@pytest.mark.parametrize('overview_copy',['ready-v1'],indirect=True)
+@pytest.mark.parametrize('native_turn',['rag-small'],indirect=True)
+def test_ready_overview_shares_pdf_text_but_revalidates_every_original(native_turn,tmp_path):
+    from contextlib import closing
+    from qdrant_client import QdrantClient,models
+    from tests.pdf_fixtures import write_pdf
+    t=native_turn;folder=tmp_path/'documents';folder.mkdir()
+    for name in ['a.pdf','b.pdf']:
+        write_pdf(folder/name,['Equipment overview Pump A capacity 17.25 kW.'])
+    dataset=t.client.post('/api/rag/datasets',json={'name':'Ready evidence sources'}).raise_for_status().json()['id']
+    job=t.client.post('/api/rag/index-external',json={'path':str(folder),'dataset_id':dataset,'background':True}).raise_for_status().json()['intake_job_id']
+    wait_for(lambda:t.client.get('/api/light/intake',params={'id':job}).json().get('status')=='completed',timeout=60)
+    docs=t.client.get('/api/rag/documents',params={'dataset_id':dataset}).raise_for_status().json()['documents']
+    first=next(d for d in docs if d['file_name'].endswith('a.pdf'))
+    raw=t.client.post('/api/rag/sources/call',json={'tool':'read_pdf_source','args':{
+        'doc_id':first['id'],'source_sha256':hashlib.sha256((folder/'a.pdf').read_bytes()).hexdigest(),'page':1,'max_chars':12000}}).raise_for_status().json()['result']['text']
+    with closing(QdrantClient(url=t.env['LES_LIGHT_QDRANT_URL'],api_key=t.env['LES_LIGHT_QDRANT_API_KEY'],check_compatibility=False)) as client:
+        collection=client.get_collections().collections[0].name
+        scope=models.Filter(must=[models.FieldCondition(key='dataset_id',match=models.MatchValue(value=dataset))])
+        # Both fixture representations contain text read from the actual PDF.
+        # Only one requests physical hydration, reproducing mixed old/new views.
+        client.set_payload(collection,payload={'text':raw},points=scope,wait=True)
+        client.delete_payload(collection,keys=['pdf_page_view','pdf_page_view_schema','pdf_page_view_sha256'],points=scope,wait=True)
+        client.set_payload(collection,payload={'table_projection_warning':'PDF_TABLE_SOURCE_MISMATCH'},points=models.Filter(must=scope.must+[
+            models.FieldCondition(key='file_name',match=models.MatchValue(value=first['file_name']))]),wait=True)
+    args={'q':'Equipment Pump capacity overview','dataset_ids':[dataset],'view':'overview','max_chars':12000}
+    answer=t.client.post('/api/rag/sources/call',json={'tool':'search_sources','args':args}).raise_for_status().json()
+    assert answer['result']['ready_evidence']['shared_bodies']>=1
+    assert len(answer['result']['passages'])==1
+    assert answer['result']['overview']['delivered_documents']==2
+    source=answer['sources'][0];origins=[source]+source['equivalent_sources']
+    assert {s['doc_id'] for s in origins}=={d['id'] for d in docs}
+    for s in origins:
+        data=t.client.get(s['url'].split('#')[0]).raise_for_status().content
+        assert hashlib.sha256(data).hexdigest()==s['source_sha256']
+    assert not t.seen
+    write_pdf(folder/'b.pdf',['Changed original capacity 117.25 kW.'])
+    changed=t.client.post('/api/rag/sources/call',json={'tool':'search_sources','args':args})
+    assert changed.status_code==409
+    assert changed.json()['code'] in ('SOURCE_REVISION_CHANGED','PDF_REVISION_CHANGED')
+    assert not t.seen

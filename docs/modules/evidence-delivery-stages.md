@@ -314,3 +314,25 @@ its corruption rejection also ran. Full suite/mail time was 1,136.77 seconds;
 minimum available RAM was 8.51 GiB and free disk stayed above 39.05 GiB.
 All copy APIs were stopped after comparison. This is source/copy acceptance,
 not an installed update or independent answer-quality result.
+
+## Ready overview admission 891 (pending)
+
+Explicit copy flag `LES_EXPERIMENT_OVERVIEW_ADMISSION=ready-v1`, off by default.
+The control uses `baseline-v1`. Discovery stays `documents-v2`, with the same
+index, BGE, original readers, ordering and output allowances in both arms.
+
+Ready evidence has typed bodies and independently pinned origins. Only exactly
+equal text/canonical content and equal semantic heading/sheet/warning context
+share a body. Physical and indexed representation labels no longer manufacture
+different body keys. Different occurrences within one document remain separate;
+formulas, numerical changes and unknown semantic metadata remain significant.
+All source identities, URLs, physical cursors and extraction claims are preserved
+per origin. Sharing text never declares a shared edition or physical object.
+
+The existing sole overview admission measures the complete compact response,
+including all retained origins, under unchanged limits. Coverage v3 counts
+document origins rather than mistaking a shared body for a missing document.
+Every delivered prepared origin is checked against its original bytes before
+API/MCP return and again after chat generation. Ordinary precision selection,
+explicit source-stream cursors and working LES remain unchanged. This isolates
+ready packaging on the existing development cohort, not the whole V0–V4 matrix.

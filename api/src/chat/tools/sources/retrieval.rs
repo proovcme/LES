@@ -7,6 +7,7 @@ mod matching;
 mod packing;
 mod pagination;
 mod physical;
+mod ready;
 mod trial;
 mod views;
 fn original_reader(name: &str) -> &'static str {
@@ -392,6 +393,9 @@ async fn search_with_navigation(
                     "discovery":"native-document-rrf","fusion_unit":"document","per_channel_document_limit":2,
                     "complete_corpus":false,"scope_datasets":datasets.len()});
                 envelope::fit_overview_context(&mut reply,max_chars)?;
+                if reply["result"]["ready_evidence"]["schema"]=="les.ready-evidence.v1" {
+                    super::verification::physical(context.clone(), &reply["sources"]).await?;
+                }
             } else if compact {
                 envelope::fit_compact_context(&mut reply)?;
             } else if control==trial::Control::RrfWire {

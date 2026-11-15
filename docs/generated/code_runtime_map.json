@@ -10435,6 +10435,7 @@
         "tests/test_light_native_intake.py",
         "tests/test_light_native_intake_execution.py",
         "tests/test_light_native_numeric_evidence.py",
+        "tests/test_light_native_overview.py",
         "tests/test_light_native_parser_pipeline.py",
         "tests/test_light_native_pdf_layout.py",
         "tests/test_light_native_preparation.py",
@@ -12159,9 +12160,10 @@
     },
     {
       "inbound": [],
-      "lines": 53,
+      "lines": 97,
       "module": "tests.test_light_native_overview",
       "outbound": [
+        "tests/pdf_fixtures.py",
         "tests/test_light_native_api.py",
         "tests/test_light_native_chat_turn.py"
       ],
@@ -16225,7 +16227,7 @@
     "runtime_support": 5,
     "test_or_tool_only": 285,
     "tracked_python_files": 730,
-    "tracked_python_lines": 174119
+    "tracked_python_lines": 174163
   },
   "warnings": []
 }
