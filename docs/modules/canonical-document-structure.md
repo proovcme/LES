@@ -43,11 +43,25 @@ field. The reading view is bound to its structure and budget; indexed typed
 views also carry a checksum of the complete unit, including cells.
 
 Chat and MCP share the same retrieval service. Before original reading there
-is only a fused-rank I/O limit of 32 anchors, without query-dependent semantic
-selection or an answer-text budget. Deduplication and semantic admission occur
+is only a fused-rank I/O limit of 32 physical read scopes, without query-dependent
+semantic selection or an answer-text budget. Bounded hydrated parent/document
+continuations remain available and receive no invented retrieval rank. Original
+document extent is retained so a clipped plan cannot claim full-document coverage.
+Deduplication and semantic admission occur
 once after reading, under the final context limit. Typed cells and paragraphs
 provide model addresses and numeric receipts directly; Markdown is presentation.
 Literal operators, pipes and brackets are escaped only for display.
+
+Paragraph addresses remain selectable when a neighboring reading unit contains
+the table. Address availability does not itself turn a prose task into arithmetic.
+The existing single answer-window retry checks delivery of verified reads,
+including partial documents. It does not depend on claiming whole-document
+coverage and does not reopen tools or waive the final context budget.
+Typed table arrays use a registered nested-item allowance of 8,192 while retaining
+the independent 24,000-character tool-result ceiling. The wire reader retains
+its tighter character limit and admits whole units; legacy flat-text envelopes
+keep their earlier item bound. Chat uses the registered budgets directly rather
+than overriding them privately.
 
 Memory guards bound the tree projection, recursion, grid dimensions and
 replicated span text. Document-wide structure is excluded before cloning

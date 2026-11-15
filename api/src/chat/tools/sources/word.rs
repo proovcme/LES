@@ -106,6 +106,7 @@ pub(super) async fn hydrate(
                         && a["file_name"] == doc["file_name"]
                         && a["source_sha256"] == doc["file_hash"]
                         && a["word_reading_schema"] == "les.document-reading.v1"
+                        && a["retrieval_expansion"] != true
                         && a["source_unit_id"] == unit["ordinal"]
                         && a["word_reading_sha256"].as_str() == Some(reading_hash.as_str())
                 })

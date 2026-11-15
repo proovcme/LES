@@ -18,6 +18,9 @@ pub fn table_headers(text: &str) -> Vec<(u64, Vec<String>)> {
 pub fn prose_spans(text: &str, body_offset: usize) -> Vec<(u64, String)> {
     prose::spans(text, body_offset)
 }
+pub fn prose_addresses(text: &str, body_offset: usize) -> Vec<(u64, String)> {
+    prose::addresses(text, body_offset)
+}
 pub fn literal_markdown(text: &str) -> String {
     crate::document::canonical::escape(text)
 }
@@ -101,7 +104,7 @@ fn evidence_text(value: &Value, text: &str) -> String {
     }
     let spans = value["body_offset"]
         .as_u64()
-        .map(|offset| prose_spans(original, offset as usize))
+        .map(|offset| prose_addresses(original, offset as usize))
         .unwrap_or_default();
     let rendered = tabular::render_with_prose(text, index, &spans);
     let body = value["body_offset"]

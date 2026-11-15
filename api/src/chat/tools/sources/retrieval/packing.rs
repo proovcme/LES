@@ -209,27 +209,66 @@ pub(super) fn read_plan(
         .map(|(i, p)| (fused_rank(p, i), p))
         .collect::<Vec<_>>();
     ranked.sort_by_key(|(rank, _)| *rank);
-    let mut seen = HashSet::new();
-    let planned = ranked
+    let mut pool = ranked
         .into_iter()
-        .filter(|(_, p)| seen.insert(key(p)))
-        .take(32)
         .map(|(rank, p)| {
             let mut p = p.clone();
             p["payload"]["retrieval_rank"] = serde_json::json!(rank);
             p
         })
         .collect::<Vec<_>>();
+    let original_ids: HashSet<_> = seeds.iter().map(key).collect();
+    for group in ["sections", "documents"] {
+        for section in hydrated[group].as_array().into_iter().flatten() {
+            for point in section["points"].as_array().into_iter().flatten() {
+                if !original_ids.contains(&key(point)) {
+                    let mut point = point.clone();
+                    point["payload"]["retrieval_expansion"] = serde_json::json!(true);
+                    point["payload"]["retrieval_rank"] = Value::Null;
+                    pool.push(point);
+                }
+            }
+        }
+    }
+    // Bound physical reads, not arbitrary index point IDs. A page may have
+    // several hits; a bounded hydrated document includes continuation pages
+    // that did not independently win a retrieval vote.
+    let scope = |point: &Value| {
+        let p = &point["payload"];
+        serde_json::json!([
+            p["dataset_id"],
+            p["file_name"],
+            p["source_sha256"],
+            p["page"]
+        ])
+        .to_string()
+    };
+    let mut scopes = HashSet::new();
+    let mut seen = HashSet::new();
+    let planned = pool
+        .into_iter()
+        .filter(|p| {
+            if !seen.insert(key(p)) {
+                return false;
+            }
+            let address = scope(p);
+            if scopes.contains(&address) {
+                return true;
+            }
+            scopes.len() < 32 && scopes.insert(address)
+        })
+        .collect::<Vec<_>>();
     let rows: std::collections::HashMap<_, _> =
         planned.iter().map(|p| (key(p), p.clone())).collect();
-    let original_ids: HashSet<_> = seeds.iter().map(key).collect();
     let planned_originals = original_ids
         .iter()
         .filter(|id| rows.contains_key(*id))
         .count();
-    hydrated["read_plan"] = serde_json::json!({"input_anchors":original_ids.len(),"planned_units":planned.len(),"omitted_original_anchors":original_ids.len()-planned_originals,"max_units":32,"context_budget_applied_after_original_read":true});
+    hydrated["read_plan"] = serde_json::json!({"input_anchors":original_ids.len(),"planned_units":planned.len(),"planned_read_scopes":scopes.len(),"omitted_original_anchors":original_ids.len()-planned_originals,"max_read_scopes":32,"context_budget_applied_after_original_read":true});
     for group in ["sections", "documents"] {
         for section in hydrated[group].as_array_mut().into_iter().flatten() {
+            section["read_plan_original_units"] =
+                serde_json::json!(section["points"].as_array().map_or(0, Vec::len));
             if let Some(points) = section["points"].as_array_mut() {
                 *points = points
                     .iter()
@@ -301,6 +340,37 @@ fn select_query_inner(
 mod tests {
     use super::*;
     #[test]
+    fn document_continuations_survive_read_planning_without_retriever_votes() {
+        let mut rows = (0..40)
+            .map(|n| {
+                let mut p = point(&format!("p{n}"), "document.pdf", "body", n);
+                p["payload"]["page"] = serde_json::json!(n + 1);
+                p
+            })
+            .collect::<Vec<_>>();
+        let seed = rows[0].clone();
+        // Several points on one physical page must consume just one read.
+        let mut caption = rows[1].clone();
+        caption["id"] = serde_json::json!("caption");
+        rows.insert(2, caption);
+        let (plan, hydrated) = read_plan(
+            &[seed.clone()],
+            serde_json::json!({"documents":[{"points":rows}],"sections":[]}),
+            1,
+            Some(1),
+            "",
+        )
+        .unwrap();
+        assert_eq!(plan.len(), 33);
+        assert_eq!(hydrated["read_plan"]["planned_read_scopes"], 32);
+        assert_eq!(hydrated["documents"][0]["read_plan_original_units"], 41);
+        assert_eq!(plan[0]["id"], seed["id"]);
+        assert!(plan[1..]
+            .iter()
+            .all(|p| p["payload"]["retrieval_expansion"] == true
+                && p["payload"]["retrieval_rank"].is_null()));
+    }
+    #[test]
     fn read_plan_is_query_independent_and_does_not_spend_the_answer_budget() {
         let mut a = point("a", "a.pdf", &"x".repeat(1_100_000), 0);
         a["payload"]["retrieval_rank"] = json!(2);
@@ -341,8 +411,10 @@ mod tests {
             "",
         )
         .unwrap();
-        assert_eq!(plan.len(), 1);
+        assert_eq!(plan.len(), 2);
         assert_eq!(plan[0]["id"], seed["id"]);
+        assert_eq!(plan[1]["payload"]["retrieval_expansion"], true);
+        assert!(plan[1]["payload"]["retrieval_rank"].is_null());
     }
     #[test]
     fn retaining_a_channel_head_does_not_reset_its_actual_fusion_rank() {

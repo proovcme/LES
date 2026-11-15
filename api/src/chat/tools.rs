@@ -93,21 +93,6 @@ impl Tools {
                     && (!remote || ["search_sources","read_source","read_pdf_source","read_excel_source"].iter().any(|n|t["name"]==*n))).cloned().collect();
             for contract in &mut contracts {
                 if contract["name"]=="search_sources"{contract["timeout_seconds"]=json!(150);}
-                if [
-                    "search_sources",
-                    "read_source",
-                    "read_excel_source",
-                    "dataset_map",
-                ]
-                .iter()
-                .any(|n| contract["name"] == *n)
-                {
-                    // The executor counts every nested array item, including
-                    // repeated citation identities, receipt IDs and discovery
-                    // cards. This is not the number of factual passages (32,
-                    // enforced by the reader). Keep the independent char cap.
-                    contract["result_budget"]=json!({"max_chars":24000,"max_items":256});
-                }
             }
             if registered && !remote {
                 let mut tool=super::unwrap(les_core::agent_files::execute(&json!({"schema":"les.agent-files.v1","action":"tool_contract","database":database,"state_root":"/","arguments":{}})))?;

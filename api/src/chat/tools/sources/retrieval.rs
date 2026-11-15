@@ -862,9 +862,13 @@ async fn passages(
             let rows = document["points"].as_array().unwrap();
             // Only a fully selected document becomes an atomic context unit.
             // Selection adds all its points contiguously or none as a unit.
-            if rows
-                .iter()
-                .all(|r| selected_ids.contains(&r["id"].to_string()))
+            if document["read_plan_original_units"]
+                .as_u64()
+                .unwrap_or(rows.len() as u64)
+                == rows.len() as u64
+                && rows
+                    .iter()
+                    .all(|r| selected_ids.contains(&r["id"].to_string()))
             {
                 source["context_unit"] = json!(format!(
                     "document:{}:{}",

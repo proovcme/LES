@@ -649,7 +649,7 @@ pub async fn run(
                         c["table_selection"] == true
                             && c["schema_reserved_tokens"].as_u64().is_some_and(|n| n > 1)
                     })
-                    && evidence.document_omitted(&visible)
+                    && evidence.read_omitted(&visible)
                 {
                     // Preparing the answer window is distinct from repairing
                     // a selection made in that window. Neither reopens tools.

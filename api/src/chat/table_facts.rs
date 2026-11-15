@@ -177,7 +177,8 @@ impl Rows {
             }
             let text = value["text"].as_str().unwrap_or("");
             if let Some(offset) = value["body_offset"].as_u64() {
-                for (line, paragraph) in les_core::chat_context::prose_spans(text, offset as usize)
+                for (line, paragraph) in
+                    les_core::chat_context::prose_addresses(text, offset as usize)
                 {
                     out.paragraphs
                         .insert((index, line), (vec![paragraph], source.clone()));

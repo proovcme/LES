@@ -59,3 +59,18 @@ typed-unit sanitation, canonical heading IDs and nonduplicated tool history.
 The full behavioral suite, frozen MCP comparison and new complete index
 acceptance remain pending. The initial head's CI failed on an incomplete test
 fixture initializer; that initializer is corrected in the follow-up.
+
+The subsequent complete behavioral run found eight failures (2,195 passed,
+19 skipped). They block merge. Three causes are being corrected: prose addresses
+depended on a table being in the same fragment; read planning discarded hydrated
+continuations and could shrink the reported document extent; typed cell arrays
+exceeded the old flat-text item allowance. The corrected candidate must repeat
+these real API/cursor regressions and the full suite before corpus acceptance.
+
+The first targeted repeat passed the mixed-prose selection and 500-row Word
+cursor scenarios. Six answer-window variants still failed: the retry incorrectly
+required a whole-document completeness marker rather than checking omitted
+verified reads. That delivery check is now separated from completeness claims;
+the targeted repeat now passes all eight previously failing scenarios (39.4 s).
+Core tests passed 168, API with Edge passed 114. The full behavioral repeat and
+frozen corpus metrics are still pending; this is not a retrieval-quality claim.

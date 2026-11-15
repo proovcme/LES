@@ -157,11 +157,24 @@ mod tests {
             json!({"tool":"search_sources","status":"ok","result":{"passages":passages}});
         let mut evidence = Evidence::new(true);
         evidence.add(&result);
-        assert!(!evidence.document_omitted(&json!([])));
+        assert!(!evidence.read_omitted(&json!([])));
         result["tool"] = json!("read_source");
         evidence.add(&result);
-        assert!(evidence.document_omitted(&json!([{"index":1}])));
-        assert!(!evidence.document_omitted(&json!([{"index":1},{"index":2}])));
+        assert!(evidence.read_omitted(&json!([{"index":1}])));
+        assert!(!evidence.read_omitted(&json!([{"index":1},{"index":2}])));
+    }
+    #[test]
+    fn verified_partial_read_can_use_a_larger_window_without_claiming_a_whole_document() {
+        let mut evidence = Evidence::new(true);
+        evidence.add(
+            &json!({"tool":"read_source","status":"ok","result":{"passages":[
+                {"text":"First bounded proof","source":{"doc_id":"doc","page":1}},
+                {"text":"Continuation proof","source":{"doc_id":"doc","page":2}}
+            ]}}),
+        );
+        assert!(evidence.sources.iter().all(|s| s["context_unit"].is_null()));
+        assert!(evidence.read_omitted(&json!([{"index":1}])));
+        assert!(!evidence.read_omitted(&json!([{"index":1},{"index":2}])));
     }
     #[test]
     fn catalog_metadata_stays_bounded_after_a_source_has_already_been_read() {
@@ -344,15 +357,15 @@ impl Evidence {
     pub(super) fn retry_used(&self) -> bool {
         self.retried
     }
-    pub(super) fn document_omitted(&self, visible: &Value) -> bool {
+    pub(super) fn read_omitted(&self, visible: &Value) -> bool {
         self.sources.iter().any(|source| {
-            source["context_unit"].is_string()
-                && source["document_fragment_count"]
-                    .as_u64()
-                    .is_some_and(|n| n > 1)
-                && source["index"]
-                    .as_u64()
-                    .is_some_and(|i| self.verified_reads.contains(&i))
+            // Delivery is independent of the full-document coverage claim.
+            // A partial but verified read can also be omitted while tool
+            // schemas reserve space, and must remain eligible for the one
+            // existing answer-window retry.
+            source["index"]
+                .as_u64()
+                .is_some_and(|i| self.verified_reads.contains(&i))
                 && !visible
                     .as_array()
                     .into_iter()

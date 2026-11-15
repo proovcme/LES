@@ -93,6 +93,21 @@ pub(crate) fn fit_envelope_budget(
     max_chars: usize,
     max_items: usize,
 ) -> Result<()> {
+    // A canonical table carries nested cell arrays, unlike a flat Markdown
+    // string. Keep the byte/character bound and atomic reading units; apply
+    // the registered cell-item allowance only to that typed representation.
+    let max_items = if reply["result"]["passages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(|p| {
+            p["canonical"]["schema"] == "les.document-structure.v1"
+                && p["canonical"]["kind"] == "table"
+        }) {
+        8192
+    } else {
+        max_items
+    };
     let orig_passages = reply["result"]["passages"]
         .as_array()
         .cloned()
@@ -259,6 +274,20 @@ fn compact_aliases(source: &mut Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn typed_table_cell_arrays_fit_the_registered_wire_contract_atomically() {
+        let rows = (0..100)
+            .map(|n| json!([format!("Item {n}"), "17.25", "kg"]))
+            .collect::<Vec<_>>();
+        let mut reply = json!({"sources":[{}],"result":{"passages":[{"source":{},"text":"table view", "canonical":{
+            "schema":"les.document-structure.v1","kind":"table","header":["Item","Qty","Unit"],"rows":rows}}]}});
+        assert!(json_item_count(&reply) > 230);
+        let original = reply["result"]["passages"][0].clone();
+        fit_envelope_budget(&mut reply, 22000, 230).unwrap();
+        assert_eq!(reply["result"]["passages"][0], original);
+        assert!(canonical_chars(&reply) <= 22000 && json_item_count(&reply) <= 8192);
+        assert!(fit_envelope_budget(&mut reply, 100, 230).is_err());
+    }
     #[test]
     fn diagnostics_and_duplicate_aliases_never_evict_primary_source_body() {
         let source = json!({"doc_id":"primary","source_sha256":"a".repeat(64),
