@@ -163,11 +163,11 @@ pub fn fuse_documents(
     let mut remaining = if covered { limit - reserved } else { limit };
     let mut result = Vec::new();
     for (rank, doc, units, leader) in bundles {
-        if covered && leader {
-        } else if units.len() <= remaining {
+        if !(covered && leader) {
+            if units.len() > remaining {
+                continue;
+            }
             remaining -= units.len();
-        } else {
-            continue;
         }
         for mut point in units {
             let unit_provenance = point["retrieval_fusion"].clone();
