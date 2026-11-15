@@ -472,7 +472,7 @@ fn compact_aliases(source: &mut Value) {
 // These are optional aliases for values that remain directly available. A
 // locator carrying any additional geometry/identity is never folded away.
 // Strong IDs, revision hashes, cursors, canonical cells and warnings remain.
-fn compact_repeated_identity(source: &mut Value) {
+pub(super) fn compact_repeated_identity(source: &mut Value) {
     let compatible_page =
         source["source_page"].is_null() || source["source_page"] == source["page"];
     let redundant_locator = source["locator"].as_object().is_some_and(|locator| {

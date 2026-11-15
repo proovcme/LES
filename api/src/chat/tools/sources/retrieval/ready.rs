@@ -86,7 +86,12 @@ impl Body {
         for field in ["source", "source_ref", "chunk_ord"] {
             content.remove(field);
         }
-        let mut context = source
+        // Compare the same source schema on both sides. A locator or parent
+        // heading which merely repeats its validated top-level value is not
+        // semantic context. Preserve the full original in `origins` above.
+        let mut semantic_source = source.clone();
+        super::envelope::compact_repeated_identity(&mut semantic_source);
+        let mut context = semantic_source
             .as_object()
             .ok_or("EVIDENCE_PACKET_SOURCE_INVALID")?
             .clone();
@@ -272,6 +277,9 @@ pub(super) mod tests {
         a["evidence_kind"] = json!("physical_pdf_page");
         a["reading_representation"] = json!("physical_pdf_page");
         a["ocr"] = json!(false);
+        a["source_page"] = a["page"].clone();
+        a["locator"] = json!({"source_sha256":a["source_sha256"],"source_page":a["page"]});
+        a["parent_heading"] = a["section_heading"].clone();
         let b = origin("b", 'b', 1);
         let mut value = reply(vec![
             ("Exact rating 17.25 kW", a.clone()),
@@ -281,6 +289,8 @@ pub(super) mod tests {
         assert_eq!(value["result"]["passages"].as_array().unwrap().len(), 1);
         let source = &value["sources"][0];
         assert_eq!(source["page"], 7);
+        assert_eq!(source["locator"], a["locator"]);
+        assert_eq!(source["parent_heading"], a["parent_heading"]);
         let alias = &source["equivalent_sources"][0];
         for field in [
             "doc_id",
@@ -316,6 +326,9 @@ pub(super) mod tests {
             "formula",
             "occurrence",
             "warning",
+            "locator_geometry",
+            "locator_conflict",
+            "parent_heading",
         ] {
             let a = origin("a", 'a', 1);
             let mut b = origin("b", 'b', 1);
@@ -327,6 +340,15 @@ pub(super) mod tests {
             }
             if kind == "warning" {
                 b["retrieval_incomplete"] = json!(true);
+            }
+            if kind == "locator_geometry" {
+                b["locator"] = json!({"x":12,"y":34});
+            }
+            if kind == "locator_conflict" {
+                b["locator"] = json!({"source_sha256":"c".repeat(64),"source_page":1});
+            }
+            if kind == "parent_heading" {
+                b["parent_heading"] = json!("Different governing section");
             }
             if kind == "occurrence" {
                 b = a.clone();
