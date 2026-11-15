@@ -328,3 +328,21 @@ test profile as the copy stand (opt 2, LTO off, 16 codegen units), with dependen
 debug symbols disabled. It retains the complete behavior suite; the separate
 installer workflow keeps its production profile. This addresses compiler cost
 in feedback, not measured RAG latency.
+
+The follow-up optimized build passed **170 core / 123 API cases**; the complete
+frontend suite passed **55 cases in 14 files**. The native service repeat passed
+111 cases, skipped the optional legacy importer, and exposed an incorrect new
+test expectation: original replacement correctly returned the source-tool
+contract's **409 / PDF_REVISION_CHANGED**, while the test expected a generic
+503. All preceding assertions had verified the late original-page text, unit
+digest and pinned Unicode-position read. The corrected case passed separately;
+the failed first log is retained. This composes 112 passing native cases and
+one skip, not a claim that the first run was green. The Word replacement during
+completion also passed with the cause recorded in run history.
+
+The same 100-question comparisons are now repeating on both existing private
+indexes, without recompilation, reindexing, file filters or an answer model.
+The benchmark's four broad-overview cases are reported separately: the preceding
+v4 result delivered only **16.67%** of their expected sources. Their small sample
+and the aggregate improvement cannot establish dependable overview quality.
+No merge or working-installation update is accepted by these component checks.

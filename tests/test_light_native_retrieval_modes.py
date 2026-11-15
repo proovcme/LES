@@ -81,7 +81,9 @@ def test_long_original_pdf_page_is_read_as_bounded_units_without_selecting_a_fil
     write_pdf(path,['Changed original revision.'])
     changed=t.client.post('/api/rag/sources/call',json={'tool':'search_sources','args':{
         'q':'Find UNIQUE_LONG_TARGET pressure.','dataset_ids':[dataset],'view':'context','max_chars':12000}})
-    assert changed.status_code==503 and changed.json()['code']=='SOURCE_REVISION_CHANGED'
+    # Source tools expose an original-version conflict as 409, including the
+    # PDF reader's specific cause; it must never become a successful answer.
+    assert changed.status_code==409 and changed.json()['code']=='PDF_REVISION_CHANGED'
 
 
 @pytest.mark.parametrize('native_turn',['rag-small'],indirect=True)
