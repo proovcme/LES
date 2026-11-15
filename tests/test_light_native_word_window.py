@@ -12,6 +12,7 @@ from tests.test_light_native_api import wait_for
 
 @pytest.fixture(autouse=True)
 def section_reading(monkeypatch):
+    monkeypatch.setenv('LES_LIGHT_INSTANCE_ID', 'word-window-fixture')
     monkeypatch.setenv('LES_EXPERIMENT_WORD_READING', 'section-v1')
     monkeypatch.setenv('LES_EXPERIMENT_SAVED_READING', 'original-v1')
     monkeypatch.setenv('LES_EXPERIMENT_EVIDENCE_PACKET', 'compact-v1')
