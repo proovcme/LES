@@ -40,6 +40,10 @@ mod tests {
         let mut rejected = Evidence::new(true);
         rejected.add(&invalid);
         assert!(rejected.sources.is_empty());
+        assert_eq!(
+            rejected.read_failures[0]["code"],
+            "EVIDENCE_PACKET_SOURCE_INVALID"
+        );
     }
     #[test]
     fn partial_conversion_keeps_verified_text_and_exposes_unread_sources_without_proof() {
@@ -536,6 +540,13 @@ impl Evidence {
     }
     pub(super) fn add(&mut self, result: &Value) {
         let result = super::protocol::effective(result);
+        if !result["result"]["evidence_packet"].is_null() {
+            if let Err(code) = super::tools::sources::packet::decode(result) {
+                self.read_failures.push(json!({"code":code}));
+                self.delivered.clear();
+                return;
+            }
+        }
         for failure in result["result"]["read_failures"]
             .as_array()
             .into_iter()
