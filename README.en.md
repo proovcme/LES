@@ -27,11 +27,14 @@ flowchart LR
 
 [Ranking](docs/modules/rag-ranking.md) · [Chunk structure and context selection](docs/modules/structured-search-context.md) · [Docling structure](docs/modules/canonical-document-structure.md) · [Application architecture](docs/LIGHT_ARCHITECTURE.md)
 
-In candidate 883, Docling's DOCX structure feeds the index and source reader
+In the source tree, Docling's DOCX structure feeds the index and source reader
 directly: headings, logical cells and their spans retain their addresses.
 Markdown is generated for display, without reconstructing tables from it.
-Before reading, only the number of original reads is bounded; semantic
-selection and the final context limit apply after reading.
+In candidate 892, automatic Word context is bounded to retrieved sections and
+neighbors; original positions remain available for further reading. Initial
+structural conversion still processes the entire file. The final limit is
+checked against the transmitted text.
+[Bounded Word reading and its limitations](docs/acceptance/bounded-word-reading-892.md).
 PDFium reads original text; Xberg adds table structure. If that structure cannot
 be verified, the original remains readable with a warning and unverified cells
 cannot be used for arithmetic.
