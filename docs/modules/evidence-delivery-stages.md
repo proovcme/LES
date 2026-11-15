@@ -1,4 +1,4 @@
-# Evidence delivery: isolated stages (885–890)
+# Evidence delivery: isolated stages (885–891)
 
 Working LES remains 880. All stages run only against the existing copied corpus,
 without Qwen, manual source selection, model changes or reindexing.
@@ -315,7 +315,7 @@ minimum available RAM was 8.51 GiB and free disk stayed above 39.05 GiB.
 All copy APIs were stopped after comparison. This is source/copy acceptance,
 not an installed update or independent answer-quality result.
 
-## Ready overview admission 891 (pending)
+## Ready overview admission 891 (comparison complete)
 
 Explicit copy flag `LES_EXPERIMENT_OVERVIEW_ADMISSION=ready-v1`, off by default.
 The control uses `baseline-v1`. Discovery stays `documents-v2`, with the same
@@ -342,3 +342,123 @@ source was already prefetched; it replaces that block rather than repeating its
 body. The source panel exposes the same origins with independent revision/page
 and cursor pins, including a return to the previous original. This is functional
 MCP/chat/UI parity for shared bodies, not an unrelated shell redesign.
+
+
+Redundant identity normalization reuses the checked existing source-schema rule:
+a locator repeating the same source SHA/page and a parent heading repeating the
+section heading do not create a new body identity. Full origin records remain
+unchanged. Extra locator geometry, conflicting pins and different parent headings
+still separate evidence. Prepared origins are mandatory under wire pressure:
+admit the whole body with its pins or skip it, never silently compact its origins
+back to primary-only provenance.
+
+The first setup attempt was rejected before retrieval because the BGE capability
+snapshot had expired. The existing connection was probed again through the native
+API, without changing its assignment or bypassing expiry checks. A later smoke
+still retained a real duplicate; that partial comparison was stopped and retained,
+not scored. It exposed the missing early normalization of repeated identity fields.
+
+The Word conversion cache currently includes the full API executable fingerprint.
+An API rebuild therefore causes cold conversion misses even with unchanged parser
+assets. Within a comparison both arms use one binary and counterbalanced periods;
+latency across different builds/cache states is not a speed comparison. Separating
+an explicit conversion-recipe revision from unrelated application changes remains
+an architecture task, without weakening source/settings/parts validation.
+
+
+### Controlled repeat 891
+
+The frozen 24-case manifest SHA-256 is
+`1f3bd3d0922fc0800ce5fa08128b8da4627c3ca4ef1a17edebb340f0893ae183`.
+Private questions, per-case replies and originals remain local; public evidence
+contains code, the protocol and aggregate results. Both arms used the same
+release/O2 binary with LTO disabled; this is not a product-release speed benchmark.
+
+Source `6417b49`, same frozen 24 questions, 48 real native stdio-MCP searches,
+four counterbalanced half-periods. Discovery stayed `documents-v2`, original
+reading, BGE, reranking off, 12,000 body characters and the same compact wire
+allowance. No answer model or expected-file filter was used. All **96** paired
+pre-admission order/content fingerprints matched (24 questions × four stages).
+
+| Measure | Baseline admission | Ready-body admission |
+|---|---:|---:|
+| Required-source fraction, four reused overviews, retrieved/readable | 58.33% | 58.33% |
+| Required-source fraction, same four overviews, delivered | 29.17% | 29.17% |
+| Observed overview p50 | 12.65 s | 11.52 s |
+| Prospective descriptive probes p50, eight without complete gold | 14.60 s | 11.06 s |
+| Search tool errors | 0 / 24 | 0 / 24 |
+
+All ten positive precision probes retained their same source outcomes; six
+reference-text checks, two page checks and two spreadsheet-row checks were
+unchanged. The two absence probes had no tool errors; this is not a claim about
+model abstention. None of the four scored overview source fractions changed.
+The two observed p50 differences are timings of this run, not an accepted speed
+improvement or a statistically established advantage.
+
+In the volume overview, the observed 1,497-character body with the same heading
+went from twice to once. Ten other-original references remained in the delivered
+ready packet, and original-byte and physical reader checks passed. This fixes
+ownership/provenance for that duplicate; it did **not** rescue additional gold
+sources. Literal equality with a different heading/occurrence remains separate.
+
+Stage accounting still loses three question/source pairs at final admission;
+five other pairs are absent from all observed pools (rank outside them unknown).
+No overview loss occurs between the read plan and readable pool in this repeat.
+The correction is therefore **not accepted as a solution to overview quality**;
+the experimental overview paths remain off and working LES stays 880.
+
+Per-period separate original/reader checks verified original files / PDF pages /
+Word cursors as 52/26/40, 70/53/31, 69/53/31 and 49/26/35, with zero errors.
+These counts may repeat originals between periods. All 638 copied document rows
+and original SHA-256 values remained unchanged. Minimum available RAM was
+6.20 GiB; peak owned service-tree working set was 2.29 GiB. No second index was
+created. The eight descriptive probes remain unscored for quality; this is reused
+development evidence, not independent acceptance or answer correctness.
+
+### Remaining reading/admission boundary
+
+The final admission pool is much larger than the indexed read plan: across the
+four scored overviews, 107–123 planned indexed units became 2,504–6,841 ready
+units. The Word automatic hydrator reads every unit of each matched original
+before final selection; compatible unit hashes alone inherit the indexed anchor
+rank. This is an observed fan-out and a code-confirmed boundary, not proof that
+every later loss has the same cause. Do not present generic body deduplication as
+a fix for it. The bounded-reader contrast must preserve actual anchor/section
+lineage, table continuations and explicit read-more cursors; a small prefix or
+question-specific document rule is not an acceptable substitute.
+
+Pure Tauri formatting has been moved to separate PR #9. PR #8 is stacked on that
+formatting branch, so its current diff contains no Tauri source formatting.
+
+
+A separate offline histogram audit found at least one compatible ranked Word
+entry for every observed Word source in each of the four overviews; no entire
+Word source was unanchored. The histograms include equivalent-point aliases and
+must not be reported as unique unit counts. Thus whole-document fan-out is
+confirmed, while a blanket failure to carry anchor identities is **not** supported
+by this run. Within-document lexical/prior ordering also remains in the control;
+its isolated effect has not been established by this admission-only contrast.
+
+
+### Validation of the final source/copy candidate
+
+API edge: **140 passed**. The generated real-PDF shared-body/revision-change
+case passed on the final binary. The full `make test` run passed **2,235 cases
+and 18 subtests**, with four skips and no failures; `make test-mail` passed
+**66 cases**. The existing platform/opt-in skips remain: POSIX TCP behavior,
+macOS supervisor, unprovided separate embedding-worker specification, and real
+Windows SMB. Local/Edge recovery/publication-crash and the autonomous packaged
+skill interpreter with corruption rejection did run. This does not validate
+every user-authored external skill or a live mailbox.
+
+Frontend: **57 tests passed**, typecheck had no errors/warnings, the real static
+UI build/receipt passed. The isolated SourcePanel browser example checked origin
+switching, pinned Word reading and Escape/focus return with synthetic data;
+native window/mobile/screen-reader acceptance remains open. `make verify` and
+publication checks passed; the installed application was not changed.
+
+Full suite plus mail took 1,156.80 seconds; minimum available RAM was 7.51 GiB
+and free disk 35.37 GiB. Test copies were cleaned by the repository fixtures;
+no redundant cleanup hook was added. Copy APIs and the owned UI preview were
+stopped. Source/copy checks are not an installer release or independent RAG
+answer-quality acceptance.
