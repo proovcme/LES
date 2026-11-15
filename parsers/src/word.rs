@@ -1,8 +1,6 @@
 use super::*;
-use docling::{
-    ContentLayers, DocumentConverter, ImageSources, MarkdownExportOptions, SourceDocument,
-};
-mod slots;
+use docling::{DocumentConverter, ImageSources, SourceDocument};
+mod structure;
 
 pub(super) fn convert(input: &Value, bytes: Vec<u8>) -> Result<Value> {
     let extension = input["format"]
@@ -44,33 +42,44 @@ pub(super) fn convert(input: &Value, bytes: Vec<u8>) -> Result<Value> {
         );
         return Err("DOCLING_WORD_INCOMPLETE");
     }
-    // Export the tree directly. Never materialize the enormous text+orig+cell JSON.
-    let options = MarkdownExportOptions {
-        layers: ContentLayers::ALL,
-        traverse_pictures: true,
-        escape_underscores: false,
-        ..Default::default()
-    };
-    let (text, artifacts) = converted.document.export_to_markdown_with_options(&options);
-    if !artifacts.is_empty() {
-        eprintln!(
-            "{}",
-            json!({"event":"docling_word_incomplete","stage":"unexpected_artifacts","count":artifacts.len()})
-        );
-        return Err("DOCLING_WORD_INCOMPLETE");
-    }
-    if text.len() > super::MAX_OUTPUT - 65536 {
-        return Err("DOCUMENT_TEXT_LIMIT");
-    }
-    if text.trim().is_empty() {
-        return Err("NO_SEARCHABLE_TEXT");
-    }
-    let expansions = if let Some(prefix) = input["slot_prefix"].as_str() {
-        slots::expansions(&converted.document, &text, prefix)?
+    // One projection of the canonical tree, retaining raw runs and logical
+    // cells/spans. Never render styled Markdown and then infer its structure.
+    // The pinned binary .doc backend has flat nodes, not an ItemTree. Keep its
+    // explicit legacy adapter instead of falsely labelling Markdown as an AST
+    // or removing a supported format. DOCX must always have the canonical tree.
+    let mut result = if extension == "doc" && converted.document.tree.is_none() {
+        let (text, artifacts) =
+            converted
+                .document
+                .export_to_markdown_with_options(&docling::MarkdownExportOptions {
+                    layers: docling::ContentLayers::ALL,
+                    traverse_pictures: true,
+                    escape_underscores: false,
+                    ..Default::default()
+                });
+        if !artifacts.is_empty() {
+            return Err("DOCLING_WORD_INCOMPLETE");
+        }
+        if text.len() > super::MAX_OUTPUT - 65536 {
+            return Err("DOCUMENT_TEXT_LIMIT");
+        }
+        if text.trim().is_empty() {
+            return Err("NO_SEARCHABLE_TEXT");
+        }
+        json!({"text":text})
     } else {
-        json!({})
+        let structure = structure::project(&converted.document)?;
+        if !crate::canonical::has_text(&structure, None) {
+            return Err("NO_SEARCHABLE_TEXT");
+        }
+        // Validate span expansion limits, then discard presentation. Only the
+        // typed structure crosses IPC; the host renders after native restoration.
+        drop(crate::canonical::render(&structure)?);
+        json!({"structure":structure})
     };
-    Ok(
-        json!({"text":text,"slot_expansions":expansions,"extractor":"docling.rs.2.82.1.word.v1","ocr":false,"source_sha256":input["sha256"]}),
-    )
+    drop(converted); // Release the original tree/flat nodes before IPC serialization.
+    result["extractor"] = json!("docling.rs.2.82.1.word.v2");
+    result["ocr"] = json!(false);
+    result["source_sha256"] = input["sha256"].clone();
+    Ok(result)
 }

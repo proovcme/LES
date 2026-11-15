@@ -6,7 +6,7 @@ use std::{
     fs::File,
     sync::{Mutex, OnceLock},
 };
-static CACHE: OnceLock<Mutex<VecDeque<(String, Value)>>> = OnceLock::new();
+static CACHE: OnceLock<Mutex<VecDeque<(String, Value, usize)>>> = OnceLock::new();
 /// Automatic chat admission reads Word originals before the common selector.
 /// The index anchor locates the document; it is never relabelled as its body.
 pub(super) async fn hydrate(
@@ -124,6 +124,9 @@ pub(super) async fn hydrate(
             }
             for field in [
                 "ordinal",
+                "canonical",
+                "source_block_id",
+                "source_parent_id",
                 "table_id",
                 "row_start",
                 "row_end",
@@ -202,7 +205,7 @@ fn snapshot_at(state: &std::path::Path, doc: &Value, timeout_ms: u64) -> Result<
         .get_or_init(Default::default)
         .lock()
         .map_err(|_| "SOURCE_READ_FAILED")?;
-    if let Some(i) = cache.iter().position(|(k, _)| *k == key) {
+    if let Some(i) = cache.iter().position(|(k, _, _)| *k == key) {
         let entry = cache.remove(i).unwrap();
         let value = entry.1.clone();
         cache.push_back(entry);
@@ -242,8 +245,13 @@ fn snapshot_at(state: &std::path::Path, doc: &Value, timeout_ms: u64) -> Result<
     if full["source_sha256"] != doc["file_hash"] {
         return Err("SOURCE_REVISION_CHANGED".into());
     }
-    let mut value = les_core::document_reading(&json!({"text":full["text"],"max_chars":4000}))?;
+    let mut value = les_core::document_reading(
+        &json!({"text":full["text"],"structure":full["metadata"]["docling_structure"],"max_chars":4000}),
+    )?;
     value["metadata"] = full["metadata"].clone();
+    if let Some(meta) = value["metadata"].as_object_mut() {
+        meta.remove("docling_structure");
+    }
     verify()?;
     eprintln!(
         "{}",
@@ -256,21 +264,16 @@ fn snapshot_at(state: &std::path::Path, doc: &Value, timeout_ms: u64) -> Result<
         .lock()
         .map_err(|_| "SOURCE_READ_FAILED")?;
     // Concurrent readers can finish the same immutable source. Keep one entry.
-    cache.retain(|(k, _)| k != &key);
+    cache.retain(|(k, _, _)| k != &key);
     while cache.len() >= 16
-        || cache
-            .iter()
-            .map(|(_, v)| v.to_string().len())
-            .sum::<usize>()
-            + size
-            > 16 * 1024 * 1024
+        || cache.iter().map(|(_, _, bytes)| *bytes).sum::<usize>() + size > 16 * 1024 * 1024
     {
         if cache.pop_front().is_none() {
             break;
         }
     }
     if size <= 16 * 1024 * 1024 {
-        cache.push_back((key, value.clone()));
+        cache.push_back((key, value.clone(), size));
     }
     Ok(value)
 }
@@ -363,7 +366,7 @@ pub(super) async fn read(
         source["section_heading"] = u["heading"].clone();
         sources.push(source.clone());
         passages.push(json!({"text":text,"body_sha256":les_core::sha256_hex(u["body"].as_str().unwrap_or("").as_bytes()),
-            "context_prefix_chars":u["context_prefix"].as_str().unwrap_or("").chars().count(),"source":source,"chunk_ord":u["ordinal"]}));
+            "canonical":u["canonical"],"context_prefix_chars":u["context_prefix"].as_str().unwrap_or("").chars().count(),"source":source,"chunk_ord":u["ordinal"]}));
     }
     if passages.is_empty() {
         return Err("SOURCE_ATOMIC_UNIT_OVERFLOW".into());

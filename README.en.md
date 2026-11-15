@@ -25,7 +25,14 @@ flowchart LR
 3. **Reading and context.** Retrieved anchors lead to a verified Word original or physical PDF page. After reading, a shared selector removes exact duplicates and admits complete units into a bounded context. A matching paragraph number cannot inherit retrieval rank unless its content hash also matches. Partial evidence is explicitly distinguished from reading the entire dataset.
 4. **Answers and evidence.** Answers stream. Citation links are tied to the retrieved source file and revision, including the page or sheet when known. LES reports when the selected sources provide no evidence. A citation lets you verify the answer; it does not guarantee the model's conclusion.
 
-[Ranking](docs/modules/rag-ranking.md) · [Chunk structure and context selection](docs/modules/structured-search-context.md) · [Application architecture](docs/LIGHT_ARCHITECTURE.md)
+[Ranking](docs/modules/rag-ranking.md) · [Chunk structure and context selection](docs/modules/structured-search-context.md) · [Docling structure](docs/modules/canonical-document-structure.md) · [Application architecture](docs/LIGHT_ARCHITECTURE.md)
+
+In candidate 883, Docling's DOCX structure feeds the index and source reader
+directly: headings, logical cells and their spans retain their addresses.
+Markdown is generated for display, without reconstructing tables from it.
+Before reading, only the number of retrieved anchors is bounded; semantic
+selection and the final context limit apply after reading.
+[Candidate acceptance status](docs/acceptance/canonical-rag-883.md).
 
 In the source candidate, MCP uses the same retrieval and source readers as chat.
 An external client can retrieve context, read an original Word document or PDF

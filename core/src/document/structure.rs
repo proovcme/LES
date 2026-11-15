@@ -1,6 +1,27 @@
 //! Lossless reading units. Embedding budgets must never redefine table rows.
 use serde_json::{json, Value};
 
+/// A heading retained in its following unit's context is not a second search
+/// hit. Reading units remain lossless and keep their original ordinal/range.
+pub(crate) fn for_index(units: Vec<Value>) -> Vec<Value> {
+    units
+        .iter()
+        .enumerate()
+        .filter(|(i, u)| {
+            let body = u["body"].as_str().unwrap_or("").trim();
+            let heading = body.starts_with('#') && u["heading"].as_str() == Some(body);
+            !heading
+                || !units.get(i + 1).is_some_and(|next| {
+                    next["context_prefix"]
+                        .as_str()
+                        .unwrap_or("")
+                        .starts_with(body)
+                })
+        })
+        .map(|(_, u)| u.clone())
+        .collect()
+}
+
 pub(crate) fn units(text: &str, budget: usize) -> Result<Vec<Value>, &'static str> {
     if text.len() > 24 * 1024 * 1024 || budget == 0 {
         return Err("DOCUMENT_TEXT_LIMIT");

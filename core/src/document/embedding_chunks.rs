@@ -59,6 +59,7 @@ pub(super) fn execute(
             request["overlap"].as_u64().unwrap_or(0) as usize,
             request["search_prefix"].as_str().unwrap_or(""),
             measure,
+            request.get("reading_unit").filter(|v| v.is_object()),
         )?;
         return Ok(
             json!({"parts":parts,"quality":{"data_uri_removed":uris,"base64_runs_removed":binary,"control_chars_removed":controls,"sanitized":uris!=0||binary!=0||controls!=0}}),

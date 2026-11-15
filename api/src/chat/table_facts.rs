@@ -9,6 +9,7 @@ pub(super) struct Rows {
     data: BTreeMap<(u64, u64), (Vec<String>, Value)>,
     paragraphs: BTreeMap<(u64, u64), (Vec<String>, Value)>,
     headers: BTreeMap<(u64, u64), Vec<String>>,
+    literal_sources: HashSet<u64>,
 }
 pub(super) const CONTRACT:&str="Финальный ответ по источникам: верни только JSON {\"answerable\":false,\"rows\":[],\"sums\":[]}. Сначала реши, есть ли в тексте именно запрошенные сведения для нужного предмета. Совпадение наименования строки ещё не подтверждает наличие показателя. Если сведений нет, answerable=false, rows и sums пустые. При наличии подтверждения поставь answerable=true и заполни rows скопированными адресами: S…R… для строк таблиц, S…P… для текстовых абзацев, S… для явно помеченного целого фрагмента. Не переписывай значения: Лес скопирует оригинал и добавит ссылки. Пояснения до и после таблицы доступны отдельно по S…P…, не заменяй их строками таблицы. Для справки выбери относящиеся к вопросу абзацы и строки в связном порядке. Не выбирай строку только за совпадение названия: количество, масса и другие поля не заменяют отсутствующий показатель. Физический номер строки Excel не является адресом S…R…. Только для запрошенной суммы табличных ячеек заполни sums объектами с column (номер C) и unit_column (номер C либо null). Текстовые абзацы и целые фрагменты не являются ячейками для сложения. Без суммы оставь sums пустым. Данные другого вида, стадии или редакции документа не подтверждают условия вопроса.";
 pub(super) fn quote_sources(sources: &mut Value, receipt: &Value) {
@@ -110,6 +111,7 @@ impl Rows {
                     .as_array()
                     .is_some_and(|rows| Self::supported(rows)))
                 || b["record_kind"] == "spreadsheet_row"
+                || b["canonical"]["schema"] == "les.document-structure.v1"
                 || !les_core::chat_context::table_rows(b["text"].as_str().unwrap_or("")).is_empty()
         })
     }
@@ -138,6 +140,41 @@ impl Rows {
             else {
                 return;
             };
+            let canonical = &value["canonical"];
+            if canonical["schema"] == "les.document-structure.v1" {
+                out.literal_sources.insert(index);
+                if canonical["kind"] == "paragraph" {
+                    if let Some(text) = canonical["text"].as_str() {
+                        out.paragraphs
+                            .insert((index, 1), (vec![text.to_owned()], source.clone()));
+                        out.data
+                            .insert((index, 0), (vec![text.to_owned()], source.clone()));
+                    }
+                } else if canonical["kind"] == "table" {
+                    let strings = |row: &Value| {
+                        row.as_array()?
+                            .iter()
+                            .map(|c| c.as_str().map(str::to_owned))
+                            .collect::<Option<Vec<_>>>()
+                    };
+                    let header = strings(&canonical["header"]);
+                    for (r, row) in canonical["rows"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .enumerate()
+                    {
+                        if let Some(cells) = strings(row) {
+                            if let Some(header) = &header {
+                                out.headers.insert((index, r as u64 + 1), header.clone());
+                            }
+                            out.data
+                                .insert((index, r as u64 + 1), (cells, source.clone()));
+                        }
+                    }
+                }
+                return; // Typed cells are authoritative; never parse presentation.
+            }
             let text = value["text"].as_str().unwrap_or("");
             if let Some(offset) = value["body_offset"].as_u64() {
                 for (line, paragraph) in les_core::chat_context::prose_spans(text, offset as usize)
@@ -306,7 +343,12 @@ impl Rows {
                 if !rendered.is_empty() {
                     rendered.push('\n');
                 }
-                rendered.push_str(&format!("{}\n\n[Источник {}]\n", cells[0], key.0));
+                let text = if self.literal_sources.contains(&key.0) {
+                    les_core::chat_context::literal_markdown(&cells[0])
+                } else {
+                    cells[0].clone()
+                };
+                rendered.push_str(&format!("{}\n\n[Источник {}]\n", text, key.0));
                 previous_header.clear();
                 receipt.push(json!({"source_index":key.0,"row":null,"paragraph_line":key.1,"address":id.label(),
                     "kind":"source_excerpt","cells":cells,"doc_id":source["doc_id"],"source_sha256":source["source_sha256"]}));
@@ -329,7 +371,13 @@ impl Rows {
                         .join(" · ")],
                 )
             };
-            let escape = |v: &str| v.replace('|', "\\|").replace('\n', "<br>");
+            let escape = |v: &str| {
+                if self.literal_sources.contains(&key.0) {
+                    les_core::chat_context::literal_markdown(v)
+                } else {
+                    v.replace('|', "\\|").replace('\n', "<br>")
+                }
+            };
             if names != previous_header {
                 if !rendered.is_empty() {
                     rendered.push('\n');
@@ -501,6 +549,36 @@ fn display(value: i128) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn canonical_cells_drive_model_addresses_and_values_without_markdown_reparsing() {
+        let prefix = "[Источник 1]\n";
+        let block = json!({"schema":"les.evidence-block.v1","source_index":1,"body_offset":prefix.len(),
+            "text":format!("{prefix}|Presentation|117.25|"),
+            "canonical":{"schema":"les.document-structure.v1","kind":"table","header":["Item","Quantity"],"rows":[["125*480 | DN_100","17.25"]]}});
+        let object = les_core::chat_context::execute(
+            &json!({"action":"objects","prefix":"e","values":[block.clone()]}),
+        )
+        .unwrap();
+        let render = object[0]["render"].as_str().unwrap();
+        assert!(render.contains("S1R1 C1: 125*480 | DN_100; C2: 17.25"));
+        assert!(!render.contains("117.25"));
+        let rows = Rows::new(
+            &json!({"sections":[{"kind":"evidence","objects":[{"payload":block}]}]}),
+            &json!([{"index":1,"doc_id":"doc","source_sha256":"r"}]),
+        );
+        let (answer, receipt) = rows
+            .finish_checked(r#"{"answerable":true,"rows":["S1R1"],"sums":[]}"#, true)
+            .unwrap()
+            .unwrap();
+        assert!(answer.contains("125\\*480 &#124; DN\\_100"));
+        assert_eq!(
+            receipt["rows"][0]["cells"],
+            json!(["125*480 | DN_100", "17.25"])
+        );
+        assert!(rows
+            .finish_checked(r#"{"answerable":true,"rows":["S1R2"],"sums":[]}"#, true)
+            .is_err());
+    }
     #[test]
     fn mixed_evidence_keeps_selectable_prose_and_numeric_cells_separate() {
         let prefix = "[Source 1]\n{}\n";

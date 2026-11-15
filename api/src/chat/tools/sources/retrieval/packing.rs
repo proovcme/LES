@@ -2,18 +2,22 @@
 use serde_json::Value;
 use std::collections::HashSet;
 
-fn unit(point: &Value, rank: usize) -> Value {
+fn fused_rank(point: &Value, rank: usize) -> u64 {
     let p = &point["payload"];
     // A reserved retriever head may have entered a small candidate pool from
     // far below its boundary. Its admission position is not its fused rank.
-    let rank = p["retrieval_rank"]
+    p["retrieval_rank"]
         .as_u64()
         .or_else(|| {
             point["retrieval_fusion"]["fusion_rank"]
                 .as_u64()
                 .map(|n| n.saturating_sub(1))
         })
-        .unwrap_or(rank as u64);
+        .unwrap_or(rank as u64)
+}
+fn unit(point: &Value, rank: usize) -> Value {
+    let p = &point["payload"];
+    let rank = fused_rank(point, rank);
     let mut source = serde_json::Map::new();
     for field in [
         "dataset_id",
@@ -47,18 +51,16 @@ pub(super) fn catalog(points: &[Value]) -> Result<Value, &'static str> {
         &serde_json::json!({"units":points.iter().enumerate().map(|(i,p)|unit(p,i)).collect::<Vec<_>>()}),
     )
 }
-/// A single core selector owns query relevance and duplicate content for both
-/// the pre-hydration shortlist and the final context. No index score is changed.
+/// The final context alone owns semantic selection and content deduplication.
 fn select_points(
     points: &[Value],
     query: &str,
     text_budget: usize,
     context_budget: Option<usize>,
-    preserve_rank: bool,
 ) -> Result<Vec<Value>, &'static str> {
     let input: Vec<_> = points.iter().enumerate().map(|(i, p)| unit(p, i)).collect();
     let result = les_core::context_selection::select(&serde_json::json!({
-        "question":query,"units":input,"originals_pending":preserve_rank,"max_chars":context_budget.unwrap_or(1_000_000),
+        "question":query,"units":input,"max_chars":context_budget.unwrap_or(1_000_000),
         "text_budget":text_budget,"identity_reserve_chars":if context_budget.is_some(){1024}else{0},"max_items":32
     }))?;
     Ok(result["units"]
@@ -67,9 +69,6 @@ fn select_points(
         .iter()
         .map(|u| {
             let mut p = u["point"].clone();
-            if preserve_rank {
-                p["payload"]["retrieval_rank"] = u["rank"].clone();
-            }
             let mut aliases = p["payload"]["equivalent_points"]
                 .as_array()
                 .cloned()
@@ -181,15 +180,7 @@ pub(super) fn select_query(
     context_budget: Option<usize>,
     query: &str,
 ) -> Result<(Vec<Value>, usize), &'static str> {
-    select_query_inner(
-        seeds,
-        sections,
-        documents,
-        budget,
-        context_budget,
-        query,
-        false,
-    )
+    select_query_inner(seeds, sections, documents, budget, context_budget, query)
 }
 
 /// Bound original I/O by anchors/sources. The size of an indexed parent must
@@ -199,17 +190,27 @@ pub(super) fn read_plan(
     mut hydrated: Value,
     _budget: usize,
     _context_budget: Option<usize>,
-    query: &str,
+    _query: &str,
 ) -> Result<(Vec<Value>, Value), &'static str> {
-    let (planned, _) = select_query_inner(
-        seeds,
-        &hydrated["sections"],
-        &hydrated["documents"],
-        1_000_000,
-        None,
-        query,
-        true,
-    )?;
+    // This is an I/O bound, not a second retriever. Indexed wording, parent
+    // length and lexical similarity must not reject an original before reading.
+    let mut ranked = seeds
+        .iter()
+        .enumerate()
+        .map(|(i, p)| (fused_rank(p, i), p))
+        .collect::<Vec<_>>();
+    ranked.sort_by_key(|(rank, _)| *rank);
+    let mut seen = HashSet::new();
+    let planned = ranked
+        .into_iter()
+        .filter(|(_, p)| seen.insert(key(p)))
+        .take(32)
+        .map(|(rank, p)| {
+            let mut p = p.clone();
+            p["payload"]["retrieval_rank"] = serde_json::json!(rank);
+            p
+        })
+        .collect::<Vec<_>>();
     let rows: std::collections::HashMap<_, _> =
         planned.iter().map(|p| (key(p), p.clone())).collect();
     let original_ids: HashSet<_> = seeds.iter().map(key).collect();
@@ -238,7 +239,6 @@ fn select_query_inner(
     budget: usize,
     context_budget: Option<usize>,
     query: &str,
-    preserve_rank: bool,
 ) -> Result<(Vec<Value>, usize), &'static str> {
     let retrieved: HashSet<String> = seeds.iter().map(key).collect();
     let mut all = retrieved.clone();
@@ -284,13 +284,40 @@ fn select_query_inner(
             point["payload"]["retrieval_rank"] = Value::Null;
         }
     }
-    let selected = select_points(&pool, query, budget, context_budget, preserve_rank)?;
+    let selected = select_points(&pool, query, budget, context_budget)?;
     Ok((selected, total))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn read_plan_is_query_independent_and_does_not_spend_the_answer_budget() {
+        let mut a = point("a", "a.pdf", &"x".repeat(1_100_000), 0);
+        a["payload"]["retrieval_rank"] = json!(2);
+        let mut b = point("b", "b.pdf", "tiny", 0);
+        b["payload"]["retrieval_rank"] = json!(1);
+        let seeds = vec![a, b];
+        let first = read_plan(
+            &seeds,
+            json!({"sections":[],"documents":[]}),
+            1,
+            Some(1),
+            "tiny",
+        )
+        .unwrap();
+        let other = read_plan(
+            &seeds,
+            json!({"sections":[],"documents":[]}),
+            100000,
+            Some(100000),
+            "different",
+        )
+        .unwrap();
+        assert_eq!(first, other);
+        assert_eq!(first.0.len(), 2);
+        assert_eq!(first.0[0]["id"], "b");
+    }
     use serde_json::json;
     #[test]
     fn unread_parent_neighbors_cannot_invent_a_retrieved_rank() {

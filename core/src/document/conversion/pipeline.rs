@@ -267,6 +267,10 @@ pub(super) fn prepare(
             .as_object_mut()
             .unwrap()
             .remove("pdf_page_views");
+        route["metadata"]
+            .as_object_mut()
+            .unwrap()
+            .remove("docling_structure");
     } else if suffix == "pptx" {
         let content = presentation::read(bytes)?;
         route["metadata"] = json!({"domain":"DOCUMENT","doc_type":"OTHER","content_type":"text","slide_count":content["slides"],"format_owner":"rust.format-dispatch.v1"});

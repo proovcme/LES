@@ -29,6 +29,10 @@ fn metadata_contract_is_explicit_and_ollama_does_not_inherit_coreml_limit() {
     )
     .unwrap();
     assert_eq!(contract["document_embedding_mode"], "metadata-v1");
+    assert_eq!(
+        contract["chunker_revision"],
+        "canonical-source-final-budget-v4"
+    );
     assert_eq!(contract["chunk_size"], 512);
     assert_eq!(contract["chunk_overlap"], 64);
     let prepared =

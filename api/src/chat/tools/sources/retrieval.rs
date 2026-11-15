@@ -876,7 +876,7 @@ async fn passages(
             }
         }
         sources.push(source.clone());
-        output.push(json!({"text":text,"source":source,"chunk_ord":p["chunk_ord"],"source_ref":p["source_ref"]}));
+        output.push(json!({"text":text,"canonical":p["canonical"],"source":source,"chunk_ord":p["chunk_ord"],"source_ref":p["source_ref"]}));
     }
     if output.is_empty() {
         if let Some(code) = hydrated["read_failures"][0]["code"].as_str() {

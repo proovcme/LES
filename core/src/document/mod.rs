@@ -1,4 +1,5 @@
 //! Read-only format adapters. No model, indexing or source writes.
+pub(crate) mod canonical;
 pub(crate) mod chunks;
 pub(crate) mod conversion;
 mod docx;
@@ -23,13 +24,30 @@ pub fn indexable_extensions() -> Vec<String> {
         .collect()
 }
 pub fn reading_units(request: &Value) -> Result<Value, &'static str> {
+    if request.get("structure").is_some_and(|s| !s.is_null()) {
+        let budget = request["max_chars"]
+            .as_u64()
+            .unwrap_or(4000)
+            .clamp(256, 12000) as usize;
+        let structure = &request["structure"];
+        if let Some(text) = request["text"].as_str() {
+            if canonical::render(structure)? != text {
+                return Err("DOCUMENT_STRUCTURE_INVALID");
+            }
+        }
+        let versioned = json!([canonical::SCHEMA, budget, structure]).to_string();
+        return Ok(
+            json!({"schema":"les.document-reading.v1","structure_schema":canonical::SCHEMA,
+            "view_sha256":crate::sha256_hex(versioned.as_bytes()),"units":canonical::units(structure,budget)?}),
+        );
+    }
     structure::execute(request)
 }
 
 pub fn execute(request: &Value) -> Result<Value, &'static str> {
     match request["action"].as_str() {
         Some("convert") => conversion::execute(request),
-        Some("reading_units") => structure::execute(request),
+        Some("reading_units") => reading_units(request),
         Some("pdf_page_blocks") => source_nodes::page_blocks(request),
         Some("json_document") => json_source::read(request),
         Some("prepare_nodes") => nodes::execute(request),

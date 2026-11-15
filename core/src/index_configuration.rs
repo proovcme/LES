@@ -65,6 +65,7 @@ pub fn execute(input: &Value) -> Result<Value, &'static str> {
     ) {
         (Some("raw-v1"), Some("structure-aware-final-budget-v2")) => false,
         (Some("metadata-v1"), Some("structure-aware-final-budget-v3")) => true,
+        (Some("metadata-v1"), Some("canonical-source-final-budget-v4")) => true,
         _ => return Err(mismatch("document_embedding_mode")),
     };
     for (key, expected) in [

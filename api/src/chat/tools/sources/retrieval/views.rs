@@ -37,6 +37,14 @@ pub(super) fn project(
                 {
                     return Err("WORD_READING_VIEW_INVALID");
                 }
+                if unit["canonical"].is_object()
+                    && p["word_structure_sha256"]
+                        != les_core::sha256_hex(
+                            les_core::tool_execution::canonical_json(unit)?.as_bytes(),
+                        )
+                {
+                    return Err("WORD_READING_VIEW_INVALID");
+                }
                 let mut reading = row.clone();
                 reading["payload"]["text"] = json!(text);
                 reading["payload"]["reading_representation"] = json!("word_structure");
@@ -48,6 +56,9 @@ pub(super) fn project(
                     "start_byte",
                     "end_byte",
                     "ordinal",
+                    "canonical",
+                    "source_block_id",
+                    "source_parent_id",
                 ] {
                     reading["payload"][field] = unit[field].clone();
                 }
@@ -146,6 +157,24 @@ mod tests {
             "retrieved-slice"
         );
         assert_eq!(hit["payload"]["text"], "Search text");
+    }
+    #[test]
+    fn typed_cells_are_bound_even_when_the_presentation_text_is_unchanged() {
+        let text = "|A|17.25|";
+        let unit = json!({"text":text,"ordinal":1,"canonical":{"schema":"les.document-structure.v1","kind":"table","rows":[["A","17.25"]]}});
+        let mut p = json!({"id":"a","payload":{"dataset_id":"d","file_name":"a.docx","source_sha256":"s","source_unit_id":1,
+            "text":"17.25","word_reading_schema":"les.document-reading.v1","word_reading_sha256":les_core::sha256_hex(text.as_bytes()),
+            "word_structure_sha256":les_core::sha256_hex(les_core::tool_execution::canonical_json(&unit).unwrap().as_bytes()),"word_reading_view":unit}});
+        project(
+            vec![p.clone()],
+            json!({"sections":[{"points":[p.clone()]}]}),
+        )
+        .unwrap();
+        p["payload"]["word_reading_view"]["canonical"]["rows"][0][1] = json!("117.25");
+        assert_eq!(
+            project(vec![p.clone()], json!({"sections":[{"points":[p]}]})).unwrap_err(),
+            "WORD_READING_VIEW_INVALID"
+        );
     }
     #[test]
     fn a_word_embedding_slice_reveals_its_entire_hashed_table_unit() {

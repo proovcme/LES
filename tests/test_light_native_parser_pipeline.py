@@ -67,6 +67,27 @@ def test_docling_word_preserves_header_textbox_math_and_original_part_identity(c
     assert (root/sha).read_bytes()==path.read_bytes()
 
 
+@pytest.mark.parametrize('bold,italic',[(False,False),(True,False),(False,True),(True,True)])
+def test_word_literal_markdown_delimiters_keep_rendered_values(converter,tmp_path,bold,italic):
+    from html.parser import HTMLParser
+    from markdown_it import MarkdownIt
+    class Visible(HTMLParser):
+        def __init__(self):super().__init__();self.parts=[]
+        def handle_data(self,text):self.parts.append(text)
+    literal=r'Размер 125*480; _phase_; `code`; [label]; C:\docs\A_B.docx'
+    doc=Document();table=doc.add_table(rows=2,cols=2)
+    table.cell(0,0).text='Description';table.cell(0,1).text='Quantity'
+    run=table.cell(1,0).paragraphs[0].add_run(literal);run.bold=bold;run.italic=italic
+    table.cell(1,1).text='17.25'
+    path=tmp_path/'literal delimiters.docx';doc.save(path)
+    value=converter(path);assert value['status']=='completed',value
+    text=value['value']['text'];assert 'LESPART' not in text
+    visible=Visible();visible.feed(MarkdownIt().render(text))
+    rendered=''.join(visible.parts)
+    assert literal in rendered
+    assert '125480' not in rendered and '17.25' in rendered
+
+
 def test_empty_word_does_not_become_indexed_nodes(converter,tmp_path):
     path=tmp_path/'Empty.docx';Document().save(path)
     value=converter(path,pipeline='nodes',data_dir=str(converter.state/'data'),dataset_id='ds',file_key=path.name,

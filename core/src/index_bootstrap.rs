@@ -130,7 +130,7 @@ pub fn contract(
     let mut result = json!({"schema":"les.rag.index-contract.v3","collection":get("RAG_COLLECTION_NAME",collection),
         "embedding_model":canonical,"embedding_api_model":model,"embedding_backend":backend,"vector_size":dimension,
         "document_embedding_mode":"metadata-v1","chunk_unit":unit,"chunk_size":size,"chunk_overlap":overlap,
-        "chunker_revision":"structure-aware-final-budget-v3","qdrant_schema":"named","dense_vector_name":get("RAG_DENSE_VECTOR_NAME","dense"),
+        "chunker_revision":"canonical-source-final-budget-v4","qdrant_schema":"named","dense_vector_name":get("RAG_DENSE_VECTOR_NAME","dense"),
         "sparse_vector_name":get("RAG_SPARSE_VECTOR_NAME","bm25_sparse"),"sparse_tokenizer_revision":get("RAG_SPARSE_TOKENIZER_REVISION","les-bm25-v1"),
         "point_embedding_fingerprint":format!("{:x}",Sha1::digest(fields.join("\n").as_bytes())),
         "hierarchy_schema":"les.rag.hierarchy.v1","hierarchy_builder":"deterministic-heading-stack-v1",

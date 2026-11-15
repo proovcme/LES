@@ -1,0 +1,46 @@
+# Canonical Word structure
+
+Build 883 introduces `les.document-structure.v1`, a bounded projection of the
+Docling item tree. It retains source item/parent IDs, headings, inline runs and
+their formatting/hyperlinks, logical table cells, spans, roles, nested content
+and available provenance. Group references preserve list and rich-cell ancestry.
+The projection is versioned; it does not pretend to be Docling's full JSON export.
+
+The isolated parser walks the borrowed tree. It does not construct Docling's
+whole JSON value or infer tables/headings from styled Markdown. Native checked
+OCR, embedded objects and mathematics are restored into authoritative text
+fields before escaping. A missing or duplicated native-part marker fails the
+conversion. Referenced furniture and floating objects retain separate owners.
+
+The core renders presentation and builds reading units from this structure.
+Indexing and original reading reuse the same unit IDs, byte ranges and table
+rows. Final token budgeting consumes those units directly. DOCX does not run
+through `markdown_sections` or the Markdown structure detector. Standalone
+Markdown retains its format adapter. Older indexes remain readable through the
+registered-original reader; no existing collection is silently reindexed.
+
+The pinned binary `.doc` backend does not expose an item tree. Its existing
+flat adapter remains an explicit compatibility exception, without labelling
+its Markdown output as canonical structure. Removing that exception requires
+an equivalent structured binary-Word adapter; dropping the format is not allowed.
+
+New collections use `metadata-v1` and `canonical-source-final-budget-v4`.
+The earlier v2/v3 contracts remain explicit compatibility paths. Reading units
+remain `les.document-reading.v1` and carry an additional typed `canonical`
+field. The reading view is bound to its structure and budget; indexed typed
+views also carry a checksum of the complete unit, including cells.
+
+Chat and MCP share the same retrieval service. Before original reading there
+is only a fused-rank I/O limit of 32 anchors, without query-dependent semantic
+selection or an answer-text budget. Deduplication and semantic admission occur
+once after reading, under the final context limit. Typed cells and paragraphs
+provide model addresses and numeric receipts directly; Markdown is presentation.
+Literal operators, pipes and brackets are escaped only for display.
+
+Memory guards bound the tree projection, recursion, grid dimensions and
+replicated span text. Document-wide structure is excluded before cloning
+per-point metadata. The Word LRU stores byte counts instead of repeatedly
+serializing every retained document to count its size.
+
+Acceptance status and measured limits belong in
+[the build 883 acceptance record](../acceptance/canonical-rag-883.md).

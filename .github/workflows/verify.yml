@@ -90,6 +90,15 @@ jobs:
           uv run python tools/native_asset.py parsers --output native/parsers
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           "LES_TEST_NATIVE_DOCUMENT_PARSERS=$((Resolve-Path native/parsers/les-document-parsers.exe).Path)" >> $env:GITHUB_ENV
+      - name: Retain native parsers for isolated acceptance
+        uses: actions/upload-artifact@v4
+        with:
+          name: LES-parsers-candidate-${{ github.sha }}
+          path: |
+            native/parsers/les-document-parsers.exe
+            native/parsers/parser-receipt.json
+          if-no-files-found: error
+          retention-days: 7
       - name: Check static frontend
         run: |
           uv run python tools/build_light_frontend.py

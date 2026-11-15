@@ -18,6 +18,9 @@ pub fn table_headers(text: &str) -> Vec<(u64, Vec<String>)> {
 pub fn prose_spans(text: &str, body_offset: usize) -> Vec<(u64, String)> {
     prose::spans(text, body_offset)
 }
+pub fn literal_markdown(text: &str) -> String {
+    crate::document::canonical::escape(text)
+}
 fn list<'a>(value: &'a Value, key: &str) -> &'a [Value] {
     value[key].as_array().map(Vec::as_slice).unwrap_or(&[])
 }
@@ -55,6 +58,47 @@ fn object_render(value: &Value) -> String {
 fn evidence_text(value: &Value, text: &str) -> String {
     let index = value["source_index"].as_u64().unwrap_or(0);
     let original = value["text"].as_str().unwrap_or("");
+    let canonical = &value["canonical"];
+    if canonical["schema"] == "les.document-structure.v1" {
+        let body = value["body_offset"]
+            .as_u64()
+            .and_then(|n| original.get(n as usize..))
+            .unwrap_or("");
+        let prefix = text.strip_suffix(body).unwrap_or("");
+        if canonical["kind"] == "paragraph" {
+            return format!(
+                "{prefix}[Фрагмент S{index}]\nS{index}P1 {}",
+                canonical["text"].as_str().unwrap_or("")
+            );
+        }
+        if canonical["kind"] == "table" {
+            let columns = |row: &Value| {
+                row.as_array()
+                    .into_iter()
+                    .flatten()
+                    .enumerate()
+                    .map(|(i, c)| {
+                        format!(
+                            "C{}: {}",
+                            i + 1,
+                            c.as_str().unwrap_or("").replace('\n', " / ")
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            };
+            return format!(
+                "{prefix}Столбцы: {}\n{}",
+                columns(&canonical["header"]),
+                list(canonical, "rows")
+                    .iter()
+                    .enumerate()
+                    .map(|(r, row)| format!("S{index}R{} {}", r + 1, columns(row)))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            );
+        }
+    }
     let spans = value["body_offset"]
         .as_u64()
         .map(|offset| prose_spans(original, offset as usize))

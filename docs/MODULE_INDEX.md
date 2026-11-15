@@ -1,5 +1,14 @@
 # Модули LES RAG
 
+[Сверка с готовыми RAG-конвейерами](modules/retrieval-reference-audit.md):
+структурный документ, связи детей и родителей, цитаты и места потери
+доказательств. Архитектурный разбор и границы проверки.
+
+883: [каноническая структура Docling](modules/canonical-document-structure.md) —
+одни единицы для индекса и читателя, типизированные ячейки, один смысловой
+отбор после чтения. [Приёмка](acceptance/canonical-rag-883.md) ведётся отдельно
+от состояния рабочей установки.
+
 882: [структурные чанки, шапки и контекст](modules/structured-search-context.md) —
 `document/{source_nodes,embedding_chunks,nodes}`, `search_context`,
 `context_selection`, `sources/retrieval/packing` и секции Word.

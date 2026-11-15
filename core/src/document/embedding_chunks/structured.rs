@@ -90,6 +90,7 @@ pub(super) fn execute(
     overlap: usize,
     search: &str,
     measure: Option<&Measure<'_>>,
+    reading_unit: Option<&Value>,
 ) -> Result<Vec<Value>> {
     if length(search, measure)? >= budget {
         return Err("DOCUMENT_SEARCH_CONTEXT_BUDGET_EXCEEDED");
@@ -101,7 +102,11 @@ pub(super) fn execute(
         measure,
         parts: Vec::new(),
     };
-    let units = crate::document::structure::units(text, 12000)?;
+    let units = if let Some(unit) = reading_unit {
+        vec![unit.clone()]
+    } else {
+        crate::document::structure::for_index(crate::document::structure::units(text, 12000)?)
+    };
     for unit in units {
         let body = unit["body"].as_str().ok_or("DOCUMENT_STRUCTURE_INVALID")?;
         if unit["kind"] != "table_rows" {
@@ -164,7 +169,7 @@ mod tests {
             .map(|i| format!("|Valve {i}|1|69.0|\n"))
             .collect::<Vec<_>>();
         let text = format!("# Equipment\n{header}{}", rows.join(""));
-        let parts = execute(&text, 180, 30, "File: equipment.docx\n", None).unwrap();
+        let parts = execute(&text, 180, 30, "File: equipment.docx\n", None, None).unwrap();
         for row in &rows {
             assert_eq!(
                 parts
@@ -189,7 +194,7 @@ mod tests {
             "|Name|Value|\n|---|---|\n|{}|17.25|\n",
             "unbroken ".repeat(50)
         );
-        let parts = execute(&text, 120, 20, "Document: source\n", None).unwrap();
+        let parts = execute(&text, 120, 20, "Document: source\n", None, None).unwrap();
         assert!(parts.iter().any(|p| p["requires_source_read"] == true));
         assert!(parts.iter().all(|p| p["length"].as_u64().unwrap() <= 120));
         assert!(parts.last().unwrap()["text"]
@@ -201,7 +206,7 @@ mod tests {
     fn a_header_larger_than_the_embedding_window_is_preserved_with_a_read_requirement() {
         let caption = "A very wide merged table title ".repeat(12);
         let text = format!("|{caption}|{caption}|\n|---|---|\n|Valve|17.25|\n");
-        let parts = execute(&text, 120, 20, "Document: source\n", None).unwrap();
+        let parts = execute(&text, 120, 20, "Document: source\n", None, None).unwrap();
         assert!(parts.iter().all(|p| p["length"].as_u64().unwrap() <= 120));
         assert!(parts.iter().all(|p| p["requires_source_read"] == true));
         assert!(parts

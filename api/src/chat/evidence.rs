@@ -392,7 +392,7 @@ impl Evidence {
             .or_else(|| block["text"].as_str())
             .unwrap_or("")
     }
-    fn block(source: &Value, text: &str) -> Value {
+    fn block(source: &Value, text: &str, canonical: &Value) -> Value {
         let mut note = if source["ocr"] == true {
             "Текст получен OCR: возможны ошибки знаков, чисел и структуры таблицы. Для точных выводов проверь оригинал.\n"
         } else {
@@ -458,6 +458,9 @@ impl Evidence {
         }
         // Byte offset into the retained original, not a duplicate of the quote.
         block["body_offset"] = json!(block["text"].as_str().unwrap().len() - text.len());
+        if canonical["schema"] == "les.document-structure.v1" {
+            block["canonical"] = canonical.clone();
+        }
         if source["sheet_name"].is_string() && source["row"].is_u64() {
             block["record_kind"] = json!("spreadsheet_row");
         }
@@ -649,7 +652,11 @@ impl Evidence {
                             self.sources[index]["header"].as_str().unwrap_or("")
                         ))
                     }) {
-                        self.blocks.push(Self::block(&self.sources[index], text));
+                        self.blocks.push(Self::block(
+                            &self.sources[index],
+                            text,
+                            &passage["canonical"],
+                        ));
                     }
                 }
                 continue;
@@ -684,7 +691,7 @@ impl Evidence {
             source["header"] = json!(format!("[Источник {index} | {header_label}]"));
             Self::page_metadata(&mut source, result);
             if result["tool"] != "document_review" {
-                let block = Self::block(&source, text);
+                let block = Self::block(&source, text, &passage["canonical"]);
                 if initial {
                     self.initial.push((index, block));
                 } else {

@@ -450,18 +450,49 @@ impl<F: Fn(&Value, Option<&[u8]>) -> Result<Value>> Package<'_, F> {
         request["prepared_sha256"] = json!(crate::sha256_hex(&prepared));
         request["slot_prefix"] = json!(prefix);
         let result = (self.external)(&request, Some(&prepared))?;
-        let text = result["text"].as_str().ok_or("DOCLING_WORD_INCOMPLETE")?;
-        let mut text = restore(
-            text,
-            &prefix,
-            &slots,
-            self.unread_visual,
-            &result["slot_expansions"],
-        )?;
+        let mut text = if result["structure"].is_object() {
+            if self.unread_visual > 0
+                && !super::super::super::canonical::has_text(&result["structure"], Some(&prefix))
+            {
+                return Err("DOCLING_WORD_INCOMPLETE");
+            }
+            // Each logical cell/run has exactly one authoritative text value.
+            // Restore checked native parts there, before any escaping/rendering.
+            // JSON escaping preserves quotes/newlines in OCR/OLE/math payloads.
+            let serialized = serde_json::to_string(&result["structure"]).map_err(|_| BAD)?;
+            let escaped = slots
+                .iter()
+                .map(|(token, value)| {
+                    let s = serde_json::to_string(value).map_err(|_| BAD)?;
+                    Ok((token.clone(), s[1..s.len() - 1].to_owned()))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let restored = restore(&serialized, &prefix, &escaped, 0, &Value::Null)?;
+            self.structure = serde_json::from_str(&restored).map_err(|_| BAD)?;
+            super::super::super::canonical::render(&self.structure)?
+        } else {
+            restore(
+                result["text"].as_str().ok_or("DOCLING_WORD_INCOMPLETE")?,
+                &prefix,
+                &slots,
+                self.unread_visual,
+                &result["slot_expansions"],
+            )?
+        };
         if text.trim().is_empty() && !self.floating.iter().any(|(_, s)| !s.trim().is_empty()) {
             return Err("NO_SEARCHABLE_TEXT");
         }
+        let body_end = text.len();
         self.read_related(&mut text)?;
+        if text.len() > body_end {
+            if let Some(blocks) = self
+                .structure
+                .get_mut("blocks")
+                .and_then(Value::as_array_mut)
+            {
+                blocks.push(json!({"id":"native:related","kind":"paragraph","text":&text[body_end..],"placement":"related_story"}));
+            }
+        }
         Ok(text)
     }
     fn slot_xml(

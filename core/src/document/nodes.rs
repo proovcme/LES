@@ -127,7 +127,10 @@ impl Builder {
                 search_prefix.push_str(&format!("{label}: {}\n", string(&node["payload"][key])));
             }
         }
-        let request = json!({"text":text,"size":self.budget,"minimum":minimum,"structural":self.structural,"overlap":self.overlap,"search_prefix":search_prefix});
+        let reading_unit = node["payload"]
+            .get("word_reading_view")
+            .or_else(|| node["payload"].get("source_reading_unit"));
+        let request = json!({"text":text,"size":self.budget,"minimum":minimum,"structural":self.structural,"overlap":self.overlap,"search_prefix":search_prefix,"reading_unit":reading_unit});
         let local = self.tokenizer.as_ref();
         let measure = |value: &str| local.unwrap().count(value);
         let prepared = embedding_chunks::execute(
@@ -159,6 +162,7 @@ impl Builder {
                 value["payload"] = json!({});
             }
             let payload = value["payload"].as_object_mut().unwrap();
+            payload.remove("source_reading_unit");
             if self.structural {
                 payload.insert(
                     "search_context_schema".into(),
