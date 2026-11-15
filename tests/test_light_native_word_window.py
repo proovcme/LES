@@ -13,6 +13,9 @@ from tests.test_light_native_api import wait_for
 @pytest.fixture(autouse=True)
 def section_reading(monkeypatch):
     monkeypatch.setenv('LES_LIGHT_INSTANCE_ID', 'word-window-fixture')
+    parsers=os.getenv('LES_TEST_NATIVE_DOCUMENT_PARSERS')
+    if not parsers:pytest.skip('Native Docling parser required for canonical table checks')
+    monkeypatch.setenv('LES_NATIVE_DOCUMENT_PARSERS',parsers)
     monkeypatch.setenv('LES_EXPERIMENT_WORD_READING', 'section-v1')
     monkeypatch.setenv('LES_EXPERIMENT_SAVED_READING', 'original-v1')
     monkeypatch.setenv('LES_EXPERIMENT_EVIDENCE_PACKET', 'compact-v1')
@@ -73,8 +76,10 @@ def test_word_window_mcp_keeps_complete_rows_original_positions_and_revision_gua
     assert plan['retained_units']<plan['original_units']/2 and plan['omitted_units']>0
     assert value['coverage']=='bounded'
     passages=value['passages'];sources=envelope['sources']
-    table=next(p for p in passages if (p.get('canonical') or {}).get('kind')=='table'
-        and 'PANEL-Z17' in p['text'])
+    table=next((p for p in passages if (p.get('canonical') or {}).get('kind')=='table'
+        and 'PANEL-Z17' in p['text']),None)
+    assert table is not None,{'plan':plan,'read_failures':value.get('read_failures'),
+        'passages':[{'kind':(p.get('canonical') or {}).get('kind'),'text':p['text'][:350]} for p in passages]}
     assert all(text in table['text'] for text in ['Capacity','17.25','117.25','kW'])
     source=sources[table['source']['ref']-1]
     assert source['source_sha256']==digest and source['ordinal']>75 and source['read_offset']>75
