@@ -83,3 +83,32 @@ must be reported as confounding pairs, not silently excluded from primary scores
   services afterward; do not duplicate corpus stores or change working LES.
 
 No benefit or replacement decision is claimed before these gates complete.
+
+## Validation boundary
+
+Frozen100 is now a development/regression set. This ablation diagnoses delivery
+losses; repeated gains on it do not establish independent quality or answer
+correctness. A release needs a separately annotated question set which has not
+guided these changes, with broader overview coverage, wrong/unsupported answers,
+numerical row/column/unit association, editions and citations evaluated separately.
+Freeze code/model/index identities before opening that set; a set used to fix
+failures becomes a development set and cannot keep its held-out label. No closed
+independent acceptance set or answer-quality result is claimed here.
+
+Repository-wide counts of `Value`, `unwrap` or test functions are triage signals,
+not measured panic reachability or coverage. Typed payload/unit boundaries and
+generated invariant checks remain architectural work; this experiment does not
+claim a repository-wide type or panic audit. Unbounded parallel parsing is not
+enabled: original-reader memory reserves remain unchanged.
+
+Component gates: **172 core / 128 API cases** passed. Native checks compose
+**113 passes and one optional skip**: the first run passed 112 and exposed a new
+test incorrectly forwarding `index_revision:null` from an index-independent Word
+response. The corrected test omits the absent selector, keeps the view pin, and
+passed all original-stream/number/replacement assertions. The original failure
+is retained. `make verify` passed with **2,230 collected**, not executed; its
+earlier attempt during the core rebuild failed at core-library discovery and
+is retained separately. The stable repeat explicitly pins the built core asset.
+Two transport-only MCP smoke calls exercised both policies with valid source
+checks; they are not quality evidence. The counterbalanced 200-call run is in
+progress. Working installation/default context policy are unchanged.
