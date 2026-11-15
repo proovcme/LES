@@ -93,14 +93,18 @@ pub(crate) fn fit_envelope_budget(
     max_chars: usize,
     max_items: usize,
 ) -> Result<()> {
-    fit_budget(reply, max_chars, max_items, None)
+    fit_budget(reply, max_chars, max_items, None, false)
+}
+
+pub(super) fn fit_compact_context(reply: &mut Value) -> Result<()> {
+    fit_budget(reply, 22500, 240, None, true)
 }
 
 /// A context snapshot has no continuation cursor. Its only admission pass
 /// measures ready records, retaining RRF order among the units which fit.
 pub(super) fn fit_ranked_context(reply: &mut Value, text_budget: usize) -> Result<()> {
     reply["result"]["context_policy"] = json!("rrf-wire-v1");
-    fit_budget(reply, 22500, 240, Some(text_budget))
+    fit_budget(reply, 22500, 240, Some(text_budget), false)
 }
 
 fn fit_budget(
@@ -108,7 +112,29 @@ fn fit_budget(
     max_chars: usize,
     max_items: usize,
     text_budget: Option<usize>,
+    compact: bool,
 ) -> Result<()> {
+    if compact {
+        super::super::packet::encode(reply)?;
+    }
+    let wire_chars = |value: &Value| {
+        if compact {
+            super::super::packet::encode(value)
+                .map(|v| canonical_chars(&v))
+                .unwrap_or(usize::MAX)
+        } else {
+            canonical_chars(value)
+        }
+    };
+    let wire_items = |value: &Value| {
+        if compact {
+            super::super::packet::encode(value)
+                .map(|v| json_item_count(&v))
+                .unwrap_or(usize::MAX)
+        } else {
+            json_item_count(value)
+        }
+    };
     let ranked = text_budget.is_some();
     let text_budget = text_budget.unwrap_or(usize::MAX);
     // A canonical table carries nested cell arrays, unlike a flat Markdown
@@ -136,8 +162,8 @@ fn fit_budget(
         .map(|p| p["text"].as_str().map_or(0, |s| s.chars().count()))
         .sum();
     reconcile_document_units(reply, &orig_passages);
-    if canonical_chars(reply) <= max_chars
-        && json_item_count(reply) <= max_items
+    if wire_chars(reply) <= max_chars
+        && wire_items(reply) <= max_items
         && (!ranked || (planned_text_chars <= text_budget && planned_units <= 32))
     {
         return Ok(());
@@ -153,13 +179,13 @@ fn fit_budget(
         reply["result"]["fusion_trace_total"] = json!(rows.len());
         reply["result"]["fusion_trace_truncated"] = json!(!rows.is_empty());
     }
-    if canonical_chars(reply) > max_chars || json_item_count(reply) > max_items {
+    if wire_chars(reply) > max_chars || wire_items(reply) > max_items {
         compact_read_failures(reply);
     }
     // Source identities occur both beside each passage and in the public
     // source map. Remove only repeated aliases inside each identity before
     // spending the wire allowance on fewer original reading units.
-    if canonical_chars(reply) > max_chars || json_item_count(reply) > max_items {
+    if wire_chars(reply) > max_chars || wire_items(reply) > max_items {
         for source in reply["sources"].as_array_mut().into_iter().flatten() {
             compact_repeated_identity(source);
         }
@@ -174,7 +200,7 @@ fn fit_budget(
     // Exact duplicate origins are navigation, not extra read evidence. Keep
     // every primary pinned source; omit alias detail explicitly if it would
     // consume the body budget. Different text/revisions remain separate units.
-    if !ranked && (canonical_chars(reply) > max_chars || json_item_count(reply) > max_items) {
+    if !ranked && (wire_chars(reply) > max_chars || wire_items(reply) > max_items) {
         for source in reply["sources"].as_array_mut().into_iter().flatten() {
             compact_aliases(source);
         }
@@ -253,7 +279,7 @@ fn fit_budget(
         if !ranked {
             reconcile_document_units(reply, &orig_passages);
         }
-        if ranked && (canonical_chars(reply) > max_chars || json_item_count(reply) > max_items) {
+        if ranked && (wire_chars(reply) > max_chars || wire_items(reply) > max_items) {
             // Unselected candidates must not erase aliases of fitting units.
             // Retry only this ready candidate without optional alias details.
             compact_aliases(&mut kept_passages.last_mut().unwrap()["source"]);
@@ -261,7 +287,7 @@ fn fit_budget(
             reply["result"]["passages"] = json!(kept_passages);
             reply["sources"] = json!(kept_sources);
         }
-        if canonical_chars(reply) > max_chars || json_item_count(reply) > max_items {
+        if wire_chars(reply) > max_chars || wire_items(reply) > max_items {
             kept_passages.pop();
             kept_sources.pop();
             kept_ids.pop();
@@ -294,7 +320,7 @@ fn fit_budget(
         for hint in hints {
             kept_hints.push(hint);
             reply["result"]["navigation_hints"] = json!(kept_hints);
-            if canonical_chars(reply) > max_chars || json_item_count(reply) > max_items {
+            if wire_chars(reply) > max_chars || wire_items(reply) > max_items {
                 kept_hints.pop();
                 reply["result"]["navigation_hints"] = json!(kept_hints);
                 break;
@@ -307,7 +333,7 @@ fn fit_budget(
         for cand in candidates.into_iter().take(cap) {
             kept_candidates.push(cand);
             reply["result"]["candidate_documents"] = json!(kept_candidates);
-            if canonical_chars(reply) > max_chars || json_item_count(reply) > max_items {
+            if wire_chars(reply) > max_chars || wire_items(reply) > max_items {
                 kept_candidates.pop();
                 reply["result"]["candidate_documents"] = json!(kept_candidates);
                 break;
@@ -321,7 +347,7 @@ fn fit_budget(
             kept.push(row);
             reply["result"]["fusion_trace"] = json!(kept);
             reply["result"]["fusion_trace_truncated"] = json!(kept.len() != total);
-            if canonical_chars(reply) > max_chars || json_item_count(reply) > max_items {
+            if wire_chars(reply) > max_chars || wire_items(reply) > max_items {
                 kept.pop();
                 reply["result"]["fusion_trace"] = json!(kept);
                 reply["result"]["fusion_trace_truncated"] = json!(true);
@@ -336,7 +362,7 @@ fn fit_budget(
             "planned_units":planned_units,"delivered_units":kept_passages.len(),
             "planned_text_chars":planned_text_chars,
             "delivered_text_chars":kept_passages.iter().map(|p|p["text"].as_str().map_or(0,|s|s.chars().count())).sum::<usize>(),
-            "wire_chars":canonical_chars(reply),"wire_limit_chars":max_chars,
+            "wire_chars":wire_chars(reply),"wire_limit_chars":max_chars,
             "body_omitted":omitted_any,"ranked_context":ranked,
             "skipped_text_budget":skipped_text,"skipped_wire_budget":skipped_wire,
             "skipped_unit_limit":skipped_count})
@@ -415,6 +441,34 @@ fn compact_read_failures(reply: &mut Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn compact_cost_keeps_more_selected_proof_without_reordering_or_losing_sources() {
+        let sources: Vec<_> = (0..6).map(|page|json!({"doc_id":"d","dataset_id":"ds","doc_name":"folder/".repeat(120),"source_sha256":"a".repeat(64),"page":page+1,"url":format!("/original#page={}",page+1)})).collect();
+        let rows:Vec<_>=sources.iter().enumerate().map(|(i,s)|json!({"text":format!("Position {i}: 17.25 kW {}","proof ".repeat(140)),"canonical":{"kind":"paragraph"},"source":s})).collect();
+        let original = json!({"result":{"passages":rows,"coverage":"bounded"},"sources":sources});
+        let mut baseline = original.clone();
+        fit_envelope_budget(&mut baseline, 22500, 240).unwrap();
+        let mut candidate = original.clone();
+        fit_compact_context(&mut candidate).unwrap();
+        let packed = super::super::super::packet::encode(&candidate).unwrap();
+        assert!(canonical_chars(&packed) <= 22500);
+        assert!(
+            candidate["result"]["passages"].as_array().unwrap().len()
+                >= baseline["result"]["passages"].as_array().unwrap().len()
+        );
+        assert_eq!(
+            super::super::super::packet::decode(&packed).unwrap(),
+            candidate
+        );
+        for (i, p) in candidate["result"]["passages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .enumerate()
+        {
+            assert_eq!(p, &original["result"]["passages"][i]);
+        }
+    }
     #[test]
     fn a_rejected_candidate_cannot_remove_a_fitting_units_source_aliases() {
         let alias = json!({"doc_id":"copy","dataset_id":"scope","source_sha256":"b".repeat(64)});
@@ -569,10 +623,12 @@ mod tests {
             assert_eq!(failure["source"]["doc_name"], "source.pdf");
             assert_eq!(failure["evidence_admissible"], false);
             assert_eq!(failure["read_required"], "read_pdf_source");
-            assert!(failure["message"]
-                .as_str()
-                .unwrap()
-                .contains("not proof of absence"));
+            assert!(
+                failure["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("not proof of absence")
+            );
         }
     }
     #[test]

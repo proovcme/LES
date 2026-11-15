@@ -1,5 +1,8 @@
 # Модули LES RAG
 
+885: [поэтапная доставка доказательств](modules/evidence-delivery-stages.md) —
+`sources/packet.rs`, допуск в `retrieval/envelope.rs`, чтение ссылок в `evidence.rs`.
+
 884: [контроль RRF/контекста](modules/rrf-admission-control.md) —
 `retrieval/trial.rs`, общий порядок в `context_selection`, измерение готового
 пакета в `retrieval/envelope.rs`. Только явный стенд на копии; штатный путь прежний.

@@ -210,6 +210,10 @@ async fn search_with_navigation(
     navigation: bool,
 ) -> Result<Value> {
     let control = trial::Control::requested(&args)?;
+    let compact = super::packet::requested()? && args["view"] == "context";
+    if compact && control == trial::Control::RrfWire {
+        return Err("CONTEXT_EXPERIMENT_CONFLICT".into());
+    }
     let started = std::time::Instant::now();
     let requested = args["dataset_ids"].as_array().cloned().unwrap_or_else(|| {
         turn.scope["resolved_dataset_ids"]
@@ -377,12 +381,15 @@ async fn search_with_navigation(
             // Public tool replies have a wire limit. Internal prefetch must
             // retain its complete candidate catalog and fitting page units:
             // the model packer, not an MCP envelope, owns their admission.
-            if control==trial::Control::RrfWire {
+            if compact {
+                envelope::fit_compact_context(&mut reply)?;
+            } else if control==trial::Control::RrfWire {
                 envelope::fit_ranked_context(&mut reply,max_chars)?;
             } else if navigation || args["view"] == "context" {
                 fit_envelope_budget(&mut reply, 22500, 240)?;
             }
             control.reply(query,&reply);
+            if compact { reply = super::packet::encode(&reply)?; }
             if navigation {
                 Page::new(offset, total).apply(&mut reply, "total_candidates")?;
             }

@@ -1,6 +1,6 @@
 //! Source identities and bounded model-facing evidence projections.
 use super::Result;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 mod pages;
 #[derive(Default)]
 pub(super) struct Evidence {
@@ -19,6 +19,27 @@ pub(super) struct Evidence {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn compact_packet_admits_identical_blocks_and_citations_in_the_main_chat() {
+        let source = json!({"doc_id":"d","dataset_id":"ds","doc_name":"Book.pdf","source_sha256":"a".repeat(64),"page":2,"evidence_kind":"physical_pdf_page"});
+        let raw = json!({"tool":"search_sources","status":"ok","result":{"passages":[{"text":"Exact quantity 17.25 kW","source":source}]},"sources":[source]});
+        let compact = super::super::tools::sources::packet::encode(&raw).unwrap();
+        let mut baseline = Evidence::new(true);
+        baseline.add(&raw);
+        let mut candidate = Evidence::new(true);
+        candidate.add(&compact);
+        assert_eq!(candidate.sources, baseline.sources);
+        assert_eq!(candidate.blocks, baseline.blocks);
+        assert_eq!(
+            candidate.projection(&compact, 12000),
+            baseline.projection(&raw, 12000)
+        );
+        let mut invalid = compact;
+        invalid["result"]["passages"][0]["source"]["ref"] = json!(999);
+        let mut rejected = Evidence::new(true);
+        rejected.add(&invalid);
+        assert!(rejected.sources.is_empty());
+    }
     #[test]
     fn partial_conversion_keeps_verified_text_and_exposes_unread_sources_without_proof() {
         let mut flow = Evidence::new(true);
@@ -51,9 +72,11 @@ mod tests {
             "passages":[{"text":"Severed legacy row","source":legacy}],"index_revision":"r",
             "read_receipt":{"schema":"les.indexed-read.v1","index_revision":"r","point_ids":["x"]}}}));
         assert_eq!(flow.sources.len(), 2);
-        assert!(!json!(flow.optional_blocks())
-            .to_string()
-            .contains("Severed legacy row"));
+        assert!(
+            !json!(flow.optional_blocks())
+                .to_string()
+                .contains("Severed legacy row")
+        );
     }
     fn page_part(offset: usize, text: &str, total: usize) -> Value {
         let end = offset + text.chars().count();
@@ -142,9 +165,11 @@ mod tests {
         evidence.add(&json!({"tool":"read_source","status":"ok","result":{"passages":[passage("B",1,"B comparison")]}}));
         let optional = json!(evidence.optional_blocks()).to_string();
         assert!(optional.contains("A first") && optional.contains("A continuation"));
-        assert!(json!(evidence.required_blocks())
-            .to_string()
-            .contains("B comparison"));
+        assert!(
+            json!(evidence.required_blocks())
+                .to_string()
+                .contains("B comparison")
+        );
         evidence.add(&json!({"tool":"read_source","status":"ok","result":{"passages":[passage("A",1,"A first")]}}));
         let optional = json!(evidence.optional_blocks()).to_string();
         assert!(optional.contains("B comparison") && optional.contains("A continuation"));
@@ -281,9 +306,11 @@ mod tests {
         let optional = evidence.optional_blocks();
         assert_eq!(optional.len(), 1);
         assert!(Evidence::text(&optional[0]).contains("Actual first read"));
-        assert!(!serde_json::to_string(&optional)
-            .unwrap()
-            .contains("Unadmitted output"));
+        assert!(
+            !serde_json::to_string(&optional)
+                .unwrap()
+                .contains("Unadmitted output")
+        );
         assert_eq!(evidence.required_blocks().len(), 1);
     }
     #[test]
@@ -729,6 +756,11 @@ impl Evidence {
         }
     }
     fn passages(result: &Value) -> Vec<Value> {
+        if !result["result"]["evidence_packet"].is_null() {
+            return super::tools::sources::packet::decode(result)
+                .map(|expanded| Self::passages(&expanded))
+                .unwrap_or_default();
+        }
         result["result"]["passages"]
             .as_array()
             .cloned()
@@ -791,7 +823,10 @@ impl Evidence {
         if self.needs_read() || result["result"]["documents"].is_array() {
             return super::discovery::project(payload, context_chars);
         }
-        let mut value = payload.clone();
+        let mut value = match super::tools::sources::packet::decode(payload) {
+            Ok(value) => value,
+            Err(code) => return json!({"status":"error","result":{"code":code}}),
+        };
         if let Some(result) = value["result"].as_object_mut() {
             result.remove("read_receipt");
         }
@@ -837,12 +872,14 @@ impl Evidence {
             }
         }
         if value["sources"].is_array() {
-            value["sources"] = json!(value["sources"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|s| self.reference(s).unwrap_or_else(|| s.clone()))
-                .collect::<Vec<_>>());
+            value["sources"] = json!(
+                value["sources"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|s| self.reference(s).unwrap_or_else(|| s.clone()))
+                    .collect::<Vec<_>>()
+            );
         }
         if !value["execution"].is_null() {
             value["execution"] =
