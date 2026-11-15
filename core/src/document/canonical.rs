@@ -145,7 +145,86 @@ fn row_text(row: &[String]) -> String {
         row.iter().map(|s| escape(s)).collect::<Vec<_>>().join("|")
     )
 }
+/// Search consumes literal source values, not display escapes. The returned
+/// unit has explicit row boundaries; no caller needs to infer Markdown tables.
+pub(crate) fn search_unit(unit: &Value) -> Result<Option<Value>> {
+    let data = &unit["canonical"];
+    if !data.is_object() {
+        return Ok(None);
+    }
+    if data["schema"] != SCHEMA {
+        return Err(INVALID);
+    }
+    let heading = unit["heading"].as_str().unwrap_or("");
+    let heading_context = if unit["kind"] == "heading" {
+        heading.rsplit_once('\n').map_or("", |(parent, _)| parent)
+    } else {
+        heading
+    };
+    let prefix = if heading_context.is_empty() {
+        String::new()
+    } else {
+        format!("{heading_context}\n\n")
+    };
+    let (body, header) = match data["kind"].as_str() {
+        Some("paragraph") => (
+            data["text"].as_str().ok_or(INVALID)?.to_owned(),
+            String::new(),
+        ),
+        Some("table") => {
+            let row = |r: &Value| -> Result<String> {
+                let cells = r
+                    .as_array()
+                    .ok_or(INVALID)?
+                    .iter()
+                    .map(|c| {
+                        c.as_str()
+                            .ok_or(INVALID)
+                            .map(|s| s.replace(['\r', '\n'], " "))
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                Ok(format!("|{}|\n", cells.join("|")))
+            };
+            let header_cells = data["header"].as_array().ok_or(INVALID)?;
+            let header = format!(
+                "{}|{}|\n",
+                row(&data["header"])?,
+                vec!["---"; header_cells.len()].join("|")
+            );
+            let mut body = String::new();
+            for (i, r) in list(data, "rows").iter().enumerate() {
+                body.push_str(&row(r)?);
+                if i == 0 && data["source_row_start"] == 0 {
+                    body.push_str(&format!(
+                        "|{}|\n",
+                        vec!["---"; header_cells.len()].join("|")
+                    ));
+                }
+            }
+            (body, header)
+        }
+        _ => return Err(INVALID),
+    };
+    let context = format!(
+        "{prefix}{}",
+        if data["kind"] == "table" && data["source_row_start"] != 0 {
+            &header
+        } else {
+            ""
+        }
+    );
+    Ok(Some(
+        json!({"kind":unit["kind"],"body":body,"heading":heading,"table_header":header,"context_prefix":context,"text":format!("{context}{body}")}),
+    ))
+}
 fn block_text(block: &Value) -> Result<String> {
+    if block["kind"] == "native_reading_units" {
+        return list(block, "units")
+            .iter()
+            .map(|u| u["body"].as_str().ok_or(INVALID))
+            .collect::<Result<Vec<_>>>()
+            .map(|v| v.concat());
+    }
     if block["kind"] == "table" {
         let rows = grid(block, 0)?;
         let mut out = String::new();
@@ -187,25 +266,71 @@ pub(crate) fn units(structure: &Value, budget: usize) -> Result<Vec<Value>> {
     }
     let mut out = Vec::new();
     let mut offset = 0;
-    let mut headings: Vec<(u64, String)> = Vec::new();
+    let mut headings: Vec<(u64, String, String)> = Vec::new();
     for block in list(structure, "blocks") {
+        let first_unit = out.len();
         let body = format!("{}\n", block_text(block)?);
+        if block["kind"] == "native_reading_units" {
+            let native = list(block, "units");
+            for (i, unit) in native.iter().enumerate() {
+                let mut unit = unit.clone();
+                unit["ordinal"] = json!(out.len());
+                unit["source_block_id"] =
+                    json!(format!("{}:{i}", block["id"].as_str().ok_or(INVALID)?));
+                unit["source_parent_id"] = block["id"].clone();
+                unit["start_byte"] =
+                    json!(offset + unit["start_byte"].as_u64().ok_or(INVALID)? as usize);
+                unit["end_byte"] = json!(
+                    offset
+                        + unit["end_byte"].as_u64().ok_or(INVALID)? as usize
+                        + usize::from(i + 1 == native.len())
+                );
+                if i + 1 == native.len() {
+                    for key in ["body", "text"] {
+                        unit[key] = json!(format!("{}\n", unit[key].as_str().ok_or(INVALID)?));
+                    }
+                }
+                unit["oversized"] =
+                    json!(unit["text"].as_str().ok_or(INVALID)?.chars().count() > budget);
+                out.push(unit);
+            }
+            offset += body.len();
+            if out.len() > 50000 || offset > 24 * 1024 * 1024 {
+                return Err("DOCUMENT_STRUCTURE_LIMIT");
+            }
+            continue;
+        }
         if block["kind"] == "heading" {
             let level = block["level"].as_u64().unwrap_or(1);
-            while headings.last().is_some_and(|(l, _)| *l >= level) {
+            while headings.last().is_some_and(|(l, _, _)| *l >= level) {
                 headings.pop();
             }
-            headings.push((level, body.trim().to_owned()));
+            headings.push((
+                level,
+                block["id"].as_str().ok_or(INVALID)?.to_owned(),
+                plain(block, 0)?,
+            ));
         }
         let heading = headings
             .iter()
-            .map(|(_, s)| s.as_str())
+            .map(|(level, _, s)| format!("{} {s}", "#".repeat((*level).clamp(1, 6) as usize)))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let display_heading = headings
+            .iter()
+            .map(|(level, _, s)| {
+                format!(
+                    "{} {}",
+                    "#".repeat((*level).clamp(1, 6) as usize),
+                    escape(s)
+                )
+            })
             .collect::<Vec<_>>()
             .join("\n");
         let prefix = if block["kind"] == "heading" || heading.is_empty() {
             String::new()
         } else {
-            format!("{heading}\n\n")
+            format!("{display_heading}\n\n")
         };
         if block["kind"] == "table" {
             let rows = grid(block, 0)?;
@@ -310,6 +435,13 @@ pub(crate) fn units(structure: &Value, budget: usize) -> Result<Vec<Value>> {
             }
         }
         offset += body.len();
+        let path = json!(headings
+            .iter()
+            .map(|(level, id, text)| json!({"id":id,"level":level,"text":text}))
+            .collect::<Vec<_>>());
+        for unit in &mut out[first_unit..] {
+            unit["source_heading_path"] = path.clone();
+        }
         if out.len() > 50000 || offset > 24 * 1024 * 1024 {
             return Err("DOCUMENT_STRUCTURE_LIMIT");
         }
@@ -403,6 +535,20 @@ mod tests {
             end = u["end_byte"].as_u64().unwrap();
         }
         assert_eq!(end as usize, text.len());
+    }
+    #[test]
+    fn display_escaping_never_splits_search_identifiers_or_literal_operators() {
+        let s = json!({"schema":SCHEMA,"blocks":[{"id":"h","kind":"heading","level":2,"text":"DN_100"},
+            {"id":"p","kind":"paragraph","text":"Cable DN_100, A_B/2 and 125*480"}]});
+        let reading = units(&s, 4000).unwrap();
+        assert!(reading[1]["text"].as_str().unwrap().contains("DN\\_100"));
+        let search = search_unit(&reading[1]).unwrap().unwrap();
+        assert_eq!(search["heading"], "## DN_100");
+        assert!(search["text"]
+            .as_str()
+            .unwrap()
+            .contains("DN_100, A_B/2 and 125*480"));
+        assert!(!search["text"].as_str().unwrap().contains("\\_"));
     }
     #[test]
     fn invalid_or_overlapping_spans_fail_instead_of_inventing_cells() {

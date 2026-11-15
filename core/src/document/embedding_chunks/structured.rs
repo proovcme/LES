@@ -163,6 +163,25 @@ pub(super) fn execute(
 mod tests {
     use super::*;
     #[test]
+    fn an_explicit_source_unit_still_passes_the_common_binary_and_control_sanitation() {
+        let body = format!("DN_100\u{0000} {} END", "A".repeat(600));
+        let result = super::super::execute(
+            &json!({"text":body,"size":512,"minimum":1,"structural":true,
+            "reading_unit":{"kind":"paragraph","body":body,"context_prefix":"","heading":""}}),
+            None,
+        )
+        .unwrap();
+        let text = result["parts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["text"].as_str().unwrap())
+            .collect::<String>();
+        assert!(text.contains("DN_100") && text.contains("END"));
+        assert!(!text.contains('\u{0000}') && !text.contains(&"A".repeat(256)));
+        assert_eq!(result["quality"]["sanitized"], true);
+    }
+    #[test]
     fn every_table_slice_has_literal_captions_and_all_data_rows_survive() {
         let header = "|Position|Quantity|Mass|\n|---|---|---|\n";
         let rows = (0..40)

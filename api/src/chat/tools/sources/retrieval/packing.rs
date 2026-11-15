@@ -15,7 +15,7 @@ fn fused_rank(point: &Value, rank: usize) -> u64 {
         })
         .unwrap_or(rank as u64)
 }
-fn unit(point: &Value, rank: usize) -> Value {
+fn unit(point: &Value, rank: usize) -> Result<Value, &'static str> {
     let p = &point["payload"];
     let rank = fused_rank(point, rank);
     let mut source = serde_json::Map::new();
@@ -42,13 +42,18 @@ fn unit(point: &Value, rank: usize) -> Value {
     } else {
         serde_json::json!(["parent", p["parent_id"]])
     };
-    serde_json::json!({"text":p["text"].as_str().unwrap_or(""),"unit_id":key(point),
+    let literal = les_core::document_search_unit(
+        &serde_json::json!({"canonical":p["canonical"],"kind":if p["canonical"]["kind"]=="table"{"table_rows"}else{"paragraph"},"heading":p["section_heading"]}),
+    )?;
+    Ok(
+        serde_json::json!({"text":literal.as_ref().and_then(|u|u["text"].as_str()).unwrap_or(p["text"].as_str().unwrap_or("")),"unit_id":key(point),
         "read_identity":serde_json::json!([p["dataset_id"],p["file_name"],p["source_sha256"],address]),
-        "source":source,"source_rank":p["retrieval_source_rank"],"rank":if p["retrieval_expansion"]==true{Value::Null}else{serde_json::json!(rank)},"self_contained":matches!(p["reading_representation"].as_str(),Some("pdf_cells"|"word_structure"|"physical_pdf_page")),"heading":format!("{} {}",p["section_heading"].as_str().unwrap_or(""),p["parent_heading"].as_str().unwrap_or("")),"group":serde_json::json!([p["dataset_id"],p["file_name"],p["source_sha256"]]).to_string(),"point":point})
+        "source":source,"source_rank":p["retrieval_source_rank"],"rank":if p["retrieval_expansion"]==true{Value::Null}else{serde_json::json!(rank)},"self_contained":matches!(p["reading_representation"].as_str(),Some("pdf_cells"|"word_structure"|"physical_pdf_page")),"heading":format!("{} {}",p["section_heading"].as_str().unwrap_or(""),p["parent_heading"].as_str().unwrap_or("")),"group":serde_json::json!([p["dataset_id"],p["file_name"],p["source_sha256"]]).to_string(),"point":point}),
+    )
 }
 pub(super) fn catalog(points: &[Value]) -> Result<Value, &'static str> {
     les_core::context_selection::catalog(
-        &serde_json::json!({"units":points.iter().enumerate().map(|(i,p)|unit(p,i)).collect::<Vec<_>>()}),
+        &serde_json::json!({"units":points.iter().enumerate().map(|(i,p)|unit(p,i)).collect::<Result<Vec<_>,_>>()?}),
     )
 }
 /// The final context alone owns semantic selection and content deduplication.
@@ -58,7 +63,11 @@ fn select_points(
     text_budget: usize,
     context_budget: Option<usize>,
 ) -> Result<Vec<Value>, &'static str> {
-    let input: Vec<_> = points.iter().enumerate().map(|(i, p)| unit(p, i)).collect();
+    let input = points
+        .iter()
+        .enumerate()
+        .map(|(i, p)| unit(p, i))
+        .collect::<Result<Vec<_>, _>>()?;
     let result = les_core::context_selection::select(&serde_json::json!({
         "question":query,"units":input,"max_chars":context_budget.unwrap_or(1_000_000),
         "text_budget":text_budget,"identity_reserve_chars":if context_budget.is_some(){1024}else{0},"max_items":32
@@ -339,11 +348,11 @@ mod tests {
     fn retaining_a_channel_head_does_not_reset_its_actual_fusion_rank() {
         let mut point = serde_json::json!({"id":"reserved", "payload":{"text":"candidate"},
             "retrieval_fusion":{"fusion_rank":80,"selection_rank":4}});
-        assert_eq!(unit(&point, 3)["rank"], 79);
+        assert_eq!(unit(&point, 3).unwrap()["rank"], 79);
         point["payload"]["retrieval_rank"] = serde_json::json!(79);
-        assert_eq!(unit(&point, 0)["rank"], 79);
+        assert_eq!(unit(&point, 0).unwrap()["rank"], 79);
         point["payload"]["retrieval_expansion"] = serde_json::json!(true);
-        assert!(unit(&point, 0)["rank"].is_null());
+        assert!(unit(&point, 0).unwrap()["rank"].is_null());
     }
     fn point(id: &str, parent: &str, text: &str, ord: u64) -> Value {
         json!({"id":id,"payload":{"dataset_id":"ds","file_name":parent,"parent_id":parent,"text":text,"chunk_ord":ord}})

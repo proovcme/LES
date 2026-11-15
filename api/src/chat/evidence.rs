@@ -298,10 +298,13 @@ mod tests {
     fn search_is_optional_but_read_promotes_text_and_keeps_exact_source_identity() {
         let source = json!({"doc_id":"catalog-doc","dataset_id":"ds","doc_name":format!("{}/Source.pdf","long-folder/".repeat(30)),"source_sha256":"a".repeat(64),"page":3,"qdrant_point_id":"point"});
         let mut envelope = json!({"status":"ok","tool":"search_sources","result":{"passages":[{"text":"Exact proof 17.35 kW","source":source}]},"sources":[source]});
+        let canonical = json!({"schema":"les.document-structure.v1","kind":"paragraph","text":"Exact proof 17.35 kW"});
+        envelope["result"]["passages"][0]["canonical"] = canonical.clone();
         let mut evidence = Evidence::default();
         evidence.add(&envelope);
         assert!(evidence.blocks.is_empty());
         assert_eq!(evidence.optional_blocks().len(), 1);
+        assert_eq!(evidence.optional_blocks()[0]["canonical"], canonical);
         let projected = evidence.projection(&envelope, 32000);
         assert!(projected.get("sources").is_none());
         assert_eq!(
@@ -313,6 +316,7 @@ mod tests {
         envelope["tool"] = json!("read_source");
         evidence.add(&envelope);
         assert!(evidence.optional_blocks().is_empty());
+        assert_eq!(evidence.blocks[0]["canonical"], canonical);
         let text = Evidence::text(&evidence.blocks[0]);
         assert!(
             text.contains("catalog-doc")
@@ -792,6 +796,7 @@ impl Evidence {
             for row in rows {
                 if let Some(reference) = self.reference(&row["source"]) {
                     row.as_object_mut().unwrap().remove("text");
+                    row.as_object_mut().unwrap().remove("canonical");
                     // The admitted evidence block owns canonical identity and
                     // location. A tool ledger needs the citation pointer, not
                     // another copy of paths, hashes and nested source_ref.

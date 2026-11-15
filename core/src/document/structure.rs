@@ -9,7 +9,8 @@ pub(crate) fn for_index(units: Vec<Value>) -> Vec<Value> {
         .enumerate()
         .filter(|(i, u)| {
             let body = u["body"].as_str().unwrap_or("").trim();
-            let heading = body.starts_with('#') && u["heading"].as_str() == Some(body);
+            let heading = u["kind"] == "heading"
+                || body.starts_with('#') && u["heading"].as_str() == Some(body);
             !heading
                 || !units.get(i + 1).is_some_and(|next| {
                     next["context_prefix"]

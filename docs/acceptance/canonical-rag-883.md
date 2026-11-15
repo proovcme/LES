@@ -37,5 +37,25 @@ Completed source gates for the initial 883 candidate:
   of the complete behavioral suite.
 - API contract: 269 method/path pairs unchanged. Publication check passed.
 
-The complete corpus, frozen MCP, memory summary and full behavioral/CI gates
-are still pending; the counts above do not establish retrieval quality.
+Initial 883 isolated corpus conversion completed for all 78 DOCX originals,
+with no conversion errors and unchanged source SHA-256. An independent OOXML
+oracle matched 1,055 numeric rows in 34 explicitly bound tables, preserving
+columns and order. This does not cover every table or validate diagram meaning.
+The oracle reads explicit OOXML nonbreaking hyphens, tabs and breaks; ignoring
+those elements would incorrectly concatenate range endpoints.
+
+Peak native process-tree working set was 0.96 GiB (private bytes: 0.91 GiB),
+with at least 11.8 GiB available system memory during this serial conversion
+run. These are measurements of the initial debug candidate, not a performance
+comparison or a bound for the persistent MCP service plus embedding model.
+
+OCR limitations are unchanged across the same 78 original hashes: 270 visual
+objects in 32 documents lack verified text. Original special parts are retained;
+conversion success does not establish full visual extraction.
+
+Follow-up source regressions passed: core 168 tests, API with Edge 111 tests.
+These include native side-story table ownership, literal search identifiers,
+typed-unit sanitation, canonical heading IDs and nonduplicated tool history.
+The full behavioral suite, frozen MCP comparison and new complete index
+acceptance remain pending. The initial head's CI failed on an incomplete test
+fixture initializer; that initializer is corrected in the follow-up.

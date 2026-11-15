@@ -75,6 +75,7 @@ pub use document::conversion::{
 };
 pub use document::indexable_extensions;
 pub use document::reading_units as document_reading;
+pub use document::search_reading_unit as document_search_unit;
 pub use files::{fingerprint as file_fingerprint, sha256_hex};
 pub use index_sources::plan as plan_index_sources;
 pub fn supports_native_mail_dispatch(path: &std::path::Path) -> bool {

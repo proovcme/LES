@@ -23,6 +23,9 @@ pub fn indexable_extensions() -> Vec<String> {
         .map(|suffix| format!(".{suffix}"))
         .collect()
 }
+pub fn search_reading_unit(unit: &Value) -> Result<Option<Value>, &'static str> {
+    canonical::search_unit(unit)
+}
 pub fn reading_units(request: &Value) -> Result<Value, &'static str> {
     if request.get("structure").is_some_and(|s| !s.is_null()) {
         let budget = request["max_chars"]

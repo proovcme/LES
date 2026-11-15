@@ -297,6 +297,7 @@ fn from_markdown(request: &Value, text: &str) -> Result<Vec<Value>> {
                 "word_reading_schema":"les.document-reading.v1",
                 "word_reading_sha256":crate::sha256_hex(body.as_bytes()),
                 "word_structure_sha256":crate::sha256_hex(crate::tool_execution::canonical_json(&unit)?.as_bytes()),
+                "source_block_id":unit["source_block_id"],"source_parent_id":unit["source_parent_id"],"source_heading_path":unit["source_heading_path"],
                 "section_heading":unit["heading"],"source_unit_id":ordinal})
                 .as_object().unwrap().clone();
             meta.insert("source_ref".into(),json!(format!("{file}#unit={ordinal}")));

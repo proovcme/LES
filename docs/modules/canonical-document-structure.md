@@ -6,6 +6,13 @@ their formatting/hyperlinks, logical table cells, spans, roles, nested content
 and available provenance. Group references preserve list and rich-cell ancestry.
 The projection is versioned; it does not pretend to be Docling's full JSON export.
 
+Heading ancestry uses Docling item IDs, including distinct headings with the
+same title. Index hierarchy construction consumes that path directly. Literal
+numbering or Markdown characters in a paragraph do not create another heading.
+Search and semantic context admission use raw source values; display escaping
+must not split identifiers such as `DN_100`. The common final sanitation still
+applies to explicit units before token budgeting.
+
 The isolated parser walks the borrowed tree. It does not construct Docling's
 whole JSON value or infer tables/headings from styled Markdown. Native checked
 OCR, embedded objects and mathematics are restored into authoritative text
@@ -23,6 +30,11 @@ The pinned binary `.doc` backend does not expose an item tree. Its existing
 flat adapter remains an explicit compatibility exception, without labelling
 its Markdown output as canonical structure. Removing that exception requires
 an equivalent structured binary-Word adapter; dropping the format is not allowed.
+
+Referenced furniture and floating objects remain owned by the native special
+reader. Their existing table/paragraph units are detected once in that adapter
+and retained, preserving table addresses and arithmetic. They do not pass
+through the Docling Markdown round trip or a second final structure detector.
 
 New collections use `metadata-v1` and `canonical-source-final-budget-v4`.
 The earlier v2/v3 contracts remain explicit compatibility paths. Reading units

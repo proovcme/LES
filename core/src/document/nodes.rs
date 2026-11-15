@@ -130,7 +130,19 @@ impl Builder {
         let reading_unit = node["payload"]
             .get("word_reading_view")
             .or_else(|| node["payload"].get("source_reading_unit"));
-        let request = json!({"text":text,"size":self.budget,"minimum":minimum,"structural":self.structural,"overlap":self.overlap,"search_prefix":search_prefix,"reading_unit":reading_unit});
+        let literal = if self.structural {
+            reading_unit
+                .map(super::canonical::search_unit)
+                .transpose()?
+                .flatten()
+        } else {
+            None
+        };
+        let search_text = literal
+            .as_ref()
+            .and_then(|u| u["text"].as_str())
+            .unwrap_or(text);
+        let request = json!({"text":search_text,"size":self.budget,"minimum":minimum,"structural":self.structural,"overlap":self.overlap,"search_prefix":search_prefix,"reading_unit":literal.as_ref().or(reading_unit)});
         let local = self.tokenizer.as_ref();
         let measure = |value: &str| local.unwrap().count(value);
         let prepared = embedding_chunks::execute(

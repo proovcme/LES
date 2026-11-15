@@ -114,42 +114,91 @@ pub(crate) fn context(
         if !revision.is_empty() {
             defaults(payload, json!({"dataset_revision":revision}));
         }
-        let (title, level) = heading(&text);
-        if !title.is_empty() {
-            last_heading = title.clone();
-            last_level = level;
-            while stack.last().is_some_and(|v| v.0 >= level) {
-                stack.pop();
+        if let Some(path) = payload
+            .get("source_heading_path")
+            .and_then(Value::as_array)
+            .cloned()
+        {
+            // The format parser already supplied an authoritative heading path.
+            // Literal '#' or numbering in content must not redefine that tree.
+            if path.len() > 128 {
+                return Err("DOCUMENT_STRUCTURE_INVALID");
             }
-            let identity = stack
-                .iter()
-                .map(|v| v.1.as_str())
-                .chain(std::iter::once(title.as_str()))
-                .collect::<Vec<_>>()
-                .join("/");
-            let ancestors = stack.iter().map(|v| v.2.clone()).collect::<Vec<_>>();
-            let meta = hierarchy(
-                dataset, file, "section", &identity, &ancestors, true, &title,
-            );
-            let id = meta["node_id"].as_str().unwrap().to_owned();
-            stack.push((level, title.clone(), id.clone()));
-            if seen_navigation.insert(id) {
-                let mut nav_payload = meta.as_object().unwrap().clone();
-                nav_payload.extend(json!({"dataset_id":dataset,"file_name":file,"section_heading":title,
-                    "heading_level":level,"content_hash":sha1(&format!("navigation:{dataset}:{file}:{identity}"))}).as_object().unwrap().clone());
-                navigation.push(json!({"text":title,"payload":nav_payload}));
+            stack.clear();
+            for part in path {
+                let id = part["id"]
+                    .as_str()
+                    .filter(|s| !s.is_empty())
+                    .ok_or("DOCUMENT_STRUCTURE_INVALID")?;
+                let title = part["text"].as_str().ok_or("DOCUMENT_STRUCTURE_INVALID")?;
+                let level = part["level"]
+                    .as_u64()
+                    .filter(|n| (1..=255).contains(n))
+                    .ok_or("DOCUMENT_STRUCTURE_INVALID")? as usize;
+                if title.trim().is_empty() {
+                    continue;
+                }
+                let ancestors = stack.iter().map(|v| v.2.clone()).collect::<Vec<_>>();
+                let meta = hierarchy(
+                    dataset,
+                    file,
+                    "section",
+                    &format!("source:{id}"),
+                    &ancestors,
+                    true,
+                    title,
+                );
+                let node_id = meta["node_id"].as_str().unwrap().to_owned();
+                if seen_navigation.insert(node_id.clone()) {
+                    let mut nav = meta.as_object().unwrap().clone();
+                    nav.extend(json!({"dataset_id":dataset,"file_name":file,"section_heading":title,"heading_level":level,
+                        "source_block_id":id,"content_hash":sha1(&format!("navigation:{dataset}:{file}:{id}"))}).as_object().unwrap().clone());
+                    navigation.push(json!({"text":title,"payload":nav}));
+                }
+                stack.push((level, title.to_owned(), node_id));
             }
-            defaults(
-                payload,
-                json!({"section_heading":title,"heading_level":level}),
-            );
-        } else if !last_heading.is_empty() {
-            defaults(
-                payload,
-                json!({"section_heading":last_heading,"heading_level":last_level,"heading_inherited":true}),
-            );
+            (last_level, last_heading) = stack
+                .last()
+                .map(|(level, title, _)| (*level, title.clone()))
+                .unwrap_or_default();
         } else {
-            defaults(payload, json!({"section_heading":fallback_heading(&text)}));
+            let (title, level) = heading(&text);
+            if !title.is_empty() {
+                last_heading = title.clone();
+                last_level = level;
+                while stack.last().is_some_and(|v| v.0 >= level) {
+                    stack.pop();
+                }
+                let identity = stack
+                    .iter()
+                    .map(|v| v.1.as_str())
+                    .chain(std::iter::once(title.as_str()))
+                    .collect::<Vec<_>>()
+                    .join("/");
+                let ancestors = stack.iter().map(|v| v.2.clone()).collect::<Vec<_>>();
+                let meta = hierarchy(
+                    dataset, file, "section", &identity, &ancestors, true, &title,
+                );
+                let id = meta["node_id"].as_str().unwrap().to_owned();
+                stack.push((level, title.clone(), id.clone()));
+                if seen_navigation.insert(id) {
+                    let mut nav_payload = meta.as_object().unwrap().clone();
+                    nav_payload.extend(json!({"dataset_id":dataset,"file_name":file,"section_heading":title,
+                    "heading_level":level,"content_hash":sha1(&format!("navigation:{dataset}:{file}:{identity}"))}).as_object().unwrap().clone());
+                    navigation.push(json!({"text":title,"payload":nav_payload}));
+                }
+                defaults(
+                    payload,
+                    json!({"section_heading":title,"heading_level":level}),
+                );
+            } else if !last_heading.is_empty() {
+                defaults(
+                    payload,
+                    json!({"section_heading":last_heading,"heading_level":last_level,"heading_inherited":true}),
+                );
+            } else {
+                defaults(payload, json!({"section_heading":fallback_heading(&text)}));
+            }
         }
         let source = payload
             .get("source_page")
@@ -248,4 +297,31 @@ pub(crate) fn context(
     }
     nodes.extend(navigation);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn canonical_heading_ids_survive_duplicate_titles_and_literal_markdown() {
+        let path = |id| json!([{"id":id,"level":1,"text":"Equipment"}]);
+        let mut nodes = vec![
+            json!({"text":"# This is literal content","payload":{"source_heading_path":path("first")}}),
+            json!({"text":"another paragraph","payload":{"source_heading_path":path("second")}}),
+            json!({"text":"# Not a heading","payload":{"source_heading_path":[]}}),
+        ];
+        context(&mut nodes, "dataset", "source.docx", "revision", 4).unwrap();
+        let nav = nodes
+            .iter()
+            .filter(|n| n["payload"]["node_role"] == "navigation")
+            .collect::<Vec<_>>();
+        assert_eq!(nav.len(), 2);
+        assert!(nav.iter().all(|n| n["text"] == "Equipment"));
+        assert_ne!(nav[0]["payload"]["node_id"], nav[1]["payload"]["node_id"]);
+        assert_ne!(
+            nodes[0]["payload"]["ancestor_ids"],
+            nodes[1]["payload"]["ancestor_ids"]
+        );
+        assert_eq!(nodes[2]["payload"]["ancestor_ids"], json!([]));
+    }
 }

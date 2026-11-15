@@ -490,7 +490,7 @@ impl<F: Fn(&Value, Option<&[u8]>) -> Result<Value>> Package<'_, F> {
                 .get_mut("blocks")
                 .and_then(Value::as_array_mut)
             {
-                blocks.push(json!({"id":"native:related","kind":"paragraph","text":&text[body_end..],"placement":"related_story"}));
+                blocks.push(native_block(&text[body_end..], "native:related")?);
             }
         }
         Ok(text)

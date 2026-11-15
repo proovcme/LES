@@ -8,6 +8,14 @@ const BAD: &str = "DOCX_PART_INVALID";
 const LIMIT: &str = "DOCX_PART_LIMIT";
 const MAX_PART: u64 = 32 * 1024 * 1024;
 
+// These stories are owned by the native special-content reader, not Docling.
+// Detect their existing presentation once, then retain the resulting units.
+fn native_block(text: &str, id: &str) -> Result<Value> {
+    Ok(
+        json!({"id":id,"kind":"native_reading_units","units":super::super::structure::units(text,4000)?}),
+    )
+}
+
 pub(in crate::document) fn convert(
     bytes: &[u8],
     request: &Value,
@@ -53,13 +61,14 @@ pub(in crate::document) fn convert(
         if content.trim().is_empty() {
             continue;
         }
-        text.push_str(&format!("\n\n## Отдельный плавающий объект {}\n\nТекст объекта оригинала; не продолжение абзаца и не ячейка таблицы.\n\n{}",index+1,content));
+        let story=format!("\n\n## Отдельный плавающий объект {}\n\nТекст объекта оригинала; не продолжение абзаца и не ячейка таблицы.\n\n{}",index+1,content);
+        text.push_str(&story);
         if let Some(blocks) = package
             .structure
             .get_mut("blocks")
             .and_then(Value::as_array_mut)
         {
-            blocks.push(json!({"id":format!("native:floating:{index}"),"kind":"paragraph","text":content,"placement":"separate_story"}));
+            blocks.push(native_block(&story, &format!("native:floating:{index}"))?);
         }
     }
     if package.structure.is_object() {

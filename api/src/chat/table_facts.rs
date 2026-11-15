@@ -699,6 +699,7 @@ mod tests {
         Rows {
             data,
             paragraphs: BTreeMap::new(),
+            literal_sources: HashSet::new(),
             headers: BTreeMap::from([(
                 (1, 4),
                 vec!["Item".into(), "Unit".into(), "Quantity".into()],
