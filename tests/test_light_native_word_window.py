@@ -16,7 +16,7 @@ def section_reading(monkeypatch):
     parsers=os.getenv('LES_TEST_NATIVE_DOCUMENT_PARSERS')
     if not parsers:pytest.skip('Native Docling parser required for canonical table checks')
     monkeypatch.setenv('LES_NATIVE_DOCUMENT_PARSERS',parsers)
-    monkeypatch.setenv('LES_EXPERIMENT_WORD_READING', 'section-v1')
+    monkeypatch.delenv('LES_EXPERIMENT_WORD_READING', raising=False)
     monkeypatch.setenv('LES_EXPERIMENT_SAVED_READING', 'original-v1')
     monkeypatch.setenv('LES_EXPERIMENT_EVIDENCE_PACKET', 'compact-v1')
     monkeypatch.setenv('LES_EXPERIMENT_OVERVIEW', 'documents-v2')

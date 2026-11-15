@@ -2,27 +2,6 @@
 use super::*;
 use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Clone, Copy, PartialEq)]
-pub(super) enum Mode {
-    Full,
-    Section,
-}
-impl Mode {
-    pub(super) fn requested() -> Result<Self> {
-        match std::env::var("LES_EXPERIMENT_WORD_READING").as_deref() {
-            Err(std::env::VarError::NotPresent) | Ok("" | "full-v1") => Ok(Self::Full),
-            Ok("section-v1") => Ok(Self::Section),
-            _ => Err("WORD_READING_EXPERIMENT_INVALID".into()),
-        }
-    }
-    pub(super) fn name(self) -> &'static str {
-        match self {
-            Self::Full => "full-v1",
-            Self::Section => "section-v1",
-        }
-    }
-}
-
 #[derive(Clone, Copy)]
 pub(super) struct Anchor {
     pub index: usize,
@@ -33,7 +12,6 @@ pub(super) struct Plan {
     pub matches: BTreeMap<usize, Anchor>,
     pub unresolved: usize,
     pub total: usize,
-    pub mode: Mode,
 }
 impl Plan {
     pub(super) fn owner(&self, index: usize) -> Option<Anchor> {
@@ -45,7 +23,7 @@ impl Plan {
         })
     }
     pub(super) fn statistics(&self) -> Value {
-        json!({"schema":"les.word-read-window.v1","mode":self.mode.name(),
+        json!({"schema":"les.word-read-window.v1","mode":"section-v1",
             "original_units":self.total,"retained_units":self.indices.len(),
             "matched_units":self.matches.len(),"unresolved_anchors":self.unresolved,
             "omitted_units":self.total.saturating_sub(self.indices.len())})
@@ -81,13 +59,7 @@ fn literal(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-pub(super) fn plan(
-    view: &Value,
-    anchors: &[Value],
-    doc: &Value,
-    budget: usize,
-    mode: Mode,
-) -> Result<Plan> {
+pub(super) fn plan(view: &Value, anchors: &[Value], doc: &Value, budget: usize) -> Result<Plan> {
     let units = view["units"]
         .as_array()
         .ok_or("DOCUMENT_STRUCTURE_INVALID")?;
@@ -163,100 +135,96 @@ pub(super) fn plan(
         }
     }
     let mut indices = matches.keys().copied().collect::<BTreeSet<_>>();
-    if mode == Mode::Full {
-        indices.extend(0..units.len());
-    } else {
-        let scopes = units.iter().map(scope).collect::<Vec<_>>();
-        // Required anchor units are never clipped by this surrounding-read
-        // allowance, including an oversized atomic table row. The final wire
-        // admission remains the sole owner of the answer budget.
-        let mut remaining = budget.saturating_sub(
-            indices
-                .iter()
-                .map(|&i| units[i]["text"].as_str().unwrap_or("").chars().count())
-                .sum(),
-        );
-        struct Window {
-            hit: usize,
-            left: usize,
-            right: usize,
-            lo: usize,
-            hi: usize,
-            rank: u64,
-            blocked: [bool; 2],
-        }
-        let mut windows = matches
+    let scopes = units.iter().map(scope).collect::<Vec<_>>();
+    // Required anchor units are never clipped by this surrounding-read
+    // allowance, including an oversized atomic table row. The final wire
+    // admission remains the sole owner of the answer budget.
+    let mut remaining = budget.saturating_sub(
+        indices
             .iter()
-            .map(|(&i, a)| {
-                let mut lo = i;
-                let mut hi = i;
-                while lo > 0 && inside(&scopes[i], &scopes[lo - 1]) {
-                    lo -= 1;
-                }
-                // A directly preceding introduction of the parent can govern
-                // this subsection. Read that atom, not unrelated sibling sections.
-                if lo > 0
-                    && !scopes[lo - 1].is_empty()
-                    && scopes[lo - 1].len() < scopes[i].len()
-                    && scopes[i].starts_with(&scopes[lo - 1])
-                    && units[lo - 1]["kind"] != "heading"
-                {
-                    lo -= 1;
-                }
-                while hi + 1 < units.len() && inside(&scopes[i], &scopes[hi + 1]) {
-                    hi += 1;
-                }
-                Window {
-                    hit: i,
-                    left: i,
-                    right: i,
-                    lo,
-                    hi,
-                    rank: a.rank,
-                    blocked: [false; 2],
-                }
-            })
-            .collect::<Vec<_>>();
-        loop {
-            let next = windows
-                .iter()
-                .enumerate()
-                .flat_map(|(w, s)| {
-                    [
-                        (0, s.left.checked_sub(1).filter(|&i| i >= s.lo)),
-                        (
-                            1,
-                            (s.right + 1 < units.len())
-                                .then_some(s.right + 1)
-                                .filter(|&i| i <= s.hi),
-                        ),
-                    ]
-                    .into_iter()
-                    .filter(move |(side, _)| !s.blocked[*side])
-                    .filter_map(move |(side, i)| {
-                        i.map(|i| ((i.abs_diff(s.hit), s.rank, side, i), w, side, i))
-                    })
+            .map(|&i| units[i]["text"].as_str().unwrap_or("").chars().count())
+            .sum(),
+    );
+    struct Window {
+        hit: usize,
+        left: usize,
+        right: usize,
+        lo: usize,
+        hi: usize,
+        rank: u64,
+        blocked: [bool; 2],
+    }
+    let mut windows = matches
+        .iter()
+        .map(|(&i, a)| {
+            let mut lo = i;
+            let mut hi = i;
+            while lo > 0 && inside(&scopes[i], &scopes[lo - 1]) {
+                lo -= 1;
+            }
+            // A directly preceding introduction of the parent can govern
+            // this subsection. Read that atom, not unrelated sibling sections.
+            if lo > 0
+                && !scopes[lo - 1].is_empty()
+                && scopes[lo - 1].len() < scopes[i].len()
+                && scopes[i].starts_with(&scopes[lo - 1])
+                && units[lo - 1]["kind"] != "heading"
+            {
+                lo -= 1;
+            }
+            while hi + 1 < units.len() && inside(&scopes[i], &scopes[hi + 1]) {
+                hi += 1;
+            }
+            Window {
+                hit: i,
+                left: i,
+                right: i,
+                lo,
+                hi,
+                rank: a.rank,
+                blocked: [false; 2],
+            }
+        })
+        .collect::<Vec<_>>();
+    loop {
+        let next = windows
+            .iter()
+            .enumerate()
+            .flat_map(|(w, s)| {
+                [
+                    (0, s.left.checked_sub(1).filter(|&i| i >= s.lo)),
+                    (
+                        1,
+                        (s.right + 1 < units.len())
+                            .then_some(s.right + 1)
+                            .filter(|&i| i <= s.hi),
+                    ),
+                ]
+                .into_iter()
+                .filter(move |(side, _)| !s.blocked[*side])
+                .filter_map(move |(side, i)| {
+                    i.map(|i| ((i.abs_diff(s.hit), s.rank, side, i), w, side, i))
                 })
-                .min_by_key(|(priority, _, _, _)| *priority);
-            let Some((_, w, side, i)) = next else {
-                break;
-            };
-            let cost = if indices.contains(&i) {
-                0
-            } else {
-                units[i]["text"].as_str().unwrap_or("").chars().count()
-            };
-            if cost > remaining {
-                windows[w].blocked[side] = true;
-                continue;
-            }
-            remaining -= cost;
-            indices.insert(i);
-            if side == 0 {
-                windows[w].left = i;
-            } else {
-                windows[w].right = i;
-            }
+            })
+            .min_by_key(|(priority, _, _, _)| *priority);
+        let Some((_, w, side, i)) = next else {
+            break;
+        };
+        let cost = if indices.contains(&i) {
+            0
+        } else {
+            units[i]["text"].as_str().unwrap_or("").chars().count()
+        };
+        if cost > remaining {
+            windows[w].blocked[side] = true;
+            continue;
+        }
+        remaining -= cost;
+        indices.insert(i);
+        if side == 0 {
+            windows[w].left = i;
+        } else {
+            windows[w].right = i;
         }
     }
     Ok(Plan {
@@ -264,7 +232,6 @@ pub(super) fn plan(
         matches,
         unresolved,
         total: units.len(),
-        mode,
     })
 }
 
@@ -299,7 +266,7 @@ mod tests {
         units[601]["canonical"] = json!({"kind":"table","rows":[["A","17.25"]]});
         let a = anchor(&units[601], 3);
         let view = json!({"units":units});
-        let p = plan(&view, &[a], &doc(), 12000, Mode::Section).unwrap();
+        let p = plan(&view, &[a], &doc(), 12000).unwrap();
         assert_eq!(p.indices, BTreeSet::from([600, 601, 602]));
         assert_eq!(p.owner(602).unwrap().index, 0);
         assert_eq!(view["units"][601]["ordinal"], 601);
@@ -312,16 +279,16 @@ mod tests {
             .collect::<Vec<_>>();
         let a = anchor(&units[50], 0);
         let view = json!({"units":units});
-        let p = plan(&view, &[a.clone()], &doc(), 500, Mode::Section).unwrap();
+        let p = plan(&view, &[a.clone()], &doc(), 500).unwrap();
         assert_eq!(p.indices, BTreeSet::from([48, 49, 50, 51, 52]));
-        let oversized = plan(&view, &[a], &doc(), 1, Mode::Section).unwrap();
+        let oversized = plan(&view, &[a], &doc(), 1).unwrap();
         assert_eq!(oversized.indices, BTreeSet::from([50]));
     }
     #[test]
     fn multiple_hits_keep_their_own_retrieval_ids_and_original_ordinals() {
         let units = vec![unit(7, "first", "17.25"), unit(70, "second", "117.25")];
         let anchors = vec![anchor(&units[0], 8), anchor(&units[1], 2)];
-        let p = plan(&json!({"units":units}), &anchors, &doc(), 1, Mode::Section).unwrap();
+        let p = plan(&json!({"units":units}), &anchors, &doc(), 1).unwrap();
         assert_eq!(p.indices, BTreeSet::from([0, 1]));
         assert_eq!(p.matches[&0].index, 0);
         assert_eq!(p.matches[&1].index, 1);
@@ -331,7 +298,7 @@ mod tests {
     fn an_ambiguous_or_missing_legacy_anchor_never_expands_to_a_whole_document() {
         let units = vec![unit(0, "one", "Repeated"), unit(1, "two", "Repeated")];
         let a = json!({"id":"legacy","payload":{"dataset_id":"ds","file_name":"book.docx","source_sha256":"a".repeat(64),"text":"Repeated"}});
-        let p = plan(&json!({"units":units}), &[a], &doc(), 12000, Mode::Section).unwrap();
+        let p = plan(&json!({"units":units}), &[a], &doc(), 12000).unwrap();
         assert!(p.indices.is_empty());
         assert_eq!(p.unresolved, 1);
     }
@@ -344,7 +311,7 @@ mod tests {
         ];
         units[1]["source_heading_path"] = json!([{"id":"root"},{"id":"child"}]);
         let a = anchor(&units[0], 0);
-        let p = plan(&json!({"units":units}), &[a], &doc(), 12000, Mode::Section).unwrap();
+        let p = plan(&json!({"units":units}), &[a], &doc(), 12000).unwrap();
         assert_eq!(p.indices, BTreeSet::from([0, 1]));
     }
     #[test]
@@ -357,7 +324,7 @@ mod tests {
         units[1]["source_heading_path"] = json!([{"id":"root"},{"id":"child"}]);
         units[2]["source_heading_path"] = json!([{"id":"root"},{"id":"other"}]);
         let a = anchor(&units[1], 0);
-        let p = plan(&json!({"units":units}), &[a], &doc(), 12000, Mode::Section).unwrap();
+        let p = plan(&json!({"units":units}), &[a], &doc(), 12000).unwrap();
         assert_eq!(p.indices, BTreeSet::from([0, 1]));
     }
 }

@@ -19,8 +19,7 @@ pub(super) async fn hydrate(
     mut hydrated: Value,
     surrounding_chars: usize,
 ) -> Result<(Vec<Value>, Value)> {
-    let mode = window::Mode::requested()?;
-    let mut statistics = json!({"schema":"les.word-read-window.v1","mode":mode.name(),
+    let mut statistics = json!({"schema":"les.word-read-window.v1","mode":"section-v1",
         "documents":0,"original_units":0,"retained_units":0,"matched_units":0,
         "unresolved_anchors":0,"omitted_units":0});
     let mut output = Vec::new();
@@ -103,7 +102,7 @@ pub(super) async fn hydrate(
             })
             .map(|(i, a)| a["payload"]["retrieval_rank"].as_u64().unwrap_or(i as u64))
             .min();
-        let plan = window::plan(&view, &anchors, &doc, surrounding_chars, mode)?;
+        let plan = window::plan(&view, &anchors, &doc, surrounding_chars)?;
         for field in [
             "original_units",
             "retained_units",
@@ -122,7 +121,7 @@ pub(super) async fn hydrate(
             json!({"event":"word_read_scope","doc_id":doc["id"],
             "source_sha256":doc["file_hash"],"window":plan.statistics()})
         );
-        if mode == window::Mode::Section && plan.unresolved > 0 {
+        if plan.unresolved > 0 {
             retrieval::failures::record(
                 &mut hydrated,
                 reference(&doc, Value::Null),
