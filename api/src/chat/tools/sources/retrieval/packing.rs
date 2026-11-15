@@ -243,6 +243,13 @@ pub(super) fn read_plan(
         ])
         .to_string()
     };
+    // Every ranked hit belongs to the bounded retrieval shortlist (at most 64
+    // anchors at the caller). Reading must not silently impose a smaller
+    // second shortlist: otherwise a late independent source can never reach
+    // final context selection. Optional parent pages use only the remaining
+    // room in the existing 32-scope expansion window.
+    let required_scopes: HashSet<_> = seeds.iter().map(scope).collect();
+    let max_read_scopes = 32.max(required_scopes.len());
     let mut scopes = HashSet::new();
     let mut seen = HashSet::new();
     let planned = pool
@@ -255,7 +262,7 @@ pub(super) fn read_plan(
             if scopes.contains(&address) {
                 return true;
             }
-            scopes.len() < 32 && scopes.insert(address)
+            scopes.len() < max_read_scopes && scopes.insert(address)
         })
         .collect::<Vec<_>>();
     let rows: std::collections::HashMap<_, _> =
@@ -264,7 +271,7 @@ pub(super) fn read_plan(
         .iter()
         .filter(|id| rows.contains_key(*id))
         .count();
-    hydrated["read_plan"] = serde_json::json!({"input_anchors":original_ids.len(),"planned_units":planned.len(),"planned_read_scopes":scopes.len(),"omitted_original_anchors":original_ids.len()-planned_originals,"max_read_scopes":32,"context_budget_applied_after_original_read":true});
+    hydrated["read_plan"] = serde_json::json!({"input_anchors":original_ids.len(),"planned_units":planned.len(),"planned_read_scopes":scopes.len(),"required_read_scopes":required_scopes.len(),"omitted_original_anchors":original_ids.len()-planned_originals,"max_read_scopes":max_read_scopes,"context_budget_applied_after_original_read":true});
     for group in ["sections", "documents"] {
         for section in hydrated[group].as_array_mut().into_iter().flatten() {
             section["read_plan_original_units"] =
@@ -339,6 +346,41 @@ fn select_query_inner(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn every_retrieved_scope_is_read_before_optional_parent_expansion() {
+        let mut seeds = (0..64)
+            .map(|n| {
+                let mut p = point(&format!("hit-{n}"), &format!("source-{n}.pdf"), "text", n);
+                p["payload"]["page"] = json!(1);
+                p
+            })
+            .collect::<Vec<_>>();
+        // Reserved retriever heads retain their true late fused rank, but
+        // remain required reads. A small answer window cannot delete them.
+        seeds[63]["payload"]["retrieval_rank"] = json!(800);
+        let optional = point("parent", "optional.pdf", "parent text", 0);
+        let (plan, hydrated) = read_plan(
+            &seeds,
+            json!({"sections":[{"points":[optional]}],"documents":[]}),
+            1,
+            Some(1),
+            "unrelated query",
+        )
+        .unwrap();
+        assert_eq!(plan.len(), 64);
+        assert_eq!(
+            plan.iter().map(key).collect::<HashSet<_>>(),
+            seeds.iter().map(key).collect::<HashSet<_>>()
+        );
+        assert_eq!(hydrated["read_plan"]["required_read_scopes"], 64);
+        assert_eq!(hydrated["read_plan"]["max_read_scopes"], 64);
+        assert_eq!(hydrated["read_plan"]["omitted_original_anchors"], 0);
+        assert!(hydrated["sections"][0]["points"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        assert_eq!(plan.last().unwrap()["payload"]["retrieval_rank"], 800);
+    }
     #[test]
     fn document_continuations_survive_read_planning_without_retriever_votes() {
         let mut rows = (0..40)

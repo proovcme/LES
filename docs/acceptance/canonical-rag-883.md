@@ -140,3 +140,51 @@ The complete targeted follow-up then passed all 70 parser, retrieval-mode and
 native model-runtime cases in 284.90 seconds. `make verify` passed with 2,223
 cases collected; publication checks passed. Full CI and both copied-index corpus
 comparisons remain merge blockers. No working installation has been changed.
+
+## Follow-up: complete unchanged Frozen100 repeat
+
+The optimized follow-up completed the same 100 MCP questions on the existing
+copied index, with the same dataset scopes, 12,000-character context and frozen
+scorer. Expected files and pages were not supplied to retrieval. No answer model
+was called.
+
+| Measure | Previous candidate | Follow-up reader |
+|---|---:|---:|
+| Needed-source delivery, 90 positive cases | 58.70% | 56.85% |
+| Reference-text 5-gram coverage, 69 cases | 43.33% | 46.38% |
+| Observed search latency p50 | 5.06 s | 6.61 s |
+| Tool-level search errors | 0 | 0 |
+
+This is not an accepted quality improvement. Three previously delivered expected
+sources were lost, while two cases gained source coverage. A separate diagnostic,
+performed only after retrieval, found the complete reference quote in another
+returned document in two of those three cases; one of those cases previously
+returned the expected document without its reference quote. This does not prove
+equivalent editions or change the frozen scores. The remaining lost conclusion
+is unresolved. Both original and alternative sources must remain inspectable;
+an aggregate percentage cannot substitute for case-level acceptance.
+
+Independent checks verified all bytes of 155 cited originals and completed
+identity, page, continuation and digest checks for 270 physical PDF pages, with
+zero read errors. Twenty-eight pages carried the explicit unverified-table-
+geometry warning. Their text availability does not certify cell associations or
+permit inferred row arithmetic. Peak owned service-tree working set was 2.31 GiB;
+minimum available system memory was 8.83 GiB, excluding the external embedding
+provider from the process-tree measurement. Copied source-catalog rows and the
+question-file hash remained unchanged.
+
+These results exercise a new reader over the old search fragments. A separate
+complete rebuild of all 638 registered originals into the new canonical v4
+representation has started, using an independent Edge store and serial batches.
+That index and its frozen-query comparison are not yet accepted. Current CI and
+corpus regressions continue to block merge; the working installation remains 880.
+
+Subsequent read-only diagnosis of the raw, unchanged scoped search found the
+missing conclusion at fused ranks 60/61 and physical-scope positions 40/41.
+The 32-scope read ceiling discarded it before original reading. The follow-up
+source change makes every retrieved anchor a required read, with optional parent
+pages using only remaining expansion capacity; it does not alter RRF, the
+retrieval shortlist, answer budget or frozen scorer. A generic 64-source
+regression also covers a reserved channel head with a late true rank. This
+change is not yet validated on the corpus and does not retroactively improve
+the measurements above.

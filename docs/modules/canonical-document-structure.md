@@ -42,9 +42,13 @@ remain `les.document-reading.v1` and carry an additional typed `canonical`
 field. The reading view is bound to its structure and budget; indexed typed
 views also carry a checksum of the complete unit, including cells.
 
-Chat and MCP share the same retrieval service. Before original reading there
-is only a fused-rank I/O limit of 32 physical read scopes, without query-dependent
-semantic selection or an answer-text budget. Bounded hydrated parent/document
+Chat and MCP share the same retrieval service. Every anchor from the bounded
+retrieval shortlist (at most 64) reaches its original reader, with duplicate
+physical scopes read once. There is no smaller second shortlist before reading,
+query-dependent semantic selection or answer-text budget. Optional parent pages
+use only the room remaining in the existing 32-scope expansion window: the total
+scope bound is the larger of 32 and the number of required original scopes.
+Bounded hydrated parent/document
 continuations remain available and receive no invented retrieval rank. Original
 document extent is retained so a clipped plan cannot claim full-document coverage.
 Deduplication and semantic admission occur
