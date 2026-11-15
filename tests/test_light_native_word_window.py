@@ -90,6 +90,12 @@ def test_word_window_mcp_keeps_complete_rows_original_positions_and_revision_gua
     reread=direct['result']['structuredContent']['result']['passages'][0]
     assert reread['text']==table['text'] and reread['canonical']==table['canonical']
     assert reread['source']['ordinal']==source['ordinal']
+    context=mcp(t,state,'search_sources',{'query':'WINDOW_TARGET PANEL-Z17 capacity',
+        'dataset_ids':[dataset],'view':'context','max_chars':12000})
+    assert not context.get('error') and not context['result'].get('isError'),context
+    context_value=context['result']['structuredContent']['result']
+    assert sum(len(p['text']) for p in context_value['passages'])<=12000
+    assert context_value['next_offset'] is None
     original=t.client.get(source['url'].split('#')[0]).raise_for_status().content
     assert hashlib.sha256(original).hexdigest()==digest and not t.seen
     path.write_bytes(path.read_bytes()+b'changed fixture revision')

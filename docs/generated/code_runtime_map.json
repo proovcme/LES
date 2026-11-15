@@ -12472,7 +12472,7 @@
     },
     {
       "inbound": [],
-      "lines": 99,
+      "lines": 105,
       "module": "tests.test_light_native_word_window",
       "outbound": [
         "tests/test_light_native_api.py",
@@ -16241,7 +16241,7 @@
     "runtime_support": 5,
     "test_or_tool_only": 286,
     "tracked_python_files": 731,
-    "tracked_python_lines": 174267
+    "tracked_python_lines": 174273
   },
   "warnings": []
 }
