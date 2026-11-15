@@ -43,4 +43,5 @@ def test_overview_public_tool_keeps_same_filename_in_two_datasets_and_original_l
         assert hashlib.sha256(original).hexdigest()==source['source_sha256']
     assert not t.seen
     args['offset']=1
-    assert t.client.post('/api/rag/sources/call',json={'tool':'search_sources','args':args}).status_code==400
+    rejected=t.client.post('/api/rag/sources/call',json={'tool':'search_sources','args':args})
+    assert rejected.status_code==422 and rejected.json()['code']=='SOURCE_OFFSET_INVALID'

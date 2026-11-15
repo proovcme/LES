@@ -48,6 +48,15 @@ then evidence reading inside each document. Grouping only an already truncated
 pool cannot recover displaced documents. A bounded result never claims complete
 corpus coverage. Precise page/table questions remain a regression gate.
 
+## Measurement boundaries
+
+Needed-source delivery matches exact original SHA values after retrieval, because
+catalog IDs differ between the source benchmark and its copy. It is byte-equivalent
+source coverage, not a claim that all path/edition instances or current normative
+authorities were identified. Page/row/cursor checks are reported separately.
+Raw questions, documents, manifests and traces stay private; public documentation
+contains sanitized aggregates. Generated-answer correctness is not measured here.
+
 ## Completed stage 1 comparison
 
 API source `dabc2da`, 131 API tests and 114 native passes / one optional skip.
@@ -111,6 +120,18 @@ Its original-reader arm holds compact transport fixed. No installation/release.
 `LES_EXPERIMENT_OVERVIEW=grouped-v1` is only active for explicit
 `search_sources(view=overview)` with compact packets. `original-v1` preserves
 the precision pipeline for a comparison with the same request intent.
+
+```mermaid
+flowchart LR
+    Q[Question and dataset scope] --> D[Qdrant document groups]
+    Q --> L[BM25 document partitions]
+    D --> F[Unchanged RRF]
+    L --> F
+    F --> R[Read original evidence units]
+    R --> O[Order within documents]
+    O --> P[One compact-ready admission]
+    P --> C[Shared chat API and MCP]
+```
 Qdrant native grouping requests two hits per file before channel top-k. Requests
 are dataset-local so equal names in separate datasets remain independent;
 intermediate results are merged by original scores and retained at bounded top-k.
