@@ -1,4 +1,4 @@
-//! The final citation must still resolve to the physical PDF version actually read.
+//! A final citation must still resolve to the original version actually read.
 use super::{document, Context, Result};
 use serde_json::{json, Value};
 use std::{collections::HashSet, sync::Arc};
@@ -7,7 +7,7 @@ pub(crate) async fn physical(context: Arc<Context>, sources: &Value) -> Result<(
     for source in sources.as_array().into_iter().flatten().filter(|s| {
         matches!(
             s["evidence_kind"].as_str(),
-            Some("physical_pdf_page" | "physical_word_section")
+            Some("physical_pdf_page" | "physical_pdf_unit" | "physical_word_section")
         )
     }) {
         let id = source["doc_id"].as_str().ok_or("SOURCE_IDENTITY_INVALID")?;

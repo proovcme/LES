@@ -418,6 +418,9 @@ impl Evidence {
         if source["retrieval_incomplete"] == true {
             note.push_str("Часть найденных оригиналов не дочитана из-за ошибки. Обзор неполный: отвечай только по прочитанному, не утверждай, что в непрочитанных файлах нет ответа.\n");
         }
+        if source["evidence_kind"] == "physical_pdf_unit" {
+            note.push_str("Это отдельная структурная часть страницы, а не вся страница. Общие выводы о требованиях и исключениях требуют дочитывания оригинала через read_pdf_source.\n");
+        }
         if let Some(code) = source["table_projection_warning"].as_str() {
             note.push_str(crate::document_parser::projection_notice(code));
             note.push('\n');

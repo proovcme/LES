@@ -29,3 +29,27 @@ it('passes a physical Word citation to the shared reader without losing its unit
   [...document.querySelectorAll('button')].find(b => b.textContent?.trim() === 'Вернуться к ответу')!.click();
   expect(close).toHaveBeenCalledOnce();
 });
+
+it('opens a compact PDF identity at its original character position with the same revision pin', async () => {
+  const read = vi.fn(); const digest = 'c'.repeat(64); const view = 'd'.repeat(64);
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.startsWith('/api/documents/by-id/')) {
+      expect(new URL(url, 'http://localhost').searchParams.get('source_sha256')).toBe(digest);
+      return new Response(JSON.stringify({ document: { id: 'found-pdf', file_name: 'Source.pdf' } }));
+    }
+    expect(url).toBe('/api/rag/sources/call'); read(JSON.parse(String(init?.body)));
+    return new Response(JSON.stringify({ result: { text: 'Найденная позиция 117.250', next_offset: null, view_sha256: view } }));
+  }));
+  component = mount(SourcePanel, { target: document.body, props: { close: vi.fn(), source: {
+    index: 1, doc_id: 'found-pdf', dataset_id: 'selected', page: 7, source_sha256: digest,
+    evidence_kind: 'physical_pdf_unit', read_offset: 21000, view_sha256: view,
+  } } });
+  await vi.waitFor(() => { flushSync(); expect([...document.querySelectorAll('button')].some(b => b.textContent?.trim() === 'Прочитать текст')).toBe(true); });
+  expect(document.body.textContent).not.toContain('редакция файла не сохранена');
+  const download = [...document.querySelectorAll('a')].find(a => a.textContent?.trim() === 'Скачать')!;
+  expect(new URL(download.href, 'http://localhost').searchParams.get('source_sha256')).toBe(digest);
+  [...document.querySelectorAll('button')].find(b => b.textContent?.trim() === 'Прочитать текст')!.click();
+  await vi.waitFor(() => { flushSync(); expect(document.body.textContent).toContain('Найденная позиция 117.250'); });
+  expect(read).toHaveBeenCalledWith({ tool: 'read_pdf_source', args: { doc_id: 'found-pdf', dataset_id: 'selected',
+    page: 7, source_sha256: digest, offset: 21000, max_chars: 12000, view_sha256: view } });
+});

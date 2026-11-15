@@ -112,6 +112,11 @@ pub(crate) fn fit_envelope_budget(
         .as_array()
         .cloned()
         .unwrap_or_default();
+    let planned_units = orig_passages.len();
+    let planned_text_chars: usize = orig_passages
+        .iter()
+        .map(|p| p["text"].as_str().map_or(0, |s| s.chars().count()))
+        .sum();
     reconcile_document_units(reply, &orig_passages);
     if canonical_chars(reply) <= max_chars && json_item_count(reply) <= max_items {
         return Ok(());
@@ -129,6 +134,21 @@ pub(crate) fn fit_envelope_budget(
     }
     if canonical_chars(reply) > max_chars || json_item_count(reply) > max_items {
         compact_read_failures(reply);
+    }
+    // Source identities occur both beside each passage and in the public
+    // source map. Remove only repeated aliases inside each identity before
+    // spending the wire allowance on fewer original reading units.
+    if canonical_chars(reply) > max_chars || json_item_count(reply) > max_items {
+        for source in reply["sources"].as_array_mut().into_iter().flatten() {
+            compact_repeated_identity(source);
+        }
+        for passage in reply["result"]["passages"]
+            .as_array_mut()
+            .into_iter()
+            .flatten()
+        {
+            compact_repeated_identity(&mut passage["source"]);
+        }
     }
     // Exact duplicate origins are navigation, not extra read evidence. Keep
     // every primary pinned source; omit alias detail explicitly if it would
@@ -257,6 +277,15 @@ pub(crate) fn fit_envelope_budget(
         }
         reply["result"]["fusion_trace_truncated"] = json!(kept.len() != total);
     }
+    eprintln!(
+        "{}",
+        json!({"event":"source_envelope_admission","tool":reply["tool"],
+            "planned_units":planned_units,"delivered_units":kept_passages.len(),
+            "planned_text_chars":planned_text_chars,
+            "delivered_text_chars":kept_passages.iter().map(|p|p["text"].as_str().map_or(0,|s|s.chars().count())).sum::<usize>(),
+            "wire_chars":canonical_chars(reply),"wire_limit_chars":max_chars,
+            "body_omitted":omitted_any})
+    );
     Ok(())
 }
 
@@ -274,6 +303,35 @@ fn compact_aliases(source: &mut Value) {
     }
 }
 
+// These are optional aliases for values that remain directly available. A
+// locator carrying any additional geometry/identity is never folded away.
+// Strong IDs, revision hashes, cursors, canonical cells and warnings remain.
+fn compact_repeated_identity(source: &mut Value) {
+    let compatible_page =
+        source["source_page"].is_null() || source["source_page"] == source["page"];
+    let redundant_locator = source["locator"].as_object().is_some_and(|locator| {
+        compatible_page
+            && locator
+                .keys()
+                .all(|key| matches!(key.as_str(), "source_sha256" | "source_page"))
+            && locator.get("source_sha256") == source.get("source_sha256")
+            && locator.get("source_page") == source.get("page")
+    });
+    let repeated_page = source.get("source_page") == source.get("page");
+    let repeated_heading = source.get("parent_heading") == source.get("section_heading");
+    if let Some(object) = source.as_object_mut() {
+        if redundant_locator {
+            object.remove("locator");
+        }
+        if repeated_page {
+            object.remove("source_page");
+        }
+        if repeated_heading {
+            object.remove("parent_heading");
+        }
+    }
+}
+
 // A failed page is not evidence. Its code, readable name and exact retry
 // identity must survive, but repeated paths, URLs and locator copies must not
 // consume the successfully read bodies' wire allowance.
@@ -286,36 +344,87 @@ fn compact_read_failures(reply: &mut Value) {
         let Some(original) = failure["source"].as_object() else {
             continue;
         };
-        let mut source = original.clone();
-        source.remove("url");
-        if original
-            .get("locator")
-            .and_then(Value::as_object)
-            .is_some_and(|v| {
-                v.keys()
-                    .all(|k| matches!(k.as_str(), "source_sha256" | "source_page"))
-                    && v.get("source_sha256") == original.get("source_sha256")
-                    && v.get("source_page") == original.get("page")
-            })
-        {
-            source.remove("locator");
-        }
-        if original.get("source_page") == original.get("page") {
-            source.remove("source_page");
-        }
+        let mut source = Value::Object(original.clone());
+        compact_repeated_identity(&mut source);
+        source.as_object_mut().unwrap().remove("url");
         if let Some(name) = original.get("doc_name").and_then(Value::as_str) {
-            source.insert(
+            source.as_object_mut().unwrap().insert(
                 "doc_name".into(),
                 json!(name.rsplit(['/', '\\']).next().unwrap_or(name)),
             );
         }
-        failure["source"] = Value::Object(source);
+        failure["source"] = source;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn repeated_source_metadata_cannot_evict_read_bodies() {
+        let sources = (1..=2)
+            .map(|page| {
+                json!({"doc_id":"original","dataset_id":"scope","source_sha256":"a".repeat(64),
+                "page":page,"source_page":page,"qdrant_point_id":format!("anchor-{page}"),
+                "view_sha256":"b".repeat(64),"offset":0,"next_offset":null,
+                "url":format!("/original?source_sha256={}#page={page}","a".repeat(64)),
+                "locator":{"source_sha256":"a".repeat(64),"source_page":page},
+                "section_heading":"Heading ".repeat(64),"parent_heading":"Heading ".repeat(64)})
+            })
+            .collect::<Vec<_>>();
+        let texts = [
+            format!("First controlled value 17.25. {}", "proof ".repeat(80)),
+            format!("Second controlled value 117.250. {}", "proof ".repeat(80)),
+        ];
+        let mut reply = json!({"sources":sources,"result":{"passages":[
+            {"source":sources[0],"text":texts[0]}, {"source":sources[1],"text":texts[1]}]}});
+        assert!(canonical_chars(&reply) > 5000);
+        fit_envelope_budget(&mut reply, 5000, 240).unwrap();
+        assert_eq!(reply["result"]["passages"].as_array().unwrap().len(), 2);
+        for (i, text) in texts.iter().enumerate() {
+            assert_eq!(reply["result"]["passages"][i]["text"], *text);
+            for source in [
+                &reply["sources"][i],
+                &reply["result"]["passages"][i]["source"],
+            ] {
+                for field in [
+                    "doc_id",
+                    "dataset_id",
+                    "source_sha256",
+                    "page",
+                    "qdrant_point_id",
+                    "view_sha256",
+                    "offset",
+                    "next_offset",
+                    "url",
+                    "section_heading",
+                ] {
+                    assert_eq!(source[field], sources[i][field]);
+                }
+                assert!(source.get("locator").is_none() && source.get("source_page").is_none());
+                assert!(source.get("parent_heading").is_none());
+            }
+        }
+        assert!(canonical_chars(&reply) <= 5000);
+    }
+    #[test]
+    fn distinct_geometry_pages_and_parent_headings_are_not_redundant_aliases() {
+        let mut source = json!({"source_sha256":"a".repeat(64),"page":1,"source_page":2,
+            "locator":{"source_sha256":"a".repeat(64),"source_page":1,"bbox":[1,2,3,4]},
+            "section_heading":"Child clause","parent_heading":"Parent chapter",
+            "table_projection_warning":"PDF_TABLE_SOURCE_MISMATCH","ocr_numbers_verified":false});
+        let original = source.clone();
+        compact_repeated_identity(&mut source);
+        assert_eq!(source, original);
+        source["locator"] = json!({"source_sha256":"a".repeat(64),"source_page":1});
+        let distinct_page = source.clone();
+        compact_repeated_identity(&mut source);
+        assert_eq!(source, distinct_page);
+        source["locator"] = json!({"source_sha256":"c".repeat(64),"source_page":1});
+        let changed = source.clone();
+        compact_repeated_identity(&mut source);
+        assert_eq!(source, changed);
+    }
     #[test]
     fn failures_preserve_retry_identity_without_evicting_verified_bodies() {
         let source = json!({"doc_id":"proof","source_sha256":"a".repeat(64),"page":1});

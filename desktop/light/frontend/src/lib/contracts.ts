@@ -15,6 +15,7 @@ export interface Source {
   label?: string; header?: string; snippet?: string; quote?: string;
   cited_in_answer?: boolean;
   ordinal?: number; view_sha256?: string; evidence_kind?: string; section_heading?: string;
+  source_sha256?: string; read_offset?: number; offset?: number;
   source_page?: string | number; page?: string | number; page_number?: string | number;
   locator?: { sheet?: string; row?: number; cell?: string; anchor?: string; source_sha256?: string; section_heading?: string };
 }
@@ -64,6 +65,14 @@ export const sourcePage = (source: Source): number => {
   const value = Number(source.source_page ?? source.page ?? source.page_number ?? 1);
   return Number.isInteger(value) && value > 0 ? value : 1;
 };
+export const sourceDigest = (source: Source): string | undefined => source.locator?.source_sha256 ?? source.source_sha256;
+export function sourceReadStart(source: Source): number {
+  const offset = source.evidence_kind === 'physical_word_section' ? source.ordinal
+    : source.evidence_kind === 'physical_pdf_unit' ? source.read_offset
+    : source.evidence_kind === 'physical_pdf_page' ? source.offset : undefined;
+  return typeof offset === 'number' && Number.isSafeInteger(offset) && offset >= 0
+    && /^[a-f0-9]{64}$/i.test(source.view_sha256 ?? '') ? offset : 0;
+}
 export function sourcePlace(source: Source): string {
   if (source.model_locator) return ` · ID ${source.model_locator.native_id}`;
   const { sheet, row, cell, anchor } = source.locator ?? {};

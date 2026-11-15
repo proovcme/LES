@@ -41,6 +41,73 @@ def test_source_api_distinguishes_unready_index_from_empty_evidence_without_call
 
 
 @pytest.mark.parametrize('native_turn',['rag-small'],indirect=True)
+def test_long_original_pdf_page_is_read_as_bounded_units_without_selecting_a_file(native_turn,tmp_path):
+    from contextlib import closing
+    from qdrant_client import QdrantClient,models
+    t=native_turn;folder=tmp_path/'documents';folder.mkdir()
+    lines=[]
+    for column in range(4):
+        for row in range(120):
+            text=f'C{column}R{row:03} evidence control value 17.25 engineering unit pcs.'
+            if (column,row)==(3,119):text='UNIQUE_LONG_TARGET pressure 117.250 kPa exact final row.'
+            lines.append(f'BT /F1 6 Tf 1 0 0 1 {10+column*295} {1580-row*12.5} Tm ({text}) Tj ET')
+    path=write_pdf(folder/'columns.pdf',['\n'.join(lines).encode('ascii')],page_size=(1200,1600))
+    dataset=t.client.post('/api/rag/datasets',json={'name':'Long original page'}).raise_for_status().json()['id']
+    job=t.client.post('/api/rag/index-external',json={'path':str(folder),'dataset_id':dataset,'background':True}).raise_for_status().json()['intake_job_id']
+    wait_for(lambda:t.client.get('/api/light/intake',params={'id':job}).json().get('status')=='completed',timeout=60)
+    # Mark layout uncertain, not text fabricated: the reader must open the
+    # real PDF and recover its late text rather than trusting index wording.
+    with closing(QdrantClient(url=t.env['LES_LIGHT_QDRANT_URL'],api_key=t.env['LES_LIGHT_QDRANT_API_KEY'],check_compatibility=False)) as client:
+        collection=client.get_collections().collections[0].name
+        client.set_payload(collection,payload={'table_projection_warning':'PDF_TABLE_SOURCE_MISMATCH'},
+            points=models.Filter(must=[models.FieldCondition(key='dataset_id',match=models.MatchValue(value=dataset))]),wait=True)
+    answer=t.client.post('/api/rag/sources/call',json={'tool':'search_sources','args':{
+        'q':'Find UNIQUE_LONG_TARGET pressure.','dataset_ids':[dataset],'view':'context','max_chars':12000}}).raise_for_status().json()
+    passages=answer['result']['passages'];found=[p for p in passages if 'UNIQUE_LONG_TARGET' in p['text']]
+    assert found and '117.250' in found[0]['text']
+    assert not any(f['code']=='SOURCE_ATOMIC_UNIT_OVERFLOW' for f in answer['result'].get('read_failures',[]))
+    for p in found:
+        source=p['source']
+        assert source['page']==1 and '#page=1' in source['url']
+        assert source['evidence_kind']=='physical_pdf_unit' and source['page_text_complete'] is False
+        assert source['reading_unit_sha256']==hashlib.sha256(p['text'].encode()).hexdigest()
+        assert source.get('offset') is None and source.get('next_offset') is None
+        assert source['read_offset']>16000
+        original=t.client.post('/api/rag/sources/call',json={'tool':'read_pdf_source','args':{
+            'doc_id':source['doc_id'],'source_sha256':source['source_sha256'],'page':1,
+            'offset':source['read_offset'],'view_sha256':source['view_sha256'],'max_chars':12000}}).raise_for_status().json()
+        assert 'UNIQUE_LONG_TARGET pressure 117.250' in original['result']['text']
+    assert not t.seen,'Source reading must not require an answer model'
+    write_pdf(path,['Changed original revision.'])
+    changed=t.client.post('/api/rag/sources/call',json={'tool':'search_sources','args':{
+        'q':'Find UNIQUE_LONG_TARGET pressure.','dataset_ids':[dataset],'view':'context','max_chars':12000}})
+    assert changed.status_code==503 and changed.json()['code']=='SOURCE_REVISION_CHANGED'
+
+
+@pytest.mark.parametrize('native_turn',['rag-small'],indirect=True)
+def test_word_revision_is_rechecked_after_model_completion_before_answer_publication(native_turn,tmp_path):
+    from docx import Document
+    t=native_turn;folder=tmp_path/'documents';folder.mkdir();path=folder/'source.docx'
+    doc=Document();doc.add_paragraph('REVISION_TARGET capacity 17.25 kW is required.');doc.save(path)
+    dataset=t.client.post('/api/rag/datasets',json={'name':'Final Word revision guard'}).raise_for_status().json()['id']
+    job=t.client.post('/api/rag/index-external',json={'path':str(folder),'dataset_id':dataset,'background':True}).raise_for_status().json()['intake_job_id']
+    wait_for(lambda:t.client.get('/api/light/intake',params={'id':job}).json().get('status')=='completed',timeout=40)
+    def answer_then_replace(body):
+        text=json.dumps(body['messages'],ensure_ascii=False)
+        address=re.search(r'(S\d+P\d+) REVISION_TARGET',text)
+        assert address,'The old original was not actually delivered'
+        replacement=Document();replacement.add_paragraph('REVISION_TARGET capacity 117.250 kW changed.');replacement.save(path)
+        return {'text':json.dumps({'answerable':True,'rows':[address[1]],'sums':[]})}
+    t.scripts.append(answer_then_replace)
+    answer=t.client.post('/api/chat',json={'question':'Find REVISION_TARGET capacity.','mode':'search','retrieval_mode':'push',
+        'scope':{'scope_type':'dataset','dataset_ids':[dataset],'selected_sources_only':True}})
+    assert answer.status_code==503 and answer.json()['code']=='SOURCE_REVISION_CHANGED',answer.text
+    assert len(t.seen)==1
+    with sqlite3.connect(t.database) as db:
+        assert db.execute('select error_code from les_chat_runs order by rowid desc limit 1').fetchone()[0]=='SOURCE_REVISION_CHANGED'
+
+
+@pytest.mark.parametrize('native_turn',['rag-small'],indirect=True)
 def test_mixed_page_prose_can_be_selected_without_copying_an_unrelated_table(native_turn,tmp_path):
     t=native_turn;folder=tmp_path/'sources';folder.mkdir()
     first='MIXED_TEXT_ANCHOR The requested location has capacity 17.35 kW.'

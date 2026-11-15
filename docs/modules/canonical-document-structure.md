@@ -110,5 +110,26 @@ replicated span text. Document-wide structure is excluded before cloning
 per-point metadata. The Word LRU stores byte counts instead of repeatedly
 serializing every retained document to count its size.
 
+The public envelope folds only exact source aliases before considering fewer
+reading units: a locator containing nothing beyond the same hash/page, a repeated
+`source_page`, and a parent title identical to the section title. Extra locator
+geometry, distinct page numbers/headings, strong IDs, reading hashes, cursors and
+uncertainty remain. The UI accepts the top-level digest when that duplicate
+locator is absent. Wire limits and text budgets are not increased. Admission
+logs report planned/delivered unit and text counts without source contents.
+
+Physical PDF pages beyond the previous 16,000-character rejection threshold
+are read to EOF under the existing source-byte bound. The existing structural
+reader produces bounded paragraph/table units, retaining table headers and
+source byte ranges. Small pages retain their existing whole-page representation.
+New `physical_pdf_unit` sources carry a complete-page view hash plus a distinct
+unit hash/ordinal and explicitly report incomplete page text. `read_offset` is
+a Unicode character position in the original page snapshot, separate from the
+rendered unit; carried headers are not advertised as a raw continuation frame.
+MCP and the UI can read that original position with the same pinned page hash.
+The final citation check runs for these units and physical Word sections as well
+as whole PDF pages; changing a Word original while a model answers must abort
+publication. These follow-ups require their own native/corpus acceptance.
+
 Acceptance status and measured limits belong in
 [the build 883 acceptance record](../acceptance/canonical-rag-883.md).

@@ -2,7 +2,7 @@
 use serde_json::Value;
 use std::collections::HashSet;
 
-fn fused_rank(point: &Value, rank: usize) -> u64 {
+pub(super) fn fused_rank(point: &Value, rank: usize) -> u64 {
     let p = &point["payload"];
     // A reserved retriever head may have entered a small candidate pool from
     // far below its boundary. Its admission position is not its fused rank.

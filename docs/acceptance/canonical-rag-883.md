@@ -253,3 +253,65 @@ documents must retain their hashes and chunk counts; originals remain read-only.
 Neither this controlled interruption nor the pending repeat is claimed as a
 successful publication-crash test. Full point checks, corpus measurements and
 current CI still block merge. The working installation remains 880.
+
+## Complete copied-generation comparison and follow-up
+
+The corrected citation test passed in the complete targeted repeat: **110 passed,
+one skipped** (the optional legacy Edge-import executable was not supplied).
+The interrupted v4 import resumed the existing job with `INTAKE_INTERRUPTED` and
+one recorded recovery, then explicit indexing requests retried both complete
+registered roots. All **638 originals** now have nonempty indexed content.
+The original 630 ready documents retain their hashes/chunk counts; all original
+file hashes remain unchanged. This is controlled-interruption recovery evidence,
+not an unannounced publication-crash claim.
+
+All **88,175 points / 81,897 content inputs** passed source/hash/token checks;
+there are **18,341 Word reading anchors / 1,541 table anchors**. Maximum prefixed
+content is 512 tokens; the independent untruncated provider probe reported 514
+including control tokens, below its 8,192-token context. An inspection-script
+field-name mistake initially miscounted uncertain PDF geometry as zero. That
+number was rejected, the initial proof retained, and the complete point check
+repeated with the actual field: **1,821 page identities carry uncertainty**.
+No perfect-layout claim follows from availability of their text.
+
+Both complete MCP repeats used the frozen 100 questions, both whole dataset
+scopes, the unchanged 12,000-character text budget and no answer model/file filter.
+The rebuilt catalog has new document IDs, so comparisons below use the same
+original-byte hashes; this agrees with the older primary-ID score.
+
+| Measure | Previous accepted candidate | Current reader, old copy | Current reader, v4 copy |
+|---|---:|---:|---:|
+| Needed-source delivery, 90 cases | 58.70% | 56.48% | 64.07% |
+| Reference-text coverage, 69 cases | 43.33% | 44.60% | 51.84% |
+| Expected-page hit, 12 cases | 91.67% | 91.67% | 91.67% |
+| Expected-page coverage, 12 cases | 87.50% | 87.50% | 87.50% |
+| Excel row hit, 2 cases | 100% | 100% | 100% |
+| Observed search latency p50 | 5.06 s | 8.61 s | 8.93 s |
+| Search-tool errors | 0 | 0 | 0 |
+
+The v4 change is +5.37 percentage points for sources and +8.51 for reference
+text, but case regressions remain. Paired question bootstrap intervals (20,000
+draws) are respectively [-2.22, 12.96] and [-2.75, 20.11] points. This is not a
+statistically established or sufficient general improvement, nor answer accuracy.
+The old-copy run overlapped targeted native tests initially; timings are observed
+end-to-end measurements, not a controlled attribution of slowdown to one stage.
+
+The old-copy repeat checked 156 originals / 266 physical pages; v4 checked
+164 / 202, with zero byte/identity/cursor/digest errors among returned citations.
+Both cohorts retain pinned, scoped sources, no exact same-source passage
+duplicates, and at most the requested text budget. This does not mean every
+candidate original was read: old-copy failures include seven large-page atomic
+overflows; v4 has eleven such failures and three worker timeouts. These remain
+visible and cannot support absence claims. V4 owned service peak is 2.51 GiB,
+minimum available system RAM 7.22 GiB; the external BGE process is not included
+in the service-tree peak. No resource reserve was lowered.
+
+Subsequent source changes fold exact repeated identity metadata before wire
+trimming, materialize long original pages through the existing structural reader,
+and fix the final Word-revision check's caller (previously gated on PDF presence).
+They preserve the frozen questions and all budgets. Native regressions include
+a real long multi-column PDF retrieved by question alone, Unicode source positions,
+and replacing a Word original during completion. The UI keeps the digest and
+opens the original PDF position. These changes are not included in the table
+above and must pass a new native/corpus repeat. Merge remains blocked; production
+installation/models/index are unchanged.

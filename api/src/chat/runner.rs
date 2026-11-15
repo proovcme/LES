@@ -684,10 +684,16 @@ pub async fn run(
                 if selected_evidence && visible.as_array().is_none_or(Vec::is_empty) {
                     return Err("SOURCE_EVIDENCE_MISSING".into());
                 }
-                if visible
-                    .as_array()
-                    .is_some_and(|v| v.iter().any(|s| s["evidence_kind"] == "physical_pdf_page"))
-                {
+                if visible.as_array().is_some_and(|v| {
+                    v.iter().any(|s| {
+                        matches!(
+                            s["evidence_kind"].as_str(),
+                            Some(
+                                "physical_pdf_page" | "physical_pdf_unit" | "physical_word_section"
+                            )
+                        )
+                    })
+                }) {
                     sink.progress("verification", "Проверяю источники ответа")
                         .await?;
                     tools::sources::verify_physical(context.clone(), &visible).await?;

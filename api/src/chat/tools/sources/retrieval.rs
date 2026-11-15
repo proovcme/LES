@@ -747,8 +747,14 @@ async fn passages(
             source["retrieval_incomplete"] = json!(true);
         }
         if p["physical_pdf_read"].is_object() {
-            source["evidence_kind"] = json!("physical_pdf_page");
-            source["page_text_complete"] = json!(true);
+            let structured = p["physical_pdf_read"]["selection"] == "structured_page_unit";
+            source["evidence_kind"] = json!(if structured {
+                "physical_pdf_unit"
+            } else {
+                "physical_pdf_page"
+            });
+            source["page_text_complete"] =
+                json!(!structured && p["physical_pdf_read"]["complete"] == true);
             for field in [
                 "ocr",
                 "ocr_engine",
@@ -760,6 +766,18 @@ async fn passages(
                 "next_offset",
             ] {
                 source[field] = p["physical_pdf_read"][field].clone();
+            }
+            if structured {
+                for field in [
+                    "ordinal",
+                    "start_byte",
+                    "end_byte",
+                    "reading_unit_schema",
+                    "reading_unit_sha256",
+                    "read_offset",
+                ] {
+                    source[field] = p["physical_pdf_read"][field].clone();
+                }
             }
             source["table_projection_warning"] = crate::document_parser::read_projection_warning(
                 &p["table_projection_warning"],

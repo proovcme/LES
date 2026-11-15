@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { ApiError, errorMessage, request } from '../lib/api';
   import type { Source } from '../lib/contracts';
-  import { sourcePage, sourcePlace } from '../lib/contracts';
+  import { sourcePage, sourcePlace, sourceDigest, sourceReadStart } from '../lib/contracts';
   import Modal from './Modal.svelte';
   import Icon from './Icon.svelte';
   import SourceReader from './SourceReader.svelte';
@@ -17,9 +17,10 @@
   let page = $state(1); let imageURL = $state(''); let viewURL = $state('');
   let imageLoading = $state(false);
   let alive = true;
+  const digest = $derived(sourceDigest(source));
   const identity = $derived(new URLSearchParams({
     dataset_id: source.dataset_id || '', doc_name: source.doc_name || '',
-    source_sha256: source.locator?.source_sha256 || '',
+    source_sha256: digest || '',
   }));
   const base = $derived(doc ? `/api/documents/by-id/${encodeURIComponent(doc.id)}` : '');
   onMount(() => {
@@ -82,7 +83,7 @@
   {#if error}<p class="error" role="alert">{error}</p>{/if}
   {#if source.model_locator}<EngineeringSource target={source.model_locator} />{/if}
   {#if doc}
-    {#if !source.locator?.source_sha256}<p class="muted">Для этой цитаты редакция файла не сохранена. Доступен текущий оригинал.</p>{/if}
+    {#if !digest}<p class="muted">Для этой цитаты редакция файла не сохранена. Доступен текущий оригинал.</p>{/if}
     <div class="source-actions">
       <button class="quiet" onclick={() => reading = !reading}>{reading ? 'Скрыть текст' : 'Прочитать текст'}</button>
       {#if /\.docx$/i.test(doc.file_name)}<button class="quiet" onclick={() => figures = !figures}>{figures ? 'Скрыть рисунки' : 'Рисунки и вложения'}</button>{/if}
@@ -92,13 +93,13 @@
     </div>
     {#if reading}
       {#key `${doc.id}:${page}`}
-        <SourceReader docId={doc.id} datasetId={source.dataset_id} digest={source.locator?.source_sha256}
-          initialOffset={source.evidence_kind === 'physical_word_section' && typeof source.ordinal === 'number' && Number.isInteger(source.ordinal) && source.ordinal >= 0 && /^[a-f0-9]{64}$/i.test(source.view_sha256 ?? '') ? source.ordinal : 0}
+        <SourceReader docId={doc.id} datasetId={source.dataset_id} {digest}
+          initialOffset={sourceReadStart(source)}
           viewSHA={source.view_sha256}
           {page} pdf={doc.file_name.toLowerCase().endsWith('.pdf')} />
       {/key}
     {/if}
-    {#if figures}<SourceFigures docId={doc.id} digest={source.locator?.source_sha256} />{/if}
+    {#if figures}<SourceFigures docId={doc.id} {digest} />{/if}
     {#if preview && doc.file_name.toLowerCase().endsWith('.pdf')}
       <form class="page-selector" onsubmit={(event) => { event.preventDefault(); void showOriginal(); }}>
         <label for="source-page">Страница</label><input id="source-page" type="number" min="1" step="1" bind:value={page} required /><button class="quiet" disabled={preparing}>Перейти</button>
