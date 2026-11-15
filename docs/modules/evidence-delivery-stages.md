@@ -1,4 +1,4 @@
-# Evidence delivery: isolated stages (885–888)
+# Evidence delivery: isolated stages (885–889)
 
 Working LES remains 880. All stages run only against the existing copied corpus,
 without Qwen, manual source selection, model changes or reindexing.
@@ -193,3 +193,15 @@ before claiming broad fast-path coverage. Adding the same representation
 alongside the old index without verifying completeness would hide that gap.
 Stage 3 therefore holds `original-v1` reading fixed in both arms; only explicit
 overview discovery/admission changes. Working LES remains 880.
+
+## Cursor ingress correction 889
+
+The first two native runs completed discovery, grouping and pinned original
+checks but failed the new cursor-rejection assertion. The generic API boundary
+asked for index_revision before rejecting a context snapshot offset, while the
+chat search path rejected it separately. This gave clients an impossible next
+action. A shared snapshot classifier/validator now rejects context and overview
+offsets before continuation handling, with HTTP 422 and the explicit document
+reading tools. Real document streams still require their revision/cursor pins.
+The native regression covers both views with and without a revision. This is an
+ingress-contract correction, not a relaxation of source or citation checks.

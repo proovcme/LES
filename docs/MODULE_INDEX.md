@@ -1,5 +1,8 @@
 # Модули LES RAG
 
+889: `sources::context_snapshot/validate_search_cursor` — общий договор
+снимка для API и чата; ошибки позиции получают 422 и указание нужного читателя.
+
 888: [обзоры на копии](modules/evidence-delivery-stages.md) — `core/overview`,
 `bm25`, `context_selection`, нативные `query_groups` Server/Edge, общий
 `search_sources(view=overview)` в чате/API/MCP. Рабочая установка прежняя.

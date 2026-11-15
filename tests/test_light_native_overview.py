@@ -42,6 +42,11 @@ def test_overview_public_tool_keeps_same_filename_in_two_datasets_and_original_l
         original=t.client.get(source['url'].split('#')[0]).raise_for_status().content
         assert hashlib.sha256(original).hexdigest()==source['source_sha256']
     assert not t.seen
-    args['offset']=1
-    rejected=t.client.post('/api/rag/sources/call',json={'tool':'search_sources','args':args})
-    assert rejected.status_code==422 and rejected.json()['code']=='SOURCE_OFFSET_INVALID'
+    for view in ['overview','context']:
+        args['view']=view;args['offset']=1
+        for pin in [None,reply['result']['index_revision']]:
+            if pin is None:args.pop('index_revision',None)
+            else:args['index_revision']=pin
+            rejected=t.client.post('/api/rag/sources/call',json={'tool':'search_sources','args':args})
+            assert rejected.status_code==422 and rejected.json()['code']=='SOURCE_SNAPSHOT_OFFSET_INVALID'
+            assert 'read_source' in rejected.json()['message']

@@ -197,10 +197,8 @@ pub(in crate::chat) async fn search(
     turn: &SourceContext,
     args: Value,
 ) -> Result<Value> {
-    let navigation = !matches!(args["view"].as_str(), Some("context" | "overview"));
-    if !navigation && args["offset"].as_u64().is_some_and(|n| n > 0) {
-        return Err("SOURCE_OFFSET_INVALID".into());
-    }
+    super::validate_search_cursor(&args)?;
+    let navigation = !super::context_snapshot(&args);
     search_with_navigation(context, turn, args, navigation).await
 }
 async fn search_with_navigation(
@@ -210,8 +208,7 @@ async fn search_with_navigation(
     navigation: bool,
 ) -> Result<Value> {
     let control = trial::Control::requested(&args)?;
-    let compact = super::packet::requested()?
-        && matches!(args["view"].as_str(), Some("context" | "overview"));
+    let compact = super::packet::requested()? && super::context_snapshot(&args);
     let overview = control == trial::Control::DocumentCoverage;
     if overview && !compact {
         return Err("OVERVIEW_COMPACT_PACKET_REQUIRED".into());

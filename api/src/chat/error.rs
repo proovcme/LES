@@ -47,6 +47,10 @@ impl Failure {
             || code == "CHAT_QUESTION_REQUIRED"
             || code == "CHAT_RESPONSE_LENGTH_INVALID"
             || code == "CHAT_RETRIEVAL_MODE_INVALID"
+            || matches!(
+                code,
+                "SOURCE_OFFSET_INVALID" | "SOURCE_SNAPSHOT_OFFSET_INVALID"
+            )
         {
             StatusCode::UNPROCESSABLE_ENTITY
         } else if matches!(code, "MODEL_QUEUE_TIMEOUT" | "CHAT_SERVICE_BUSY") {
@@ -74,6 +78,8 @@ impl Failure {
             "SOURCE_ATOMIC_UNIT_OVERFLOW" => "Целая строка таблицы или абзац не помещается. Увеличьте max_chars; фрагмент не был обрезан.",
             "OCR_NO_TEXT" => "На странице не удалось распознать текст. Это не подтверждает отсутствие сведений в оригинале.",
             "OCR_UNAVAILABLE" => "Локальный OCR недоступен. Проверьте установленный обработчик распознавания; ответ по скану не подтверждён.",
+            "SOURCE_SNAPSHOT_OFFSET_INVALID"=>"Контекст поиска — готовый снимок, его нельзя листать через offset. Для продолжения чтения найденного документа используйте read_source, для страницы PDF — read_pdf_source.",
+            "SOURCE_OFFSET_INVALID"=>"Неверная позиция чтения. Используйте next_offset из предыдущей порции вместе с закреплённой редакцией; старые и новые порции нельзя смешивать.",
             "SOURCE_CONTINUATION_REVISION_REQUIRED"=>"Для продолжения передайте index_revision из предыдущего ответа. Не объединяйте выдержки разных поколений индекса.",
             "SOURCE_INDEX_NOT_READY"=>"В выбранных наборах нет готовых поисковых фрагментов. Подготовьте документы к поиску; это не отсутствие ответа в оригиналах.",
             "INDEX_NOT_CONFIGURED"=>"Поиск по документам ещё не настроен. Подготовьте набор к поиску в разделе «Данные» и повторите вопрос.",

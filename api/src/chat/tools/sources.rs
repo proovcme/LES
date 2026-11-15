@@ -7,6 +7,15 @@ mod verification;
 mod word;
 use super::{envelope, Context, Prepared, Result};
 use retrieval::search;
+pub(crate) fn context_snapshot(args: &Value) -> bool {
+    matches!(args["view"].as_str(), Some("context" | "overview"))
+}
+pub(crate) fn validate_search_cursor(args: &Value) -> Result<()> {
+    if context_snapshot(args) && args["offset"].as_u64().is_some_and(|n| n > 0) {
+        return Err("SOURCE_SNAPSHOT_OFFSET_INVALID".into());
+    }
+    Ok(())
+}
 /// Shared data-only scope for chat and MCP; no answer model or dialogue.
 pub(crate) struct SourceContext {
     pub request: Value,
@@ -70,6 +79,24 @@ fn bind_name(selected: &[Value], args: &mut Value) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn context_snapshots_reject_offsets_before_requesting_a_continuation_revision() {
+        for view in ["context", "overview"] {
+            for revision in [Value::Null, json!("current")] {
+                assert!(validate_search_cursor(
+                    &json!({"view":view,"offset":0,"index_revision":revision})
+                )
+                .is_ok());
+                let error = validate_search_cursor(
+                    &json!({"view":view,"offset":1,"index_revision":revision}),
+                )
+                .unwrap_err();
+                assert_eq!(error.code, "SOURCE_SNAPSHOT_OFFSET_INVALID");
+                assert_eq!(error.status, axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+            }
+        }
+        assert!(validate_search_cursor(&json!({"view":"passages","offset":1})).is_ok());
+    }
     #[test]
     fn only_a_unique_short_name_is_bound_to_the_explicit_selection() {
         let selected = vec![json!("folder/Source.pdf")];
