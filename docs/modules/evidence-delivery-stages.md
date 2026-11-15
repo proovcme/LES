@@ -1,4 +1,4 @@
-# Evidence delivery: isolated stages (885–886)
+# Evidence delivery: isolated stages (885–887)
 
 Working LES remains 880. All stages run only against the existing copied corpus,
 without Qwen, manual source selection, model changes or reindexing.
@@ -96,5 +96,10 @@ treated as corrupt because both layouts use the v1 reading container. Inspection
 confirmed its text and structure digests were valid and no canonical tree existed.
 The correction distinguishes the nested canonical schema after digest validation;
 the legacy fallback and a fixture with the real native Docling parser are now
-separate cases. That repeat and UI/MCP checks are pending. Its original-reader
+separate cases. The first targeted repeat passed legacy fallback but exposed
+`DOCUMENT_PARSER_CACHE_INVALID` during native Docling indexing: the batch worker
+did not receive `owned_state`, relying on ambient `LES_STATE_ROOT`. The API now
+freezes its owned state root into the batch and forwards it to the format worker;
+the regression deliberately removes that environment variable. No source folder
+is used as scratch space. This repeat and UI/MCP checks are pending. Its original-reader
 arm holds compact transport fixed. No installation/release; stage 3 pending.

@@ -1,5 +1,8 @@
 # Модули LES RAG
 
+887: явный `owned_state` в `index_batch/configuration` → `core/index_batch` →
+обработчик формата. Кэш Docling не зависит от переменной окружения запуска.
+
 886: [чтение сохранённых элементов](modules/evidence-delivery-stages.md) —
 `sources/word/saved.rs`, общий `read_source`, отдельные курсор и ordinal.
 Только явный опыт на копии, проверка следует после компактного пакета.

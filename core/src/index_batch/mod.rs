@@ -76,7 +76,7 @@ fn convert_document(
     .join(dataset);
     let response=crate::worker_host::run_documents(&json!({"schema":"les.worker-host.v1","program":worker["program"],"directory":worker["directory"],
         "args":["--serve-document-formats"],"context":"les.format-dispatch.v1","timeout_ms":worker["timeout_ms"],
-        "input":{"schema":"les.document-convert.v1","pipeline":"nodes","mail_index":mail_index,"path":path,"data_dir":data_dir,"dataset_id":dataset,"file_key":input["file_name"],
+        "input":{"schema":"les.document-convert.v1","pipeline":"nodes","mail_index":mail_index,"path":path,"data_dir":data_dir,"owned_state":request["owned_state"],"dataset_id":dataset,"file_key":input["file_name"],
             "node_spool":input["node_spool"],"source_sha256":input["source_sha256"],"chunking":chunking,
             "minimum":worker["minimum"],"final_minimum":worker["final_minimum"],"table_row_limit":worker["table_row_limit"],"ocr":worker["ocr"],"ocr_unavailable":worker["ocr_unavailable"],
             "pdf_page_size":worker["pdf_page_size"].as_u64().unwrap_or(1800),"pdf_page_overlap":worker["pdf_page_overlap"].as_u64().unwrap_or(150)}})).map_err(error)?;
@@ -153,7 +153,11 @@ pub fn run(request: &Value, bridge: impl Fn(u8, &Value) -> Result<Value>) -> Res
         })
         .filter(|v| (1..=65_536).contains(v))
         .ok_or("EMBEDDING_DESCRIPTOR_INVALID")?;
-    if !database.is_absolute()
+    if (!request["owned_state"].is_null()
+        && !request["owned_state"]
+            .as_str()
+            .is_some_and(|p| Path::new(p).is_absolute()))
+        || !database.is_absolute()
         || !root.is_absolute()
         || !source_root.is_absolute()
         || !spool_dir.is_absolute()

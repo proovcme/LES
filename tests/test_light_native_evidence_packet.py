@@ -15,6 +15,7 @@ def packet_trial(monkeypatch, request):
     if reading in ('saved', 'legacy'):
         monkeypatch.setenv('LES_EXPERIMENT_SAVED_READING', 'canonical-v1')
     if reading == 'saved':
+        monkeypatch.delenv('LES_STATE_ROOT', raising=False)
         parsers = os.getenv('LES_TEST_NATIVE_DOCUMENT_PARSERS')
         if not parsers: pytest.skip('Provide the native Docling parser for canonical reuse')
         monkeypatch.setenv('LES_NATIVE_DOCUMENT_PARSERS', parsers)
@@ -36,9 +37,15 @@ def test_compact_discovery_reads_pinned_original_and_rejects_replacement(native_
     doc.save(path); sha = hashlib.sha256(path.read_bytes()).hexdigest()
     dataset = t.client.post('/api/rag/datasets', json={'name': 'Packet control'}).raise_for_status().json()['id']
     job = t.client.post('/api/rag/index-external', json={'path': str(folder), 'dataset_id': dataset, 'background': True}).raise_for_status().json()['intake_job_id']
-    wait_for(lambda: t.client.get('/api/light/intake', params={'id': job}).json().get('status') == 'completed', timeout=60)
+    def completed():
+        status = t.client.get('/api/light/intake', params={'id': job}).json()
+        assert status.get('status') not in ('failed', 'cancelled'), status
+        return status.get('status') == 'completed'
+    wait_for(completed, timeout=60)
     args = {'q': 'Equipment pump power', 'view': 'context', 'dataset_ids': [dataset], 'max_chars': 12000}
-    reply = t.client.post('/api/rag/sources/call', json={'tool': 'search_sources', 'args': args}).raise_for_status().json()
+    response = t.client.post('/api/rag/sources/call', json={'tool': 'search_sources', 'args': args})
+    assert response.status_code == 200, response.json()
+    reply = response.json()
     assert reply['result']['evidence_packet'] == 'les.evidence-packet.v1'
     assert reply['result']['passages']
     texts = []
