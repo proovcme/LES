@@ -56,19 +56,35 @@ impl Shard {
             .ok_or("CORE_LEXICAL_RESPONSE_INVALID")?
             .is_empty();
         let prefetch = if lexical { (limit * 2).max(24) } else { limit };
-        let dense = self.call(
-            "query",
-            &json!({"query":request["vector"],"using":request["dense_name"],
-            "filter":filter,"limit":prefetch,"with_payload":true}),
-        )?;
-        let dense = dense["points"]
-            .as_array()
-            .ok_or("EDGE_RESPONSE_INVALID")?
-            .clone();
+        let dense_request = json!({"query":request["vector"],"using":request["dense_name"],
+            "filter":filter,"limit":prefetch,"with_payload":true});
+        let overview = request["overview"] == true;
+        let dense = if overview {
+            let mut points = Vec::new();
+            for query in
+                les_core::overview::dense_requests(&dense_request, &filters["dataset_ids"])?
+            {
+                les_core::overview::merge_dense(
+                    &mut points,
+                    &self.call("query_groups", &query)?,
+                    prefetch,
+                )?;
+            }
+            points
+        } else {
+            self.call("query", &dense_request)?["points"]
+                .as_array()
+                .ok_or("EDGE_RESPONSE_INVALID")?
+                .clone()
+        };
         if !lexical {
             return Ok(dense);
         }
-        let hits = self.lexical_search(text, filters, prefetch)?;
+        let mut lexical_filters = filters.clone();
+        if overview {
+            lexical_filters["group_size"] = json!(2);
+        }
+        let hits = self.lexical_search(text, &lexical_filters, prefetch)?;
         let hits = hits["hits"].as_array().ok_or("EDGE_RESPONSE_INVALID")?;
         let mut lexical = Vec::new();
         if !hits.is_empty() {

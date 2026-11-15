@@ -100,6 +100,31 @@ pub(super) fn fit_compact_context(reply: &mut Value) -> Result<()> {
     fit_budget(reply, 22500, 240, None, true)
 }
 
+pub(super) fn fit_overview_context(reply: &mut Value, text_budget: usize) -> Result<()> {
+    reply["result"]["context_policy"] = json!("document-coverage-v1");
+    let documents = |value: &Value| {
+        value["sources"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|s| json!([s["dataset_id"], s["doc_id"], s["source_sha256"]]).to_string())
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+    };
+    let readable = documents(reply);
+    // Reserve the largest counters before the sole wire admission. Final
+    // counter updates only shrink that representation, never evict evidence.
+    reply["result"]["overview"]["readable_primary_documents"] = json!(readable);
+    reply["result"]["overview"]["delivered_primary_documents"] = json!(readable);
+    reply["result"]["overview"]["omitted_primary_documents"] = json!(readable);
+    fit_budget(reply, 22500, 240, Some(text_budget), true)?;
+    let delivered = documents(reply);
+    reply["result"]["overview"]["delivered_primary_documents"] = json!(delivered);
+    reply["result"]["overview"]["omitted_primary_documents"] =
+        json!(readable.saturating_sub(delivered));
+    Ok(())
+}
+
 /// A context snapshot has no continuation cursor. Its only admission pass
 /// measures ready records, retaining RRF order among the units which fit.
 pub(super) fn fit_ranked_context(reply: &mut Value, text_budget: usize) -> Result<()> {
@@ -623,12 +648,10 @@ mod tests {
             assert_eq!(failure["source"]["doc_name"], "source.pdf");
             assert_eq!(failure["evidence_admissible"], false);
             assert_eq!(failure["read_required"], "read_pdf_source");
-            assert!(
-                failure["message"]
-                    .as_str()
-                    .unwrap()
-                    .contains("not proof of absence")
-            );
+            assert!(failure["message"]
+                .as_str()
+                .unwrap()
+                .contains("not proof of absence"));
         }
     }
     #[test]

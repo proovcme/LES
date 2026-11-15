@@ -1,4 +1,4 @@
-# Evidence delivery: isolated stages (885–887)
+# Evidence delivery: isolated stages (885–888)
 
 Working LES remains 880. All stages run only against the existing copied corpus,
 without Qwen, manual source selection, model changes or reindexing.
@@ -103,3 +103,29 @@ freezes its owned state root into the batch and forwards it to the format worker
 the regression deliberately removes that environment variable. No source folder
 is used as scratch space. This repeat and UI/MCP checks are pending. Its original-reader
 arm holds compact transport fixed. No installation/release; stage 3 pending.
+
+## Overview candidate 888 (not accepted)
+
+`LES_EXPERIMENT_OVERVIEW=grouped-v1` is only active for explicit
+`search_sources(view=overview)` with compact packets. `original-v1` preserves
+the precision pipeline for a comparison with the same request intent.
+Qdrant native grouping requests two hits per file before channel top-k. Requests
+are dataset-local so equal names in separate datasets remain independent;
+intermediate results are merged by original scores and retained at bounded top-k.
+SQLite uses ROW_NUMBER partitioned by dataset/file before LIMIT, with unchanged
+global BM25 statistics. There is one dense and one lexical vote, unchanged RRF,
+BGE and disabled reranker. No corpus mutation or payload migration.
+
+Documents follow their best fused prior. Existing relevance chooses reading
+units only within each document; documents are interleaved before the single
+compact-ready admission. No per-unit reserved kilobyte or earlier text quota
+is spent by this ordering. Non-fitting units are skipped whole, not truncated.
+The receipt distinguishes readable/delivered/omitted primary documents and
+never claims exhaustive corpus coverage. Precise context requests are unchanged.
+
+The dataset-local dense fanout is bounded by the existing 512-dataset scope
+contract; retained result memory is top-k, but latency can grow with scope.
+Large multi-dataset latency and semantic overview completeness remain acceptance
+questions, not solved by grouping alone. No automatic query-type heuristic.
+The explicit tool is shared by chat, API and MCP; automatic main-chat prefetch
+continues to request precision context. No new UI controls.

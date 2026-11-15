@@ -1575,9 +1575,10 @@
             "enum": [
               "passages",
               "documents",
-              "context"
+              "context",
+              "overview"
             ],
-            "description": "passages: ranked search locators with continuations; documents: catalog only; context: the same bounded, structurally read context as automatic chat RAG, without an answer model. Context is not a paginated stream; read_source continues a found document."
+            "description": "passages: ranked locators with continuations; documents: catalog only; context: bounded structurally read evidence; overview: bounded document coverage. Neither context nor overview is a paginated stream or proof of complete corpus coverage; read_source continues a found document."
           },
           "offset": {
             "type": "integer",
@@ -1630,8 +1631,11 @@
             "type": "string",
             "enum": [
               "passages",
-              "documents"
-            ]
+              "documents",
+              "context",
+              "overview"
+            ],
+            "description": "passages: ranked locators with continuations; documents: catalog only; context: bounded structurally read evidence; overview: bounded document coverage. Neither context nor overview is a paginated stream or proof of complete corpus coverage; read_source continues a found document."
           },
           "offset": {
             "type": "integer",

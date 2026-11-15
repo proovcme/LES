@@ -1140,6 +1140,7 @@
         "tests/test_light_native_tool_executor.py",
         "tests/test_light_native_unicode.py",
         "tests/test_light_native_workbook.py",
+        "tests/test_light_overview_groups.py",
         "tests/test_light_pdf_source_tool.py",
         "tests/test_light_resource_memory.py",
         "tests/test_light_section_coverage.py",
@@ -11072,7 +11073,8 @@
       "inbound": [
         "tests/test_light_native_batch_api.py",
         "tests/test_light_native_folder_watch.py",
-        "tests/test_light_native_intake_execution.py"
+        "tests/test_light_native_intake_execution.py",
+        "tests/test_light_overview_groups.py"
       ],
       "lines": 149,
       "module": "tests.test_light_edge_migration",
@@ -11513,6 +11515,7 @@
         "tests/test_light_native_intake_execution.py",
         "tests/test_light_native_mail.py",
         "tests/test_light_native_numeric_evidence.py",
+        "tests/test_light_native_overview.py",
         "tests/test_light_native_pdf_layout.py",
         "tests/test_light_native_public_upload.py",
         "tests/test_light_native_publication.py",
@@ -11642,6 +11645,7 @@
         "tests/test_light_native_model_discovery.py",
         "tests/test_light_native_model_settings.py",
         "tests/test_light_native_numeric_evidence.py",
+        "tests/test_light_native_overview.py",
         "tests/test_light_native_pdf_layout.py",
         "tests/test_light_native_public_chat.py",
         "tests/test_light_native_public_upload.py",
@@ -12155,6 +12159,18 @@
     },
     {
       "inbound": [],
+      "lines": 46,
+      "module": "tests.test_light_native_overview",
+      "outbound": [
+        "tests/test_light_native_api.py",
+        "tests/test_light_native_chat_turn.py"
+      ],
+      "path": "tests/test_light_native_overview.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
       "lines": 16,
       "module": "tests.test_light_native_parser_package",
       "outbound": [
@@ -12506,6 +12522,18 @@
         "tests/pdf_fixtures.py"
       ],
       "path": "tests/test_light_ocr.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
+      "lines": 55,
+      "module": "tests.test_light_overview_groups",
+      "outbound": [
+        "backend/native_core.py",
+        "tests/test_light_edge_migration.py"
+      ],
+      "path": "tests/test_light_overview_groups.py",
       "status": "TEST_OR_TOOL_ONLY",
       "windows_runtime_explicit": false
     },
@@ -16192,9 +16220,9 @@
     "product_reachable": 417,
     "registered_api_routes": 298,
     "runtime_support": 5,
-    "test_or_tool_only": 283,
-    "tracked_python_files": 728,
-    "tracked_python_lines": 173970
+    "test_or_tool_only": 285,
+    "tracked_python_files": 730,
+    "tracked_python_lines": 174071
   },
   "warnings": []
 }

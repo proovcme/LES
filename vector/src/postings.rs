@@ -57,6 +57,9 @@ impl Shard {
         for key in ["dataset_ids", "doc_filter", "node_roles", "ancestor_ids"] {
             request[key] = filters[key].clone();
         }
+        if let Some(size) = filters.get("group_size") {
+            request["group_size"] = size.clone();
+        }
         let result = les_core::bm25::execute(&request)?;
         if self.generation()? != stamp {
             return Err("INDEX_CHANGED_DURING_SEARCH");

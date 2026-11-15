@@ -20,7 +20,9 @@ pub(super) async fn server_read(
             .map_err(|_| "INDEX_READ_UNAVAILABLE")?;
         path.pop_if_empty()
             .extend(["collections", collection, "points"]);
-        if operation != "retrieve" {
+        if operation == "query_groups" {
+            path.extend(["query", "groups"]);
+        } else if operation != "retrieve" {
             path.push(operation);
         }
     }
@@ -61,7 +63,10 @@ impl Store {
         if let Some(code) = self.recovery_error() {
             return Err(code.into());
         }
-        if !matches!(operation, "scroll" | "retrieve" | "query" | "count") {
+        if !matches!(
+            operation,
+            "scroll" | "retrieve" | "query" | "query_groups" | "count"
+        ) {
             return Err("INDEX_READ_OPERATION_INVALID".into());
         }
         #[cfg(feature = "edge")]
@@ -180,11 +185,26 @@ impl Store {
             .ok_or("INDEX_COLLECTION_MISMATCH")?;
         let prefetch = (limit * 2).max(24);
         let filter = query_filter(filters);
-        let dense=self.read_owned(context,collection,"query",json!({"query":request["vector"],"using":request["dense_name"],"filter":filter,"limit":prefetch,"with_payload":true})).await?;
-        let dense = dense["points"]
-            .as_array()
-            .cloned()
-            .ok_or("INDEX_READ_INVALID")?;
+        let dense_request = json!({"query":request["vector"],"using":request["dense_name"],"filter":filter,"limit":prefetch,"with_payload":true});
+        let overview = request["overview"] == true;
+        let dense = if overview {
+            let mut points = Vec::new();
+            for query in
+                les_core::overview::dense_requests(&dense_request, &filters["dataset_ids"])?
+            {
+                let groups = self
+                    .read_owned(context, collection, "query_groups", query)
+                    .await?;
+                les_core::overview::merge_dense(&mut points, &groups, prefetch)?;
+            }
+            points
+        } else {
+            self.read_owned(context, collection, "query", dense_request)
+                .await?["points"]
+                .as_array()
+                .cloned()
+                .ok_or("INDEX_READ_INVALID")?
+        };
         let database = self
             .content_root(context)
             .join(".index-replacements")
@@ -200,8 +220,10 @@ impl Store {
             let tokens=les_core::lexical::current(&[text])?;
             let terms=tokens["documents"][0]["terms"].as_object().ok_or("INDEX_SPARSE_CONTRACT_INVALID")?.keys().cloned().collect::<Vec<_>>();
             if terms.is_empty(){return Ok(json!({"hits":[]}));}
-            Ok(les_core::bm25::execute(&json!({"action":"search","database":database,"revision":revision,"terms":terms,"limit":prefetch,
-                "dataset_ids":filters["dataset_ids"],"doc_filter":filters["doc_filter"],"node_roles":filters["node_roles"],"ancestor_ids":filters["ancestor_ids"]}))?)
+            let mut query=json!({"action":"search","database":database,"revision":revision,"terms":terms,"limit":prefetch,
+                "dataset_ids":filters["dataset_ids"],"doc_filter":filters["doc_filter"],"node_roles":filters["node_roles"],"ancestor_ids":filters["ancestor_ids"]});
+            if overview {query["group_size"]=json!(2);}
+            Ok(les_core::bm25::execute(&query)?)
         }).await.map_err(|_|"INDEX_SPARSE_OWNER_FAILED")??;
         let hits = lexical["hits"]
             .as_array()

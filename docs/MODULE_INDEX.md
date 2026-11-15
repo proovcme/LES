@@ -1,5 +1,9 @@
 # Модули LES RAG
 
+888: [обзоры на копии](modules/evidence-delivery-stages.md) — `core/overview`,
+`bm25`, `context_selection`, нативные `query_groups` Server/Edge, общий
+`search_sources(view=overview)` в чате/API/MCP. Рабочая установка прежняя.
+
 887: явный `owned_state` в `index_batch/configuration` → `core/index_batch` →
 обработчик формата. Кэш Docling не зависит от переменной окружения запуска.
 

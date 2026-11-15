@@ -296,7 +296,7 @@ impl Shard {
                         .collect::<Result<Vec<_>>>()?
                 ))
             }
-            "query" => {
+            "query" | "query_groups" => {
                 let mut request = QueryRequest::new(limit(&body["limit"], 10)?);
                 request.query = scoring(body)?;
                 request.prefetches = prefetches(&body["prefetch"], 0)?;
@@ -319,6 +319,20 @@ impl Shard {
                     body.get("with_vector").cloned().unwrap_or(json!(false)),
                 )
                 .map_err(|_| "EDGE_REQUEST_INVALID")?;
+                if action == "query_groups" {
+                    let groups = self
+                        .edge
+                        .query_groups(GroupRequest {
+                            groups: limit(&body["limit"], 128)?,
+                            group_size: limit(&body["group_size"], 2)?,
+                            group_by: serde_json::from_value(body["group_by"].clone())
+                                .map_err(|_| "EDGE_REQUEST_INVALID")?,
+                            query: request,
+                        })
+                        .map_err(|_| "EDGE_READ_FAILED")?;
+                    return Ok(json!({"groups":groups.into_iter().map(|g|json!({"id":g.key,
+                        "hits":g.hits.into_iter().map(|p|json!({"id":p.id,"payload":p.payload,"score":p.score,"version":p.version,"vector":p.vector.map(VectorStructPersisted::from)})).collect::<Vec<_>>()})).collect::<Vec<_>>()}));
+                }
                 let rows = self.edge.query(request).map_err(|_| "EDGE_READ_FAILED")?;
                 Ok(
                     json!({"points":rows.into_iter().map(|p|json!({"id":p.id,"payload":p.payload,"score":p.score,"version":p.version,"vector":p.vector.map(VectorStructPersisted::from)})).collect::<Vec<_>>()}),

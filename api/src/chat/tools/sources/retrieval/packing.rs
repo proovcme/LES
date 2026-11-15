@@ -73,7 +73,7 @@ fn select_points(
     let result = les_core::context_selection::select(&serde_json::json!({
         "question":query,"units":input,"max_chars":context_budget.unwrap_or(1_000_000),
         "text_budget":text_budget,"identity_reserve_chars":if context_budget.is_some(){1024}else{0},"max_items":32,
-        "policy":if control==super::trial::Control::RrfWire{"rrf-order-v1"}else{"coverage-mmr-v1"}
+        "policy":match control {super::trial::Control::RrfWire=>"rrf-order-v1",super::trial::Control::DocumentCoverage=>"document-coverage-v1",_=>"coverage-mmr-v1"}
     }))?;
     Ok(result["units"]
         .as_array()

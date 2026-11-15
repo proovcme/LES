@@ -197,7 +197,7 @@ pub(in crate::chat) async fn search(
     turn: &SourceContext,
     args: Value,
 ) -> Result<Value> {
-    let navigation = args["view"] != "context";
+    let navigation = !matches!(args["view"].as_str(), Some("context" | "overview"));
     if !navigation && args["offset"].as_u64().is_some_and(|n| n > 0) {
         return Err("SOURCE_OFFSET_INVALID".into());
     }
@@ -210,7 +210,12 @@ async fn search_with_navigation(
     navigation: bool,
 ) -> Result<Value> {
     let control = trial::Control::requested(&args)?;
-    let compact = super::packet::requested()? && args["view"] == "context";
+    let compact = super::packet::requested()?
+        && matches!(args["view"].as_str(), Some("context" | "overview"));
+    let overview = control == trial::Control::DocumentCoverage;
+    if overview && !compact {
+        return Err("OVERVIEW_COMPACT_PACKET_REQUIRED".into());
+    }
     if compact && control == trial::Control::RrfWire {
         return Err("CONTEXT_EXPERIMENT_CONFLICT".into());
     }
@@ -299,7 +304,7 @@ async fn search_with_navigation(
         .as_ref()
         .ok_or("INDEX_STORAGE_UNAVAILABLE")?;
     let request = json!({"collection":config["collection"],"text":query,"vector":vector,"dense_name":config["vector_names"]["dense"],
-        "limit":policy["retrieval_candidate_k"],"rank_constant":policy["rrf_rank_constant"],"fusion":config["fusion"],"preserve_heads":!navigation,"filters":{"dataset_ids":datasets,"doc_filter":files},"hierarchy":navigation});
+        "limit":policy["retrieval_candidate_k"],"rank_constant":policy["rrf_rank_constant"],"fusion":config["fusion"],"preserve_heads":!navigation,"filters":{"dataset_ids":datasets,"doc_filter":files},"hierarchy":navigation,"overview":overview});
     for attempt in 0..16 {
         let result: Result<Value> = async {
             let store_started = std::time::Instant::now();
@@ -381,7 +386,12 @@ async fn search_with_navigation(
             // Public tool replies have a wire limit. Internal prefetch must
             // retain its complete candidate catalog and fitting page units:
             // the model packer, not an MCP envelope, owns their admission.
-            if compact {
+            if overview {
+                reply["result"]["overview"] = json!({"schema":"les.overview-coverage.v1",
+                    "discovery":"storage-document-groups","per_channel_document_limit":2,
+                    "complete_corpus":false,"scope_datasets":datasets.len()});
+                envelope::fit_overview_context(&mut reply,max_chars)?;
+            } else if compact {
                 envelope::fit_compact_context(&mut reply)?;
             } else if control==trial::Control::RrfWire {
                 envelope::fit_ranked_context(&mut reply,max_chars)?;
@@ -693,7 +703,14 @@ async fn passages(
     );
     let word_started = std::time::Instant::now();
     let (points, hydrated) = if expand_document {
-        super::word::hydrate(context, turn, collection.as_str().ok_or("INDEX_COLLECTION_MISMATCH")?, points, hydrated).await?
+        super::word::hydrate(
+            context,
+            turn,
+            collection.as_str().ok_or("INDEX_COLLECTION_MISMATCH")?,
+            points,
+            hydrated,
+        )
+        .await?
     } else {
         (points, hydrated)
     };

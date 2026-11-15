@@ -8,9 +8,18 @@ pub(super) enum Control {
     Off,
     Observe,
     RrfWire,
+    DocumentCoverage,
 }
 impl Control {
     pub(super) fn requested(args: &Value) -> Result<Self> {
+        if args["view"] == "overview" {
+            return match std::env::var("LES_EXPERIMENT_OVERVIEW").as_deref() {
+                Err(std::env::VarError::NotPresent) | Ok("") => Ok(Self::Off),
+                Ok("original-v1") => Ok(Self::Observe),
+                Ok("grouped-v1") => Ok(Self::DocumentCoverage),
+                _ => Err("OVERVIEW_EXPERIMENT_INVALID".into()),
+            };
+        }
         if args["view"] != "context" {
             return Ok(Self::Off);
         }
@@ -92,7 +101,7 @@ impl Control {
             "{}",
             json!({"event":"context_trial_stage","stage":stage,
             "question_sha256":les_core::sha256_hex(question.as_bytes()),
-            "policy":if self==Self::RrfWire{"rrf-wire-v1"}else{"baseline-v1"},
+            "policy":match self { Self::RrfWire=>"rrf-wire-v1",Self::DocumentCoverage=>"document-coverage-v1",_=>"baseline-v1" },
             "units":points.len(),"sources":sources,"order_sha256":order,"set_sha256":set})
         );
     }

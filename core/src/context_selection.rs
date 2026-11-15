@@ -1,6 +1,6 @@
 //! Query-aware, whole-unit context admission. Retrieval scores and the index are immutable.
 //! Exact content duplicates share text, never identity or revision authority.
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 mod discovery;
 pub use discovery::catalog;
@@ -179,7 +179,7 @@ pub fn select(request: &Value) -> Result<Value, &'static str> {
                 "budget_owner":"ready_envelope","semantic_selection":false}}),
             );
         }
-        None | Some("coverage-mmr-v1") => {}
+        None | Some("coverage-mmr-v1" | "document-coverage-v1") => {}
         _ => return Err("CONTEXT_SELECTION_INVALID"),
     }
     // Vocabulary statistics use unique content, so copies do not outvote an
@@ -275,6 +275,51 @@ pub fn select(request: &Value) -> Result<Value, &'static str> {
             }
         })
         .collect();
+    if request["policy"] == "document-coverage-v1" {
+        // An explicit overview spends its ready-envelope budget once. Rank
+        // documents by their fused retrieval prior, then choose useful units
+        // within each document. Lexical coverage cannot evict another document.
+        let mut groups = BTreeMap::<String, Vec<usize>>::new();
+        for (i, unit) in units.iter().enumerate() {
+            let group = unit["group"]
+                .as_str()
+                .map(str::to_owned)
+                .unwrap_or_else(|| unit["source"].to_string());
+            groups.entry(group).or_default().push(i);
+        }
+        let prior = |i: usize| {
+            units[i]["rank"]
+                .as_u64()
+                .or_else(|| units[i]["source_rank"].as_u64())
+                .unwrap_or(u64::MAX)
+        };
+        let mut groups = groups.into_values().collect::<Vec<_>>();
+        groups.sort_by_key(|g| g.iter().map(|&i| prior(i)).min().unwrap_or(u64::MAX));
+        for group in &mut groups {
+            group.sort_by(|&a, &b| {
+                relevance[b]
+                    .total_cmp(&relevance[a])
+                    .then_with(|| prior(a).cmp(&prior(b)))
+                    .then_with(|| {
+                        units[a]["unit_id"]
+                            .as_str()
+                            .cmp(&units[b]["unit_id"].as_str())
+                    })
+            });
+        }
+        let mut ordered = Vec::with_capacity(units.len());
+        for position in 0..groups.iter().map(Vec::len).max().unwrap_or(0) {
+            for group in &groups {
+                if let Some(&i) = group.get(position) {
+                    ordered.push(units[i].clone());
+                }
+            }
+        }
+        return Ok(json!({"units":ordered,"selection":{
+            "schema":"les.context-selection.v1","policy":"document-coverage-v1",
+            "input_units":input.len(),"candidate_documents":groups.len(),
+            "complete_corpus":false,"budget_owner":"ready_envelope"}}));
+    }
     let mut chosen: Vec<usize> = Vec::new();
     let source_limit = request["max_sources"].as_u64().unwrap_or(64).min(64) as usize;
     let groups = units
@@ -390,6 +435,32 @@ pub fn select(request: &Value) -> Result<Value, &'static str> {
 mod tests {
     use super::*;
     #[test]
+    fn overview_orders_documents_before_extra_units_without_spending_a_second_budget() {
+        let mut repeated = (0..40)
+            .map(|i| {
+                let mut u = unit(
+                    &format!("a-{i}"),
+                    &format!("query detailed paragraph {i}"),
+                    i,
+                );
+                u["group"] = json!("dataset-a/file/revision-1");
+                u
+            })
+            .collect::<Vec<_>>();
+        let mut second = unit("b", "Semantically retrieved independent source", 50);
+        second["group"] = json!("dataset-b/file/revision-2");
+        repeated.push(second);
+        let result = select(&json!({"question":"query","units":repeated,
+            "policy":"document-coverage-v1","max_chars":1,"text_budget":1,"max_items":1}))
+        .unwrap();
+        let rows = result["units"].as_array().unwrap();
+        assert_eq!(rows.len(), 41);
+        assert_eq!(rows[0]["group"], "dataset-a/file/revision-1");
+        assert_eq!(rows[1]["unit_id"], "b");
+        assert_eq!(result["selection"]["budget_owner"], "ready_envelope");
+        assert_eq!(result["selection"]["complete_corpus"], false);
+    }
+    #[test]
     fn rrf_control_neither_lexically_reranks_nor_spends_the_callers_budget() {
         let mut parent = unit("parent", "query query short", 0);
         parent["rank"] = Value::Null;
@@ -444,11 +515,13 @@ mod tests {
             "max_chars":1000000,"text_budget":text_budget}),
         )
         .unwrap();
-        assert!(result["units"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|u| u["unit_id"] == "row"));
+        assert!(
+            result["units"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|u| u["unit_id"] == "row")
+        );
         assert!(result["selection"]["used_text_chars"].as_u64().unwrap() <= text_budget as u64);
     }
     #[test]
@@ -477,11 +550,13 @@ mod tests {
             "max_chars":8000,"max_items":8,"identity_reserve_chars":1024}),
         )
         .unwrap();
-        assert!(result["units"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|u| u["unit_id"] == "complete"));
+        assert!(
+            result["units"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|u| u["unit_id"] == "complete")
+        );
         assert!(result["selection"]["used_chars"].as_u64().unwrap() <= 8000);
     }
     #[test]
@@ -534,11 +609,13 @@ mod tests {
         )
         .unwrap();
         assert_eq!(r["units"].as_array().unwrap().len(), 2);
-        assert!(r["units"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|u| u["equivalent_sources"].as_array().unwrap().is_empty()));
+        assert!(
+            r["units"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|u| u["equivalent_sources"].as_array().unwrap().is_empty())
+        );
         let final_read =
             select(&json!({"question":"Pump pressure rating","units":[a,b],"max_chars":4000}))
                 .unwrap();
@@ -570,9 +647,10 @@ mod tests {
             "max_chars":10000,"max_sources":2}))
         .unwrap();
         let rows = result["units"].as_array().unwrap();
-        assert!(rows
-            .iter()
-            .any(|u| u["unit_id"] == "late" && u["rank"] == 60));
+        assert!(
+            rows.iter()
+                .any(|u| u["unit_id"] == "late" && u["rank"] == 60)
+        );
         assert!(
             rows.iter()
                 .map(|u| u["source"].to_string())
@@ -636,11 +714,13 @@ mod tests {
             r["units"][0]["equivalent_sources"][0]["source"]["doc_id"],
             "b"
         );
-        assert!(r["units"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|u| u["unit_id"] == "c"));
+        assert!(
+            r["units"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|u| u["unit_id"] == "c")
+        );
     }
     #[test]
     fn lower_ranked_complementary_evidence_survives_repeated_boilerplate() {
@@ -659,11 +739,13 @@ mod tests {
             30,
         ));
         let r = select(&json!({"question":"Pump pressure rating and flow capacity", "units":units,"max_chars":650})).unwrap();
-        assert!(r["units"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|u| u["unit_id"] == "rating"));
+        assert!(
+            r["units"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|u| u["unit_id"] == "rating")
+        );
         assert!(r["selection"]["used_chars"].as_u64().unwrap() <= 650);
     }
     #[test]
@@ -686,11 +768,13 @@ mod tests {
             &json!({"question":"Pump pressure and flow", "units":[page,row],"max_chars":budget}),
         )
         .unwrap();
-        assert!(r["units"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|u| u["unit_id"] == "row"));
+        assert!(
+            r["units"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|u| u["unit_id"] == "row")
+        );
         assert!(r["selection"]["used_chars"].as_u64().unwrap() <= budget as u64);
     }
     #[test]

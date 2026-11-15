@@ -47,6 +47,7 @@ pub mod model_capabilities;
 pub mod model_profile;
 pub mod model_request;
 pub mod model_secrets;
+pub mod overview;
 pub mod pdf_source;
 mod process_guard;
 mod receipts;
