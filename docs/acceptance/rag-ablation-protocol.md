@@ -139,6 +139,13 @@ types/behavior passed in 28 seconds; desktop build passed. These are observed
 job wall times for this run, not a cold-cache SLA or a completed native-suite
 result. The full native job is separate.
 
+Local repeat on source `d0141e1`: `make test` passed 2,234 cases with four
+explicit skips and 18 passing subtests; `make test-mail` passed 66 cases.
+This follows a retained failed setup run, not a relabeling of it. The missing
+UI receipt now fails before the long suite; test scratch cleanup keeps pytest
+name reservations. Full boundaries and the four skips are listed with the
+[evidence-delivery results](../modules/evidence-delivery-stages.md).
+
 ## Ordered architecture risks and exit criteria
 
 | Priority | Boundary | Required evidence before removal/replacement |

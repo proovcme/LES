@@ -226,7 +226,7 @@ hits in different units of one file therefore failed to combine, while a common
 directory unit hit by both channels received two votes. Dense retention also
 still spent its top-k on individual anchors after native grouping.
 
-## Document-fusion correction 890 (pending validation)
+## Document-fusion correction 890 (comparison complete)
 
 The copy-only flag is now `LES_EXPERIMENT_OVERVIEW=documents-v2`; the rejected
 `grouped-v1` flag is no longer accepted. Both channels rank document identities
@@ -242,3 +242,75 @@ intact. Conflicting payloads for the same point still fail before admission.
 Per-point debug provenance explicitly declares document fusion and anchor ranks.
 The normal precision path is unchanged. The repeat uses the same frozen cohort,
 without new filename filters, query rewrites, model changes or reindexing.
+
+Source `e27e96a`: all 48 real MCP search calls completed on the same 24 frozen
+questions in four counterbalanced half-periods. Both arms retained compact
+transport, original reading, BGE, disabled reranking and the same limits.
+There were no tool-call errors. This is a development comparison, not held-out
+acceptance or an answer-model evaluation.
+
+| Four reused overview questions | Original | Document fusion |
+|---|---:|---:|
+| Mean required-source fraction in retrieval/readable pool | 41.67% | 58.33% |
+| Mean required-source fraction finally delivered | 29.17% | 29.17% |
+| Observed MCP latency p50 | 7.89 s | 11.40 s |
+
+All four per-question delivery fractions were unchanged, not just the average.
+Ten positive precision regressions retained the same source/quote/page/row
+outcomes; two absence probes had no tool-call errors. The two page probes and
+two Excel probes retained their expected locations. Eight prospective overview
+questions still have no complete gold answer; their observed p50 changed from
+9.83 to 14.62 seconds and no recall percentage is assigned to them.
+
+Offline stage accounting located one lost expected-source instance between
+selection and wire in the original overview arm and three in the document-fusion
+arm. Seven versus five expected-source instances were absent from all observed
+pools; their rank outside the pool is unknown. These are source instances across
+questions, not unique corpus files. There was no observed overview source loss
+between the read plan and readable pool. Thus correcting document voting found
+more annotated sources, but the final evidence package did not deliver the gain.
+
+Manual inspection of the returned volume/electrical packets found repeated
+composition tables and an exactly repeated 1,497-character passage. That passage
+was delivered once as a full physical PDF page and once as an indexed excerpt.
+The selector's content key omits heading context only for a self-contained reading
+unit, so those representations receive different keys. A generic reproducer gives
+two units for mixed completeness declarations and one for consistent complete
+declarations. This explains this duplicate; it does not establish that every
+same-text excerpt can safely lose its heading or be merged across editions.
+Uniform, verified reading-unit identities are needed before collapsing sources.
+
+Original/PDF-page/Word-unit checks by period were 47/31/32, 69/53/31, 52/26/40
+and 50/32/30, with zero errors. Counts may repeat sources across periods. The
+Word checks establish exact cursor/text/canonical agreement, not an independent
+semantic parser oracle. All 638 catalog document rows and original SHA values
+remained unchanged. Minimum observed available RAM was 7.01 GiB; the observed sum
+of owned-service working sets peaked between 1.80 and 2.40 GiB by period.
+
+The new overview configuration has no observed delivery or speed benefit and is
+**not accepted for working LES**. The document-voting defect is corrected on the
+copy; final context admission and mixed reading representations remain open.
+The experimental mode stays off. The next registered comparison must isolate
+admission/representation, rather than retune discovery against these four probes.
+
+## Validation setup
+
+The redundant private scratch-cleanup hook invalidated an initial full-suite
+attempt by removing pytest's empty name reservations; path reuse returned stale
+cached fixture results. A two-case reproducer failed with that hook and passed
+with repository cleanup. The invalidated attempt is retained and not scored.
+A subsequent full run passed 2,231 cases but failed two packaging cases because
+the UI build receipt was missing (four optional skips). After the normal frontend
+build, all 16 package/asset cases passed. `make test` now checks the current UI
+receipt before starting pytest.
+
+The clean full repeat on source `d0141e1` passed **2,234 cases and 18 subtests**,
+with four skips and no failures; `make test-mail` then passed **66 cases**.
+Skips are POSIX TCP semantics, the macOS supervisor, an unprovided separate
+embedding-worker specification, and the opt-in real Windows SMB share. The
+local/Edge folder-watch and publication-crash cases did run; a live SMB test
+must not be inferred from them. The packaged autonomous skill interpreter and
+its corruption rejection also ran. Full suite/mail time was 1,136.77 seconds;
+minimum available RAM was 8.51 GiB and free disk stayed above 39.05 GiB.
+All copy APIs were stopped after comparison. This is source/copy acceptance,
+not an installed update or independent answer-quality result.
