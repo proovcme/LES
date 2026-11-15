@@ -28,6 +28,7 @@ mod tests {
         baseline.add(&raw);
         let mut candidate = Evidence::new(true);
         candidate.add(&compact);
+        assert_eq!(candidate.sources.len(), 1);
         assert_eq!(candidate.sources, baseline.sources);
         assert_eq!(candidate.blocks, baseline.blocks);
         assert_eq!(

@@ -693,7 +693,7 @@ async fn passages(
     );
     let word_started = std::time::Instant::now();
     let (points, hydrated) = if expand_document {
-        super::word::hydrate(context, turn, points, hydrated).await?
+        super::word::hydrate(context, turn, collection.as_str().ok_or("INDEX_COLLECTION_MISMATCH")?, points, hydrated).await?
     } else {
         (points, hydrated)
     };
@@ -854,6 +854,10 @@ async fn passages(
                 if p["word_physical"] == true {
                     source["evidence_kind"] = json!("physical_word_section");
                     source["view_sha256"] = p["word_snapshot_sha256"].clone();
+                    if p["reading_origin"] == "published_canonical_unit" {
+                        source["reading_origin"] = p["reading_origin"].clone();
+                        source["read_offset"] = p["word_read_offset"].clone();
+                    }
                 }
             }
         }

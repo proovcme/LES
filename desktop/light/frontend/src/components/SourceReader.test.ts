@@ -1,6 +1,13 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import SourceReader from './SourceReader.svelte';
+import { sourceReadStart } from '../lib/contracts';
+it('uses the saved stream position while retaining the canonical original ordinal', () => {
+  const source = { index: 1, evidence_kind: 'physical_word_section', ordinal: 7, read_offset: 5, view_sha256: 'a'.repeat(64) };
+  expect(sourceReadStart(source)).toBe(5);
+  expect(sourceReadStart({ ...source, read_offset: undefined })).toBe(7);
+  expect(sourceReadStart({ ...source, view_sha256: undefined })).toBe(0);
+});
 let component: ReturnType<typeof mount> | undefined;
 afterEach(async () => { if (component) await unmount(component); document.body.replaceChildren(); vi.unstubAllGlobals(); });
 const button = (name: string) => [...document.querySelectorAll('button')].find(b => b.textContent?.trim() === name)!;

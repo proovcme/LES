@@ -7,11 +7,13 @@ use std::{
     sync::{Mutex, OnceLock},
 };
 static CACHE: OnceLock<Mutex<VecDeque<(String, Value, usize)>>> = OnceLock::new();
+mod saved;
 /// Automatic chat admission reads Word originals before the common selector.
 /// The index anchor locates the document; it is never relabelled as its body.
 pub(super) async fn hydrate(
     context: &Context,
     turn: &SourceContext,
+    collection: &str,
     points: Vec<Value>,
     mut hydrated: Value,
 ) -> Result<(Vec<Value>, Value)> {
@@ -49,10 +51,25 @@ pub(super) async fn hydrate(
         // This runs in passages' async owner; parsing and hashing stay off Tokio.
         let owned_context = context.state_root.clone();
         let original = doc.clone();
-        let view =
-            tokio::task::spawn_blocking(move || snapshot_at(&owned_context, &original, 30000))
-                .await
-                .map_err(|_| "SOURCE_READ_FAILED")?;
+        let cached = if saved::enabled()? {
+            saved::load(context, &doc, collection).await?
+        } else {
+            None
+        };
+        let view = match cached {
+            Some(view) => Ok(view),
+            None => {
+                if saved::enabled()? {
+                    eprintln!(
+                        "{}",
+                        json!({"event":"saved_word_read_legacy_original","doc_id":doc["id"]})
+                    );
+                }
+                tokio::task::spawn_blocking(move || snapshot_at(&owned_context, &original, 30000))
+                    .await
+                    .map_err(|_| "SOURCE_READ_FAILED")?
+            }
+        };
         let view = match view {
             Ok(value) => value,
             Err(failure)
@@ -62,7 +79,7 @@ pub(super) async fn hydrate(
                     &failure.code,
                 ) =>
             {
-                continue
+                continue;
             }
             Err(failure) => return Err(failure),
         };
@@ -80,9 +97,11 @@ pub(super) async fn hydrate(
             })
             .map(|(i, a)| a["payload"]["retrieval_rank"].as_u64().unwrap_or(i as u64))
             .min();
-        for unit in view["units"]
+        for (read_offset, unit) in view["units"]
             .as_array()
             .ok_or("DOCUMENT_STRUCTURE_INVALID")?
+            .iter()
+            .enumerate()
         {
             let reading_hash = les_core::sha256_hex(unit["text"].as_str().unwrap_or("").as_bytes());
             text_bytes += unit["text"].as_str().map_or(0, str::len);
@@ -95,6 +114,10 @@ pub(super) async fn hydrate(
                 "text":unit["text"],"reading_representation":"word_structure","word_physical":true,
                 "word_snapshot_sha256":view["view_sha256"],"retrieval_anchor_id":p.get("retrieval_anchor_id").unwrap_or(&point["id"]),
                 "chunk_ord":unit["ordinal"],"section_heading":unit["heading"],"source_unit_id":unit["ordinal"]});
+            if view["saved_units"] == true {
+                payload["word_read_offset"] = json!(read_offset);
+                payload["reading_origin"] = json!("published_canonical_unit");
+            }
             // An original document is not a dense hit at every paragraph.
             // Only a compatible indexed unit can inherit an anchor's rank.
             let matched = anchors
@@ -171,6 +194,23 @@ pub(super) fn supports(doc: &Value) -> bool {
 }
 fn snapshot(context: &Context, doc: &Value) -> Result<Value> {
     snapshot_at(&context.state_root, doc, 120000)
+}
+fn verify_at(state: &std::path::Path, doc: &Value) -> Result<()> {
+    let path = les_core::document_source::resolve(
+        doc["source_path"].as_str().unwrap_or(""),
+        doc["dataset_id"]
+            .as_str()
+            .ok_or("SOURCE_IDENTITY_INVALID")?,
+        doc["file_name"].as_str().ok_or("SOURCE_IDENTITY_INVALID")?,
+        &state.join("storage/datasets"),
+    )?;
+    let actual = les_core::pdf_source::fingerprint(
+        &mut File::open(path).map_err(|_| "SOURCE_UNAVAILABLE")?,
+    )?;
+    if doc["file_hash"] != actual {
+        return Err("SOURCE_REVISION_CHANGED".into());
+    }
+    Ok(())
 }
 fn snapshot_at(state: &std::path::Path, doc: &Value, timeout_ms: u64) -> Result<Value> {
     let path = les_core::document_source::resolve(
@@ -286,9 +326,37 @@ pub(super) async fn read(
 ) -> Result<Value> {
     let owner = context.clone();
     let original = doc.clone();
-    let view = tokio::task::spawn_blocking(move || snapshot(&owner, &original))
-        .await
-        .map_err(|_| "SOURCE_READ_FAILED")??;
+    let cached = if saved::enabled()?
+        && doc["status"] == "INDEXED"
+        && context.index_store.is_some()
+        && args["q"].as_str().is_none_or(str::is_empty)
+        && args["clause"].as_str().is_none_or(str::is_empty)
+    {
+        let (config, _, _, _) = retrieval::configuration(context.clone(), false).await?;
+        saved::load(
+            &context,
+            &doc,
+            config["collection"]
+                .as_str()
+                .ok_or("INDEX_COLLECTION_MISMATCH")?,
+        )
+        .await?
+    } else {
+        None
+    };
+    let view = match cached {
+        Some(value) => value,
+        None => tokio::task::spawn_blocking(move || snapshot(&owner, &original))
+            .await
+            .map_err(|_| "SOURCE_READ_FAILED")??,
+    };
+    if view["saved_units"] == true
+        && args["index_revision"]
+            .as_str()
+            .is_some_and(|r| view["index_revision"] != r)
+    {
+        return Err("INDEX_CHANGED_DURING_SEARCH".into());
+    }
     if args["view_sha256"]
         .as_str()
         .is_some_and(|s| view["view_sha256"] != s)
@@ -353,6 +421,10 @@ pub(super) async fn read(
             source[field] = view["metadata"][field].clone();
         }
         source["view_sha256"] = view["view_sha256"].clone();
+        if view["saved_units"] == true {
+            source["read_offset"] = json!(offset + sources.len());
+            source["reading_origin"] = json!("published_canonical_unit");
+        }
         for field in [
             "ordinal",
             "heading",
@@ -385,6 +457,12 @@ pub(super) async fn read(
         sources,
     );
     retrieval::bound_word(&mut reply)?;
+    if view["saved_units"] == true {
+        reply["result"]["index_revision"] = view["index_revision"].clone();
+        reply["result"]["reading_origin"] = json!("published_canonical_unit");
+        reply["result"]["coverage_scope"] = json!("published_reading_units");
+        reply["result"]["complete_original"] = json!(false);
+    }
     // Budget trimming changes the stream cursor, never skip a removed row.
     let kept = reply["result"]["passages"].as_array().map_or(0, Vec::len);
     reply["result"]["included_fragments"] = json!(kept);

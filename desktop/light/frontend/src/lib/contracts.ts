@@ -67,7 +67,7 @@ export const sourcePage = (source: Source): number => {
 };
 export const sourceDigest = (source: Source): string | undefined => source.locator?.source_sha256 ?? source.source_sha256;
 export function sourceReadStart(source: Source): number {
-  const offset = source.evidence_kind === 'physical_word_section' ? source.ordinal
+  const offset = source.evidence_kind === 'physical_word_section' ? (source.read_offset ?? source.ordinal)
     : source.evidence_kind === 'physical_pdf_unit' ? source.read_offset
     : source.evidence_kind === 'physical_pdf_page' ? source.offset : undefined;
   return typeof offset === 'number' && Number.isSafeInteger(offset) && offset >= 0

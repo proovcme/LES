@@ -1,4 +1,4 @@
-# Evidence delivery: isolated stages (885)
+# Evidence delivery: isolated stages (885–886)
 
 Working LES remains 880. All stages run only against the existing copied corpus,
 without Qwen, manual source selection, model changes or reindexing.
@@ -28,10 +28,18 @@ size/latency, link and revision checks. No result is claimed before completion.
 
 ## 2. Saved canonical reading units
 
-Next, use published structured units only after validating original revision,
-unit identity/digest and completeness. Legacy indexes keep their explicit reader;
-incompatible/missing representations must be reported. Reading changes are
-measured separately from packet encoding. Whole-Word reparsing is not yet removed.
+`LES_EXPERIMENT_SAVED_READING=canonical-v1` prepares a separate saved-unit reader.
+It scans the published Word units, checks all text/structure digests and owner
+coverage, and verifies the original SHA before/after plus the index revision.
+Missing legacy representation explicitly falls back to the original reader;
+corrupt units and changed generations are errors. Ordinary launches are unchanged.
+
+The reading-view digest binds the ordered saved units and original identity.
+It is not the old parser-view digest. Original ordinals are retained separately
+from saved-stream offsets, so citation jumps and continuation use the right view.
+The same `read_source` exposes this view through chat and MCP. Its scope is
+published reading units, not a claim to read every visual or the complete original.
+Explicit query/clause reads keep the original reader. No parser/index rebuild.
 
 ## 3. Overview coverage
 
@@ -40,4 +48,6 @@ then evidence reading inside each document. Grouping only an already truncated
 pool cannot recover displaced documents. A bounded result never claims complete
 corpus coverage. Precise page/table questions remain a regression gate.
 
-Status: stage 1 implementation awaiting native/MCP comparison; stages 2/3 pending.
+Stage 1: 131 API tests and 114 native passes / one optional skip; transport smoke
+passed. Its 200-call counterbalanced MCP comparison is in progress. Stage 2 is
+prepared, not built/accepted; it must run after stage 1 completes. Stage 3 pending.

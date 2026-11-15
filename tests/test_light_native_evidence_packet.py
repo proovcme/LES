@@ -6,13 +6,16 @@ from tests.test_light_native_api import wait_for
 
 
 @pytest.fixture(autouse=True)
-def packet_trial(monkeypatch):
+def packet_trial(monkeypatch, request):
     monkeypatch.setenv('LES_EXPERIMENT_CONTEXT_ADMISSION', 'baseline-v1')
     monkeypatch.setenv('LES_EXPERIMENT_EVIDENCE_PACKET', 'compact-v1')
+    if 'saved' in request.node.name:
+        monkeypatch.setenv('LES_EXPERIMENT_SAVED_READING', 'canonical-v1')
 
 
 @pytest.mark.parametrize('native_turn', ['rag-small'], indirect=True)
-def test_compact_discovery_reads_pinned_original_and_rejects_replacement(native_turn, tmp_path):
+@pytest.mark.parametrize('reading', ['original', 'saved'])
+def test_compact_discovery_reads_pinned_original_and_rejects_replacement(native_turn, tmp_path, reading):
     from docx import Document
     t = native_turn
     folder = tmp_path / 'documents'; folder.mkdir()
@@ -37,6 +40,16 @@ def test_compact_discovery_reads_pinned_original_and_rejects_replacement(native_
         assert sha in source['url']; texts.append(passage['text'])
         original = t.client.get(source['url'].split('#')[0]).raise_for_status().content
         assert hashlib.sha256(original).hexdigest() == sha
+        if reading == 'saved':
+            assert source['reading_origin'] == 'published_canonical_unit'
+            pin = {'doc_id': source['doc_id'], 'source_sha256': sha, 'offset': source['read_offset'],
+                   'view_sha256': source['view_sha256'], 'limit': 1, 'max_chars': 12000}
+            direct = t.client.post('/api/rag/sources/call', json={'tool': 'read_source', 'args': pin}).raise_for_status().json()['result']
+            assert direct['reading_origin'] == 'published_canonical_unit'
+            assert direct['complete_original'] is False
+            assert direct['passages'][0]['text'] == passage['text']
+            assert direct['passages'][0]['canonical'] == passage['canonical']
+            assert direct['passages'][0]['source']['ordinal'] == source['ordinal']
     assert '17.25' in '\n'.join(texts) and '117.250' in '\n'.join(texts)
     assert not t.seen, 'No answer model may be used by source tools'
     replacement = Document(); replacement.add_paragraph('Changed original'); replacement.save(path)
