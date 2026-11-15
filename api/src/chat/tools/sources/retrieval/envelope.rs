@@ -185,6 +185,38 @@ fn one_ready_body_leaves_room_for_a_later_independent_source() {
     assert_eq!(candidate["result"]["passages"].as_array().unwrap().len(), 2);
 }
 
+#[cfg(test)]
+#[test]
+fn wire_pressure_cannot_strip_the_origins_of_a_ready_body() {
+    use super::ready::tests::{origin, reply};
+    let mut rows = vec![
+        ("Shared evidence".to_owned(), origin("a", 'a', 7)),
+        ("Shared evidence".to_owned(), origin("b", 'b', 1)),
+    ];
+    for i in 0..40 {
+        rows.push((
+            format!("Independent {i}: {}", "x".repeat(1000)),
+            origin(&format!("other-{i}"), 'c', 1),
+        ));
+    }
+    let mut value = reply(
+        rows.iter()
+            .map(|(text, source)| (text.as_str(), source.clone()))
+            .collect(),
+    );
+    assert!(canonical_chars(&super::super::packet::encode(&value).unwrap()) > 22500);
+    fit_ready_overview(&mut value, 12000).unwrap();
+    let source = &value["sources"][0];
+    assert_eq!(source["doc_id"], "a");
+    assert_eq!(source["equivalent_sources"][0]["doc_id"], "b");
+    assert_eq!(
+        source["equivalent_sources"][0]["source_sha256"],
+        "b".repeat(64)
+    );
+    assert!(source["equivalent_sources_omitted"].is_null());
+    assert!(canonical_chars(&super::super::packet::encode(&value).unwrap()) <= 22500);
+}
+
 /// A context snapshot has no continuation cursor. Its only admission pass
 /// measures ready records, retaining RRF order among the units which fit.
 pub(super) fn fit_ranked_context(reply: &mut Value, text_budget: usize) -> Result<()> {
@@ -456,6 +488,12 @@ fn fit_budget(
 }
 
 fn compact_aliases(source: &mut Value) {
+    // Ready-body origins are mandatory evidence, not optional navigation.
+    // Admit the whole body with its pins, or skip it; never silently turn a
+    // shared text body back into a claim supported by only its first file.
+    if source["prepared_evidence_origin"] == true {
+        return;
+    }
     if let Some(aliases) = source
         .get_mut("equivalent_sources")
         .and_then(Value::as_array_mut)
