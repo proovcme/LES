@@ -315,3 +315,16 @@ and replacing a Word original during completion. The UI keeps the digest and
 opens the original PDF position. These changes are not included in the table
 above and must pass a new native/corpus repeat. Merge remains blocked; production
 installation/models/index are unchanged.
+
+The first follow-up API unit run passed 122 cases and failed the long-table
+header assertion. Its newly materialized page included a standalone title in
+addition to the same title carried by the table. The fix reuses the existing
+core heading projection with an explicit context purpose, removes whitespace-
+only evidence units and leaves the default raw reader's stream/hash unchanged.
+The header/row assertions are retained. The preceding full CI (`abf5eac`) passed
+core 169, API 119, UI 54 and 2,205 Python cases plus 18 subtests, with 22 skips;
+it does not cover this follow-up. Verification CI now uses the same optimized
+test profile as the copy stand (opt 2, LTO off, 16 codegen units), with dependency
+debug symbols disabled. It retains the complete behavior suite; the separate
+installer workflow keeps its production profile. This addresses compiler cost
+in feedback, not measured RAG latency.

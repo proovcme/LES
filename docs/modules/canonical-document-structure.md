@@ -122,6 +122,9 @@ Physical PDF pages beyond the previous 16,000-character rejection threshold
 are read to EOF under the existing source-byte bound. The existing structural
 reader produces bounded paragraph/table units, retaining table headers and
 source byte ranges. Small pages retain their existing whole-page representation.
+An explicit context projection reuses the existing heading filter and excludes
+whitespace-only units; carried titles are not independent evidence. Its reading
+hash is separate from the unchanged default raw reader's hash/stream.
 New `physical_pdf_unit` sources carry a complete-page view hash plus a distinct
 unit hash/ordinal and explicitly report incomplete page text. `read_offset` is
 a Unicode character position in the original page snapshot, separate from the

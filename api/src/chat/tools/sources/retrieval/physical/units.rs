@@ -14,7 +14,8 @@ pub(super) fn reading_units(full: &Value) -> Result<Vec<Value>, &'static str> {
     if text.chars().count() <= 16000 {
         return Ok(vec![full.clone()]);
     }
-    let view = les_core::document_reading(&json!({"text":text,"max_chars":4000}))?;
+    let view =
+        les_core::document_reading(&json!({"text":text,"max_chars":4000,"for_context":true}))?;
     let units = view["units"]
         .as_array()
         .ok_or("DOCUMENT_STRUCTURE_INVALID")?;

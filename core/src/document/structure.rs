@@ -173,15 +173,54 @@ pub(crate) fn execute(request: &Value) -> Result<Value, &'static str> {
         .as_u64()
         .unwrap_or(4000)
         .clamp(256, 12000) as usize;
-    let versioned = json!(["les.document-reading.v1", budget, text]).to_string();
+    let for_context = request["for_context"] == true;
+    let mut reading = units(text, budget)?;
+    if for_context {
+        // These titles are already carried by their following reading unit.
+        // Preserve the raw reader's stream; context is a separate projection.
+        reading = for_index(reading)
+            .into_iter()
+            .filter(|u| !u["body"].as_str().unwrap_or("").trim().is_empty())
+            .collect();
+    }
+    let versioned = if for_context {
+        json!(["les.document-reading.v1", "context", budget, text])
+    } else {
+        json!(["les.document-reading.v1", budget, text])
+    }
+    .to_string();
     Ok(
         json!({"schema":"les.document-reading.v1","view_sha256":crate::sha256_hex(versioned.as_bytes()),
-        "units":units(text,budget)?}),
+        "units":reading}),
     )
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn evidence_projection_carries_titles_without_a_second_navigation_only_hit() {
+        let text = "# Equipment\n\n|Item|Quantity|\n|---|---|\n|Pump|17.25|\n";
+        let raw = execute(&json!({"text":text,"max_chars":256})).unwrap();
+        assert_eq!(
+            raw,
+            execute(&json!({"text":text,"max_chars":256,"for_context":false})).unwrap()
+        );
+        let context = execute(&json!({"text":text,"max_chars":256,"for_context":true})).unwrap();
+        assert_ne!(context["view_sha256"], raw["view_sha256"]);
+        let units = context["units"].as_array().unwrap();
+        assert_eq!(units.len(), 1);
+        assert!(units[0]["text"].as_str().unwrap().contains("# Equipment"));
+        assert!(units[0]["text"].as_str().unwrap().contains("|Pump|17.25|"));
+        assert_eq!(
+            raw["units"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|u| u["body"].as_str().unwrap())
+                .collect::<String>(),
+            text
+        );
+    }
     #[test]
     fn oversized_cells_are_atomic_and_missing_exporter_headers_are_not_invented() {
         let row = format!("|{}|17.25|\n", "Длинная ячейка ".repeat(100));
