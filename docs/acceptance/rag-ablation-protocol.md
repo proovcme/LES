@@ -15,7 +15,10 @@ MMR from serialization, ordering and admission changes.
 [Evidence-delivery stages](../modules/evidence-delivery-stages.md) separates
 compact transport, saved reading and overview discovery. These results must not
 be pooled into one claim about answer accuracy. In particular, the first overview
-strategy regressed and was rejected; corrected document fusion needs a repeat.
+strategy regressed and was rejected; the corrected document-fusion repeat
+improved discovery but not delivery, and remains off. Ready-body admission is
+a separate opt-in contrast with discovery/readers/budgets held fixed. It is
+not the five-arm matrix below.
 
 Frozen100 is a development/regression set. Its repeated use disqualifies it as
 independent acceptance evidence. The eight prospective overview probes have no
