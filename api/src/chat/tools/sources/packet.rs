@@ -52,7 +52,10 @@ pub(crate) fn decode(reply: &Value) -> Result<Value, &'static str> {
     let rows = value["result"]["passages"]
         .as_array_mut()
         .ok_or("EVIDENCE_PACKET_SOURCE_INVALID")?;
-    for row in rows {
+    if rows.len() != sources.len() {
+        return Err("EVIDENCE_PACKET_SOURCE_INVALID");
+    }
+    for (position, row) in rows.iter_mut().enumerate() {
         let reference = row["source"]
             .as_object()
             .filter(|o| o.len() == 1)
@@ -63,6 +66,9 @@ pub(crate) fn decode(reply: &Value) -> Result<Value, &'static str> {
             .and_then(|n| usize::try_from(n).ok())
             .and_then(|n| n.checked_sub(1))
             .ok_or("EVIDENCE_PACKET_SOURCE_INVALID")?;
+        if i != position {
+            return Err("EVIDENCE_PACKET_SOURCE_INVALID");
+        }
         row["source"] = sources
             .get(i)
             .filter(|s| s.is_object() && s.get("ref").is_none())
@@ -89,6 +95,17 @@ mod tests {
         let mut invalid = packet.clone();
         invalid["result"]["passages"][0]["source"]["ref"] = json!(2);
         assert!(decode(&invalid).is_err());
+        let mut swapped = packet.clone();
+        swapped["sources"]
+            .as_array_mut()
+            .unwrap()
+            .push(reply["sources"][0].clone());
+        swapped["result"]["passages"]
+            .as_array_mut()
+            .unwrap()
+            .push(packet["result"]["passages"][0].clone());
+        swapped["result"]["passages"][0]["source"]["ref"] = json!(2);
+        assert!(decode(&swapped).is_err());
         invalid["result"]["passages"][0]["source"] = json!({"ref":1,"page":999});
         assert!(decode(&invalid).is_err());
         assert_eq!(encode(&packet).unwrap(), packet);

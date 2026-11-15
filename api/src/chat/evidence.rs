@@ -31,6 +31,8 @@ mod tests {
         assert_eq!(candidate.sources.len(), 1);
         assert_eq!(candidate.sources, baseline.sources);
         assert_eq!(candidate.blocks, baseline.blocks);
+        assert!(!candidate.initial.is_empty());
+        assert_eq!(candidate.initial, baseline.initial);
         assert_eq!(
             candidate.projection(&compact, 12000),
             baseline.projection(&raw, 12000)
