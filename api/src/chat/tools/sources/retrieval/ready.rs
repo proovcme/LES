@@ -245,13 +245,13 @@ pub(super) fn prepare(reply: &mut Value) -> Result<()> {
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
-    pub(super) fn origin(id: &str, digest: char, page: u64) -> Value {
+    pub(crate) fn origin(id: &str, digest: char, page: u64) -> Value {
         json!({"doc_id":id,"dataset_id":"scope","doc_name":format!("{id}.pdf"),
             "source_sha256":digest.to_string().repeat(64),"page":page,
             "source_ref":format!("{id}.pdf#page={page}"),"url":format!("/original/{id}#page={page}"),
             "qdrant_point_id":format!("point-{id}"),"section_heading":"Equipment ratings"})
     }
-    pub(super) fn reply(rows: Vec<(&str, Value)>) -> Value {
+    pub(crate) fn reply(rows: Vec<(&str, Value)>) -> Value {
         let passages = rows
             .iter()
             .enumerate()
