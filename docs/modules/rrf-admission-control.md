@@ -40,6 +40,8 @@ There is no product switch, automatic fallback, topic rule or answer model.
 
 Both policies share identity validation, original readers, canonical views,
 duplicate normalization/aliases, retrieval scores and the complete read plan.
+Both explicit trial arms use a stable pool order to remove container-iteration
+and duplicate-primary tie noise; the unconfigured production path is unchanged.
 The control orders exact units by existing fused rank; expanded units follow
 exact hits using their source prior and stable original order. It performs no
 lexical/MMR/length reranking. The ordering stage spends no output budget.
@@ -52,6 +54,10 @@ Source streams keep their previous contiguous-prefix behavior. Navigation and
 trace details use remaining room after evidence. The public source format is
 preserved for existing UI/MCP consumers; source-map migration is not part of this
 control. Per-request catalog lookup caching is common to both policies.
+The control compacts optional aliases only on a candidate which actually fails
+admission, so a rejected large candidate cannot erase another fitting unit's
+provenance. This measures the combined ranking/admission policy, not the isolated
+causal contribution of lexical scoring alone.
 
 `paired-a-v1` / `paired-b-v1` counterbalance cache/order effects: query SHA alone
 chooses each question's first policy, and the second period flips it. Each of

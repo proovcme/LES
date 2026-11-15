@@ -55,12 +55,12 @@ impl Control {
                 row.2 += usize::from(p["retrieval_expansion"] == true);
             }
         }
-        let order = points
+        let fingerprints = points
             .iter()
             .map(|p| {
                 let canonical =
                     les_core::tool_execution::canonical_json(&p["payload"]["canonical"])?;
-                Ok(json!([
+                let row = json!([
                     p["id"],
                     p["payload"]["dataset_id"],
                     p["payload"]["source_sha256"],
@@ -72,18 +72,28 @@ impl Control {
                     p["payload"]["physical_pdf_read"]["view_sha256"],
                     les_core::sha256_hex(p["payload"]["text"].as_str().unwrap_or("").as_bytes()),
                     les_core::sha256_hex(canonical.as_bytes())
-                ]))
+                ]);
+                les_core::tool_execution::canonical_json(&row)
+                    .map(|text| les_core::sha256_hex(text.as_bytes()))
             })
-            .collect::<std::result::Result<Vec<Value>, &'static str>>()
-            .and_then(|rows| les_core::tool_execution::canonical_json(&json!(rows)))
-            .map(|text| les_core::sha256_hex(text.as_bytes()))
+            .collect::<std::result::Result<Vec<String>, &'static str>>()
             .ok();
+        let order = fingerprints
+            .as_ref()
+            .and_then(|rows| les_core::tool_execution::canonical_json(&json!(rows)).ok())
+            .map(|text| les_core::sha256_hex(text.as_bytes()));
+        let set = fingerprints
+            .and_then(|mut rows| {
+                rows.sort();
+                les_core::tool_execution::canonical_json(&json!(rows)).ok()
+            })
+            .map(|text| les_core::sha256_hex(text.as_bytes()));
         eprintln!(
             "{}",
             json!({"event":"context_trial_stage","stage":stage,
             "question_sha256":les_core::sha256_hex(question.as_bytes()),
             "policy":if self==Self::RrfWire{"rrf-wire-v1"}else{"baseline-v1"},
-            "units":points.len(),"sources":sources,"order_sha256":order})
+            "units":points.len(),"sources":sources,"order_sha256":order,"set_sha256":set})
         );
     }
 

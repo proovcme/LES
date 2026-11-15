@@ -174,7 +174,7 @@ fn fit_budget(
     // Exact duplicate origins are navigation, not extra read evidence. Keep
     // every primary pinned source; omit alias detail explicitly if it would
     // consume the body budget. Different text/revisions remain separate units.
-    if canonical_chars(reply) > max_chars || json_item_count(reply) > max_items {
+    if !ranked && (canonical_chars(reply) > max_chars || json_item_count(reply) > max_items) {
         for source in reply["sources"].as_array_mut().into_iter().flatten() {
             compact_aliases(source);
         }
@@ -252,6 +252,14 @@ fn fit_budget(
         reply["result"]["coverage"] = json!("bounded");
         if !ranked {
             reconcile_document_units(reply, &orig_passages);
+        }
+        if ranked && (canonical_chars(reply) > max_chars || json_item_count(reply) > max_items) {
+            // Unselected candidates must not erase aliases of fitting units.
+            // Retry only this ready candidate without optional alias details.
+            compact_aliases(&mut kept_passages.last_mut().unwrap()["source"]);
+            compact_aliases(kept_sources.last_mut().unwrap());
+            reply["result"]["passages"] = json!(kept_passages);
+            reply["sources"] = json!(kept_sources);
         }
         if canonical_chars(reply) > max_chars || json_item_count(reply) > max_items {
             kept_passages.pop();
@@ -407,6 +415,21 @@ fn compact_read_failures(reply: &mut Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_rejected_candidate_cannot_remove_a_fitting_units_source_aliases() {
+        let alias = json!({"doc_id":"copy","dataset_id":"scope","source_sha256":"b".repeat(64)});
+        let source = json!({"doc_id":"primary","dataset_id":"scope","source_sha256":"a".repeat(64),"equivalent_sources":[alias]});
+        let other = json!({"doc_id":"other","dataset_id":"scope","source_sha256":"c".repeat(64)});
+        let mut reply = json!({"sources":[source,other],"result":{"passages":[
+            {"text":"Exact value 17.25","source":source}, {"text":"x".repeat(30000),"source":other}]}});
+        fit_ranked_context(&mut reply, 12000).unwrap();
+        assert_eq!(reply["result"]["passages"].as_array().unwrap().len(), 1);
+        assert_eq!(reply["sources"][0]["equivalent_sources"][0], alias);
+        assert_eq!(
+            reply["result"]["passages"][0]["source"]["equivalent_sources"][0],
+            alias
+        );
+    }
     #[test]
     fn ranked_context_skips_an_oversized_unit_while_a_stream_stops_before_it() {
         let source = |n| json!({"doc_id":format!("d-{n}"),"dataset_id":"scope","source_sha256":"a".repeat(64),"qdrant_point_id":format!("p-{n}")});

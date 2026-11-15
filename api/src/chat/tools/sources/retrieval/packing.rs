@@ -372,6 +372,20 @@ fn select_query_inner(
             point["payload"]["retrieval_rank"] = Value::Null;
         }
     }
+    if control != super::trial::Control::Off {
+        // Both trial arms start from one stable pool. Hash-map iteration and
+        // duplicate-primary ties must not masquerade as an admission effect.
+        pool.sort_by_key(|p| {
+            let payload = &p["payload"];
+            let expansion = payload["retrieval_expansion"] == true;
+            let prior = if expansion {
+                payload["retrieval_source_rank"].as_u64()
+            } else {
+                payload["retrieval_rank"].as_u64()
+            };
+            (expansion, prior.unwrap_or(u64::MAX), key(p))
+        });
+    }
     let selected = select_points(&pool, query, budget, context_budget, control)?;
     control.snapshot("selection", query, &selected);
     Ok((selected, total))
@@ -380,6 +394,39 @@ fn select_query_inner(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn control_arms_do_not_depend_on_materialized_container_iteration_order() {
+        let mut a = point("a", "one", "query first proof", 0);
+        let mut b = point("b", "two", "query other proof", 0);
+        a["payload"]["retrieval_rank"] = json!(0);
+        b["payload"]["retrieval_rank"] = json!(0);
+        for control in [
+            super::super::trial::Control::Observe,
+            super::super::trial::Control::RrfWire,
+        ] {
+            let left = controlled_query(
+                &[a.clone(), b.clone()],
+                &Value::Null,
+                &Value::Null,
+                100,
+                None,
+                "query",
+                control,
+            )
+            .unwrap();
+            let right = controlled_query(
+                &[b.clone(), a.clone()],
+                &Value::Null,
+                &Value::Null,
+                100,
+                None,
+                "query",
+                control,
+            )
+            .unwrap();
+            assert_eq!(left, right);
+        }
+    }
     #[test]
     fn every_retrieved_scope_is_read_before_optional_parent_expansion() {
         let mut seeds = (0..64)
