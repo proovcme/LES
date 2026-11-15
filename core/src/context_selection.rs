@@ -160,6 +160,28 @@ pub fn select(request: &Value) -> Result<Value, &'static str> {
             units.push(unit);
         }
     }
+    // The copy-only RRF control shares the exact same identity/content
+    // normalization, but has no lexical vote or length-based reranking.
+    // Ready-JSON admission at the caller owns its budgets, not this ordering.
+    match request["policy"].as_str() {
+        Some("rrf-order-v1") => {
+            units.sort_by_key(|u| {
+                let rank = u["rank"].as_u64();
+                (
+                    rank.is_none(),
+                    rank.or_else(|| u["source_rank"].as_u64())
+                        .unwrap_or(u64::MAX),
+                )
+            });
+            return Ok(
+                json!({"units":units,"selection":{"schema":"les.context-selection.v1",
+                "policy":"rrf-order-v1","input_units":input.len(),"complete_corpus":false,
+                "budget_owner":"ready_envelope","semantic_selection":false}}),
+            );
+        }
+        None | Some("coverage-mmr-v1") => {}
+        _ => return Err("CONTEXT_SELECTION_INVALID"),
+    }
     // Vocabulary statistics use unique content, so copies do not outvote an
     // independent source. Names/paths cannot manufacture textual relevance.
     let mut texts = vec![query.to_owned()];
@@ -367,6 +389,40 @@ pub fn select(request: &Value) -> Result<Value, &'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn rrf_control_neither_lexically_reranks_nor_spends_the_callers_budget() {
+        let mut parent = unit("parent", "query query short", 0);
+        parent["rank"] = Value::Null;
+        parent["source_rank"] = json!(0);
+        let result=select(&json!({"question":"query", "policy":"rrf-order-v1",
+            "units":[unit("lexical","query query",8),parent,unit("dense","A semantically related paraphrase without the query term",0)],
+            "max_chars":1,"text_budget":1,"max_items":1})).unwrap();
+        assert_eq!(
+            result["units"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|u| u["unit_id"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["dense", "lexical", "parent"]
+        );
+        assert_eq!(result["selection"]["budget_owner"], "ready_envelope");
+        assert_eq!(result["selection"]["semantic_selection"], false);
+    }
+    #[test]
+    fn rrf_control_shares_duplicate_provenance_without_merging_changed_numbers() {
+        let first = unit("copy-a", "Pressure 17.25", 5);
+        let copy = unit("copy-b", "Pressure 17.25", 0);
+        let changed = unit("different", "Pressure 117.250", 1);
+        let request = json!({"question":"Pressure", "policy":"rrf-order-v1",
+            "units":[first,copy,changed],"max_chars":5000});
+        let result = select(&request).unwrap();
+        let units = result["units"].as_array().unwrap();
+        assert_eq!(units.len(), 2);
+        assert_eq!(units[0]["rank"], 0);
+        assert_eq!(units[0]["equivalent_sources"][0]["unit_id"], "copy-b");
+        assert_eq!(units[1]["text"], "Pressure 117.250");
+    }
     #[test]
     fn an_independent_text_quota_is_not_hidden_by_a_large_envelope_ceiling() {
         let page = unit(

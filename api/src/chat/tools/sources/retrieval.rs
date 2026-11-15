@@ -7,6 +7,7 @@ mod matching;
 mod packing;
 mod pagination;
 mod physical;
+mod trial;
 mod views;
 fn original_reader(name: &str) -> &'static str {
     match name
@@ -208,6 +209,7 @@ async fn search_with_navigation(
     args: Value,
     navigation: bool,
 ) -> Result<Value> {
+    let control = trial::Control::requested(&args)?;
     let started = std::time::Instant::now();
     let requested = args["dataset_ids"].as_array().cloned().unwrap_or_else(|| {
         turn.scope["resolved_dataset_ids"]
@@ -301,6 +303,7 @@ async fn search_with_navigation(
             let store_ms = store_started.elapsed().as_millis();
             pinned_revision(&args, &result["revision"])?;
             let raw_points = result["points"].as_array().ok_or("INDEX_READ_INVALID")?;
+            control.snapshot("retrieval",query,raw_points);
             // Diversify the automatic shortlist. Explicit tool pagination must
             // still expose every ranked match, including later pages of one file.
             let ranked = reading_units(raw_points);
@@ -349,7 +352,7 @@ async fn search_with_navigation(
             } else {
                 None
             };
-            let mut reply=passages(&context,turn,&config["collection"],points.clone(),result["revision"].clone(),max_chars,"search_sources",context_budget,!navigation,navigation).await?;
+            let mut reply=passages(&context,turn,&config["collection"],points.clone(),result["revision"].clone(),max_chars,"search_sources",context_budget,ReadMode{expand_document:!navigation,paginated:navigation,control}).await?;
             eprintln!("{}", json!({"event":"source_search_timing","embedding_ms":embedding_ms,
                 "store_ms":store_ms,"reading_and_catalog_ms":store_started.elapsed().as_millis().saturating_sub(store_ms),
                 "total_ms":started.elapsed().as_millis(),"navigation":navigation}));
@@ -374,9 +377,12 @@ async fn search_with_navigation(
             // Public tool replies have a wire limit. Internal prefetch must
             // retain its complete candidate catalog and fitting page units:
             // the model packer, not an MCP envelope, owns their admission.
-            if navigation || args["view"] == "context" {
+            if control==trial::Control::RrfWire {
+                envelope::fit_ranked_context(&mut reply,max_chars)?;
+            } else if navigation || args["view"] == "context" {
                 fit_envelope_budget(&mut reply, 22500, 240)?;
             }
+            control.reply(query,&reply);
             if navigation {
                 Page::new(offset, total).apply(&mut reply, "total_candidates")?;
             }
@@ -600,6 +606,12 @@ mod selection_tests {
         assert!(reply["sources"].as_array().unwrap().is_empty());
     }
 }
+#[derive(Default)]
+struct ReadMode {
+    expand_document: bool,
+    paginated: bool,
+    control: trial::Control,
+}
 async fn passages(
     context: &Context,
     turn: &SourceContext,
@@ -609,9 +621,13 @@ async fn passages(
     max_chars: usize,
     name: &str,
     context_budget: Option<usize>,
-    expand_document: bool,
-    paginated: bool,
+    mode: ReadMode,
 ) -> Result<Value> {
+    let ReadMode {
+        expand_document,
+        paginated,
+        control,
+    } = mode;
     let store = context
         .index_store
         .as_ref()
@@ -663,6 +679,11 @@ async fn passages(
         (points, hydrated)
     };
     let plan_ms = stage.elapsed().as_millis().saturating_sub(sections_ms);
+    control.snapshot(
+        "read_plan",
+        turn.request["question"].as_str().unwrap_or(""),
+        &points,
+    );
     let word_started = std::time::Instant::now();
     let (points, hydrated) = if expand_document {
         super::word::hydrate(context, turn, points, hydrated).await?
@@ -690,13 +711,14 @@ async fn passages(
         let documents = hydrated["documents"].clone();
         let question = turn.request["question"].as_str().unwrap_or("").to_owned();
         tokio::task::spawn_blocking(move || {
-            packing::select_query(
+            packing::controlled_query(
                 &candidates,
                 &sections,
                 &documents,
                 max_chars,
                 context_budget,
                 &question,
+                control,
             )
         })
         .await
@@ -712,14 +734,17 @@ async fn passages(
         selected.iter().map(|p| p["id"].to_string()).collect();
     let mut output = Vec::new();
     let mut sources = Vec::new();
+    let mut catalog = trial::Documents::default();
     for point in selected {
         let p = &point["payload"];
         let text = p["text"].as_str().unwrap_or("");
-        let doc = document(
-            context,
-            &json!({"dataset_id":p["dataset_id"],"file_name":p["file_name"]}),
-        )
-        .await?;
+        let doc = catalog
+            .get(
+                context,
+                turn,
+                json!({"dataset_id":p["dataset_id"],"file_name":p["file_name"]}),
+            )
+            .await?;
         scoped_document(turn, &doc)?;
         if p["source_sha256"]
             .as_str()
@@ -855,11 +880,13 @@ async fn passages(
         let mut equivalents = Vec::new();
         for alias in p["equivalent_points"].as_array().into_iter().flatten() {
             let a = &alias["source"];
-            let origin = document(
-                context,
-                &json!({"dataset_id":a["dataset_id"],"file_name":a["file_name"]}),
-            )
-            .await?;
+            let origin = catalog
+                .get(
+                    context,
+                    turn,
+                    json!({"dataset_id":a["dataset_id"],"file_name":a["file_name"]}),
+                )
+                .await?;
             scoped_document(turn, &origin)?;
             if origin["file_hash"] != a["source_sha256"] {
                 return Err("INDEX_CHANGED_DURING_SEARCH".into());
@@ -1097,8 +1124,11 @@ pub(super) async fn read(
         args["max_chars"].as_u64().unwrap_or(3000).clamp(1, 16000) as usize,
         "read_source",
         args["_context_budget_chars"].as_u64().map(|n| n as usize),
-        false,
-        true,
+        ReadMode {
+            expand_document: false,
+            paginated: true,
+            control: trial::Control::Off,
+        },
     )
     .await?;
     if let Some(rows) = reply["result"]["passages"].as_array_mut() {

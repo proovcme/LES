@@ -93,6 +93,24 @@ pub(crate) fn fit_envelope_budget(
     max_chars: usize,
     max_items: usize,
 ) -> Result<()> {
+    fit_budget(reply, max_chars, max_items, None)
+}
+
+/// A context snapshot has no continuation cursor. Its only admission pass
+/// measures ready records, retaining RRF order among the units which fit.
+pub(super) fn fit_ranked_context(reply: &mut Value, text_budget: usize) -> Result<()> {
+    reply["result"]["context_policy"] = json!("rrf-wire-v1");
+    fit_budget(reply, 22500, 240, Some(text_budget))
+}
+
+fn fit_budget(
+    reply: &mut Value,
+    max_chars: usize,
+    max_items: usize,
+    text_budget: Option<usize>,
+) -> Result<()> {
+    let ranked = text_budget.is_some();
+    let text_budget = text_budget.unwrap_or(usize::MAX);
     // A canonical table carries nested cell arrays, unlike a flat Markdown
     // string. Keep the byte/character bound and atomic reading units; apply
     // the registered cell-item allowance only to that typed representation.
@@ -118,7 +136,10 @@ pub(crate) fn fit_envelope_budget(
         .map(|p| p["text"].as_str().map_or(0, |s| s.chars().count()))
         .sum();
     reconcile_document_units(reply, &orig_passages);
-    if canonical_chars(reply) <= max_chars && json_item_count(reply) <= max_items {
+    if canonical_chars(reply) <= max_chars
+        && json_item_count(reply) <= max_items
+        && (!ranked || (planned_text_chars <= text_budget && planned_units <= 32))
+    {
         return Ok(());
     }
     // Debug ranks are optional transport data. They must never evict the
@@ -192,7 +213,23 @@ pub(crate) fn fit_envelope_budget(
     let mut kept_sources = Vec::new();
     let mut kept_ids = Vec::new();
     let mut omitted_any = false;
+    let mut admitted_text = 0usize;
+    let mut skipped_text = 0usize;
+    let mut skipped_wire = 0usize;
+    let mut skipped_count = 0usize;
     for i in 0..orig_passages.len() {
+        let chars = orig_passages[i]["text"]
+            .as_str()
+            .map_or(0, |s| s.chars().count());
+        if ranked && (kept_passages.len() >= 32 || admitted_text + chars > text_budget) {
+            if kept_passages.len() >= 32 {
+                skipped_count += 1;
+            } else {
+                skipped_text += 1;
+            }
+            omitted_any = true;
+            continue;
+        }
         kept_passages.push(orig_passages[i].clone());
         kept_sources.push(
             orig_sources
@@ -213,14 +250,22 @@ pub(crate) fn fit_envelope_budget(
         }
         reply["result"]["included_fragments"] = json!(kept_passages.len());
         reply["result"]["coverage"] = json!("bounded");
-        reconcile_document_units(reply, &orig_passages);
+        if !ranked {
+            reconcile_document_units(reply, &orig_passages);
+        }
         if canonical_chars(reply) > max_chars || json_item_count(reply) > max_items {
             kept_passages.pop();
             kept_sources.pop();
             kept_ids.pop();
             omitted_any = true;
-            // Preserve contiguous block order so next_offset continues without gaps.
-            break;
+            skipped_wire += 1;
+            // Only ranked context snapshots can skip a whole unit. Explicit
+            // source streams must stop here, or their cursor would skip text.
+            if !ranked {
+                break;
+            }
+        } else {
+            admitted_text += chars;
         }
     }
     reply["result"]["passages"] = json!(kept_passages);
@@ -284,7 +329,9 @@ pub(crate) fn fit_envelope_budget(
             "planned_text_chars":planned_text_chars,
             "delivered_text_chars":kept_passages.iter().map(|p|p["text"].as_str().map_or(0,|s|s.chars().count())).sum::<usize>(),
             "wire_chars":canonical_chars(reply),"wire_limit_chars":max_chars,
-            "body_omitted":omitted_any})
+            "body_omitted":omitted_any,"ranked_context":ranked,
+            "skipped_text_budget":skipped_text,"skipped_wire_budget":skipped_wire,
+            "skipped_unit_limit":skipped_count})
     );
     Ok(())
 }
@@ -360,6 +407,49 @@ fn compact_read_failures(reply: &mut Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn ranked_context_skips_an_oversized_unit_while_a_stream_stops_before_it() {
+        let source = |n| json!({"doc_id":format!("d-{n}"),"dataset_id":"scope","source_sha256":"a".repeat(64),"qdrant_point_id":format!("p-{n}")});
+        let a = source(0);
+        let b = source(1);
+        let c = source(2);
+        let mut context = json!({"sources":[a,b,c],"result":{"passages":[
+            {"text":"First exact value 17.25","source":a},
+            {"text":"x".repeat(30000),"source":b},
+            {"text":"Last exact value 117.250 東京","source":c}],
+            "read_receipt":{"point_ids":["p-0","p-1","p-2"]}}});
+        let mut stream = context.clone();
+        fit_ranked_context(&mut context, 12000).unwrap();
+        assert_eq!(context["result"]["passages"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            context["result"]["passages"][1]["text"],
+            "Last exact value 117.250 東京"
+        );
+        assert_eq!(
+            context["result"]["read_receipt"]["point_ids"],
+            json!(["p-0", "p-2"])
+        );
+        assert_eq!(context["sources"][1], c);
+        assert!(canonical_chars(&context) <= 22500);
+        fit_envelope_budget(&mut stream, 22500, 240).unwrap();
+        assert_eq!(stream["result"]["passages"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            stream["result"]["read_receipt"]["point_ids"],
+            json!(["p-0"])
+        );
+    }
+    #[test]
+    fn ready_table_and_source_costs_cannot_hide_a_text_budget_overflow() {
+        let source = json!({"doc_id":"a","dataset_id":"scope","source_sha256":"a".repeat(64)});
+        let mut context = json!({"sources":[source,source,source],"result":{"passages":[
+            {"text":"17.25","canonical":{"schema":"les.document-structure.v1","kind":"table","rows":[["cell".repeat(10000)]]},"source":source},
+            {"text":"117.250","source":source},
+            {"text":"An unrelated longer body","source":source}]}});
+        fit_ranked_context(&mut context, 7).unwrap();
+        assert_eq!(context["result"]["passages"].as_array().unwrap().len(), 1);
+        assert_eq!(context["result"]["passages"][0]["text"], "117.250");
+        assert!(canonical_chars(&context) <= 22500);
+    }
     #[test]
     fn repeated_source_metadata_cannot_evict_read_bodies() {
         let sources = (1..=2)

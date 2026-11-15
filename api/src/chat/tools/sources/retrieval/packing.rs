@@ -62,7 +62,9 @@ fn select_points(
     query: &str,
     text_budget: usize,
     context_budget: Option<usize>,
+    control: super::trial::Control,
 ) -> Result<Vec<Value>, &'static str> {
+    control.snapshot("readable_pool", query, points);
     let input = points
         .iter()
         .enumerate()
@@ -70,7 +72,8 @@ fn select_points(
         .collect::<Result<Vec<_>, _>>()?;
     let result = les_core::context_selection::select(&serde_json::json!({
         "question":query,"units":input,"max_chars":context_budget.unwrap_or(1_000_000),
-        "text_budget":text_budget,"identity_reserve_chars":if context_budget.is_some(){1024}else{0},"max_items":32
+        "text_budget":text_budget,"identity_reserve_chars":if context_budget.is_some(){1024}else{0},"max_items":32,
+        "policy":if control==super::trial::Control::RrfWire{"rrf-order-v1"}else{"coverage-mmr-v1"}
     }))?;
     Ok(result["units"]
         .as_array()
@@ -181,6 +184,7 @@ pub(super) fn select(
 ) -> (Vec<Value>, usize) {
     select_query(seeds, sections, documents, budget, context_budget, "").unwrap()
 }
+#[cfg(test)]
 pub(super) fn select_query(
     seeds: &[Value],
     sections: &Value,
@@ -189,7 +193,35 @@ pub(super) fn select_query(
     context_budget: Option<usize>,
     query: &str,
 ) -> Result<(Vec<Value>, usize), &'static str> {
-    select_query_inner(seeds, sections, documents, budget, context_budget, query)
+    select_query_inner(
+        seeds,
+        sections,
+        documents,
+        budget,
+        context_budget,
+        query,
+        super::trial::Control::Off,
+    )
+}
+
+pub(super) fn controlled_query(
+    seeds: &[Value],
+    sections: &Value,
+    documents: &Value,
+    budget: usize,
+    context_budget: Option<usize>,
+    query: &str,
+    control: super::trial::Control,
+) -> Result<(Vec<Value>, usize), &'static str> {
+    select_query_inner(
+        seeds,
+        sections,
+        documents,
+        budget,
+        context_budget,
+        query,
+        control,
+    )
 }
 
 /// Bound original I/O by anchors/sources. The size of an indexed parent must
@@ -294,6 +326,7 @@ fn select_query_inner(
     budget: usize,
     context_budget: Option<usize>,
     query: &str,
+    control: super::trial::Control,
 ) -> Result<(Vec<Value>, usize), &'static str> {
     let retrieved: HashSet<String> = seeds.iter().map(key).collect();
     let mut all = retrieved.clone();
@@ -339,7 +372,8 @@ fn select_query_inner(
             point["payload"]["retrieval_rank"] = Value::Null;
         }
     }
-    let selected = select_points(&pool, query, budget, context_budget)?;
+    let selected = select_points(&pool, query, budget, context_budget, control)?;
+    control.snapshot("selection", query, &selected);
     Ok((selected, total))
 }
 
