@@ -51,5 +51,6 @@ def test_native_edge_groups_before_rrf_without_merging_dataset_local_names(binar
         assert found=={('a','same.pdf'),('a','other.pdf'),('b','same.pdf')}
         assert len(reply['points'])<=8
         assert all(p['payload']['source_sha256']=='a'*64 for p in reply['points'])
+        assert all(p['retrieval_fusion']['unit']=='document' for p in reply['points'])
     finally:
         owner.stdin.close();owner.wait(timeout=10)

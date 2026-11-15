@@ -1,5 +1,8 @@
 # Модули LES RAG
 
+890: `core/overview::fuse_documents` — документные голоса dense/BM25,
+затем якоря; общий путь Server/Edge. Первое сравнение обзоров отклонено.
+
 889: `sources::context_snapshot/validate_search_cursor` — общий договор
 снимка для API и чата; ошибки позиции получают 422 и указание нужного читателя.
 

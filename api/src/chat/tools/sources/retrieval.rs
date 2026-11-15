@@ -365,6 +365,10 @@ async fn search_with_navigation(
             reply["result"]["candidate_documents"] = json!(candidates);
             let total = ranked.len();
             reply["result"]["selection_policy"] = json!({"schema":"les.context-selection.v1","seed_limit":if navigation{limit}else{64},"per_document_seed_limit":Value::Null,"raw_candidates":raw_points.len(),"eligible_candidates":total,"hydrated_candidates":points.len(),"navigation_requested":navigation});
+            if overview {
+                reply["result"]["selection_policy"]["per_document_seed_limit"]=json!(2);
+                reply["result"]["selection_policy"]["fusion_unit"]=json!("document");
+            }
             // Diagnostics belong to the initial request receipt, never to the
             // model's repeated search-tool exchanges or their result budget.
             if !navigation {
@@ -384,8 +388,8 @@ async fn search_with_navigation(
             // retain its complete candidate catalog and fitting page units:
             // the model packer, not an MCP envelope, owns their admission.
             if overview {
-                reply["result"]["overview"] = json!({"schema":"les.overview-coverage.v1",
-                    "discovery":"storage-document-groups","per_channel_document_limit":2,
+                reply["result"]["overview"] = json!({"schema":"les.overview-coverage.v2",
+                    "discovery":"native-document-rrf","fusion_unit":"document","per_channel_document_limit":2,
                     "complete_corpus":false,"scope_datasets":datasets.len()});
                 envelope::fit_overview_context(&mut reply,max_chars)?;
             } else if compact {

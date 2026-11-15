@@ -8,7 +8,7 @@ from tests.test_light_native_api import wait_for
 @pytest.fixture(autouse=True)
 def overview_copy(monkeypatch):
     monkeypatch.setenv('LES_EXPERIMENT_EVIDENCE_PACKET','compact-v1')
-    monkeypatch.setenv('LES_EXPERIMENT_OVERVIEW','grouped-v1')
+    monkeypatch.setenv('LES_EXPERIMENT_OVERVIEW','documents-v2')
     monkeypatch.setenv('LES_EXPERIMENT_SAVED_READING','canonical-v1')
 
 
@@ -34,6 +34,7 @@ def test_overview_public_tool_keeps_same_filename_in_two_datasets_and_original_l
     reply=t.client.post('/api/rag/sources/call',json={'tool':'search_sources','args':args}).raise_for_status().json()
     assert reply['result']['context_policy']=='document-coverage-v1'
     assert reply['result']['overview']['complete_corpus'] is False
+    assert reply['result']['overview']['fusion_unit']=='document'
     assert reply['result']['evidence_packet']=='les.evidence-packet.v1'
     assert {source['source_sha256'] for source in reply['sources']}==hashes
     assert {source['dataset_id'] for source in reply['sources']}==set(datasets)

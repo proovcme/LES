@@ -78,13 +78,27 @@ impl Shard {
                 .clone()
         };
         if !lexical {
-            return Ok(dense);
+            return if overview {
+                les_core::overview::fuse_documents(
+                    &[dense],
+                    limit,
+                    request["rank_constant"].as_f64().unwrap_or(2.),
+                    request["fusion"].as_str().unwrap_or("rrf"),
+                    request["preserve_heads"] == true,
+                )
+            } else {
+                Ok(dense)
+            };
         }
         let mut lexical_filters = filters.clone();
         if overview {
             lexical_filters["group_size"] = json!(2);
         }
-        let hits = self.lexical_search(text, &lexical_filters, prefetch)?;
+        let hits = self.lexical_search(
+            text,
+            &lexical_filters,
+            prefetch * if overview { 2 } else { 1 },
+        )?;
         let hits = hits["hits"].as_array().ok_or("EDGE_RESPONSE_INVALID")?;
         let mut lexical = Vec::new();
         if !hits.is_empty() {
@@ -125,7 +139,12 @@ impl Shard {
                 lexical.push(row);
             }
         }
-        fuse(
+        let fusion = if overview {
+            les_core::overview::fuse_documents
+        } else {
+            fuse
+        };
+        fusion(
             &[dense, lexical],
             limit,
             request["rank_constant"].as_f64().unwrap_or(2.),

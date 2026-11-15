@@ -12159,7 +12159,7 @@
     },
     {
       "inbound": [],
-      "lines": 52,
+      "lines": 53,
       "module": "tests.test_light_native_overview",
       "outbound": [
         "tests/test_light_native_api.py",
@@ -12527,7 +12527,7 @@
     },
     {
       "inbound": [],
-      "lines": 55,
+      "lines": 56,
       "module": "tests.test_light_overview_groups",
       "outbound": [
         "backend/native_core.py",
@@ -16222,7 +16222,7 @@
     "runtime_support": 5,
     "test_or_tool_only": 285,
     "tracked_python_files": 730,
-    "tracked_python_lines": 174077
+    "tracked_python_lines": 174079
   },
   "warnings": []
 }

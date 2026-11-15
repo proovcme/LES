@@ -16,7 +16,7 @@ impl Control {
             return match std::env::var("LES_EXPERIMENT_OVERVIEW").as_deref() {
                 Err(std::env::VarError::NotPresent) | Ok("") => Ok(Self::Off),
                 Ok("original-v1") => Ok(Self::Observe),
-                Ok("grouped-v1") => Ok(Self::DocumentCoverage),
+                Ok("documents-v2") => Ok(Self::DocumentCoverage),
                 _ => Err("OVERVIEW_EXPERIMENT_INVALID".into()),
             };
         }

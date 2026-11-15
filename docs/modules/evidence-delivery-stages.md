@@ -1,4 +1,4 @@
-# Evidence delivery: isolated stages (885–889)
+# Evidence delivery: isolated stages (885–890)
 
 Working LES remains 880. All stages run only against the existing copied corpus,
 without Qwen, manual source selection, model changes or reindexing.
@@ -205,3 +205,40 @@ offsets before continuation handling, with HTTP 422 and the explicit document
 reading tools. Real document streams still require their revision/cursor pins.
 The native regression covers both views with and without a revision. This is an
 ingress-contract correction, not a relaxation of source or citation checks.
+
+## Rejected first overview comparison
+
+Source `48552aa`: 48 real MCP search calls, 24 fixed questions in two arms,
+including four previous overview questions, eight prospective descriptive
+questions and twelve precision regressions. The output allowance, BGE, disabled
+reranker, original reader and copied index were fixed. Both arms completed with
+zero tool-call errors; original/PDF/Word cursor checks were performed separately.
+The prospective questions have no complete answer oracle and do not get an
+invented quality percentage.
+
+Needed-source delivery on the four overview questions fell from 29.17% to 8.33%;
+observed p50 rose from 6.84 to 9.64 seconds. The first grouping strategy is rejected.
+Inspection also found directory tables crowding the electrical briefing context;
+source presence alone must not be reported as factual briefing completeness.
+
+The implementation grouped by document but fused by point ID. Dense and BM25
+hits in different units of one file therefore failed to combine, while a common
+directory unit hit by both channels received two votes. Dense retention also
+still spent its top-k on individual anchors after native grouping.
+
+## Document-fusion correction 890 (pending validation)
+
+The copy-only flag is now `LES_EXPERIMENT_OVERVIEW=documents-v2`; the rejected
+`grouped-v1` flag is no longer accepted. Both channels rank document identities
+(dataset, full file key, source SHA) before the existing RRF. Different anchors
+in the same document provide one vote per channel. Native dense retention and
+SQLite prefetch are bounded by document capacity, not duplicate anchor count.
+
+Only after document fusion are up to two reading anchors chosen, retaining the
+two channel heads within capacity. Entire document-anchor bundles use the existing
+64-anchor pool; reservations preserve channel-head membership without promoting
+its relevance rank. All actual source IDs, payloads and revision guards remain
+intact. Conflicting payloads for the same point still fail before admission.
+Per-point debug provenance explicitly declares document fusion and anchor ranks.
+The normal precision path is unchanged. The repeat uses the same frozen cohort,
+without new filename filters, query rewrites, model changes or reindexing.

@@ -220,7 +220,7 @@ impl Store {
             let tokens=les_core::lexical::current(&[text])?;
             let terms=tokens["documents"][0]["terms"].as_object().ok_or("INDEX_SPARSE_CONTRACT_INVALID")?.keys().cloned().collect::<Vec<_>>();
             if terms.is_empty(){return Ok(json!({"hits":[]}));}
-            let mut query=json!({"action":"search","database":database,"revision":revision,"terms":terms,"limit":prefetch,
+            let mut query=json!({"action":"search","database":database,"revision":revision,"terms":terms,"limit":prefetch*if overview{2}else{1},
                 "dataset_ids":filters["dataset_ids"],"doc_filter":filters["doc_filter"],"node_roles":filters["node_roles"],"ancestor_ids":filters["ancestor_ids"]});
             if overview {query["group_size"]=json!(2);}
             Ok(les_core::bm25::execute(&query)?)
@@ -263,7 +263,12 @@ impl Store {
                 lexical_points.push(point);
             }
         }
-        fuse(
+        let fusion = if overview {
+            les_core::overview::fuse_documents
+        } else {
+            fuse
+        };
+        fusion(
             &[dense, lexical_points],
             limit,
             request["rank_constant"].as_f64().unwrap_or(2.),
