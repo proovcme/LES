@@ -728,6 +728,9 @@ async fn passages(
             .unwrap_or(&p["page"])
             .clone();
         let mut source = reference(&doc, page);
+        if p["table_projection_warning"].is_string() {
+            source["table_projection_warning"] = p["table_projection_warning"].clone();
+        }
         if p["model_locator"].is_object() {
             source["model_locator"] = p["model_locator"].clone();
             source["evidence_kind"] = json!("engineering_snapshot");
@@ -748,6 +751,7 @@ async fn passages(
                 "ocr_numbers_verified",
                 "view_sha256",
                 "extractor",
+                "table_projection_warning",
                 "offset",
                 "next_offset",
             ] {

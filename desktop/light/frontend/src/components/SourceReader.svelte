@@ -7,7 +7,7 @@
     docId: string; datasetId?: string; digest?: string; page: number; pdf: boolean;
     initialOffset?: number; viewSHA?: string;
   } = $props();
-  type Read = { result: { text?: string; passages?: { text: string }[]; next_offset?: number | null;
+  type Read = { warnings?: string[]; result: { text?: string; passages?: { text: string }[]; next_offset?: number | null;
     view_sha256?: string; index_revision?: string; ocr?: boolean; coverage?: string; unread_visual_count?: number } };
   let result = $state<Read | null>(null); let busy = $state(false); let error = $state('');
   let cursors = $state([0]); let position = $state(0); let alive = true;
@@ -49,6 +49,7 @@
   {#if busy}<p role="status">Читаю оригинал{pdf ? ' и при необходимости распознаю скан' : ''}…</p>{/if}
   {#if error}<p class="error" role="alert">{error}</p><div class="source-actions"><button class="quiet" disabled={busy} onclick={() => read(attempted)}>Повторить чтение</button><button class="quiet" disabled={busy} onclick={restart}>Начать заново</button></div>{/if}
   {#if result}
+    {#each result.warnings ?? [] as warning}<p class="notice" role="status">{warning}</p>{/each}
     {#if result.result.ocr}<p class="notice">{pdf ? 'Текст распознан со скана.' : 'В документе распознаны встроенные изображения.'} Возможны ошибки букв, чисел и расположения ячеек — проверьте оригинал.</p>{/if}
     {#if result.result.unread_visual_count}<p class="notice">Объектов без распознанного текста: {result.result.unread_visual_count}. Оригиналы сохранены; их содержимое требует визуальной проверки.</p>{/if}
     <div class="answer-text">{@html html}</div>

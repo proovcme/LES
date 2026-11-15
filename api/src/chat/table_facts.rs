@@ -111,6 +111,7 @@ impl Rows {
                     .as_array()
                     .is_some_and(|rows| Self::supported(rows)))
                 || b["record_kind"] == "spreadsheet_row"
+                || b["table_geometry_unverified"] == true
                 || b["canonical"]["schema"] == "les.document-structure.v1"
                 || !les_core::chat_context::table_rows(b["text"].as_str().unwrap_or("")).is_empty()
         })
@@ -141,6 +142,17 @@ impl Rows {
                 return;
             };
             let canonical = &value["canonical"];
+            if value["table_geometry_unverified"] == true {
+                if let Some(body) = value["body_offset"]
+                    .as_u64()
+                    .and_then(|n| value["text"].as_str()?.get(n as usize..))
+                {
+                    out.literal_sources.insert(index);
+                    out.data
+                        .insert((index, 0), (vec![body.to_owned()], source.clone()));
+                }
+                return;
+            }
             if canonical["schema"] == "les.document-structure.v1" {
                 out.literal_sources.insert(index);
                 if canonical["kind"] == "paragraph" {
@@ -473,6 +485,13 @@ impl Rows {
                 sums.push(json!({"column":column+1,"operands":values,"result":result,"unit":unit}));
             }
         }
+        if selected.iter().any(|id| {
+            self.get(*id)
+                .is_some_and(|(_, s)| s["table_projection_warning"].is_string())
+        }) {
+            rendered.push_str("\n\n");
+            rendered.push_str(crate::document_parser::TABLE_PROJECTION_NOTICE);
+        }
         if rendered.chars().count() > 16000 {
             return Err("TABLE_ANSWER_TOO_LARGE");
         }
@@ -550,6 +569,45 @@ fn display(value: i128) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn unverified_pdf_layout_is_an_exact_excerpt_never_cells_for_arithmetic() {
+        let text = "|Valve|117.25|";
+        let block = json!({"schema":"les.evidence-block.v1","source_index":1,
+            "body_offset":0,"text":text,"table_geometry_unverified":true});
+        let source = json!({"index":1,"doc_id":"doc","source_sha256":"revision",
+            "table_projection_warning":"PDF_TABLE_SOURCE_MISMATCH"});
+        let objects = les_core::chat_context::execute(
+            &json!({"action":"objects","prefix":"e","values":[block.clone()]}),
+        )
+        .unwrap();
+        let render = objects[0]["render"].as_str().unwrap();
+        assert!(render.contains("[Фрагмент S1]"));
+        assert!(!render.contains("S1R") && !render.contains("C2:"));
+        assert!(Rows::supported(&[block.clone()]));
+        let rows = Rows::new(
+            &json!({"sections":[{"kind":"evidence","objects":[{"payload":block}]}]}),
+            &json!([source]),
+        );
+        assert_eq!(
+            rows.finish_checked(r#"{"answerable":true,"rows":["S1R1"],"sums":[]}"#, true)
+                .unwrap_err(),
+            "TABLE_ROW_NOT_VISIBLE"
+        );
+        let (answer, receipt) = rows
+            .finish_checked(r#"{"answerable":true,"rows":["S1"],"sums":[]}"#, true)
+            .unwrap()
+            .unwrap();
+        assert_eq!(receipt["rows"][0]["cells"], json!([text]));
+        assert!(answer.contains(crate::document_parser::TABLE_PROJECTION_NOTICE));
+        assert_eq!(
+            rows.finish_checked(
+                r#"{"answerable":true,"rows":["S1"],"sums":[{"column":1,"unit_column":null}]}"#,
+                true
+            )
+            .unwrap_err(),
+            "TABLE_VALUE_INVALID"
+        );
+    }
     #[test]
     fn canonical_cells_drive_model_addresses_and_values_without_markdown_reparsing() {
         let prefix = "[Источник 1]\n";

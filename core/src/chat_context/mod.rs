@@ -60,6 +60,9 @@ fn object_render(value: &Value) -> String {
 }
 fn evidence_text(value: &Value, text: &str) -> String {
     let index = value["source_index"].as_u64().unwrap_or(0);
+    if value["table_geometry_unverified"] == true {
+        return format!("[Фрагмент S{index}]\n{text}");
+    }
     let original = value["text"].as_str().unwrap_or("");
     let canonical = &value["canonical"];
     if canonical["schema"] == "les.document-structure.v1" {

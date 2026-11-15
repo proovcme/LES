@@ -418,6 +418,10 @@ impl Evidence {
         if source["retrieval_incomplete"] == true {
             note.push_str("Часть найденных оригиналов не дочитана из-за ошибки. Обзор неполный: отвечай только по прочитанному, не утверждай, что в непрочитанных файлах нет ответа.\n");
         }
+        if source["table_projection_warning"].is_string() {
+            note.push_str(crate::document_parser::TABLE_PROJECTION_NOTICE);
+            note.push('\n');
+        }
         if source["visual_content"] == true {
             note.push_str("Документ содержит рисунки/вложения. Текстовая выдержка не подтверждает геометрию, графики и детали изображений. Оригиналы доступны через read_source view=parts; OCR не гарантирует чтение всех надписей.\n");
         }
@@ -475,6 +479,9 @@ impl Evidence {
         }
         // Byte offset into the retained original, not a duplicate of the quote.
         block["body_offset"] = json!(block["text"].as_str().unwrap().len() - text.len());
+        if source["table_projection_warning"].is_string() {
+            block["table_geometry_unverified"] = json!(true);
+        }
         if canonical["schema"] == "les.document-structure.v1" {
             block["canonical"] = canonical.clone();
         }

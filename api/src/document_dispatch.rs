@@ -115,7 +115,7 @@ pub(crate) fn external(request: &Value) -> Result<Value, &'static str> {
         return Err("NO_SEARCHABLE_TEXT");
     }
     Ok(
-        json!({"kind":"pdf","text":value["text"],"metadata":{"page_count":value["pages"],"pdf_page_views":value["page_views"],"ocr":value["ocr"],"extractor":"les.pdfium.layout.v2"}}),
+        json!({"kind":"pdf","text":value["text"],"metadata":{"page_count":value["pages"],"pdf_page_views":value["page_views"],"pdf_table_projection_warnings":value["table_projection_warnings"],"ocr":value["ocr"],"extractor":"les.pdfium.layout.v2"}}),
     )
 }
 

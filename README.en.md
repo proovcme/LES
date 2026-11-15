@@ -30,8 +30,11 @@ flowchart LR
 In candidate 883, Docling's DOCX structure feeds the index and source reader
 directly: headings, logical cells and their spans retain their addresses.
 Markdown is generated for display, without reconstructing tables from it.
-Before reading, only the number of retrieved anchors is bounded; semantic
+Before reading, only the number of original reads is bounded; semantic
 selection and the final context limit apply after reading.
+PDFium reads original text; Xberg adds table structure. If that structure cannot
+be verified, the original remains readable with a warning and unverified cells
+cannot be used for arithmetic.
 [Candidate acceptance status](docs/acceptance/canonical-rag-883.md).
 
 In the source candidate, MCP uses the same retrieval and source readers as chat.

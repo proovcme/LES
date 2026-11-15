@@ -72,5 +72,71 @@ cursor scenarios. Six answer-window variants still failed: the retry incorrectly
 required a whole-document completeness marker rather than checking omitted
 verified reads. That delivery check is now separated from completeness claims;
 the targeted repeat now passes all eight previously failing scenarios (39.4 s).
-Core tests passed 168, API with Edge passed 114. The full behavioral repeat and
-frozen corpus metrics are still pending; this is not a retrieval-quality claim.
+Core tests passed 168, API with Edge passed 114. These checks do not establish
+retrieval quality; the frozen corpus metrics are still pending.
+
+The complete behavioral repeat then passed: 2,203 passed, 19 skipped, 48 warnings,
+18 subtests passed in 1,133.26 seconds. No failures remain in that suite. Peak
+owned test-process working set was 0.95 GiB; minimum available system memory
+was 10.41 GiB. These measurements describe the test tree, not the persistent
+retrieval service or BGE. Optimized-copy MCP metrics and new-index acceptance
+remain pending, and this candidate is still not installed or merged.
+
+## Frozen100 comparison on the existing copied index
+
+The first optimized 883 reader run completed all 100 unchanged MCP questions,
+with the same two dataset scopes and 12,000-character context limit. No expected
+file/page was supplied to retrieval; no answer model was called.
+
+| Measure | Previous candidate | Initial canonical reader |
+|---|---:|---:|
+| Needed-source delivery, 90 positive cases | 58.70% | 59.07% |
+| Reference-text 5-gram coverage, 69 cases | 43.33% | 47.83% |
+| Observed search latency p50 | 5.06 s | 7.14 s |
+| Tool-level search errors | 0 | 0 |
+
+These are context-delivery measures, not answer accuracy. Latency includes the
+run's original-reading/cache conditions and is not an isolated speed comparison.
+The candidate fails acceptance: one previously delivered source was lost.
+Verbose read-failure metadata grew from about 3.5k to 8.7k characters in that
+case and competed with proof bodies under the unchanged wire limit.
+
+Independent post-retrieval MCP checks verified the bytes of 155 cited originals
+and completed physical-page identity/cursor/digest checks for 239 PDF pages.
+There were 22 failed read attempts across 12 distinct pages, all reporting
+`PDF_TABLE_SOURCE_MISMATCH`. The optional table projection currently invalidates
+the independently verified original text; that ownership boundary is being fixed.
+Neither those failures nor the lost source are counted as a passing result.
+
+Peak owned retrieval-service process-tree working set was 2.48 GiB; minimum
+available system RAM was 8.68 GiB. The service-tree peak excludes the separately
+running embedding provider. The working installation was unchanged.
+
+Unaccepted follow-up: compact only redundant failure locator/path data while
+retaining every cause and retry identity; reject unproved table enrichment while
+preserving the revision-checked original, visibly marking uncertain geometry and
+disabling row arithmetic for it. Targeted, corpus and CI acceptance must repeat.
+
+The follow-up source gates passed core 169 / API with Edge 117 tests. The new
+real-PDF regression injects an unproved numeric value into the auxiliary table
+cache: indexing and physical reading retain the unchanged original value, a
+page warning, nonempty nodes and the original SHA. A test-fixture access error
+(`payload.text` instead of the node's text) was corrected without weakening
+those assertions. The other 64 parser/RAG scenarios passed in that run; the
+corrected PDF scenario passed separately. A complete targeted repeat is pending.
+The source-reader component passed four tests plus typecheck/build.
+
+The head's GitHub run also failed on concurrent settings publication
+(`SECRET_STORE_UNAVAILABLE`); its other 2,199 cases passed, 22 were skipped.
+Eighty ordinary local parallel cycles did not reproduce it. A Windows reader
+that temporarily denies rename reproduced the same failure while preserving
+the old file. The follow-up retries only transient Windows publication failures,
+retains writer locking, permissions and durability, checks external changes
+before each retry and logs the failing stage without values. Its forced-lock
+regression and 80 additional parallel FFI cycles passed. This is local evidence;
+the failed GitHub gate must still be repeated successfully.
+
+The complete targeted follow-up then passed all 70 parser, retrieval-mode and
+native model-runtime cases in 284.90 seconds. `make verify` passed with 2,223
+cases collected; publication checks passed. Full CI and both copied-index corpus
+comparisons remain merge blockers. No working installation has been changed.

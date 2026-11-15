@@ -245,6 +245,46 @@ def test_cold_pdf_reader_extracts_only_physical_second_page_and_keeps_paging(con
     assert json.loads(caches[0].read_text())['physical_page']==2
 
 
+def test_rejected_pdf_table_preserves_original_for_index_and_physical_reader(converter,tmp_path):
+    path=grid(tmp_path/'Physical original.pdf')
+    original_hash=hashlib.sha256(path.read_bytes()).hexdigest()
+    initial=converter(path)
+    assert initial['status']=='completed',initial
+    cache=next((converter.state/'storage/parser-tables').glob('*.json'))
+    projection=json.loads(cache.read_text(encoding='utf8'));changed=0
+    for table in projection['tables']:
+        for row in table['cells']:
+            for i,cell in enumerate(row):
+                if cell=='17.25':row[i]='117.25';changed+=1
+    assert changed, 'The native fixture must exercise a real table projection'
+    cache.write_text(json.dumps(projection),encoding='utf8')
+    extracted=converter(path)
+    assert extracted['status']=='completed',extracted
+    value=extracted['value']
+    assert '17.25' in value['text'] and '117.25' not in value['text']
+    assert value['metadata']['pdf_table_projection_warnings']==[{'page':1,'code':'PDF_TABLE_SOURCE_MISMATCH'}]
+    indexed=converter(path,pipeline='nodes',data_dir=str(converter.state/'data'),dataset_id='ds',file_key=path.name,
+                      chunking={'unit':'chars','chunk_size':800,'chunk_overlap':80},minimum=1,final_minimum=1)
+    assert indexed['status']=='completed' and indexed['value']['nodes'],indexed
+    nodes=indexed['value']['nodes']
+    page_nodes=[n for n in nodes if n['payload'].get('page')==1]
+    assert page_nodes and all(n['payload']['table_projection_warning']=='PDF_TABLE_SOURCE_MISMATCH' for n in page_nodes)
+    assert all('117.25' not in n['text'] for n in page_nodes)
+    db=converter.state/'source.db'
+    with sqlite3.connect(db) as c:
+        c.execute('CREATE TABLE documents(id TEXT,dataset_id TEXT,file_name TEXT,source_path TEXT,file_hash TEXT)')
+        c.execute('INSERT INTO documents VALUES(?,?,?,?,?)',('physical-id','ds',path.name,str(path),original_hash))
+    answer=converter(path,pdf=True,kind='source_page',database=str(db),snapshot=True,
+                     source={'doc_id':'physical-id','page':1,'max_chars':12000})
+    assert answer['status']=='completed',answer
+    page=answer['value']
+    assert page['source_sha256']==original_hash and page['page']==1
+    assert page['table_projection_warning']=='PDF_TABLE_SOURCE_MISMATCH'
+    assert page['extractor']=='les.pdfium.page.v1'
+    assert '17.25' in page['text'] and '117.25' not in page['text']
+    assert hashlib.sha256(path.read_bytes()).hexdigest()==original_hash
+
+
 def test_excel_values_and_missing_formula_cache_still_use_existing_reader(converter,tmp_path):
     from openpyxl import Workbook
     import xml.etree.ElementTree as ET

@@ -78,7 +78,10 @@ fn payload(request: &Value, value: Map<String, Value>) -> Result<Value> {
                 .filter(|(key, _)| {
                     !matches!(
                         key.as_str(),
-                        "pdf_page_views" | "docx_table_headers" | "docling_structure"
+                        "pdf_page_views"
+                            | "pdf_table_projection_warnings"
+                            | "docx_table_headers"
+                            | "docling_structure"
                     )
                 })
                 .map(|(key, value)| (key.clone(), value.clone())),
@@ -208,6 +211,14 @@ fn from_pdf(
                 "page":page,"page_part":number,"page_parts":parts.len(),"source_ref":reference}).as_object().unwrap().clone();
             if let Some(unit) = units.get(index) {
                 meta.insert("source_reading_unit".into(), unit.clone());
+            }
+            if let Some(warning) = request["route_metadata"]["pdf_table_projection_warnings"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|w| w["page"] == page)
+            {
+                meta.insert("table_projection_warning".into(), warning["code"].clone());
             }
             if index == 0 {
                 if let Some(view) = request["route_metadata"]["pdf_page_views"]

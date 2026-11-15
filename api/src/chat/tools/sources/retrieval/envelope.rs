@@ -127,6 +127,9 @@ pub(crate) fn fit_envelope_budget(
         reply["result"]["fusion_trace_total"] = json!(rows.len());
         reply["result"]["fusion_trace_truncated"] = json!(!rows.is_empty());
     }
+    if canonical_chars(reply) > max_chars || json_item_count(reply) > max_items {
+        compact_read_failures(reply);
+    }
     // Exact duplicate origins are navigation, not extra read evidence. Keep
     // every primary pinned source; omit alias detail explicitly if it would
     // consume the body budget. Different text/revisions remain separate units.
@@ -271,9 +274,85 @@ fn compact_aliases(source: &mut Value) {
     }
 }
 
+// A failed page is not evidence. Its code, readable name and exact retry
+// identity must survive, but repeated paths, URLs and locator copies must not
+// consume the successfully read bodies' wire allowance.
+fn compact_read_failures(reply: &mut Value) {
+    for failure in reply["result"]["read_failures"]
+        .as_array_mut()
+        .into_iter()
+        .flatten()
+    {
+        let Some(original) = failure["source"].as_object() else {
+            continue;
+        };
+        let mut source = original.clone();
+        source.remove("url");
+        if original
+            .get("locator")
+            .and_then(Value::as_object)
+            .is_some_and(|v| {
+                v.keys()
+                    .all(|k| matches!(k.as_str(), "source_sha256" | "source_page"))
+                    && v.get("source_sha256") == original.get("source_sha256")
+                    && v.get("source_page") == original.get("page")
+            })
+        {
+            source.remove("locator");
+        }
+        if original.get("source_page") == original.get("page") {
+            source.remove("source_page");
+        }
+        if let Some(name) = original.get("doc_name").and_then(Value::as_str) {
+            source.insert(
+                "doc_name".into(),
+                json!(name.rsplit(['/', '\\']).next().unwrap_or(name)),
+            );
+        }
+        failure["source"] = Value::Object(source);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn failures_preserve_retry_identity_without_evicting_verified_bodies() {
+        let source = json!({"doc_id":"proof","source_sha256":"a".repeat(64),"page":1});
+        let failures = (1..=10).map(|page|json!({"code":"PDF_TABLE_SOURCE_MISMATCH",
+            "message":"Original not read; this is not proof of absence.","evidence_admissible":false,"read_required":"read_pdf_source",
+                "source":{"doc_id":"unread","dataset_id":"scope","source_sha256":"b".repeat(64),"page":page,"offset":17,
+                "doc_name":format!("{}source.pdf","nested-directory/".repeat(30)),
+                "url":format!("/raw/{}?sha256={}","source-directory/".repeat(30),"b".repeat(64)),
+                "locator":{"source_sha256":"b".repeat(64),"source_page":page}}})).collect::<Vec<_>>();
+        let passages = (0..3)
+            .map(|n| json!({"source":source,"text":format!("Proof {n} {}","x".repeat(2990))}))
+            .collect::<Vec<_>>();
+        let mut reply = json!({"sources":vec![source;3],"result":{"read_failures":failures,"passages":passages}});
+        assert!(canonical_chars(&reply) > 18000);
+        fit_envelope_budget(&mut reply, 18000, 230).unwrap();
+        assert_eq!(reply["result"]["passages"], json!(passages));
+        assert!(canonical_chars(&reply) <= 18000);
+        for (i, failure) in reply["result"]["read_failures"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .enumerate()
+        {
+            assert_eq!(failure["code"], "PDF_TABLE_SOURCE_MISMATCH");
+            assert_eq!(failure["source"]["doc_id"], "unread");
+            assert_eq!(failure["source"]["source_sha256"], "b".repeat(64));
+            assert_eq!(failure["source"]["page"], i + 1);
+            assert_eq!(failure["source"]["offset"], 17);
+            assert_eq!(failure["source"]["doc_name"], "source.pdf");
+            assert_eq!(failure["evidence_admissible"], false);
+            assert_eq!(failure["read_required"], "read_pdf_source");
+            assert!(failure["message"]
+                .as_str()
+                .unwrap()
+                .contains("not proof of absence"));
+        }
+    }
     #[test]
     fn typed_table_cell_arrays_fit_the_registered_wire_contract_atomically() {
         let rows = (0..100)

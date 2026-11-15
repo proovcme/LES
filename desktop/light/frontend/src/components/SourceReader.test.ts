@@ -4,6 +4,15 @@ import SourceReader from './SourceReader.svelte';
 let component: ReturnType<typeof mount> | undefined;
 afterEach(async () => { if (component) await unmount(component); document.body.replaceChildren(); vi.unstubAllGlobals(); });
 const button = (name: string) => [...document.querySelectorAll('button')].find(b => b.textContent?.trim() === name)!;
+it('keeps the verified page visible alongside the same warning returned through MCP', async () => {
+  const warning = 'Текст страницы прочитан. Расположение ячеек таблицы не подтверждено.';
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ warnings: [warning],
+    result: { text: 'Original quantity 117.25 kg', next_offset: null, view_sha256: 'a'.repeat(64) } }))));
+  component = mount(SourceReader, { target: document.body, props: { docId: 'found', page: 2, pdf: true } });
+  await vi.waitFor(() => expect(document.querySelector('.notice')?.textContent).toBe(warning));
+  expect(document.querySelector('.answer-text')?.textContent).toContain('117.25');
+  expect(button('Читать дальше').disabled).toBe(true);
+});
 it('reads the same source API as MCP, pins continuations and keeps errors visible', async () => {
   const calls: { tool: string; args: Record<string, unknown> }[] = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {

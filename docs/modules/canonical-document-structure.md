@@ -63,6 +63,19 @@ its tighter character limit and admits whole units; legacy flat-text envelopes
 keep their earlier item bound. Chat uses the registered budgets directly rather
 than overriding them privately.
 
+Wire admission compacts redundant read-failure URLs and locators before it
+can remove proof bodies. Causes, messages, source/revision identities and retry
+cursors remain available; a failed neighbor must not spend a verified page's
+entire transport allowance.
+
+PDFium owns revision-checked original PDF text. Xberg table enrichment has a
+separate proof boundary: a literal mismatch rejects that projection, preserving
+raw original text with `table_projection_warning`. Other source, scope, identity
+and parser-shape errors still fail. Index nodes carry the warning only on the
+affected page. Chat and MCP expose the same warning; the source window displays
+the shared message. Native selection admits such a page only as an exact excerpt,
+without invented row/column addresses or arithmetic.
+
 Memory guards bound the tree projection, recursion, grid dimensions and
 replicated span text. Document-wide structure is excluded before cloning
 per-point metadata. The Word LRU stores byte counts instead of repeatedly
