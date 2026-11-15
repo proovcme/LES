@@ -46,6 +46,9 @@ The existing `LES_EXPERIMENT_CONTEXT_ADMISSION` flag provides `baseline-v1` and
 `rrf-wire-v1`; these are the completed combined contrast, **not** five implemented
 variants. No `RAG_ABLATION=v0..v4` switch or completed five-arm run is claimed.
 Experimental switches stay off in normal launches and reject unknown values.
+They are temporary research arms. Before production acceptance, preserve source
+SHAs/manifests/results and remove losing paths from the shipped pipeline rather
+than retaining every strategy as another permanent mode or hidden fallback.
 
 Admission properties are determinism for frozen inputs, exact cost within every
 declared limit, whole units and valid source lineage. Do not demand monotonic
@@ -130,11 +133,18 @@ the draft. Fast jobs have timeout bounds, **no measured 3–5 minute promise**.
 Clippy/unsafe auditing remains a separate measured step; making all existing
 warnings fatal before review would hide useful feedback behind a large cleanup.
 
+First [workflow run](https://github.com/proovcme/LES/actions/runs/43742511377),
+source `ac4992b`: static/format/publication job passed in 44 seconds; frontend
+types/behavior passed in 28 seconds; desktop build passed. These are observed
+job wall times for this run, not a cold-cache SLA or a completed native-suite
+result. The full native job is separate.
+
 ## Ordered architecture risks and exit criteria
 
 | Priority | Boundary | Required evidence before removal/replacement |
 |---|---|---|
 | P1 | Evidence packet source references; payload/unit/read failure | Typed internal identities and explicit wire conversion; reject invalid refs/missing pins; preserve canonical cells, aliases and old clients |
+| P1 | Published reading representation versus index anchors | Same parser/schema generation and stable unit identities for indexing and reading; migrate only a separate copy, never relabel legacy Markdown as canonical or weaken hashes |
 | P1 | MSG/DOC/PDF unsafe input boundaries | Read actual ABI contracts, ownership, lengths and error paths; meaningful `SAFETY` per block; damaged/truncated inputs and bounded subprocess failures; fuzz separately |
 | P1 | Chat runner and indexing coordinator | Behavior-preserving phase extraction with shared turn/job state, cancellation/recovery and rollback parity; no parallel semantic rewrite |
 | P1 | Retrieval/select/admission | Implement one registered contrast at a time, real MCP stage receipts, exact citations and no regressions hidden by averages |
@@ -146,3 +156,9 @@ triage, not a verified vulnerability or test-coverage inventory. A line-count
 ceiling alone can move complexity without reducing it. Do not add a blanket
 `SAFETY` comment or suppress a warning instead of establishing the invariant.
 This protocol does not claim the typed-boundary refactor or fuzz audit completed.
+
+The representation risk is already concrete: stage 2 used saved reading five
+times, fell back 702 times and delivered no saved-unit source. Therefore the
+existing-copy run cannot validate broad saved-reader coverage. A representation
+migration is a separate controlled experiment, not an unnoticed index change
+inside the fixed-index ablation.

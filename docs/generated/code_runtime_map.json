@@ -11182,7 +11182,7 @@
     },
     {
       "inbound": [],
-      "lines": 122,
+      "lines": 127,
       "module": "tests.test_light_frontend_assets",
       "outbound": [
         "proxy/light_frontend.py",
@@ -13663,7 +13663,7 @@
         "tests/test_light_frontend_assets.py",
         "tools/build_light_package.py"
       ],
-      "lines": 107,
+      "lines": 122,
       "module": "tools.build_light_frontend",
       "outbound": [
         "tools/__init__.py"
@@ -16225,7 +16225,7 @@
     "runtime_support": 5,
     "test_or_tool_only": 285,
     "tracked_python_files": 730,
-    "tracked_python_lines": 174099
+    "tracked_python_lines": 174119
   },
   "warnings": []
 }

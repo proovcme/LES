@@ -37,6 +37,7 @@ verify: verify-fast
 	uv run python -m pytest --basetemp=$(PYTEST_BASETEMP)/verify --collect-only -q $(CURRENT_TESTS)
 
 test:
+	uv run python tools/build_light_frontend.py --check
 	uv run python tools/code_runtime_map.py --check
 	uv run python -m pytest --basetemp=$(PYTEST_BASETEMP)/test -q --durations=20 $(CURRENT_TESTS)
 
