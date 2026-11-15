@@ -11506,6 +11506,7 @@
         "tests/test_light_native_conversation.py",
         "tests/test_light_native_dataset_reader.py",
         "tests/test_light_native_docx_parts.py",
+        "tests/test_light_native_evidence_packet.py",
         "tests/test_light_native_folder_watch.py",
         "tests/test_light_native_index_batch.py",
         "tests/test_light_native_indexed_attachment.py",
@@ -11637,6 +11638,7 @@
         "tests/test_light_native_conversation.py",
         "tests/test_light_native_document_review.py",
         "tests/test_light_native_docx_parts.py",
+        "tests/test_light_native_evidence_packet.py",
         "tests/test_light_native_model_discovery.py",
         "tests/test_light_native_model_settings.py",
         "tests/test_light_native_numeric_evidence.py",
@@ -11861,6 +11863,18 @@
         "tests/test_model_connection_embeddings_integration.py"
       ],
       "path": "tests/test_light_native_embeddings.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
+      "lines": 44,
+      "module": "tests.test_light_native_evidence_packet",
+      "outbound": [
+        "tests/test_light_native_api.py",
+        "tests/test_light_native_chat_turn.py"
+      ],
+      "path": "tests/test_light_native_evidence_packet.py",
       "status": "TEST_OR_TOOL_ONLY",
       "windows_runtime_explicit": false
     },
@@ -16178,9 +16192,9 @@
     "product_reachable": 417,
     "registered_api_routes": 298,
     "runtime_support": 5,
-    "test_or_tool_only": 282,
-    "tracked_python_files": 727,
-    "tracked_python_lines": 173895
+    "test_or_tool_only": 283,
+    "tracked_python_files": 728,
+    "tracked_python_lines": 173939
   },
   "warnings": []
 }
