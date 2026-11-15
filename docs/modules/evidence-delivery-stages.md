@@ -462,3 +462,32 @@ and free disk 35.37 GiB. Test copies were cleaned by the repository fixtures;
 no redundant cleanup hook was added. Copy APIs and the owned UI preview were
 stopped. Source/copy checks are not an installer release or independent RAG
 answer-quality acceptance.
+
+
+## Bounded Word reading 892 (pending copy comparison)
+
+Explicit temporary copy control `LES_EXPERIMENT_WORD_READING=full-v1|section-v1`;
+ordinary launches retain full-v1 until acceptance. The automatic Word hydrator
+now resolves each indexed unit by ordinal plus text SHA, with unique literal
+alignment for legacy anchors. Unresolved/ambiguous anchors are explicit unread
+failures in section-v1, never a hidden whole-document fallback.
+
+Section-v1 retains every resolved retrieval anchor, its closest heading section
+and descendants, and adjacent original reading units under the existing per-read
+character allowance. Long sections expand contiguously around anchors; an
+oversized atomic row remains intact and a blocked direction does not jump across
+it. All already carried headings/table headers, cells/formulas and original
+ordinals/stream offsets remain unchanged. Explicit read_source pagination is
+unchanged. Cold format conversion still builds the structural view once; this
+change bounds automatic evidence materialization, not initial ZIP/XML parsing.
+
+Each unit now keeps its actual matched/nearest retrieval-anchor ID instead of
+borrowing the first hit's ID for every paragraph. This lineage fix and explicit
+original stream offsets are common to both comparison arms. The read-plan
+summary distinguishes original, retained and unresolved units. Partial windows
+are bounded evidence, never a claim to have read the whole document.
+
+Required comparison: same copy/BGE/index, ready admission held fixed; first two
+retrieval/read-plan fingerprints equal; all matched physical anchor units retained;
+source/quote/page/row delivery and exact MCP rereading checked without Qwen or
+expected-file filters. No outcome is claimed before completing that comparison.

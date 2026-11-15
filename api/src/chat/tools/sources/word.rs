@@ -8,6 +8,7 @@ use std::{
 };
 static CACHE: OnceLock<Mutex<VecDeque<(String, Value, usize)>>> = OnceLock::new();
 mod saved;
+mod window;
 /// Automatic chat admission reads Word originals before the common selector.
 /// The index anchor locates the document; it is never relabelled as its body.
 pub(super) async fn hydrate(
@@ -16,7 +17,12 @@ pub(super) async fn hydrate(
     collection: &str,
     points: Vec<Value>,
     mut hydrated: Value,
+    surrounding_chars: usize,
 ) -> Result<(Vec<Value>, Value)> {
+    let mode = window::Mode::requested()?;
+    let mut statistics = json!({"schema":"les.word-read-window.v1","mode":mode.name(),
+        "documents":0,"original_units":0,"retained_units":0,"matched_units":0,
+        "unresolved_anchors":0,"omitted_units":0});
     let mut output = Vec::new();
     let mut text_bytes = 0usize;
     let mut documents = std::collections::HashSet::new();
@@ -97,13 +103,39 @@ pub(super) async fn hydrate(
             })
             .map(|(i, a)| a["payload"]["retrieval_rank"].as_u64().unwrap_or(i as u64))
             .min();
-        for (read_offset, unit) in view["units"]
-            .as_array()
-            .ok_or("DOCUMENT_STRUCTURE_INVALID")?
-            .iter()
-            .enumerate()
-        {
-            let reading_hash = les_core::sha256_hex(unit["text"].as_str().unwrap_or("").as_bytes());
+        let plan = window::plan(&view, &anchors, &doc, surrounding_chars, mode)?;
+        for field in [
+            "original_units",
+            "retained_units",
+            "matched_units",
+            "unresolved_anchors",
+            "omitted_units",
+        ] {
+            statistics[field] = json!(
+                statistics[field].as_u64().unwrap_or(0)
+                    + plan.statistics()[field].as_u64().unwrap_or(0)
+            );
+        }
+        statistics["documents"] = json!(statistics["documents"].as_u64().unwrap_or(0) + 1);
+        eprintln!(
+            "{}",
+            json!({"event":"word_read_scope","doc_id":doc["id"],
+            "source_sha256":doc["file_hash"],"window":plan.statistics()})
+        );
+        if mode == window::Mode::Section && plan.unresolved > 0 {
+            retrieval::failures::record(
+                &mut hydrated,
+                reference(&doc, Value::Null),
+                "WORD_ANCHOR_UNRESOLVED",
+            );
+        }
+        for read_offset in plan.indices.iter().copied() {
+            let unit = &view["units"][read_offset];
+            let owner = plan
+                .owner(read_offset)
+                .map(|a| &anchors[a.index])
+                .unwrap_or(&point);
+            let owner_payload = &owner["payload"];
             text_bytes += unit["text"].as_str().map_or(0, str::len);
             if output.len() >= les_core::context_selection::MAX_SOURCE_UNITS
                 || text_bytes > les_core::context_selection::MAX_SOURCE_TEXT_BYTES
@@ -112,29 +144,16 @@ pub(super) async fn hydrate(
             }
             let mut payload = json!({"dataset_id":doc["dataset_id"],"file_name":doc["file_name"],"source_sha256":doc["file_hash"],
                 "text":unit["text"],"reading_representation":"word_structure","word_physical":true,
-                "word_snapshot_sha256":view["view_sha256"],"retrieval_anchor_id":p.get("retrieval_anchor_id").unwrap_or(&point["id"]),
+                "word_snapshot_sha256":view["view_sha256"],"retrieval_anchor_id":owner_payload.get("retrieval_anchor_id").unwrap_or(&owner["id"]),
                 "chunk_ord":unit["ordinal"],"section_heading":unit["heading"],"source_unit_id":unit["ordinal"]});
+            // This is the original stream position, not the filtered window index.
+            payload["word_read_offset"] = json!(read_offset);
             if view["saved_units"] == true {
-                payload["word_read_offset"] = json!(read_offset);
                 payload["reading_origin"] = json!("published_canonical_unit");
             }
             // An original document is not a dense hit at every paragraph.
             // Only a compatible indexed unit can inherit an anchor's rank.
-            let matched = anchors
-                .iter()
-                .enumerate()
-                .filter(|(_, a)| {
-                    let a = &a["payload"];
-                    a["dataset_id"] == doc["dataset_id"]
-                        && a["file_name"] == doc["file_name"]
-                        && a["source_sha256"] == doc["file_hash"]
-                        && a["word_reading_schema"] == "les.document-reading.v1"
-                        && a["retrieval_expansion"] != true
-                        && a["source_unit_id"] == unit["ordinal"]
-                        && a["word_reading_sha256"].as_str() == Some(reading_hash.as_str())
-                })
-                .map(|(i, a)| a["payload"]["retrieval_rank"].as_u64().unwrap_or(i as u64))
-                .min();
+            let matched = plan.matches.get(&read_offset).map(|a| a.rank);
             payload["retrieval_expansion"] = json!(matched.is_none());
             payload["retrieval_rank"] = json!(matched);
             payload["retrieval_source_rank"] = json!(source_rank);
@@ -151,6 +170,7 @@ pub(super) async fn hydrate(
                 "canonical",
                 "source_block_id",
                 "source_parent_id",
+                "source_heading_path",
                 "table_id",
                 "row_start",
                 "row_end",
@@ -178,6 +198,10 @@ pub(super) async fn hydrate(
             }
         }
     }
+    if !hydrated["read_plan"].is_object() {
+        hydrated["read_plan"] = json!({});
+    }
+    hydrated["read_plan"]["word"] = statistics;
     Ok((output, hydrated))
 }
 pub(super) fn supports(doc: &Value) -> bool {

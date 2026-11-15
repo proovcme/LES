@@ -11522,7 +11522,8 @@
         "tests/test_light_native_publication.py",
         "tests/test_light_native_retrieval_modes.py",
         "tests/test_light_native_source_presentation.py",
-        "tests/test_light_native_table_publication.py"
+        "tests/test_light_native_table_publication.py",
+        "tests/test_light_native_word_window.py"
       ],
       "lines": 933,
       "module": "tests.test_light_native_api",
@@ -11651,7 +11652,8 @@
         "tests/test_light_native_public_chat.py",
         "tests/test_light_native_public_upload.py",
         "tests/test_light_native_retrieval_modes.py",
-        "tests/test_light_native_source_presentation.py"
+        "tests/test_light_native_source_presentation.py",
+        "tests/test_light_native_word_window.py"
       ],
       "lines": 375,
       "module": "tests.test_light_native_chat_turn",
@@ -12465,6 +12467,18 @@
         "proxy/services/web_research_config_service.py"
       ],
       "path": "tests/test_light_native_web.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
+      "lines": 93,
+      "module": "tests.test_light_native_word_window",
+      "outbound": [
+        "tests/test_light_native_api.py",
+        "tests/test_light_native_chat_turn.py"
+      ],
+      "path": "tests/test_light_native_word_window.py",
       "status": "TEST_OR_TOOL_ONLY",
       "windows_runtime_explicit": false
     },
@@ -16225,9 +16239,9 @@
     "product_reachable": 417,
     "registered_api_routes": 298,
     "runtime_support": 5,
-    "test_or_tool_only": 285,
-    "tracked_python_files": 730,
-    "tracked_python_lines": 174168
+    "test_or_tool_only": 286,
+    "tracked_python_files": 731,
+    "tracked_python_lines": 174261
   },
   "warnings": []
 }

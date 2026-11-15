@@ -4,7 +4,8 @@ use serde_json::{json, Value};
 pub(super) fn recoverable(code: &str) -> bool {
     matches!(
         code,
-        "WORKER_TIMEOUT"
+        "WORD_ANCHOR_UNRESOLVED"
+            | "WORKER_TIMEOUT"
             | "WORKER_QUEUE_TIMEOUT"
             | "NO_SEARCHABLE_TEXT"
             | "SOURCE_ATOMIC_UNIT_OVERFLOW"

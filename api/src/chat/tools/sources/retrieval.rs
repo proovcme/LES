@@ -714,6 +714,7 @@ async fn passages(
             collection.as_str().ok_or("INDEX_COLLECTION_MISMATCH")?,
             points,
             hydrated,
+            max_chars,
         )
         .await?
     } else {
@@ -876,6 +877,7 @@ async fn passages(
                 if p["word_physical"] == true {
                     source["evidence_kind"] = json!("physical_word_section");
                     source["view_sha256"] = p["word_snapshot_sha256"].clone();
+                    source["read_offset"] = p["word_read_offset"].clone();
                     if p["reading_origin"] == "published_canonical_unit" {
                         source["reading_origin"] = p["reading_origin"].clone();
                         source["read_offset"] = p["word_read_offset"].clone();
@@ -1001,7 +1003,7 @@ async fn passages(
             "read_receipt":{"schema":"les.indexed-read.v1","index_revision":revision,
                 "semantics":"verified_index_locators_and_reading_views",
                 "point_ids":sources.iter().map(|s|s["qdrant_point_id"].clone()).collect::<Vec<_>>()},
-            "coverage":if included==total && all_visuals_read && hydrated["read_failures"].as_array().is_none_or(Vec::is_empty) && hydrated["read_plan"]["omitted_original_anchors"].as_u64().unwrap_or(0)==0{"complete"}else{"bounded"},
+            "coverage":if included==total && all_visuals_read && hydrated["read_failures"].as_array().is_none_or(Vec::is_empty) && hydrated["read_plan"]["omitted_original_anchors"].as_u64().unwrap_or(0)==0 && hydrated["read_plan"]["word"]["omitted_units"].as_u64().unwrap_or(0)==0 && hydrated["read_plan"]["word"]["unresolved_anchors"].as_u64().unwrap_or(0)==0{"complete"}else{"bounded"},
             "complete_corpus":false,"coverage_scope":"selected_retrieval_candidates","read_plan":hydrated["read_plan"],
             "read_failures":hydrated["read_failures"].as_array().cloned().unwrap_or_default(),
             "total_fragments":total,"included_fragments":included}),
