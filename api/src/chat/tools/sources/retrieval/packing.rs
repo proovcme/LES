@@ -385,6 +385,8 @@ fn select_query_inner(
             };
             (expansion, prior.unwrap_or(u64::MAX), key(p))
         });
+        let mut seen = HashSet::new();
+        pool.retain(|p| seen.insert(key(p)));
     }
     let selected = select_points(&pool, query, budget, context_budget, control)?;
     control.snapshot("selection", query, &selected);
