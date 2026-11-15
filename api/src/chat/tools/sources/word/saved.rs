@@ -68,12 +68,10 @@ pub(super) async fn load(
                     metadata[key] = json!(true);
                 }
             }
-            metadata["unread_visual_count"] = json!(
-                metadata["unread_visual_count"]
-                    .as_u64()
-                    .unwrap_or(0)
-                    .max(p["unread_visual_count"].as_u64().unwrap_or(0))
-            );
+            metadata["unread_visual_count"] = json!(metadata["unread_visual_count"]
+                .as_u64()
+                .unwrap_or(0)
+                .max(p["unread_visual_count"].as_u64().unwrap_or(0)));
             if p["visual_coverage"] == "partial" {
                 metadata["visual_coverage"] = json!("partial");
             }

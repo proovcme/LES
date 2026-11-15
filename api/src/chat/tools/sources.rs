@@ -1,7 +1,7 @@
 //! Registered identities and frozen user scope bind every source read.
 mod catalog;
-mod parts;
 pub(crate) mod packet;
+mod parts;
 pub(crate) mod retrieval;
 mod verification;
 mod word;

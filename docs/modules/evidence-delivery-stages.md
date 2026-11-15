@@ -101,8 +101,10 @@ separate cases. The first targeted repeat passed legacy fallback but exposed
 did not receive `owned_state`, relying on ambient `LES_STATE_ROOT`. The API now
 freezes its owned state root into the batch and forwards it to the format worker;
 the regression deliberately removes that environment variable. No source folder
-is used as scratch space. This repeat and UI/MCP checks are pending. Its original-reader
-arm holds compact transport fixed. No installation/release; stage 3 pending.
+is used as scratch space. The correction passed 172 core / 132 Edge API tests,
+116 native checks with one optional skip, 56 frontend tests, frontend checking,
+`make verify` (2,233 collected, not executed) and the publication audit.
+Its original-reader arm holds compact transport fixed. No installation/release.
 
 ## Overview candidate 888 (not accepted)
 
@@ -129,3 +131,44 @@ Large multi-dataset latency and semantic overview completeness remain acceptance
 questions, not solved by grouping alone. No automatic query-type heuristic.
 The explicit tool is shared by chat, API and MCP; automatic main-chat prefetch
 continues to request precision context. No new UI controls.
+
+## Completed stage 2 comparison
+
+API source `504e37a`, the same copied index and unchanged 100-question cohort.
+All 200 real MCP calls completed in four counterbalanced half-periods; both
+arms used compact transport. Every selected-unit fingerprint, retrieval pool
+and read plan matched across all 100 pairs. The readable pool differed in five
+cases, including different saved view identities and two Word worker timeouts
+in the saved arm. The selected evidence was unchanged; no case was excluded.
+
+| Measure | Original reader + compact | Saved reader + compact |
+|---|---:|---:|
+| Needed-source delivery, 90 positive cases | 69.07% | 69.07% |
+| Reference-text coverage, 69 cases | 56.52% | 56.52% |
+| Expected-page coverage, 12 cases | 87.50% | 87.50% |
+| Excel-row hit, 2 cases | 100% | 100% |
+| Overview-source delivery, 4 cases | 29.17% | 29.17% |
+| Observed MCP p50, 90 positive cases | 7.80 s | 8.63 s |
+| Mean body characters, all 100 cases | 10,009.37 | 10,009.37 |
+| Recorded Word worker timeouts | 0 | 2 |
+
+The saved loader completed five reads of four distinct real documents and used
+legacy fallback 702 times. These are read attempts, not counts of unique legacy
+files. No saved-unit source reached final admission in this cohort, so this run
+cannot establish the quality or speed of a predominantly saved-unit corpus.
+The fixture with real native Docling separately verifies saved table text,
+canonical cells, cursor jumps and rejection after original replacement.
+
+Both raw MCP representations agree and all one-based source references bind
+the aligned full source. Independent original/PDF checks by half-period were
+141/148, 149/170, 141/148 and 149/170, with zero errors. These are per-period
+counts. All catalog rows and original SHA values remained unchanged. The
+minimum observed available RAM was 6.23 GiB; owned-service peak working sets
+were 2.51–2.67 GiB. Copy APIs stopped before the next serial build.
+
+There is no observed delivery gain and no speed gain; the saved experiment
+remains off. The published corpus representation must be migrated deliberately
+before claiming broad fast-path coverage. Adding the same representation
+alongside the old index without verifying completeness would hide that gap.
+Stage 3 therefore holds `original-v1` reading fixed in both arms; only explicit
+overview discovery/admission changes. Working LES remains 880.

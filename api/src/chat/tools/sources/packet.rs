@@ -1,5 +1,5 @@
 //! A reversible wire view: provenance is stored once, never discarded.
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 const SCHEMA: &str = "les.evidence-packet.v1";
 
 pub(crate) fn requested() -> Result<bool, &'static str> {
