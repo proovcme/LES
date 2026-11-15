@@ -78,10 +78,16 @@ pub(super) async fn load(
                 metadata["visual_coverage"] = json!("partial");
             }
             if let Some(unit) = p.get("word_reading_view") {
-                if !unit["canonical"].is_object() && p["word_structure_sha256"].is_null() {
+                validate(p, unit)?;
+                // The v1 reading container predates typed Docling units.
+                // A valid legacy text unit also has a structure digest; that
+                // digest must not be mistaken for a canonical-layout tag.
+                if unit["canonical"].is_null() {
                     return Ok(None);
                 }
-                validate(p, unit)?;
+                if unit["canonical"]["schema"] != "les.document-structure.v1" {
+                    return Err("WORD_READING_VIEW_INVALID".into());
+                }
                 if let Some(previous) = units.get(&ordinal) {
                     if previous != unit {
                         return Err("WORD_READING_VIEW_INVALID".into());
@@ -139,8 +145,7 @@ pub(super) async fn load(
 }
 
 fn validate(p: &Value, unit: &Value) -> Result<()> {
-    if !unit["canonical"].is_object()
-        || unit["ordinal"] != p["source_unit_id"]
+    if unit["ordinal"] != p["source_unit_id"]
         || p["word_reading_sha256"]
             != les_core::sha256_hex(
                 unit["text"]
@@ -148,8 +153,10 @@ fn validate(p: &Value, unit: &Value) -> Result<()> {
                     .ok_or("WORD_READING_VIEW_INVALID")?
                     .as_bytes(),
             )
-        || p["word_structure_sha256"]
-            != les_core::sha256_hex(les_core::tool_execution::canonical_json(unit)?.as_bytes())
+        || (!p["word_structure_sha256"].is_null()
+            && p["word_structure_sha256"]
+                != les_core::sha256_hex(les_core::tool_execution::canonical_json(unit)?.as_bytes()))
+        || (unit["canonical"].is_object() && p["word_structure_sha256"].is_null())
     {
         return Err("WORD_READING_VIEW_INVALID".into());
     }
@@ -170,5 +177,9 @@ mod tests {
         altered = unit.clone();
         altered["ordinal"] = json!(8);
         assert!(validate(&p, &altered).is_err());
+        let legacy = json!({"ordinal":2,"text":"Legacy text","body":"Legacy text"});
+        let legacy_payload = json!({"source_unit_id":2,"word_reading_sha256":les_core::sha256_hex(b"Legacy text"),"word_structure_sha256":les_core::sha256_hex(les_core::tool_execution::canonical_json(&legacy).unwrap().as_bytes())});
+        validate(&legacy_payload, &legacy).unwrap();
+        assert!(legacy["canonical"].is_null());
     }
 }

@@ -1,5 +1,6 @@
 """Opt-in compact transport retains real native source reading and revision guards."""
 import hashlib
+import os
 import pytest
 from tests.test_light_native_chat_turn import native_turn
 from tests.test_light_native_api import wait_for
@@ -9,12 +10,20 @@ from tests.test_light_native_api import wait_for
 def packet_trial(monkeypatch, request):
     monkeypatch.setenv('LES_EXPERIMENT_CONTEXT_ADMISSION', 'baseline-v1')
     monkeypatch.setenv('LES_EXPERIMENT_EVIDENCE_PACKET', 'compact-v1')
-    if 'saved' in request.node.name:
+    reading = request.node.callspec.params.get('reading', 'original')
+    monkeypatch.setenv('LES_EXPERIMENT_SAVED_READING', 'original-v1')
+    if reading in ('saved', 'legacy'):
         monkeypatch.setenv('LES_EXPERIMENT_SAVED_READING', 'canonical-v1')
+    if reading == 'saved':
+        parsers = os.getenv('LES_TEST_NATIVE_DOCUMENT_PARSERS')
+        if not parsers: pytest.skip('Provide the native Docling parser for canonical reuse')
+        monkeypatch.setenv('LES_NATIVE_DOCUMENT_PARSERS', parsers)
+    elif reading == 'legacy':
+        monkeypatch.delenv('LES_NATIVE_DOCUMENT_PARSERS', raising=False)
 
 
 @pytest.mark.parametrize('native_turn', ['rag-small'], indirect=True)
-@pytest.mark.parametrize('reading', ['original', 'saved'])
+@pytest.mark.parametrize('reading', ['original', 'saved', 'legacy'])
 def test_compact_discovery_reads_pinned_original_and_rejects_replacement(native_turn, tmp_path, reading):
     from docx import Document
     t = native_turn
@@ -50,6 +59,8 @@ def test_compact_discovery_reads_pinned_original_and_rejects_replacement(native_
             assert direct['passages'][0]['text'] == passage['text']
             assert direct['passages'][0]['canonical'] == passage['canonical']
             assert direct['passages'][0]['source']['ordinal'] == source['ordinal']
+        elif reading == 'legacy':
+            assert 'reading_origin' not in source, 'A verified legacy container must use the original reader'
     assert '17.25' in '\n'.join(texts) and '117.250' in '\n'.join(texts)
     assert not t.seen, 'No answer model may be used by source tools'
     replacement = Document(); replacement.add_paragraph('Changed original'); replacement.save(path)
