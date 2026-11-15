@@ -136,3 +136,10 @@ publication. These follow-ups require their own native/corpus acceptance.
 
 Acceptance status and measured limits belong in
 [the build 883 acceptance record](../acceptance/canonical-rag-883.md).
+
+Known admission gaps remain explicit: the final text selector does not yet
+measure the complete serialized evidence cost, so envelope admission can still
+remove selected units. Automatic Word hydration also still reparses/expands
+whole originals; canonical-unit reuse with a checked revision/unit identity is
+not implemented. The common structure removes the Markdown round trip, not
+these two remaining costs. See [the current backlog](../BACKLOG.md).

@@ -340,9 +340,72 @@ the failed first log is retained. This composes 112 passing native cases and
 one skip, not a claim that the first run was green. The Word replacement during
 completion also passed with the cause recorded in run history.
 
-The same 100-question comparisons are now repeating on both existing private
+The same 100-question comparisons repeated on both existing private
 indexes, without recompilation, reindexing, file filters or an answer model.
 The benchmark's four broad-overview cases are reported separately: the preceding
 v4 result delivered only **16.67%** of their expected sources. Their small sample
 and the aggregate improvement cannot establish dependable overview quality.
 No merge or working-installation update is accepted by these component checks.
+
+## Completed follow-up: small gains, quality gate remains open
+
+Both complete repeats finished against the unchanged old/v4 copies. The API
+was built from `3ea89d3`; `90194ca` changes only the test expectation and report.
+All 200 requests used the same frozen questions and 12,000-character budget.
+Gold source identities were read only by the evaluator after retrieval.
+
+| Measure | Old copy before | Old copy after | V4 copy before | V4 copy after |
+|---|---:|---:|---:|---:|
+| Needed-source delivery, 90 cases | 56.48% | 59.81% | 64.07% | 64.63% |
+| Reference-text coverage, 69 cases | 44.60% | 48.95% | 51.84% | 53.29% |
+| Observed p50 search latency | 8.61 s | 8.61 s | 8.93 s | 8.55 s |
+| Expected-page hit, 12 cases | 91.67% | 91.67% | 91.67% | 91.67% |
+| Expected-page coverage, 12 cases | 87.50% | 87.50% | 87.50% | 87.50% |
+| Excel row hit, 2 cases | 100% | 100% | 100% | 100% |
+| Overview-source delivery, 4 cases | 8.33% | 8.33% | 16.67% | 29.17% |
+
+The latest follow-up has no source/text losses relative to its immediately
+preceding version on either unchanged copy. Its v4 gains are only **0.56 source
+points / 1.45 text points**. Compared with the earlier 58.70% / 43.33% candidate,
+the complete v4 result is +5.93 / +9.96 points, with paired 95% bootstrap
+intervals [-1.85, 13.70] / [-0.84, 21.08]. These include zero. Four source cases
+and five reference-text cases still lose against that earlier candidate. The
+four overview questions remain insufficiently covered and too few to establish
+general overview quality. These scores measure delivery, not answer accuracy.
+
+Independent MCP verification checked **163 originals / 292 physical PDF pages**
+on the old copy and **173 / 221** on v4, with zero returned-source byte, page,
+digest or continuation errors. There were zero search-tool errors. The previous
+seven/eleven large-page overflows did not recur; one/two `WORKER_TIMEOUT` read
+failures remain visible. A successful partial context must not imply those
+originals were read or that no answer exists elsewhere.
+
+None of the new `physical_pdf_unit` units reached the selected passages in these
+100-question outputs. The real multi-column PDF fixture and unit tests verify
+their late text, byte bounds, Unicode jump and replacement guard; this is not
+claimed as independent derived-unit coverage on the user's corpus. The copied
+catalogs, all 638 v4 original-file hashes and frozen question hash are unchanged.
+
+The old/v4 cohorts delivered 477/453 passages, with at most 11,654/11,912 text
+characters, no exact same-source passage duplicates and at most 64/63 original
+read scopes. Owned-service peak working sets were **2.57 / 2.71 GiB**; minimum
+available system memory **8.05 / 8.35 GiB**. These exclude the external BGE
+process from owned-service peaks. Resource reserves were preserved. Services ran
+sequentially, without concurrent compilation or native-test execution during
+the query measurements; these are observed runs, not a statistically established
+latency improvement. Citation audits ran between timed searches.
+
+Two architectural limits are confirmed by code and runtime logs:
+
+1. Text admission does not account for the complete wire cost of typed cells and
+   source records. Later envelope admission can discard already selected text;
+   one observed request went from 13 chosen units to four transmitted units.
+   Folding duplicated metadata reduced losses but did not remove this mismatch.
+2. Automatic Word hydration still parses/expands complete originals even when
+   canonical reading units are published. Cold document conversions of 16 and
+   29 seconds were observed. Reuse must bind the original revision and unit hash,
+   preserve exact source jumps and retain a real original reader for legacy data.
+
+These remain [P1 backlog items](../BACKLOG.md), not implemented fast paths.
+Current full CI is pending. The PR remains draft, merge is blocked, and the
+working installation, model assignments and production index remain unchanged.
