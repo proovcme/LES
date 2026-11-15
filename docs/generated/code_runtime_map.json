@@ -12539,10 +12539,11 @@
     },
     {
       "inbound": [],
-      "lines": 145,
+      "lines": 164,
       "module": "tests.test_light_package",
       "outbound": [
-        "tools/build_light_package.py"
+        "tools/build_light_package.py",
+        "tools/publication_check.py"
       ],
       "path": "tests/test_light_package.py",
       "status": "TEST_OR_TOOL_ONLY",
@@ -14283,8 +14284,10 @@
       "windows_runtime_explicit": false
     },
     {
-      "inbound": [],
-      "lines": 156,
+      "inbound": [
+        "tests/test_light_package.py"
+      ],
+      "lines": 157,
       "module": "tools.publication_check",
       "outbound": [
         "tools/__init__.py"
@@ -16222,7 +16225,7 @@
     "runtime_support": 5,
     "test_or_tool_only": 285,
     "tracked_python_files": 730,
-    "tracked_python_lines": 174079
+    "tracked_python_lines": 174099
   },
   "warnings": []
 }

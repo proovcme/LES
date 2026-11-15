@@ -24,7 +24,8 @@ FORBIDDEN_PREFIXES = (
 FORBIDDEN_EXACT = {".env"}
 PRIVATE_DATA_SUFFIXES = {".db", ".sqlite", ".sqlite3", ".pst", ".ost", ".olm", ".pfx", ".key"}
 PERSONAL_PATH = re.compile(
-    r"(?i)\b[A-Z]:(?:[/\\]+)Users(?:[/\\]+)[\w.-]+(?:[/\\]+)"
+    r"(?i)(?:\b[A-Z]:(?:[/\\]+)Users(?:[/\\]+)[\w.-]+(?:[/\\]+)"
+    r"|(?<![\w])/(?:Users|home)/[\w.-]+/)"
 )
 REQUIRED_PUBLIC_FILES = (
     "README.md",

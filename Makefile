@@ -27,11 +27,13 @@ help:
 version-sync:
 	uv run python tools/sync_version_contract.py
 
-verify:
+verify-fast:
 	uv run python tools/sync_version_contract.py --check
 	uv run python tools/code_runtime_map.py --check
-	uv run python tools/native_api_contract.py --check
 	uv run python -m compileall -q $(PKGS)
+
+verify: verify-fast
+	uv run python tools/native_api_contract.py --check
 	uv run python -m pytest --basetemp=$(PYTEST_BASETEMP)/verify --collect-only -q $(CURRENT_TESTS)
 
 test:

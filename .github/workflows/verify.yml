@@ -6,12 +6,67 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
-concurrency:
-  group: les-rag-checks-${{ github.ref }}
-  cancel-in-progress: true
 jobs:
-  windows:
+  checks:
+    name: Format, static contracts and publication
     runs-on: windows-2022
+    timeout-minutes: 20
+    concurrency:
+      group: les-checks-${{ github.ref }}
+      cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+    env:
+      PYTHONUTF8: '1'
+      UV_FROZEN: '1'
+    steps:
+      - uses: actions/checkout@v4
+      # These checks do not compile dependencies or wait for native binaries.
+      - name: Check all Rust formatting first
+        run: |
+          foreach ($crate in 'core', 'runtime', 'api', 'parsers', 'vector', 'desktop/light/src-tauri') {
+            cargo fmt --manifest-path "$crate/Cargo.toml" --check
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          }
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.13.12'
+          enable-cache: true
+      - name: Prepare contract checks
+        run: |
+          choco install make --yes --no-progress
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          uv sync --frozen --extra mcp
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Verify contracts and publication
+        run: |
+          make verify-fast
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          make public-check
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+  frontend:
+    name: Frontend types and behavior
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    concurrency:
+      group: les-frontend-${{ github.ref }}
+      cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.14.0'
+          cache: npm
+          cache-dependency-path: desktop/light/frontend/package-lock.json
+      - run: npm ci --prefix desktop/light/frontend
+      - run: npm run check --prefix desktop/light/frontend
+      - run: npm test --prefix desktop/light/frontend
+  windows:
+    name: Native build and full behavior
+    needs: [checks, frontend]
+    runs-on: windows-2022
+    # A newer push must not repeatedly cancel an almost finished acceptance run.
+    concurrency:
+      group: les-native-${{ github.ref }}
+      cancel-in-progress: false
     # Preserve the complete behavior gate even on a cold runner.
     timeout-minutes: 150
     env:
@@ -104,17 +159,13 @@ jobs:
             native/parsers/parser-receipt.json
           if-no-files-found: error
           retention-days: 7
-      - name: Check static frontend
+      - name: Build frontend for integration tests
         run: |
           uv run python tools/build_light_frontend.py
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          npm.cmd test --prefix desktop/light/frontend
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Verify code and offline behavior
         run: |
           make verify
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          make public-check
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           make test
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
@@ -122,7 +173,11 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
   desktop:
     name: Windows desktop
+    needs: [checks, frontend]
     runs-on: windows-2022
+    concurrency:
+      group: les-desktop-${{ github.ref }}
+      cancel-in-progress: false
     timeout-minutes: 45
     env:
       CARGO_INCREMENTAL: '0'
