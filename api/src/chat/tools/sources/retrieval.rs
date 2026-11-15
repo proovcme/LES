@@ -379,7 +379,7 @@ async fn search_with_navigation(
             let next = offset + points.len();
             reply["result"]["offset"] = json!(offset);
             reply["result"]["total_candidates"] = json!(total);
-            reply["result"]["next_offset"] = if next < total { json!(next) } else { Value::Null };
+            reply["result"]["next_offset"] = if navigation && next < total { json!(next) } else { Value::Null };
             let mut seen=std::collections::HashSet::new();
             reply["result"]["navigation_hints"]=json!(result["hierarchy_candidates"].as_array().into_iter().flatten()
                 .filter(|p|seen.insert(json!([p["payload"]["dataset_id"],p["payload"]["file_name"],p["payload"]["parent_id"]]).to_string()))

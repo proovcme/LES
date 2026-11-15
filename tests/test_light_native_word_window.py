@@ -74,7 +74,7 @@ def test_word_window_mcp_keeps_complete_rows_original_positions_and_revision_gua
     envelope=reply['result']['structuredContent'];value=envelope['result'];plan=value['read_plan']['word']
     assert plan['mode']=='section-v1' and plan['matched_units']>0
     assert plan['retained_units']<plan['original_units']/2 and plan['omitted_units']>0
-    assert value['coverage']=='bounded'
+    assert value['coverage']=='bounded' and value['next_offset'] is None
     passages=value['passages'];sources=envelope['sources']
     table=next((p for p in passages if (p.get('canonical') or {}).get('kind')=='table'
         and 'PANEL-Z17' in p['text']),None)
