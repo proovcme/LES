@@ -20,6 +20,42 @@ pub(super) struct Evidence {
 mod tests {
     use super::*;
     #[test]
+    fn ready_origins_update_prefetch_without_repeating_body_or_losing_chat_pins() {
+        let source = json!({"doc_id":"first","doc_name":"First.pdf","dataset_id":"scope",
+            "source_sha256":"a".repeat(64),"page":1,"qdrant_point_id":"point"});
+        let mut reply = json!({"tool":"search_sources","status":"ok","operation":"indexed_sections",
+            "sources":[source],"result":{"index_revision":"r",
+                "read_receipt":{"schema":"les.indexed-read.v1","index_revision":"r","point_ids":["point"]},
+                "passages":[{"text":"Exact rating 17.25 kW","source":source}]}});
+        let mut evidence = Evidence::new(true);
+        evidence.add(&reply);
+        reply["sources"][0]["prepared_evidence_origin"] = json!(true);
+        reply["sources"][0]["equivalent_sources"] = json!([{"doc_id":"second","doc_name":"Second.docx",
+            "dataset_id":"scope","source_sha256":"b".repeat(64),"ordinal":17,"read_offset":21,
+            "view_sha256":"c".repeat(64),"evidence_kind":"physical_word_section"}]);
+        reply["result"]["passages"][0]["source"] = reply["sources"][0].clone();
+        evidence.add(&reply);
+        assert_eq!(evidence.sources.len(), 1);
+        assert_eq!(evidence.initial.len(), 1);
+        let block = &evidence.initial[0].1;
+        let text = Evidence::text(block);
+        assert_eq!(text.matches("Exact rating 17.25 kW").count(), 1);
+        for expected in [
+            "Second.docx",
+            "second",
+            &"b".repeat(64),
+            &"c".repeat(64),
+            "\"read_offset\":21",
+        ] {
+            assert!(text.contains(expected), "{expected}");
+        }
+        assert_eq!(
+            &text[block["body_offset"].as_u64().unwrap() as usize..],
+            "Exact rating 17.25 kW"
+        );
+        assert_eq!(evidence.sources[0]["equivalent_sources"][0]["ordinal"], 17);
+    }
+    #[test]
     fn compact_packet_admits_identical_blocks_and_citations_in_the_main_chat() {
         let source = json!({"doc_id":"d","dataset_id":"ds","doc_name":"Book.pdf","source_sha256":"a".repeat(64),"page":2,"evidence_kind":"physical_pdf_page"});
         let raw = json!({"tool":"search_sources","status":"ok","result":{"passages":[{"text":"Exact quantity 17.25 kW","source":source}]},"sources":[source]});
@@ -459,6 +495,40 @@ impl Evidence {
         if let Some(count) = source["unread_visual_count"].as_u64().filter(|n| *n > 0) {
             note.push_str(&format!("Объектов без распознанного текста: {count}. Их содержимое не подтверждено этой выдержкой.\n"));
         }
+        if source["prepared_evidence_origin"] == true {
+            if let Some(origins) = source["equivalent_sources"]
+                .as_array()
+                .filter(|v| !v.is_empty())
+            {
+                let identities = origins
+                    .iter()
+                    .map(|origin| {
+                        let fields = [
+                            "doc_id",
+                            "doc_name",
+                            "dataset_id",
+                            "source_sha256",
+                            "page",
+                            "ordinal",
+                            "view_sha256",
+                            "read_offset",
+                            "offset",
+                            "sheet_name",
+                            "row",
+                            "evidence_kind",
+                        ]
+                        .into_iter()
+                        .filter(|key| !origin[*key].is_null())
+                        .map(|key| (key.to_owned(), origin[key].clone()))
+                        .collect::<serde_json::Map<_, _>>();
+                        Value::Object(fields)
+                    })
+                    .collect::<Vec<_>>();
+                note.push_str("Тот же текст есть в других оригиналах. Это отдельные документы/редакции, а не один объект; не объединяй их количества. Для проверки конкретного оригинала используй его идентификатор и хеш:\n");
+                note.push_str(&json!({"same_text_origins":identities}).to_string());
+                note.push('\n');
+            }
+        }
         let identity: serde_json::Map<_, _> = [
             "doc_id",
             "dataset_id",
@@ -704,6 +774,23 @@ impl Evidence {
                 .iter()
                 .position(|s| s["native_identity"] == key)
             {
+                if source["prepared_evidence_origin"] == true {
+                    for field in ["index", "native_identity", "label", "header"] {
+                        source[field] = self.sources[index][field].clone();
+                    }
+                    Self::page_metadata(&mut source, result);
+                    let block = Self::block(&source, text, &passage["canonical"]);
+                    self.sources[index] = source;
+                    self.initial.retain(|(i, _)| *i != index + 1);
+                    self.retained.retain(|(i, _)| *i != index + 1);
+                    self.blocks.retain(|b| b["source_index"] != index + 1);
+                    if initial {
+                        self.initial.push((index + 1, block));
+                    } else {
+                        self.blocks.push(block);
+                    }
+                    continue;
+                }
                 Self::page_metadata(&mut self.sources[index], result);
                 if !initial && result["tool"] != "document_review" {
                     self.initial.retain(|(i, _)| *i != index + 1);

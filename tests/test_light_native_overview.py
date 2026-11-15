@@ -66,7 +66,10 @@ def test_ready_overview_shares_pdf_text_but_revalidates_every_original(native_tu
     dataset=t.client.post('/api/rag/datasets',json={'name':'Ready evidence sources'}).raise_for_status().json()['id']
     job=t.client.post('/api/rag/index-external',json={'path':str(folder),'dataset_id':dataset,'background':True}).raise_for_status().json()['intake_job_id']
     wait_for(lambda:t.client.get('/api/light/intake',params={'id':job}).json().get('status')=='completed',timeout=60)
-    docs=t.client.get('/api/rag/documents',params={'dataset_id':dataset}).raise_for_status().json()['documents']
+    import sqlite3
+    with sqlite3.connect(t.database) as db:
+        db.row_factory=sqlite3.Row
+        docs=[dict(row) for row in db.execute('SELECT id,file_name,file_hash FROM documents WHERE dataset_id=?',(dataset,))]
     first=next(d for d in docs if d['file_name'].endswith('a.pdf'))
     raw=t.client.post('/api/rag/sources/call',json={'tool':'read_pdf_source','args':{
         'doc_id':first['id'],'source_sha256':hashlib.sha256((folder/'a.pdf').read_bytes()).hexdigest(),'page':1,'max_chars':12000}}).raise_for_status().json()['result']['text']
@@ -77,7 +80,9 @@ def test_ready_overview_shares_pdf_text_but_revalidates_every_original(native_tu
         # Only one requests physical hydration, reproducing mixed old/new views.
         client.set_payload(collection,payload={'text':raw},points=scope,wait=True)
         client.delete_payload(collection,keys=['pdf_page_view','pdf_page_view_schema','pdf_page_view_sha256'],points=scope,wait=True)
-        client.set_payload(collection,payload={'table_projection_warning':'PDF_TABLE_SOURCE_MISMATCH'},points=models.Filter(must=scope.must+[
+        # Request a physical reread through the legacy scan locator. The real
+        # reader can use the clean PDF text; no differing table warning is added.
+        client.set_payload(collection,payload={'pdf_requires_ocr':True},points=models.Filter(must=scope.must+[
             models.FieldCondition(key='file_name',match=models.MatchValue(value=first['file_name']))]),wait=True)
     args={'q':'Equipment Pump capacity overview','dataset_ids':[dataset],'view':'overview','max_chars':12000}
     answer=t.client.post('/api/rag/sources/call',json={'tool':'search_sources','args':args}).raise_for_status().json()

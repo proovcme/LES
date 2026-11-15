@@ -336,3 +336,9 @@ Every delivered prepared origin is checked against its original bytes before
 API/MCP return and again after chat generation. Ordinary precision selection,
 explicit source-stream cursors and working LES remain unchanged. This isolates
 ready packaging on the existing development cohort, not the whole V0–V4 matrix.
+
+The chat retains the other origins in the admitted block even when its primary
+source was already prefetched; it replaces that block rather than repeating its
+body. The source panel exposes the same origins with independent revision/page
+and cursor pins, including a return to the previous original. This is functional
+MCP/chat/UI parity for shared bodies, not an unrelated shell redesign.

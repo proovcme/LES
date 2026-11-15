@@ -1,14 +1,15 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { ApiError, errorMessage, request } from '../lib/api';
-  import type { Source } from '../lib/contracts';
+  import type { Source, SourceOrigin } from '../lib/contracts';
   import { sourcePage, sourcePlace, sourceDigest, sourceReadStart } from '../lib/contracts';
   import Modal from './Modal.svelte';
   import Icon from './Icon.svelte';
   import SourceReader from './SourceReader.svelte';
   import SourceFigures from './SourceFigures.svelte';
   import EngineeringSource from './EngineeringSource.svelte';
-  let { source, close }: { source: Source; close: () => void } = $props();
+  let { source, close, selectOrigin }: { source: Source; close: () => void;
+    selectOrigin?: (value: SourceOrigin) => void } = $props();
   let loading = $state(true); let error = $state(''); let documentError = $state('');
   let doc = $state<{ id: string; file_name: string } | null>(null);
   let preview = $state(false); let preparing = $state(false);
@@ -79,6 +80,19 @@
   <p class="eyebrow">Источник {source.index}{sourcePlace(source)}</p>
   {#if source.locator?.section_heading || source.section_heading}<p>{source.locator?.section_heading || source.section_heading}</p>{/if}
   {#if source.quote || source.snippet}<blockquote class="evidence">{source.quote || source.snippet}</blockquote>{:else}<p class="muted">У этого источника не сохранена цитата. Проверьте оригинал.</p>{/if}
+  {#if selectOrigin && source.equivalent_sources?.length}
+    <details>
+      <summary>Тот же текст в других оригиналах ({source.equivalent_sources.length})</summary>
+      <p class="muted">У каждого оригинала своя редакция и место в документе.</p>
+      <div class="source-actions">
+        {#each source.equivalent_sources as origin}
+          <button class="quiet" title={origin.doc_name} onclick={() => selectOrigin?.(origin)}>
+            <Icon name="file" />{origin.doc_name?.split(/[\\/]/).pop() || 'Документ'}{sourcePlace({ ...origin, index: source.index })}
+          </button>
+        {/each}
+      </div>
+    </details>
+  {/if}
   {#if loading}<p role="status">Проверяю оригинал…</p>{/if}
   {#if error}<p class="error" role="alert">{error}</p>{/if}
   {#if source.model_locator}<EngineeringSource target={source.model_locator} />{/if}

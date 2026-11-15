@@ -17,8 +17,10 @@ export interface Source {
   ordinal?: number; view_sha256?: string; evidence_kind?: string; section_heading?: string;
   source_sha256?: string; read_offset?: number; offset?: number;
   source_page?: string | number; page?: string | number; page_number?: string | number;
+  sheet_name?: string; row?: number; equivalent_sources?: SourceOrigin[];
   locator?: { sheet?: string; row?: number; cell?: string; anchor?: string; source_sha256?: string; section_heading?: string };
 }
+export type SourceOrigin = Omit<Source, 'index'>;
 export interface Message {
   role: 'user' | 'ai'; text: string; srcs?: string[]; crag?: string;
   history_id?: number;
@@ -66,6 +68,17 @@ export const sourcePage = (source: Source): number => {
   return Number.isInteger(value) && value > 0 ? value : 1;
 };
 export const sourceDigest = (source: Source): string | undefined => source.locator?.source_sha256 ?? source.source_sha256;
+export function sourceOrigin(current: Source, selected: SourceOrigin): Source {
+  const { index, equivalent_sources, ...original } = current;
+  const key = (s: SourceOrigin) => JSON.stringify([s.doc_id, s.dataset_id, s.source_sha256,
+    s.locator, s.page, s.ordinal, s.read_offset, s.offset, s.view_sha256]);
+  const seen = new Set([key(selected)]);
+  const alternatives = [original, ...(equivalent_sources ?? [])].filter(s => {
+    const id = key(s); if (seen.has(id)) return false; seen.add(id); return true;
+  });
+  return { ...selected, index, quote: current.quote, snippet: current.snippet,
+    equivalent_sources: alternatives };
+}
 export function sourceReadStart(source: Source): number {
   const offset = source.evidence_kind === 'physical_word_section' ? (source.read_offset ?? source.ordinal)
     : source.evidence_kind === 'physical_pdf_unit' ? source.read_offset
@@ -75,7 +88,7 @@ export function sourceReadStart(source: Source): number {
 }
 export function sourcePlace(source: Source): string {
   if (source.model_locator) return ` · ID ${source.model_locator.native_id}`;
-  const { sheet, row, cell, anchor } = source.locator ?? {};
+  const { sheet = source.sheet_name, row = source.row, cell, anchor } = source.locator ?? {};
   if (sheet && row) return ` · ${sheet} · ${cell || `строка ${row}`}`;
   const paragraph = anchor?.match(/^para(\d+)$/);
   if (paragraph) return ` · абзац ${Number(paragraph[1]) + 1}`;

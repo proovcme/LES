@@ -1,11 +1,33 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import SourcePanel from './SourcePanel.svelte';
+import { sourceOrigin, type Source } from '../lib/contracts';
 
 let component: ReturnType<typeof mount> | undefined;
 beforeEach(() => { HTMLDialogElement.prototype.showModal = function () { this.open = true; };
   HTMLDialogElement.prototype.close = function () { this.open = false; this.dispatchEvent(new Event('close')); }; });
 afterEach(async () => { if (component) await unmount(component); document.body.replaceChildren(); vi.unstubAllGlobals(); });
+
+it('offers each shared original with its own page, revision and reading cursor', async () => {
+  const alias = { doc_id: 'other', dataset_id: 'scope', doc_name: 'Other.docx',
+    source_sha256: 'b'.repeat(64), evidence_kind: 'physical_word_section', ordinal: 17,
+    read_offset: 21, view_sha256: 'c'.repeat(64) };
+  const first: Source = { index: 1, doc_id: 'first', doc_name: 'First.pdf', page: 7,
+    dataset_id: 'scope', source_sha256: 'a'.repeat(64), quote: 'Exact shared text', equivalent_sources: [alias] };
+  const selectOrigin = vi.fn();
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ document: { id: 'first', file_name: 'First.pdf' } }))));
+  component = mount(SourcePanel, { target: document.body, props: { source: first, close: vi.fn(), selectOrigin } });
+  await vi.waitFor(() => { flushSync(); expect(document.body.textContent).toContain('Тот же текст в других оригиналах (1)'); });
+  const details = document.querySelector('details')!; details.open = true;
+  [...details.querySelectorAll('button')].find(b => b.textContent?.includes('Other.docx'))!.click();
+  expect(selectOrigin).toHaveBeenCalledWith(alias);
+  const selected = sourceOrigin(first, alias);
+  expect(selected).toMatchObject({ ...alias, index: 1, quote: 'Exact shared text' });
+  expect(selected.equivalent_sources).toHaveLength(1);
+  expect(selected.equivalent_sources![0].doc_id).toBe('first');
+  const returned = sourceOrigin(selected, selected.equivalent_sources![0]);
+  expect(returned).toMatchObject({ doc_id: 'first', page: 7, source_sha256: 'a'.repeat(64), index: 1 });
+});
 
 it('passes a physical Word citation to the shared reader without losing its unit or revision', async () => {
   const close = vi.fn();

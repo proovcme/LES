@@ -2,6 +2,7 @@
   import { onMount, tick } from 'svelte';
   import { errorMessage } from './lib/api';
   import type { Source } from './lib/contracts';
+  import { sourceOrigin as pickSourceOrigin, sourceReadStart, sourcePage } from './lib/contracts';
   import { Workspace } from './lib/workspace.svelte';
   import { connectNativeClose } from './lib/native-close';
   import Icon from './components/Icon.svelte';
@@ -75,6 +76,9 @@
     });
   }
   function openSource(value: Source) { sourceTrigger = document.activeElement as HTMLElement; source = value; }
+  function openOrigin(value: import('./lib/contracts').SourceOrigin) {
+    if (source) source = pickSourceOrigin(source, value);
+  }
   async function closeSource() { source = null; await tick(); (sourceTrigger?.isConnected ? sourceTrigger : composer)?.focus(); }
   function keyboard(event: KeyboardEvent) {
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && !event.ctrlKey && !event.altKey && !event.metaKey) {
@@ -241,7 +245,10 @@
     <div class="modal-footer"><button onclick={() => modal = null}>Готово</button></div>
   </Modal>
 {/if}
-{#if source}{#key source.index}<SourcePanel {source} close={closeSource} />{/key}{/if}
+{#if source}{#key `${source.index}:${source.doc_id}:${source.source_sha256}:${source.view_sha256}:${sourceReadStart(source)}:${sourcePage(source)}`}
+  {@const selected = source}
+  <SourcePanel source={selected} close={() => { if (source === selected) void closeSource(); }} selectOrigin={openOrigin} />
+{/key}{/if}
 {#if workspace.draftConflict}
   <Modal title="Два черновика одного диалога" close={() => workspace.draftConflict = null}>
     <p>В другом окне сохранён другой текст. Выберите, какую версию оставить.</p>
