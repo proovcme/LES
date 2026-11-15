@@ -225,3 +225,31 @@ unrecognized document and a strict standalone OCR request still fail. Other OCR
 errors are not hidden. This boundary is covered by a three-page regression;
 the real corpus repeat remains required. This is not a claim that all scans or
 figures were successfully recognized.
+
+## Current source and copy gates
+
+The previous follow-up's complete GitHub run passed: 2,201 Python scenarios,
+22 skips and 18 subtests, together with core 169, Edge API 117 and the UI checks.
+This does not validate subsequent changes. The current Rust source separately
+passed core 169 and Edge API 119 unit tests. Its optimized private API build
+completed in 341.75 seconds with peak build-child working set 1.14 GiB and
+minimum available system memory 10.25 GiB. Build memory is not runtime memory.
+A full debug executable link was stopped at the 4 GiB reserve; the reserve was
+not lowered and user applications were not closed.
+
+The first targeted native repeat passed 109 cases, skipped one and failed one
+assertion. Inspection of its saved real API response showed the selected prose
+and exact quote correctly bound to source 3, while the assertion required a quote
+on source 1. The corrected test follows the receipt's source index, checks its
+quote and answer citation, and rejects attaching that quote to other sources.
+It does not impose retrieval order or copy the quote across sources. A complete
+targeted repeat and the unchanged 100-question MCP repeat are in progress.
+
+The first new-generation import was deliberately interrupted after 630 ready
+documents, four errors and four pending documents. Its original state, reasons
+and job history are retained. The next step resumes the same private generation
+and retries both whole registered roots through the public indexing API. Ready
+documents must retain their hashes and chunk counts; originals remain read-only.
+Neither this controlled interruption nor the pending repeat is claimed as a
+successful publication-crash test. Full point checks, corpus measurements and
+current CI still block merge. The working installation remains 880.

@@ -60,7 +60,11 @@ def test_mixed_page_prose_can_be_selected_without_copying_an_unrelated_table(nat
     assert first in result['answer'] and 'Unrelated pump' not in result['answer'] and '42.75' not in result['answer']
     proof=result['artifact']['table_facts']['rows'][0]
     assert proof['kind']=='source_excerpt' and proof['paragraph_line']>0 and 'P' in proof['address']
-    assert result['source_map'][0]['quote']==proof['cells'][0]
+    # Retrieval order is independent of the model's selected evidence address.
+    selected=[s for s in result['source_map'] if s['index']==proof['source_index']]
+    assert len(selected)==1 and selected[0]['quote']==proof['cells'][0]
+    assert f"[Источник {proof['source_index']}]" in result['answer']
+    assert all('quote' not in s for s in result['source_map'] if s['index']!=proof['source_index'])
 
 
 @pytest.mark.parametrize('native_turn',['rag-small'],indirect=True)
