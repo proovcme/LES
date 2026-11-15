@@ -464,13 +464,14 @@ stopped. Source/copy checks are not an installer release or independent RAG
 answer-quality acceptance.
 
 
-## Bounded Word reading 892 (pending copy comparison)
+## Bounded Word reading 892 (copy comparison completed)
 
-Explicit temporary copy control `LES_EXPERIMENT_WORD_READING=full-v1|section-v1`;
-ordinary launches retain full-v1 until acceptance. The automatic Word hydrator
-now resolves each indexed unit by ordinal plus text SHA, with unique literal
+The temporary full/section control was compared over 216 actual MCP calls, then
+removed from the current candidate: automatic Word reading is now bounded.
+Working LES remains 880. The automatic Word hydrator resolves each indexed unit
+by ordinal plus text SHA, with unique literal
 alignment for legacy anchors. Unresolved/ambiguous anchors are explicit unread
-failures in section-v1, never a hidden whole-document fallback.
+failures, never a hidden whole-document fallback.
 
 Section-v1 retains every resolved retrieval anchor, its closest heading section
 and descendants, and adjacent original reading units under the existing per-read
@@ -478,8 +479,9 @@ character allowance. Long sections expand contiguously around anchors; an
 oversized atomic row remains intact and a blocked direction does not jump across
 it. All already carried headings/table headers, cells/formulas and original
 ordinals/stream offsets remain unchanged. Explicit read_source pagination is
-unchanged. Cold format conversion still builds the structural view once; this
-change bounds automatic evidence materialization, not initial ZIP/XML parsing.
+unchanged. Format conversion still builds the whole structural view and may
+repeat after executable changes or bounded-cache eviction/entry-size rejection.
+This change bounds automatic evidence materialization, not initial ZIP/XML parsing.
 
 Each unit now keeps its actual matched/nearest retrieval-anchor ID instead of
 borrowing the first hit's ID for every paragraph. This lineage fix and explicit
@@ -487,10 +489,16 @@ original stream offsets are common to both comparison arms. The read-plan
 summary distinguishes original, retained and unresolved units. Partial windows
 are bounded evidence, never a claim to have read the whole document.
 
-Required comparison: same copy/BGE/index, ready admission held fixed; first two
-retrieval/read-plan fingerprints equal; all matched physical anchor units retained;
-source/quote/page/row delivery and exact MCP rereading checked without Qwen or
-expected-file filters. No outcome is claimed before completing that comparison.
+Same copy/BGE/index, ready admission held fixed: all 216 paired checks of the
+first two retrieval/read-plan fingerprints are equal; all 1,883 matched anchor
+occurrences remain. Word units shrink 385,622 → 35,747 across 108 searches per
+arm. Source/quote delivery changes 71.30%/60.54% → 72.41%/61.99%; the four reused
+overviews remain at 29.17%. One short TOC-reference regression is retained and
+explained in the [full protocol](../acceptance/bounded-word-reading-892.md).
+Page/row outcomes and exact original-reader checks are preserved. This is not
+independent answer-quality acceptance. No Qwen or expected-file filters were used.
+Overall p50 is essentially unchanged, and two cold Word overviews became slower;
+do not claim an end-to-end speed improvement from the smaller pool.
 
 
 The first expanded 108-case attempt stopped on a literal context of 12,002
