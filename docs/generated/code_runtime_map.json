@@ -11672,7 +11672,7 @@
     },
     {
       "inbound": [],
-      "lines": 52,
+      "lines": 55,
       "module": "tests.test_light_native_context_control",
       "outbound": [
         "tests/test_light_native_api.py",
@@ -16180,7 +16180,7 @@
     "runtime_support": 5,
     "test_or_tool_only": 282,
     "tracked_python_files": 727,
-    "tracked_python_lines": 173892
+    "tracked_python_lines": 173895
   },
   "warnings": []
 }

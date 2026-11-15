@@ -40,7 +40,10 @@ def test_ranked_context_keeps_pinned_sources_and_an_unbroken_word_stream(native_
         ordinals.extend(p['source']['ordinal'] for p in passages);texts.extend(p['text'] for p in passages)
         if read['next_offset'] is None:break
         assert read['next_offset']==args['offset']+len(passages)
-        args.update(offset=read['next_offset'],view_sha256=view,index_revision=read['index_revision'])
+        args.update(offset=read['next_offset'],view_sha256=view)
+        # Original Word views can be read without an index. A null revision
+        # in that response is not a valid string selector in the next request.
+        if read.get('index_revision'):args['index_revision']=read['index_revision']
     else:pytest.fail('The original stream did not reach its end')
     assert ordinals==list(range(len(ordinals)))
     for n in range(12):assert sum(text.count(f'PART_{n:02}') for text in texts)==1
