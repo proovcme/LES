@@ -491,3 +491,13 @@ Required comparison: same copy/BGE/index, ready admission held fixed; first two
 retrieval/read-plan fingerprints equal; all matched physical anchor units retained;
 source/quote/page/row delivery and exact MCP rereading checked without Qwen or
 expected-file filters. No outcome is claimed before completing that comparison.
+
+
+The first expanded 108-case attempt stopped on a literal context of 12,002
+characters under a 12,000-character request. This was a real final-admission gap:
+the selector estimates normalized search-unit text, while the compact context
+admission checked only the wire envelope. The incomplete attempt is retained and
+not scored. Both reader arms now use a common literal-text final context guard,
+for compact and ordinary JSON snapshots. Whole non-fitting units are skipped;
+explicit read_source streams retain their existing contiguous cursor behavior.
+This common guard change must be declared when comparing with earlier builds.

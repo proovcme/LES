@@ -96,8 +96,10 @@ pub(crate) fn fit_envelope_budget(
     fit_budget(reply, max_chars, max_items, None, false)
 }
 
-pub(super) fn fit_compact_context(reply: &mut Value) -> Result<()> {
-    fit_budget(reply, 22500, 240, None, true)
+pub(super) fn fit_context(reply: &mut Value, text_budget: usize, compact: bool) -> Result<()> {
+    // A context snapshot has no source-stream cursor. Measure its literal
+    // reading text here, not the selector's normalized semantic projection.
+    fit_budget(reply, 22500, 240, Some(text_budget), compact)
 }
 
 pub(super) fn fit_overview_context(reply: &mut Value, text_budget: usize) -> Result<()> {
@@ -565,6 +567,30 @@ fn compact_read_failures(reply: &mut Value) {
 mod tests {
     use super::*;
     #[test]
+    fn context_admission_counts_literal_text_and_skips_whole_nonfitting_units() {
+        use super::super::ready::tests::{origin, reply};
+        let large = "a".repeat(8000);
+        let next = "b".repeat(6000);
+        let small = "c".repeat(1000);
+        for compact in [false, true] {
+            let mut value = reply(vec![
+                (&large, origin("a", 'a', 1)),
+                (&next, origin("b", 'b', 2)),
+                (&small, origin("c", 'c', 3)),
+            ]);
+            fit_context(&mut value, 12000, compact).unwrap();
+            let passages = value["result"]["passages"].as_array().unwrap();
+            assert_eq!(passages.len(), 2);
+            assert_eq!(passages[0]["text"], large);
+            assert_eq!(passages[1]["text"], small);
+            assert_eq!(
+                value["result"]["read_receipt"]["point_ids"],
+                json!(["point-a", "point-c"])
+            );
+            assert_eq!(value["result"]["coverage"], "bounded");
+        }
+    }
+    #[test]
     fn compact_cost_keeps_more_selected_proof_without_reordering_or_losing_sources() {
         let sources: Vec<_> = (0..6).map(|page|json!({"doc_id":"d","dataset_id":"ds","doc_name":"folder/".repeat(120),"source_sha256":"a".repeat(64),"page":page+1,"url":format!("/original#page={}",page+1)})).collect();
         let rows:Vec<_>=sources.iter().enumerate().map(|(i,s)|json!({"text":format!("Position {i}: 17.25 kW {}","proof ".repeat(140)),"canonical":{"kind":"paragraph"},"source":s})).collect();
@@ -572,7 +598,7 @@ mod tests {
         let mut baseline = original.clone();
         fit_envelope_budget(&mut baseline, 22500, 240).unwrap();
         let mut candidate = original.clone();
-        fit_compact_context(&mut candidate).unwrap();
+        fit_context(&mut candidate, 12000, true).unwrap();
         let packed = super::super::super::packet::encode(&candidate).unwrap();
         assert!(canonical_chars(&packed) <= 22500);
         assert!(

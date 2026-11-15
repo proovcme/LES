@@ -397,10 +397,12 @@ async fn search_with_navigation(
                     super::verification::physical(context.clone(), &reply["sources"]).await?;
                 }
             } else if compact {
-                envelope::fit_compact_context(&mut reply)?;
+                envelope::fit_context(&mut reply,max_chars,true)?;
             } else if control==trial::Control::RrfWire {
                 envelope::fit_ranked_context(&mut reply,max_chars)?;
-            } else if navigation || args["view"] == "context" {
+            } else if args["view"] == "context" {
+                envelope::fit_context(&mut reply,max_chars,false)?;
+            } else if navigation {
                 fit_envelope_budget(&mut reply, 22500, 240)?;
             }
             control.reply(query,&reply);
