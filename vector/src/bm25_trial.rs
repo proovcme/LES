@@ -7,6 +7,7 @@ use std::{fs, path::Path};
 const FIELD: &str = "_les_bm25_tokens_trial_v1";
 const INPUT: &str = "_les_bm25_input_trial_v1";
 const MARKER: &str = "edge-bm25-trial.json";
+const DIGEST: &str = "les.edge-points.sorted-json.v1";
 
 pub(crate) fn mode(request: &Value) -> Result<Option<&'static str>> {
     let env = std::env::var("LES_EXPERIMENT_EDGE_BM25").unwrap_or_default();
@@ -34,6 +35,11 @@ impl Shard {
         }
         if marker["revision"] != self.generation()? {
             return Err("EDGE_BM25_TRIAL_REVISION_CHANGED");
+        }
+        // An unversioned digest used SDK map iteration order. Never silently
+        // reinterpret an earlier checksum as a canonical one.
+        if marker.get("source_points_sha256").is_some() && marker["digest_schema"] != DIGEST {
+            return Err("EDGE_BM25_TRIAL_DIGEST_SCHEMA_INVALID");
         }
         if ready && marker["phase"] != "ready" {
             return Err("EDGE_BM25_TRIAL_NOT_READY");
@@ -65,6 +71,9 @@ impl Shard {
                     p.remove(FIELD);
                     p.remove(INPUT);
                 }
+                // SDK named-vector/payload maps do not promise iteration order.
+                // Sort objects recursively, retaining arrays and exact numbers.
+                point.sort_all_objects();
                 digest.update(serde_json::to_vec(&point).map_err(|_| "EDGE_RESPONSE_INVALID")?);
                 digest.update(b"\n");
                 count += 1;
@@ -78,7 +87,9 @@ impl Shard {
             }
             offset = next;
         }
-        Ok(json!({"points":count,"source_points_sha256":format!("{:x}",digest.finalize())}))
+        Ok(
+            json!({"digest_schema":DIGEST,"points":count,"source_points_sha256":format!("{:x}",digest.finalize())}),
+        )
     }
     pub(crate) fn prepare_bm25_trial(&self) -> Result<Value> {
         let mut marker = self.bm25_trial_marker(false)?;
@@ -92,6 +103,7 @@ impl Shard {
             return Err("EDGE_BM25_TRIAL_SOURCE_CHANGED");
         }
         marker["phase"] = json!("preparing");
+        marker["digest_schema"] = json!(DIGEST);
         marker["source_points_sha256"] = before["source_points_sha256"].clone();
         self.save_bm25_trial_marker(&marker)?;
         let mut offset = Value::Null;

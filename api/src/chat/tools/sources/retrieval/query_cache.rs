@@ -54,6 +54,7 @@ pub(super) async fn load(context: Arc<Context>, question: String) -> Result<Opti
         let marker:Value=serde_json::from_slice(&fs::read(edge.join("edge-bm25-trial.json")).map_err(|_|"EDGE_BM25_COPY_REQUIRED")?)
             .map_err(|_|"EDGE_BM25_COPY_INVALID")?;
         if marker["schema"]!="les.edge-bm25-trial.v1" || marker["phase"]!="ready"
+            || marker["digest_schema"]!="les.edge-points.sorted-json.v1"
             || fs::canonicalize(marker["root"].as_str().ok_or("EDGE_BM25_COPY_INVALID")?).map_err(|_|"EDGE_BM25_COPY_INVALID")?
                 !=fs::canonicalize(edge).map_err(|_|"EDGE_BM25_COPY_INVALID")? {
             return Err("EDGE_BM25_COPY_INVALID".into());
