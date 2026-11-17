@@ -7,6 +7,7 @@ mod matching;
 mod packing;
 mod pagination;
 mod physical;
+mod query_cache;
 mod ready;
 mod trial;
 mod views;
@@ -243,10 +244,15 @@ async fn search_with_navigation(
         return super::catalog::search(context, turn, &args, &datasets).await;
     }
     let remote_scope = Some(turn.scope["resolved_dataset_ids"].clone());
+    let cached = query_cache::load(context.clone(), query.to_owned()).await?;
     let (config, revision, prefix, allow_remote) =
-        scoped_configuration(context.clone(), true, remote_scope).await?;
-    let raw=crate::embedding_inference::execute(context.clone(),&json!({"schema":"les.embedding-inference.v1","revision_id":revision,"inputs":[format!("{prefix}{query}")],
-        "dimension":config["embedding"]["vector_size"].as_str().and_then(|s|s.parse::<u64>().ok()),"timeout_seconds":120,"allow_remote":allow_remote,"response_limit":1048576,"release_after":true})).await?;
+        scoped_configuration(context.clone(), cached.is_none(), remote_scope).await?;
+    let raw = if let Some(raw) = cached {
+        raw
+    } else {
+        crate::embedding_inference::execute(context.clone(),&json!({"schema":"les.embedding-inference.v1","revision_id":revision,"inputs":[format!("{prefix}{query}")],
+        "dimension":config["embedding"]["vector_size"].as_str().and_then(|s|s.parse::<u64>().ok()),"timeout_seconds":120,"allow_remote":allow_remote,"response_limit":1048576,"release_after":true})).await?
+    };
     let embedding_ms = started.elapsed().as_millis();
     let end = raw
         .iter()

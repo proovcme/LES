@@ -1,13 +1,13 @@
 name: Edge BM25 copy candidate
 on:
   pull_request:
-    paths: ['vector/**', '.github/workflows/edge-bm25-trial.yml']
+    paths: ['vector/**', 'api/**', '.github/workflows/edge-bm25-trial.yml']
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
   group: edge-bm25-copy-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 jobs:
   native:
     runs-on: windows-2022
