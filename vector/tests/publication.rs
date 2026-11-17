@@ -67,7 +67,7 @@ fn native_bm25_trial_requires_a_copy_preserves_originals_and_rejects_partial_pub
     let prepared = shard.call("bm25_trial_prepare", &json!({})).unwrap();
     assert_eq!(prepared["phase"], "ready");
     assert_eq!(before, shard.call("bm25_trial_digest", &json!({})).unwrap());
-    for backend in ["sqlite-v1", "matched-v1", "raw-v1"] {
+    for backend in ["sqlite-v1", "matched-v1", "raw-v1", "context-v1"] {
         let mut q = query.clone();
         q["lexical_backend"] = json!(backend);
         assert_eq!(

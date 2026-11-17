@@ -51,7 +51,8 @@ impl Shard {
         let filter = query_filter(filters)?;
         let text = request["text"].as_str().ok_or("EDGE_QUERY_INVALID")?;
         let values = les_core::lexical::current(&[text.to_owned()])?;
-        let lexical = crate::bm25_trial::mode(request)? == Some("text")
+        let lexical = crate::bm25_trial::mode(request)?
+            .is_some_and(|field| field != "_les_bm25_tokens_trial_v1")
             || !values["documents"][0]["terms"]
                 .as_object()
                 .ok_or("CORE_LEXICAL_RESPONSE_INVALID")?

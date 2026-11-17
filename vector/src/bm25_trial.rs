@@ -5,6 +5,7 @@ use sha2::{Digest, Sha256};
 use std::{fs, path::Path};
 
 const FIELD: &str = "_les_bm25_tokens_trial_v1";
+const INPUT: &str = "_les_bm25_input_trial_v1";
 const MARKER: &str = "edge-bm25-trial.json";
 
 pub(crate) fn mode(request: &Value) -> Result<Option<&'static str>> {
@@ -12,6 +13,7 @@ pub(crate) fn mode(request: &Value) -> Result<Option<&'static str>> {
     match request["lexical_backend"].as_str().unwrap_or(&env) {
         "" | "sqlite-v1" => Ok(None),
         "matched-v1" => Ok(Some(FIELD)),
+        "context-v1" => Ok(Some(INPUT)),
         "raw-v1" => Ok(Some("text")),
         _ => Err("EDGE_BM25_TRIAL_MODE_INVALID"),
     }
@@ -61,6 +63,7 @@ impl Shard {
                     .remove("version");
                 if let Some(p) = point["payload"].as_object_mut() {
                     p.remove(FIELD);
+                    p.remove(INPUT);
                 }
                 digest.update(serde_json::to_vec(&point).map_err(|_| "EDGE_RESPONSE_INVALID")?);
                 digest.update(b"\n");
@@ -109,11 +112,15 @@ impl Shard {
                 })
                 .collect::<Vec<_>>();
             let lexical = les_core::lexical::current(&texts)?;
-            for (p, terms) in points.iter().zip(
-                lexical["documents"]
-                    .as_array()
-                    .ok_or("CORE_LEXICAL_RESPONSE_INVALID")?,
-            ) {
+            for ((p, terms), input) in points
+                .iter()
+                .zip(
+                    lexical["documents"]
+                        .as_array()
+                        .ok_or("CORE_LEXICAL_RESPONSE_INVALID")?,
+                )
+                .zip(&texts)
+            {
                 let mut text = String::new();
                 for (term, tf) in terms["terms"]
                     .as_object()
@@ -126,9 +133,10 @@ impl Shard {
                         text.push_str(term);
                     }
                 }
-                let operation =
-                    serde_json::from_value(json!({"points":[p["id"]],"payload":{FIELD:text}}))
-                        .map_err(|_| "EDGE_PAYLOAD_INVALID")?;
+                let operation = serde_json::from_value(
+                    json!({"points":[p["id"]],"payload":{FIELD:text,INPUT:input}}),
+                )
+                .map_err(|_| "EDGE_PAYLOAD_INVALID")?;
                 self.edge
                     .update(qdrant_edge::UpdateOperation::PayloadOperation(
                         qdrant_edge::PayloadOps::SetPayload(operation),
@@ -153,6 +161,11 @@ impl Shard {
             offset = next;
         }
         for (field, schema) in [
+            (
+                INPUT,
+                json!({"type":"text","tokenizer":"word","lowercase":true,"min_token_len":1,"memory":"cold","scoring":true,
+                "stemmer":{"type":"snowball","language":"russian"}}),
+            ),
             (
                 FIELD,
                 json!({"type":"text","tokenizer":"whitespace","lowercase":false,"min_token_len":1,"memory":"cold","scoring":true}),
