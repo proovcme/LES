@@ -49,6 +49,49 @@ fn setup(legacy: bool) -> (Fixture, PathBuf, Vec<Value>) {
     migration::import(&manifest, &target, |_| {}).unwrap();
     (Fixture(root), target, rows)
 }
+
+#[test]
+fn native_bm25_trial_requires_a_copy_preserves_originals_and_rejects_partial_publication() {
+    let (_fixture, target, _) = setup(false);
+    let shard = Shard::open(&target).unwrap();
+    shard.refresh_postings(true, |_| {}).unwrap();
+    let query = json!({"text":"кабелепровод", "lexical_backend":"matched-v1",
+        "filters":{"dataset_ids":["project"],"node_roles":["evidence"]},"limit":10});
+    assert_eq!(
+        shard.call("bm25_trial_search", &query).unwrap_err(),
+        "EDGE_BM25_COPY_REQUIRED"
+    );
+    fs::write(target.join("edge-bm25-trial.json"),json!({"schema":"les.edge-bm25-trial.v1",
+        "root":fs::canonicalize(&target).unwrap(),"collection":"docs","revision":shard.generation().unwrap(),"phase":"allowed"}).to_string()).unwrap();
+    let before = shard.call("bm25_trial_digest", &json!({})).unwrap();
+    let prepared = shard.call("bm25_trial_prepare", &json!({})).unwrap();
+    assert_eq!(prepared["phase"], "ready");
+    assert_eq!(before, shard.call("bm25_trial_digest", &json!({})).unwrap());
+    for backend in ["sqlite-v1", "matched-v1", "raw-v1"] {
+        let mut q = query.clone();
+        q["lexical_backend"] = json!(backend);
+        assert_eq!(
+            shard.call("bm25_trial_search", &q).unwrap()["hits"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        q["filters"]["dataset_ids"] = json!(["another-project"]);
+        assert!(
+            shard.call("bm25_trial_search", &q).unwrap()["hits"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+    }
+    let writer = Writer::acquire(&shard.content_root(), "docs").unwrap();
+    writer.journal("begin",json!({"dataset":"project","file_name":"first.pdf","db_file_name":"first.pdf","ids":["future"]})).unwrap();
+    assert_eq!(
+        shard.call("bm25_trial_search", &query).unwrap_err(),
+        "INDEX_RECOVERY_REQUIRED"
+    );
+}
 fn search(shard: &Shard, text: &str) -> Value {
     shard
         .call(

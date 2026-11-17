@@ -127,6 +127,20 @@ fn scoring(body: &Value) -> Result<Option<ScoringQuery>> {
     if !input["rrf"].is_null() {
         return Err("EDGE_QUERY_NOT_SUPPORTED");
     }
+    if let Some(text) = input.get("text_query") {
+        let field = text["field"].as_str().ok_or("EDGE_QUERY_INVALID")?;
+        let query = text["text"]
+            .as_str()
+            .filter(|s| !s.is_empty() && s.len() <= 65536)
+            .ok_or("EDGE_QUERY_INVALID")?;
+        return Ok(Some(
+            TextQueryBuilder::new(field.try_into().map_err(|_| "EDGE_QUERY_INVALID")?, query)
+                .scoring(TextQueryScoring::Bm25(
+                    Bm25ParamsBuilder::new().k(1.2).b(0.75).build(),
+                ))
+                .build(),
+        ));
+    }
     let input = input.get("nearest").unwrap_or(input);
     let query = match persisted_vector(input)? {
         VectorPersisted::Dense(v) => {
@@ -195,6 +209,16 @@ impl Shard {
     }
     pub fn call(&self, action: &str, body: &Value) -> Result<Value> {
         match action {
+            "bm25_trial_prepare" => self.prepare_bm25_trial(),
+            "bm25_trial_digest" => self.bm25_trial_digest(),
+            "bm25_trial_search" => self.bm25_trial_lexical(
+                body,
+                &body["filters"],
+                body["limit"]
+                    .as_u64()
+                    .filter(|n| (1..=512).contains(n))
+                    .ok_or("EDGE_LIMIT_INVALID")? as usize,
+            ),
             "hybrid_search" => self.hybrid_search(body),
             "refresh_postings" => self.refresh_postings(false, |_| {}),
             "exists" => Ok(json!({"exists":true})),

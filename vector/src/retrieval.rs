@@ -4,7 +4,7 @@ use les_core::retrieval_fusion::retrieve as fuse;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 
-fn query_filter(filters: &Value) -> Result<Value> {
+pub(crate) fn query_filter(filters: &Value) -> Result<Value> {
     let mut must = Vec::new();
     for (key, field) in [
         ("dataset_ids", "dataset_id"),
@@ -51,10 +51,11 @@ impl Shard {
         let filter = query_filter(filters)?;
         let text = request["text"].as_str().ok_or("EDGE_QUERY_INVALID")?;
         let values = les_core::lexical::current(&[text.to_owned()])?;
-        let lexical = !values["documents"][0]["terms"]
-            .as_object()
-            .ok_or("CORE_LEXICAL_RESPONSE_INVALID")?
-            .is_empty();
+        let lexical = crate::bm25_trial::mode(request)? == Some("text")
+            || !values["documents"][0]["terms"]
+                .as_object()
+                .ok_or("CORE_LEXICAL_RESPONSE_INVALID")?
+                .is_empty();
         let prefetch = if lexical { (limit * 2).max(24) } else { limit };
         let dense_request = json!({"query":request["vector"],"using":request["dense_name"],
             "filter":filter,"limit":prefetch,"with_payload":true});
@@ -94,8 +95,8 @@ impl Shard {
         if overview {
             lexical_filters["group_size"] = json!(2);
         }
-        let hits = self.lexical_search(
-            text,
+        let hits = self.bm25_trial_lexical(
+            request,
             &lexical_filters,
             prefetch * if overview { 2 } else { 1 },
         )?;
@@ -153,6 +154,9 @@ impl Shard {
         )
     }
     pub fn hybrid_search(&self, request: &Value) -> Result<Value> {
+        if crate::bm25_trial::mode(request)?.is_some() {
+            self.bm25_trial_marker(true)?;
+        }
         request["text"]
             .as_str()
             .filter(|s| !s.trim().is_empty() && s.len() <= 65536)
