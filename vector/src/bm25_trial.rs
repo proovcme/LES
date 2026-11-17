@@ -126,12 +126,19 @@ impl Shard {
                         text.push_str(term);
                     }
                 }
-                self.call(
-                    "set_payload",
-                    &json!({"points":[p["id"]],"payload":{FIELD:text}}),
-                )?;
+                let operation =
+                    serde_json::from_value(json!({"points":[p["id"]],"payload":{FIELD:text}}))
+                        .map_err(|_| "EDGE_PAYLOAD_INVALID")?;
+                self.edge
+                    .update(qdrant_edge::UpdateOperation::PayloadOperation(
+                        qdrant_edge::PayloadOps::SetPayload(operation),
+                    ))
+                    .map_err(|_| "EDGE_WRITE_FAILED")?;
                 completed += 1;
             }
+            // WAL remains enabled; a stopped partial batch is never queryable
+            // while the marker is preparing. Sync once per acknowledged page.
+            self.flush()?;
             eprintln!(
                 "{}",
                 json!({"event":"edge_bm25_trial_preparation","completed":completed})
