@@ -1,8 +1,6 @@
-//! Short, source-bound reading units for automatic PDF retrieval in Pull.
+//! Short, source-bound reading units for automatic PDF retrieval.
 use super::{Result, Value};
 use serde_json::json;
-
-const EXCERPTS_PER_HIT: usize = 3;
 
 fn separator(line: &str) -> bool {
     line.starts_with('|')
@@ -153,26 +151,29 @@ fn excerpts(
     ranked.sort_by(|(a, score_a, _), (b, score_b, _)| {
         score_b.total_cmp(score_a).then_with(|| a.cmp(b))
     });
-    let minimum = ranked.first().map_or(0.0, |(_, score, _)| score * 0.6);
     let mut seen = std::collections::HashSet::new();
     let mut covered = std::collections::HashSet::new();
-    Ok(ranked
-        .into_iter()
-        .take_while(|(_, score, _)| *score >= minimum)
-        .filter_map(|(i, _, found)| {
-            let (line, body, header) = &candidates[i];
-            if !seen.insert(body) || (distinct && found.iter().all(|term| covered.contains(term))) {
-                return None;
-            }
-            covered.extend(found);
-            let text = match header {
-                Some((label, divider)) => format!("{label}\n{divider}\n{body}"),
-                None => body.clone(),
-            };
-            Some((*line, text))
-        })
-        .take(EXCERPTS_PER_HIT)
-        .collect())
+    let mut excerpts = Vec::new();
+    let mut related = Vec::new();
+    for (i, _, found) in ranked {
+        let (line, body, header) = &candidates[i];
+        if !seen.insert((body, header)) {
+            continue;
+        }
+        let adds_terms = found.iter().any(|term| !covered.contains(term));
+        covered.extend(found);
+        let text = match header {
+            Some((label, divider)) => format!("{label}\n{divider}\n{body}"),
+            None => body.clone(),
+        };
+        if distinct && !adds_terms {
+            related.push((*line, text));
+        } else {
+            excerpts.push((*line, text));
+        }
+    }
+    excerpts.extend(related);
+    Ok(excerpts)
 }
 
 fn canonical(text: &str) -> Value {
@@ -205,11 +206,15 @@ pub(super) fn bare_code(text: &str) -> bool {
         && words.all(|word| word.chars().all(|c| !c.is_alphabetic()))
 }
 
-pub(super) fn index_excerpts(points: Vec<Value>, query: &str) -> Result<Vec<Value>> {
+pub(super) fn index_excerpts(
+    points: Vec<Value>,
+    query: &str,
+    selected_files: &[Value],
+) -> Result<Vec<Value>> {
     let mut result = Vec::new();
-    let mut focused = std::collections::HashSet::new();
-    let document =
-        |p: &Value| json!([p["dataset_id"], p["file_name"], p["source_sha256"]]).to_string();
+    // An exceptionally dense page can stay whole. The bound here is the
+    // context selector's input limit, not a relevance cutoff on each hit.
+    let materialization_limit = les_core::context_selection::MAX_SOURCE_UNITS / points.len().max(1);
     for mut point in points {
         let payload = &point["payload"];
         if !is_pdf(payload) {
@@ -230,17 +235,13 @@ pub(super) fn index_excerpts(points: Vec<Value>, query: &str) -> Result<Vec<Valu
         } else {
             payload["text"].as_str().unwrap_or("")
         };
-        let matches = excerpts(
-            text,
-            query,
-            payload["file_name"].as_str().unwrap_or(""),
-            false,
-        )?;
-        if matches.is_empty() {
+        let file = payload["file_name"].as_str();
+        let reading_question = crate::chat::inspection::read_question(query, file, selected_files);
+        let matches = excerpts(text, reading_question, file.unwrap_or(""), false)?;
+        if matches.is_empty() || matches.len() > materialization_limit {
             result.push(point);
             continue;
         }
-        focused.insert(document(payload));
         let anchor = payload
             .get("retrieval_anchor_id")
             .unwrap_or(&point["id"])
@@ -253,6 +254,7 @@ pub(super) fn index_excerpts(points: Vec<Value>, query: &str) -> Result<Vec<Valu
             .as_object_mut()
             .ok_or("INDEX_READ_INVALID")?;
         body.remove("pdf_page_view");
+        body.remove("text");
         if let Some(read) = body
             .get_mut("physical_pdf_read")
             .and_then(Value::as_object_mut)
@@ -275,19 +277,10 @@ pub(super) fn index_excerpts(points: Vec<Value>, query: &str) -> Result<Vec<Valu
             result.push(excerpt);
         }
     }
-    let mut fallback = std::collections::HashSet::new();
-    result.retain(|point| {
-        let p = &point["payload"];
-        if !is_pdf(p) || p["pdf_excerpt_line"].is_u64() {
-            return true;
-        }
-        let key = document(p);
-        !focused.contains(&key) && fallback.insert(key)
-    });
     Ok(result)
 }
 
-pub(in crate::chat) fn focus_page(reply: &mut Value, query: &str) -> Result<()> {
+pub(in crate::chat) fn focus_page(reply: &mut Value, query: &str, max_chars: usize) -> Result<()> {
     let Some(text) = reply["result"]["text"].as_str() else {
         return Ok(());
     };
@@ -315,12 +308,62 @@ pub(in crate::chat) fn focus_page(reply: &mut Value, query: &str) -> Result<()> 
     result.insert("passages".into(), json!(passages));
     result.insert("selection".into(), json!("query_excerpts"));
     result.insert("complete".into(), json!(false));
+    super::retrieval::bound_pdf_excerpts(reply, max_chars)?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lexical_focus_does_not_discard_other_ranked_pages() {
+        let point = |page, text| {
+            json!({"id":format!("p{page}"),"payload":{
+                "page":page,"file_name":"Report.pdf","dataset_id":"scope","text":text
+            }})
+        };
+        let result = index_excerpts(
+            vec![
+                point(1, "Pump flow 12 litres"),
+                point(2, "Discharge 36 cubic metres"),
+                point(3, "Head 9 metres"),
+            ],
+            "pump flow",
+            &[],
+        )
+        .unwrap();
+        assert_eq!(
+            result
+                .iter()
+                .map(|p| &p["payload"]["page"])
+                .collect::<Vec<_>>(),
+            [&json!(1), &json!(2), &json!(3)]
+        );
+        assert_eq!(result[0]["payload"]["retrieval_anchor_id"], "p1");
+        assert_eq!(result[1]["id"], "p2");
+    }
+
+    #[test]
+    fn a_single_hit_can_offer_five_rows_to_the_budget_even_with_unequal_scores() {
+        let text = "Pump flow 12 litres\nPump pressure 9 bar\nPump capacity 7 kilowatts\nPump mass 42 kg\nValve diameter 500 mm";
+        let rows = excerpts(
+            text,
+            "pump flow pressure capacity mass valve diameter",
+            "Report.pdf",
+            true,
+        )
+        .unwrap();
+        assert_eq!(rows.len(), 5);
+        let mut reply = json!({"result":{"text":text},"sources":[{"doc_name":"Report.pdf","doc_id":"doc","page":1}]});
+        focus_page(
+            &mut reply,
+            "pump flow pressure capacity mass valve diameter",
+            3000,
+        )
+        .unwrap();
+        assert_eq!(reply["result"]["passages"].as_array().unwrap().len(), 5);
+    }
 
     #[test]
     fn reading_a_repeated_drawing_code_prefers_its_label() {
@@ -360,7 +403,6 @@ mod tests {
             true,
         )
         .unwrap();
-        assert_eq!(found.len(), 1);
         assert!(found[0].1.ends_with("RJ-45"));
     }
 }

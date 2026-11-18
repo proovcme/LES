@@ -4,6 +4,7 @@ use serde_json::{json, Value};
 pub struct Failure {
     pub code: String,
     pub status: StatusCode,
+    pub checkpoint: Option<(String, usize)>,
 }
 impl From<&str> for Failure {
     fn from(code: &str) -> Self {
@@ -61,6 +62,7 @@ impl Failure {
         Self {
             code: code.into(),
             status,
+            checkpoint: None,
         }
     }
     pub fn payload(&self) -> Value {
@@ -129,7 +131,12 @@ impl Failure {
             value if value.starts_with("TOOL_")=>"Инструмент не завершил действие. Откройте подробности; Лес не считает его выполненным.",
             _=>"Не удалось завершить запрос. Подробности сохранены в журнале. Проверьте подключение модели и повторите действие."
         };
-        json!({"code":self.code,"detail":detail,"message":detail,"retryable":self.status!=StatusCode::UNPROCESSABLE_ENTITY})
+        let mut payload = json!({"code":self.code,"detail":detail,"message":detail,"retryable":self.status!=StatusCode::UNPROCESSABLE_ENTITY});
+        if let Some((stage, count)) = &self.checkpoint {
+            payload["stage"] = json!(stage);
+            payload["model_call"] = json!(count);
+        }
+        payload
     }
 }
 pub type Result<T> = std::result::Result<T, Failure>;

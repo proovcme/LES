@@ -46,7 +46,7 @@ fn catalog_document(context: &Context, args: &Value) -> Result<Value, &'static s
     Ok(doc)
 }
 
-fn verified_file(
+pub(crate) fn verified_file(
     context: &Context,
     doc: &Value,
     expected: &str,

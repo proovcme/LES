@@ -896,7 +896,7 @@
       "version": "1.0.0",
       "title": "Read Excel source",
       "category": "source",
-      "summary": "Read indexed text/table chunks for Excel-like sources and mark sheet/range extraction as missing when unavailable.",
+      "summary": "Read verified workbook rows. Use q for a position or code, or use sheet_name with row_start and row_end for physical rows. Repeat continuation to read more.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -911,6 +911,14 @@
           },
           "q": {
             "type": "string"
+          },
+          "sheet_name": {"type": "string", "minLength": 1, "maxLength": 31},
+          "row_start": {"type": "integer", "minimum": 1, "maximum": 1048576},
+          "row_end": {"type": "integer", "minimum": 1, "maximum": 1048576},
+          "view_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "automatic_focus": {
+            "type": "boolean",
+            "description": "Use the ranked focus order; repeat the returned continuation arguments unchanged."
           },
           "limit": {
             "type": "integer",
@@ -964,6 +972,14 @@
           },
           "q": {
             "type": "string"
+          },
+          "sheet_name": {"type": "string", "minLength": 1, "maxLength": 31},
+          "row_start": {"type": "integer", "minimum": 1, "maximum": 1048576},
+          "row_end": {"type": "integer", "minimum": 1, "maximum": 1048576},
+          "view_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "automatic_focus": {
+            "type": "boolean",
+            "description": "Use the ranked focus order; repeat the returned continuation arguments unchanged."
           },
           "limit": {
             "type": "integer",
@@ -1252,6 +1268,10 @@
           "q": {
             "type": "string"
           },
+          "automatic_focus": {
+            "type": "boolean",
+            "description": "Use the ranked focus order; repeat the returned continuation arguments unchanged."
+          },
           "clause": {
             "type": "string"
           },
@@ -1330,6 +1350,10 @@
           },
           "q": {
             "type": "string"
+          },
+          "automatic_focus": {
+            "type": "boolean",
+            "description": "Use the ranked focus order; repeat the returned continuation arguments unchanged."
           },
           "clause": {
             "type": "string"

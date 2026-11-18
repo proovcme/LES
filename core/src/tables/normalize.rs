@@ -36,7 +36,7 @@ fn raw_pairs(value: &Value) -> Result<Vec<(String, Value)>> {
         })
         .collect()
 }
-fn raw_json(pairs: &[(String, Value)]) -> Result<String> {
+pub(super) fn raw_json(pairs: &[(String, Value)]) -> Result<String> {
     let parts = pairs
         .iter()
         .map(|(k, v)| {
@@ -170,6 +170,13 @@ fn preferred<'a>(row: &'a Value, first: &str, second: &str) -> &'a Value {
         &row[second]
     }
 }
+pub(super) fn row_values(row: &Value) -> String {
+    ordered(field(row, "raw_row"))
+        .into_iter()
+        .filter_map(|(_, value)| present(&value).then(|| string(&value)))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
 fn chunk_text(row: &Value) -> String {
     let mut parts = Vec::new();
     let kind = field(row, "doc_type");
@@ -255,7 +262,16 @@ pub(super) fn chunks(request: &Value) -> Result<Value> {
         if !row.is_object() {
             return Err(INVALID);
         }
-        let text = chunk_text(row);
+        let text = if request["exact_rows"] == true {
+            ordered(field(row, "raw_row"))
+                .into_iter()
+                .filter(|(_, value)| present(value))
+                .map(|(label, value)| format!("{label}: {}", string(&value)))
+                .collect::<Vec<_>>()
+                .join("\n")
+        } else {
+            chunk_text(row)
+        };
         if text.trim().is_empty() {
             continue;
         }

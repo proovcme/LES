@@ -438,8 +438,16 @@ def test_passage_offsets_advance_ranked_hits_and_report_exhaustion(native_turn,t
     dataset=t.client.post('/api/rag/datasets',json={'name':'Ranked search pages'}).raise_for_status().json()['id']
     job=t.client.post('/api/rag/index-external',json={'path':str(folder),'dataset_id':dataset,'background':True}).raise_for_status().json()['intake_job_id']
     wait_for(lambda:t.client.get('/api/light/intake',params={'id':job}).json().get('status')=='completed',timeout=40)
-    t.scripts.extend([{'calls':[{'tool':'search_sources','args':{'q':'OFFSET_MARKER','limit':1,'offset':i}} for i in range(4)]},
-                      {'text':'Retrieved controlled evidence [Источник 1]'}])
+    def cite_delivered_passage(body):
+        text = '\n'.join(message['content'] for message in body['messages']
+                         if isinstance(message.get('content'), str))
+        if '[Фрагмент S' in text:
+            return source_excerpt_reply(body)
+        visible = re.search(r'(?m)^\[Источник (\d+) \|', text)
+        assert visible, 'No paginated evidence reached the model'
+        return {'text':f'Retrieved controlled evidence [Источник {visible[1]}]'}
+    t.scripts.extend([{'calls':[{'tool':'search_sources','args':{'q':'OFFSET_MARKER','view':'passages','limit':1,'offset':i}} for i in range(4)]},
+                      cite_delivered_passage, cite_delivered_passage])
     result=t.client.post('/api/chat',json={'question':'Find OFFSET_MARKER documents.',
         'mode':'search','retrieval_mode':'pull','scope':{'scope_type':'dataset','dataset_ids':[dataset],'selected_sources_only':True}}).raise_for_status().json()
     rows=[t['result'] for t in result['artifact']['tool_results']]
@@ -449,7 +457,7 @@ def test_passage_offsets_advance_ranked_hits_and_report_exhaustion(native_turn,t
     assert len({r['passages'][0]['source']['doc_id'] for r in rows[:3]})==3
     assert rows[3]['passages']==[] and rows[3]['coverage']=='no_matches'
     assert len({r['index_revision'] for r in rows})==1
-    assert len(t.seen)==2
+    assert len(t.seen) == 2 + int(result['retrieval_trace']['answer_window_retry'])
     assert all('fusion_trace' not in row for row in rows)
 
 
@@ -498,7 +506,9 @@ def test_source_cursor_covers_unequal_pages_once_and_stops_at_end(native_turn, t
         assert offset not in offsets and len(offsets) < 5
         offsets.append(offset)
         args = {'limit': 2, 'max_chars': 250, 'offset': offset}
-        args.update({'doc_id': doc} if tool == 'read_source' else {'q': 'CURSOR_MARKER'})
+        args.update({'doc_id': doc} if tool == 'read_source' else {'q': 'CURSOR_MARKER', 'view': 'passages'})
+        if replies:
+            args['index_revision'] = last['index_revision']
         return {'tool': tool, 'args': args}
     t.scripts.extend([step] * 6)
     response = t.client.post('/api/chat', json={'question': 'Read CURSOR_MARKER source evidence.', 'mode': 'search', 'retrieval_mode': 'pull',

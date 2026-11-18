@@ -51,6 +51,11 @@ pub(super) async fn rank_units(
 pub(super) fn bound_word(reply: &mut Value) -> Result<()> {
     fit_envelope_budget(reply, 22000, 230)
 }
+pub(super) fn bound_pdf_excerpts(reply: &mut Value, max_chars: usize) -> Result<()> {
+    envelope::fit_context(reply, max_chars, true)?;
+    *reply = super::packet::encode(reply)?;
+    Ok(())
+}
 
 fn pinned_revision(args: &Value, revision: &Value) -> Result<()> {
     if args["index_revision"]
@@ -192,15 +197,124 @@ pub(in crate::chat) async fn initial(context: Arc<Context>, turn: &Prepared) -> 
         )
         .saturating_mul(2)
         .clamp(1, 16000);
-    let pull = turn.profile["mode"] == "search"
-        && turn.request["retrieval_mode"].as_str().unwrap_or("pull") == "pull";
-    search_view(
-        context,
-        &SourceContext::from(turn),
-        json!({"q":turn.request["question"],"max_chars":chars,"_pull_pdf_focus":pull}),
+    let focus_pdf = turn.profile["mode"] == "search"
+        && matches!(
+            turn.request["retrieval_mode"].as_str().unwrap_or("pull"),
+            "pull" | "hybrid"
+        );
+    let scope = SourceContext::from(turn);
+    let question = turn.request["question"]
+        .as_str()
+        .ok_or("INDEX_QUERY_INVALID")?;
+    let mut result = search_view(
+        context.clone(),
+        &scope,
+        json!({"q":question,"max_chars":chars,"_pull_pdf_focus":focus_pdf}),
         ReadView::Prefetch,
     )
-    .await
+    .await?;
+    // Large books have searchable catalog points. Use those points to choose
+    // a book, then retrieve actual rows from that book before model admission.
+    let selected = selected_scoped(&scope);
+    let mut seen = std::collections::HashSet::new();
+    let candidates = result["sources"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|source| {
+            let file = source["doc_name"].as_str()?;
+            if original_reader(file) != "read_excel_source" {
+                return None;
+            }
+            let query = crate::chat::inspection::read_question(question, Some(file), &selected);
+            (source["workbook_projection"] == true
+                || (query != question && selected.contains(&source["doc_name"])))
+            .then_some((source.clone(), query))
+        })
+        .filter(|(source, _)| seen.insert(source["doc_id"].clone()))
+        .take(2)
+        .collect::<Vec<_>>();
+    for (source, query) in candidates {
+        let budget = (chars / 3).clamp(1, 4000);
+        let mut args = json!({"doc_id":source["doc_id"],"source_sha256":source["source_sha256"],
+            "q":query,"limit":4,"max_chars":budget});
+        let coordinates = les_core::chat_request::sheet_rows(query);
+        if let Some((sheet, rows)) = coordinates
+            .first_key_value()
+            .filter(|_| coordinates.len() == 1)
+        {
+            let (Some(first), Some(last)) = (rows.first(), rows.last()) else {
+                continue;
+            };
+            if (*last - *first + 1) == rows.len() as u64 {
+                args["sheet_name"] = json!(sheet);
+                args["row_start"] = json!(first);
+                args["row_end"] = json!(last);
+                args["limit"] = json!(rows.len().clamp(1, 16));
+            }
+        }
+        let rows = match super::workbook::read(context.clone(), &scope, &args).await {
+            Ok(Some(read))
+                if read["result"]["passages"]
+                    .as_array()
+                    .is_some_and(|p| !p.is_empty()) =>
+            {
+                read
+            }
+            Ok(_) => continue,
+            Err(error) => {
+                if let Some(failures) = result["result"]["read_failures"].as_array_mut() {
+                    failures.push(json!({"code":error.code,"doc_id":source["doc_id"]}));
+                }
+                continue;
+            }
+        };
+        let point = &source["qdrant_point_id"];
+        if let Some(passages) = result["result"]["passages"].as_array_mut() {
+            passages.retain(|p| p["source"]["doc_id"] != source["doc_id"]);
+            for mut row in rows["result"]["passages"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .rev()
+                .cloned()
+            {
+                row["source"]["qdrant_point_id"] = point.clone();
+                passages.insert(0, row);
+            }
+            let count = passages.len();
+            let sources = json!(passages.iter().map(|p| &p["source"]).collect::<Vec<_>>());
+            result["sources"] = sources;
+            result["result"]["included_fragments"] = json!(count);
+        }
+        result["result"]["coverage"] = json!("bounded");
+    }
+    // For deliberately separate file questions, place focused reading units
+    // before broad page snippets. The latter remain available if the budget permits.
+    if selected.len() > 1 {
+        if let Some(passages) = result["result"]["passages"].as_array_mut() {
+            passages.sort_by_key(|row| {
+                let source = &row["source"];
+                let named = crate::chat::inspection::read_question(
+                    question,
+                    source["doc_name"].as_str(),
+                    &selected,
+                ) != question;
+                if source["evidence_kind"] == "physical_workbook_row"
+                    || (named && source["pdf_excerpt_line"].is_u64())
+                {
+                    0
+                } else if named && source["page"].is_u64() {
+                    2
+                } else {
+                    1
+                }
+            });
+            let sources = json!(passages.iter().map(|p| &p["source"]).collect::<Vec<_>>());
+            result["sources"] = sources;
+        }
+    }
+    Ok(result)
 }
 pub(in crate::chat) async fn search(
     context: Arc<Context>,
@@ -348,10 +462,7 @@ async fn search_view(
         .index_store
         .as_ref()
         .ok_or("INDEX_STORAGE_UNAVAILABLE")?;
-    let automatic_pdf = args["_pull_pdf_focus"] == true
-        && !overview_requested
-        && args["offset"].is_null()
-        && args["index_revision"].is_null();
+    let automatic_pdf = args["_pull_pdf_focus"] == true && focus_snapshot(view, &args);
     let pool_limit = if automatic_pdf {
         candidate_limit.max(128)
     } else {
@@ -484,6 +595,23 @@ async fn search_view(
             if compact { reply = super::packet::encode(&reply)?; }
             if navigation {
                 Page::new(offset, total).apply(&mut reply, "total_candidates")?;
+                if args["_pull_pdf_focus"] == true && args["view"] == "passages" && offset == 0 {
+                    let pdf: Vec<_> = raw_points.iter()
+                        .filter(|point| super::pdf_focus::is_pdf(&point["payload"]))
+                        .take(32).cloned().collect();
+                    if !pdf.is_empty() {
+                        match passages(&context, turn, &config["collection"], pdf, result["revision"].clone(),
+                            max_chars, "search_sources", None, ReadMode {view: ReadView::Context, query,
+                                pdf_focus: true, ..ReadMode::default()}).await.and_then(|mut evidence| {
+                            bound_pdf_excerpts(&mut evidence, max_chars)?;
+                            evidence["result"]["pull_search"] = json!(true);
+                            Ok(evidence)
+                        }) {
+                            Ok(evidence) => reply["_pull_evidence"] = evidence,
+                            Err(error) => eprintln!("{}", json!({"event":"pull_pdf_evidence_unavailable","code":error.code})),
+                        }
+                    }
+                }
             }
             Ok(reply)
         }
@@ -512,6 +640,31 @@ async fn search_view(
         }
     }
     unreachable!()
+}
+
+fn focus_snapshot(view: ReadView, args: &Value) -> bool {
+    args["offset"].is_null()
+        && args["index_revision"].is_null()
+        && (matches!(view, ReadView::Prefetch)
+            || args["view"].is_null()
+            || args["view"] == "context")
+}
+
+#[cfg(test)]
+#[test]
+fn pull_pdf_context_never_overrides_passage_pagination() {
+    for offset in [Value::Null, json!(0), json!(2)] {
+        assert!(!focus_snapshot(
+            ReadView::Navigation,
+            &json!({"view":"passages","offset":offset})
+        ));
+    }
+    assert!(focus_snapshot(
+        ReadView::Context,
+        &json!({"view":"context"})
+    ));
+    assert!(focus_snapshot(ReadView::Navigation, &json!({})));
+    assert!(!focus_snapshot(ReadView::Navigation, &json!({"offset":0})));
 }
 
 #[cfg(test)]
@@ -820,7 +973,7 @@ async fn passages(
     let packing_started = std::time::Instant::now();
     let (mut points, mut hydrated) = views::project_with_pdf_hits(points, hydrated, pdf_focus)?;
     if pdf_focus {
-        points = super::pdf_focus::index_excerpts(points, query)?;
+        points = super::pdf_focus::index_excerpts(points, query, &selected_scoped(turn))?;
         // Focused PDF hits already carry their reading text. Broad parent
         // expansion would add the same page again as an unfiltered block.
         for group in ["sections", "documents"] {
@@ -911,6 +1064,11 @@ async fn passages(
             .unwrap_or(&p["page"])
             .clone();
         let mut source = reference(&doc, page);
+        if p["type"] == "table_navigation_projection" {
+            source["evidence_admissible"] = json!(false);
+            source["read_required"] = json!("read_excel_source");
+            source["workbook_projection"] = json!(true);
+        }
         if p["table_projection_warning"].is_string() {
             source["table_projection_warning"] = p["table_projection_warning"].clone();
         }
@@ -1209,10 +1367,45 @@ pub(super) async fn read(
         )
         .await?
     } else {
-        None
+        let (total, ids) = indexed_matches(
+            &context,
+            store,
+            collection,
+            &doc,
+            &args,
+            &revision,
+            read_offset,
+            limit,
+        )
+        .await?;
+        if total == 0 && args["_automatic_focus"] == true {
+            indexed_page::read(
+                &context,
+                store,
+                collection,
+                &doc,
+                &revision,
+                read_offset,
+                limit,
+            )
+            .await?
+        } else {
+            if total == 0 {
+                return Err("SOURCE_SECTION_NOT_FOUND".into());
+            }
+            if read_offset >= total {
+                return Err("SOURCE_OFFSET_INVALID".into());
+            }
+            let points = read_match_ids(&context, store, collection, &doc, ids).await?;
+            Some((points, total))
+        }
     };
     let (page_points, total_units, document_units) = match page {
-        Some((points, total)) => (points, total, total),
+        Some((points, total)) => (
+            points,
+            total,
+            doc["chunk_count"].as_u64().unwrap_or(total as u64) as usize,
+        ),
         None => {
             let (points, document_units) =
                 scan_indexed_source(&context, store, collection, &doc, &args).await?;
@@ -1252,6 +1445,97 @@ pub(super) async fn read(
     Page::new(read_offset, total_units).apply(&mut reply, "total_fragments")?;
     pagination::reading_scope(&mut reply, &args, document_units);
     Ok(reply)
+}
+
+async fn indexed_matches(
+    context: &Context,
+    store: &crate::index_store::Store,
+    collection: &str,
+    doc: &Value,
+    args: &Value,
+    revision: &Value,
+    offset: usize,
+    limit: usize,
+) -> Result<(usize, Vec<String>)> {
+    if let Some(clause) = args["clause"].as_str().filter(|s| !s.is_empty()) {
+        let database = context.database.clone();
+        let collection = collection.to_owned();
+        let dataset = doc["dataset_id"]
+            .as_str()
+            .ok_or("SOURCE_IDENTITY_INVALID")?
+            .to_owned();
+        let file = doc["file_name"]
+            .as_str()
+            .ok_or("SOURCE_IDENTITY_INVALID")?
+            .to_owned();
+        let clause = clause.to_owned();
+        return Ok(tokio::task::spawn_blocking(move || {
+            les_core::index_publication::clause_positions(
+                &database,
+                &collection,
+                &dataset,
+                &file,
+                &clause,
+                offset,
+                limit,
+            )
+        })
+        .await
+        .map_err(|_| "INDEX_READ_UNAVAILABLE")??);
+    }
+    let q = args["q"].as_str().ok_or("INDEX_QUERY_INVALID")?;
+    let filters = json!({"dataset_ids":[doc["dataset_id"]],"doc_filter":[doc["file_name"]],
+        "node_roles":["evidence",""]});
+    // The ordered pool is capped by the same upper bound as collection search.
+    let result = store
+        .lexical_hits(context, collection, q, &filters, revision, 512, false)
+        .await?;
+    let hits = result["hits"].as_array().ok_or("INDEX_READ_INVALID")?;
+    let ids = hits
+        .iter()
+        .skip(offset)
+        .take(limit)
+        .map(|hit| {
+            let encoded = hit[0].as_str().ok_or("INDEX_READ_INVALID")?;
+            serde_json::from_str::<String>(encoded).map_err(|_| "INDEX_READ_INVALID")
+        })
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok((hits.len(), ids))
+}
+
+async fn read_match_ids(
+    context: &Context,
+    store: &crate::index_store::Store,
+    collection: &str,
+    doc: &Value,
+    ids: Vec<String>,
+) -> Result<Vec<Value>> {
+    let rows = store
+        .read_owned(
+            context,
+            collection,
+            "retrieve",
+            json!({"ids":ids,"with_payload":true,"with_vector":false}),
+        )
+        .await?;
+    let mut by_id = rows
+        .as_array()
+        .ok_or("INDEX_READ_INVALID")?
+        .iter()
+        .filter_map(|p| p["id"].as_str().map(|id| (id, p)))
+        .collect::<std::collections::HashMap<_, _>>();
+    let mut ordered = Vec::new();
+    for id in ids {
+        let point = by_id
+            .remove(id.as_str())
+            .ok_or("INDEX_CHANGED_DURING_SEARCH")?;
+        let payload = &point["payload"];
+        if payload["dataset_id"] != doc["dataset_id"] || payload["file_name"] != doc["file_name"] {
+            return Err("TOOL_SCOPE_VIOLATION".into());
+        }
+        ordered.push(point.clone());
+    }
+    Ok(ordered)
 }
 
 async fn scan_indexed_source(
@@ -1337,6 +1621,19 @@ async fn scan_indexed_source(
     }
     points = reading_units(&points);
     Ok((points, document_units))
+}
+
+pub(super) fn page_workbook(
+    reply: &mut Value,
+    args: &Value,
+    offset: usize,
+    total: usize,
+    rows: usize,
+) -> Result<()> {
+    fit_envelope_budget(reply, 22000, 230)?;
+    Page::new(offset, total).apply(reply, "total_fragments")?;
+    reading_scope(reply, args, rows);
+    Ok(())
 }
 
 pub(super) fn reading_scope(reply: &mut Value, args: &Value, document_units: usize) {

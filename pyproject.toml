@@ -82,6 +82,19 @@ mcp = [
 ]
 
 [dependency-groups]
+skill-runtime = [
+    "numpy",
+    "openpyxl>=3.1.0",
+    "pandas>=2.0.0",
+    "pyarrow>=16.0.0",
+    "pypdfium2==5.8.0",
+    "pdfplumber>=0.11.0",
+    "Pillow>=10.0.0",
+    "python-docx>=1.2.0",
+    "ezdxf>=1.3.0",
+    "httpx>=0.27.0",
+    "python-dotenv>=1.0.0",
+]
 dev = ["pytest>=8.0", "pytest-asyncio>=1.0", "pytest-subtests>=0.14"]
 
 [project.scripts]

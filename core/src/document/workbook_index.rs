@@ -39,64 +39,36 @@ fn trim(text: &str) -> &str {
     text.trim_matches(|c: char| c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c))
 }
 
-fn header_score(values: &[Value]) -> usize {
-    values
+pub(super) fn to_table(name: &str, mut rows: BTreeMap<u32, Vec<Value>>) -> Option<Value> {
+    rows.retain(|_, row| row.iter().any(|cell| !trim(&as_text(cell)).is_empty()));
+    let (&first, values) = rows.first_key_value()?;
+    let width = rows.values().map(Vec::len).max()?;
+    let labels = values
         .iter()
-        .map(|value| {
-            let text = as_text(value);
-            let text = trim(&text);
-            if text.is_empty() {
-                0
-            } else if value.is_string() && text.chars().count() > 1 {
-                3
-            } else {
-                1
-            }
-        })
-        .sum()
-}
-
-pub(super) fn to_table(name: &str, rows: BTreeMap<u32, Vec<Value>>) -> Option<Value> {
-    let mut best_score = 0;
-    let mut header = 0;
-    for (&row, values) in rows.range(..20) {
-        let score = header_score(values);
-        if score > best_score {
-            header = row;
-            best_score = score;
-        }
-    }
-    if best_score == 0 {
-        return None;
-    }
-    let headers: Vec<String> = rows[&header]
-        .iter()
-        .enumerate()
-        .map(|(index, value)| {
-            let text = as_text(value);
-            let text = trim(&text);
-            if text.is_empty() {
-                format!("col_{}", index + 1)
-            } else {
-                text.to_owned()
-            }
+        .map(|v| trim(&as_text(v)).to_owned())
+        .collect::<Vec<_>>();
+    // Only an initial row of recognizable column labels may supply names.
+    // Keep its cells and coordinates separately from the data rows.
+    let header = (rows.len() > 1 && crate::tables::has_column_labels(&labels)).then_some(first);
+    let header_values = header.and_then(|row| rows.remove(&row));
+    let headers: Vec<_> = (0..width)
+        .map(|i| {
+            labels
+                .get(i)
+                .filter(|v| header.is_some() && !v.is_empty())
+                .cloned()
+                .unwrap_or_else(|| format!("col_{}", i + 1))
         })
         .collect();
     let (row_numbers, data): (Vec<_>, Vec<_>) = rows
         .into_iter()
-        .filter_map(|(row, values)| {
-            if row <= header || header_score(&values) == 0 {
-                return None;
-            }
-            Some((row + 1, values))
+        .map(|(row, mut values)| {
+            values.resize(width, Value::Null);
+            (row + 1, values)
         })
         .unzip();
-    if data.is_empty() {
-        return None;
-    }
-    Some(
-        json!({"sheet_name":name,"headers":headers,"rows":data,"header_row":header+1,"row_numbers":row_numbers}),
-    )
+    Some(json!({"sheet_name":name,"headers":headers,"rows":data,
+        "header_row":header.map(|row|row+1),"header_values":header_values,"row_numbers":row_numbers}))
 }
 
 fn extract(bytes: &[u8], probe: bool) -> Result<Value> {
@@ -150,15 +122,13 @@ fn extract(bytes: &[u8], probe: bool) -> Result<Value> {
                     |values| values.iter().map(as_text).collect::<Vec<_>>().join(" | "),
                 ));
             }
-        } else if last_row > 0 {
-            if let Some(table) = to_table(&sheet.name, rows) {
-                let bytes = serde_json::to_vec(&table).map_err(|_| COMPAT)?.len();
-                estimated_bytes += bytes;
-                if estimated_bytes > MAX_OUTPUT {
-                    return Err(COMPAT);
-                }
-                tables.push(table);
+        } else if let Some(table) = to_table(&sheet.name, rows) {
+            let bytes = serde_json::to_vec(&table).map_err(|_| COMPAT)?.len();
+            estimated_bytes += bytes;
+            if estimated_bytes > MAX_OUTPUT {
+                return Err(COMPAT);
             }
+            tables.push(table);
         }
     }
     if probe {

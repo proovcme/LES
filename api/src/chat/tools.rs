@@ -212,7 +212,9 @@ impl Tools {
         chosen.into_iter().map(|c| {
             let schema=model_schema(c);
             let description=if c["name"] == "read_source" {
-                "Read structured Word originals or indexed text by doc_id. q/clause locates text; continue with offset and the returned index_revision/view_sha256. Physical PDF pages use read_pdf_source. Word images/attachments use the extension's read_source view=parts/part.".to_owned()
+                "Read structured Word originals or indexed text by doc_id. q/clause locates text. If continuation is returned, pass it as the next read arguments. Physical PDF pages use read_pdf_source. Word images/attachments use the extension's read_source view=parts/part.".to_owned()
+            } else if c["name"] == "search_sources" {
+                "Search registered sources. Use view=context to read evidence for an answer, including short PDF excerpts. Use view=passages for paginated navigation with next_offset and index_revision; view=documents returns the catalog.".to_owned()
             } else if c["name"] == "read_pdf_source" {
                 "Read an original PDF page by doc_id and 1-based page; configured OCR handles scans. source_sha256 pins the original. Continue with offset and returned view_sha256. Verify OCR numbers against the original.".to_owned()
             } else if schema!=c["input_schema"] {
@@ -429,10 +431,6 @@ impl Tools {
                     {
                         result["result"]["pull_search"] = json!(true);
                     }
-                    if focus && result["status"] == "ok" {
-                        result["result"]["automatic_focus"] = json!(true);
-                        result["result"]["next_offset"] = Value::Null;
-                    }
                     if focus_pdf_read
                         && result["status"] == "ok"
                         && result["result"]["selection"] == "page_range"
@@ -444,7 +442,7 @@ impl Tools {
                             file_name.as_deref(),
                             &sources::selected_files(turn),
                         );
-                        sources::pdf_focus::focus_page(&mut result, query)?;
+                        sources::pdf_focus::focus_page(&mut result, query, self.read_max_chars)?;
                     }
                     Ok(result)
                 }
@@ -477,6 +475,9 @@ impl Tools {
                 }
             };
             let mut raw = raw;
+            let pull_evidence = raw
+                .as_object_mut()
+                .and_then(|object| object.remove("_pull_evidence"));
             if let Some(grant) = read_grant {
                 if raw["result"].is_object() {
                     raw["result"]["context_budget"] = grant;
@@ -493,6 +494,9 @@ impl Tools {
                 json!({"event":"chat_tool_finished","tool":name,"status":finished["envelope"]["status"],"code":finished["envelope"]["code"],"duration_ms":finished["envelope"]["duration_ms"]})
             );
             let mut payload = self.payload(name, &finished["envelope"], operation.as_deref());
+            if let Some(evidence) = pull_evidence.filter(|_| payload["status"] == "ok") {
+                payload["_pull_evidence"] = evidence;
+            }
             if let Some(request) = source_request {
                 payload["inputs"] = json!([request]);
             }
@@ -551,9 +555,19 @@ fn prefer_indexed_reader(selected: &[Value]) -> bool {
 fn positionless_read(name: &str, args: &Value) -> bool {
     matches!(name, "read_source" | "read_excel_source")
         && args["view"].as_str().is_none_or(|view| view == "text")
-        && ["q", "offset", "clause", "page", "view_sha256"]
-            .into_iter()
-            .all(|field| args[field].is_null())
+        && [
+            "q",
+            "offset",
+            "clause",
+            "page",
+            "view_sha256",
+            "automatic_focus",
+            "sheet_name",
+            "row_start",
+            "row_end",
+        ]
+        .into_iter()
+        .all(|field| args[field].is_null())
 }
 
 fn source_request(name: &str, args: &Value) -> Option<Value> {

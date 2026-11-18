@@ -11,7 +11,15 @@ pub(super) struct Rows {
     headers: BTreeMap<(u64, u64), Vec<String>>,
     literal_sources: HashSet<u64>,
 }
-pub(super) const CONTRACT:&str="Финальный ответ по источникам: верни только JSON {\"answerable\":false,\"rows\":[],\"sums\":[]}. Сначала реши, есть ли в тексте именно запрошенные сведения для нужного предмета. Совпадение наименования строки ещё не подтверждает наличие показателя. Если сведений нет, answerable=false, rows и sums пустые. При наличии подтверждения поставь answerable=true и заполни rows скопированными адресами: S…R… для строк таблиц, S…P… для текстовых абзацев, S… для явно помеченного целого фрагмента. Не переписывай значения: Лес скопирует оригинал и добавит ссылки. Пояснения до и после таблицы доступны отдельно по S…P…, не заменяй их строками таблицы. Для справки выбери относящиеся к вопросу абзацы и строки в связном порядке. Не выбирай строку только за совпадение названия: количество, масса и другие поля не заменяют отсутствующий показатель. Физический номер строки Excel не является адресом S…R…. Только для запрошенной суммы табличных ячеек заполни sums объектами с column (номер C) и unit_column (номер C либо null). Текстовые абзацы и целые фрагменты не являются ячейками для сложения. Без суммы оставь sums пустым. Данные другого вида, стадии или редакции документа не подтверждают условия вопроса.";
+pub(super) const CONTRACT: &str = "Верни только JSON с полями answerable, rows, sums и missing. В missing кратко назови запрошенные сведения, для которых не нашлось подтверждения. Если всё подтверждено, оставь missing пустым. \
+    Проверь каждую часть вопроса по видимым источникам. Помести в rows адреса фрагментов, \
+    которые непосредственно подтверждают запрошенные сведения, включая подтверждённые части неполного ответа. Для каждой части выбери минимальный достаточный набор. Пропусти фрагменты, которые только называют объект или документ. \
+    answerable=true при непустом rows, иначе false. Копируй адреса из контекста: S…R… для строк, \
+    S…P… для абзацев, S… для помеченного целого фрагмента. Лес скопирует исходный текст и поставит ссылки. \
+    Проверяй предмет, показатель, вид и редакцию документа. Совпадение названия без нужного показателя \
+    не подтверждает факт. Номер строки Excel не является адресом S…R…. \
+    Только для явно запрошенной суммы заполни sums объектами с column (номер C) и unit_column \
+    (номер C или null) по табличным ячейкам. Во всех остальных случаях sums пуст.";
 pub(super) fn quote_sources(sources: &mut Value, receipt: &Value) {
     for source in sources.as_array_mut().into_iter().flatten() {
         let quotes = receipt["rows"]
@@ -98,8 +106,9 @@ impl Rows {
             column["enum"] = json!(columns);
         }
         json!({"type":"json_schema","json_schema":{"name":"les_source_rows","strict":true,"schema":{
-        "type":"object","additionalProperties":false,"required":["answerable","rows","sums"],"properties":{
+        "type":"object","additionalProperties":false,"required":["answerable","rows","sums","missing"],"properties":{
             "answerable":{"type":"boolean"},
+            "missing":{"type":"array","maxItems":8,"items":{"type":"string","maxLength":160}},
             "rows":{"type":"array","maxItems":128,"items":item},
             "sums":{"type":"array","maxItems":if columns.is_empty(){0}else{16},"items":{"type":"object","additionalProperties":false,"required":["column","unit_column"],"properties":{"column":column,"unit_column":{"type":["integer","null"],"minimum":1,"maximum":width}}}}
         }}}})
@@ -187,29 +196,23 @@ impl Rows {
                 }
                 return; // Typed cells are authoritative; never parse presentation.
             }
-            let text = value["text"].as_str().unwrap_or("");
-            if let Some(offset) = value["body_offset"].as_u64() {
-                for (line, paragraph) in
-                    les_core::chat_context::prose_addresses(text, offset as usize)
-                {
+            let original = value["text"].as_str().unwrap_or("");
+            let text = value["body_offset"]
+                .as_u64()
+                .and_then(|offset| original.get(offset as usize..))
+                .unwrap_or(original);
+            if value["body_offset"].is_u64() {
+                for (line, paragraph) in les_core::chat_context::prose_addresses(text, 0) {
                     out.paragraphs
                         .insert((index, line), (vec![paragraph], source.clone()));
                 }
-            }
-            if let Some(body) = value["body_offset"]
-                .as_u64()
-                .and_then(|n| text.get(n as usize..))
-                .filter(|s| {
-                    !s.trim().is_empty() && les_core::chat_context::table_rows(s).is_empty()
-                })
-            {
-                out.data
-                    .insert((index, 0), (vec![body.to_owned()], source.clone()));
+                if !text.trim().is_empty() && les_core::chat_context::table_rows(text).is_empty() {
+                    out.data
+                        .insert((index, 0), (vec![text.to_owned()], source.clone()));
+                }
             }
             let headers = les_core::chat_context::table_headers(text);
-            for (row, cells) in
-                les_core::chat_context::table_rows(value["text"].as_str().unwrap_or(""))
-            {
+            for (row, cells) in les_core::chat_context::table_rows(text) {
                 let header = headers.iter().rev().find(|(h, labels)| {
                     *h < row
                         && labels.len() == cells.len()
@@ -287,7 +290,7 @@ impl Rows {
         let object = value.as_object().ok_or("TABLE_FACTS_REQUIRED")?;
         if object
             .keys()
-            .any(|k| !["answerable", "rows", "sums"].contains(&k.as_str()))
+            .any(|k| !["answerable", "rows", "sums", "missing"].contains(&k.as_str()))
         {
             return Err("TABLE_FACTS_REQUIRED");
         }
@@ -333,18 +336,10 @@ impl Rows {
             {
                 return Err("TABLE_FACTS_REQUIRED");
             }
-            let indexes = self
-                .data
-                .keys()
-                .map(|(s, _)| *s)
-                .collect::<std::collections::BTreeSet<_>>();
-            let citations = indexes
-                .iter()
-                .take(16)
-                .map(|n| format!("[Источник {n}]"))
-                .collect::<Vec<_>>()
-                .join(" ");
-            return Ok(Some((format!("В прочитанных фрагментах не удалось подтвердить запрошенные показатели. Нужен подходящий документ или дополнительное чтение. {citations}"),json!({"schema":"les.table-facts.v1","status":"insufficient","rows":[],"sums":[]}))));
+            return Ok(Some((
+                "В прочитанных фрагментах не удалось подтвердить запрошенные сведения.".into(),
+                json!({"schema":"les.table-facts.v1","status":"insufficient","rows":[],"sums":[]}),
+            )));
         }
         let mut rendered = String::new();
         let mut receipt = Vec::new();
@@ -492,12 +487,39 @@ impl Rows {
             rendered.push_str("\n\n");
             rendered.push_str(crate::document_parser::TABLE_PROJECTION_NOTICE);
         }
+        let missing: Vec<_> = match value.get("missing") {
+            Some(items) => items
+                .as_array()
+                .filter(|items| items.len() <= 8)
+                .ok_or("TABLE_FACTS_REQUIRED")?
+                .iter()
+                .map(|item| {
+                    let text = item
+                        .as_str()
+                        .filter(|s| !s.trim().is_empty() && s.chars().count() <= 160)
+                        .ok_or("TABLE_FACTS_REQUIRED")?;
+                    // A model-authored label is never a citation or a new factual answer.
+                    let text = text
+                        .replace(['[', ']'], "")
+                        .split_whitespace()
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    Ok(les_core::chat_context::literal_markdown(&text))
+                })
+                .collect::<Result<Vec<_>, &str>>()?,
+            None => Vec::new(),
+        };
+        if !missing.is_empty() {
+            rendered.push_str("\n\nВ прочитанных источниках не подтверждено — ");
+            rendered.push_str(&missing.join(", "));
+            rendered.push('.');
+        }
         if rendered.chars().count() > 16000 {
             return Err("TABLE_ANSWER_TOO_LARGE");
         }
         Ok(Some((
             rendered.trim().to_owned(),
-            json!({"schema":"les.table-facts.v1","status":"copied","rows":receipt,"sums":sums}),
+            json!({"schema":"les.table-facts.v1","status":"copied","rows":receipt,"sums":sums,"missing":missing}),
         )))
     }
 }
@@ -649,21 +671,28 @@ mod tests {
         let packet = json!({"sections":[{"kind":"evidence","objects":[{"payload":unit}]}]});
         let sources = json!([{"index":1,"doc_id":"doc","source_sha256":"r1"}]);
         let rows = Rows::new(&packet, &sources);
+        let terminal = json!({"sections":[{"kind":"evidence","objects":[{"payload":{
+            "schema":"les.evidence-block.v1","source_index":1,"body_offset":0,"text":body
+        }}]}]});
+        assert_eq!(
+            rows.format(true),
+            Rows::new(&terminal, &sources).format(true)
+        );
         let ids =
             &rows.format(true)["json_schema"]["schema"]["properties"]["rows"]["items"]["enum"];
-        for id in ["S1P3", "S1R7", "S1P9"] {
+        for id in ["S1P1", "S1R5", "S1P7"] {
             assert!(ids.as_array().unwrap().contains(&json!(id)));
         }
         let (text, proof) = rows
-            .finish_checked(r#"{"answerable":true,"rows":["S1P3"],"sums":[]}"#, true)
+            .finish_checked(r#"{"answerable":true,"rows":["S1P1"],"sums":[]}"#, true)
             .unwrap()
             .unwrap();
         assert_eq!(text, "Before: 17.35 kW.\n\n[Источник 1]");
-        assert_eq!(proof["rows"][0]["paragraph_line"], 3);
+        assert_eq!(proof["rows"][0]["paragraph_line"], 1);
         assert_eq!(proof["rows"][0]["kind"], "source_excerpt");
         assert_eq!(proof["rows"][0]["cells"], json!(["Before: 17.35 kW."]));
         assert!(!text.contains("Pump") && !text.contains("29") && !text.contains("42.75"));
-        for id in ["S1P7", "S1R3", "S2P3"] {
+        for id in ["S1P5", "S1R1", "S2P1"] {
             assert_eq!(
                 rows.finish_checked(
                     &json!({"answerable":true,"rows":[id],"sums":[]}).to_string(),
@@ -674,7 +703,7 @@ mod tests {
             );
         }
         assert_eq!(
-            rows.finish(r#"{"rows":["S1P3"],"sums":[{"column":1,"unit_column":null}]}"#)
+            rows.finish(r#"{"rows":["S1P1"],"sums":[{"column":1,"unit_column":null}]}"#)
                 .unwrap_err(),
             "TABLE_VALUE_INVALID"
         );
@@ -770,7 +799,7 @@ mod tests {
         let rows = sample();
         let (limited, receipt) = rows.finish(r#"{"rows":[],"sums":[]}"#).unwrap().unwrap();
         assert_eq!(receipt["status"], "insufficient");
-        assert!(limited.contains("В прочитанных фрагментах") && limited.contains("[Источник 1]"));
+        assert!(limited.contains("В прочитанных фрагментах") && !limited.contains("[Источник"));
         let schema = rows.format(true);
         assert!(
             schema["json_schema"]["schema"]["properties"]["rows"]["items"]["enum"]

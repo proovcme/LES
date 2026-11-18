@@ -84,8 +84,11 @@ def native_stages(final, gold):
     """Measure document admission and citation separately, never answer truth."""
     trace = final.get('retrieval_trace') or {}
     confirmed = [c for c in trace.get('contexts', []) if c.get('delivery') == 'confirmed']
-    delivered = [source for c in confirmed for source in c.get('sources', [])]
+    delivered = confirmed[-1].get('sources', []) if confirmed else []
     indexes = set((trace.get('citation_syntax') or {}).get('indexes', []))
+    selection = (final.get('artifact') or {}).get('table_facts')
+    if isinstance(selection, dict):
+        indexes = {r['source_index'] for r in selection.get('rows', []) if 'source_index' in r}
     cited = [s for s in final.get('source_map', []) if s.get('index') in indexes]
     candidates = [{'doc_name':s.get('file_name', '')} for s in (trace.get('prefetch') or {}).get('candidate_documents', [])]
     model = final.get('model')

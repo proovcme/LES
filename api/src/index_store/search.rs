@@ -172,6 +172,34 @@ impl Store {
             json!({"points":points,"revision":revision,"channels":["dense","bm25_postings"],"fusion":request["fusion"].as_str().unwrap_or("rrf"),"hierarchy":request["hierarchy"]==true,"hierarchy_candidates":hierarchy_candidates}),
         )
     }
+    pub(crate) async fn lexical_hits(
+        &self,
+        context: &Context,
+        collection: &str,
+        text: &str,
+        filters: &Value,
+        revision: &Value,
+        prefetch: usize,
+        overview: bool,
+    ) -> Result<Value> {
+        let database = self
+            .content_root(context)
+            .join(".index-replacements")
+            .join(&les_core::sha256_hex(collection.as_bytes())[..24])
+            .join("bm25.sqlite");
+        let text = text.to_owned();
+        let filters = filters.clone();
+        let revision = revision.clone();
+        tokio::task::spawn_blocking(move||->Result<Value>{
+            let tokens=les_core::lexical::current(&[text])?;
+            let terms=tokens["documents"][0]["terms"].as_object().ok_or("INDEX_SPARSE_CONTRACT_INVALID")?.keys().cloned().collect::<Vec<_>>();
+            if terms.is_empty(){return Ok(json!({"hits":[]}));}
+            let mut query=json!({"action":"search","database":database,"revision":revision,"terms":terms,"limit":prefetch*if overview{2}else{1},
+                "dataset_ids":filters["dataset_ids"],"doc_filter":filters["doc_filter"],"node_roles":filters["node_roles"],"ancestor_ids":filters["ancestor_ids"]});
+            if overview {query["group_size"]=json!(2);}
+            Ok(les_core::bm25::execute(&query)?)
+        }).await.map_err(|_|"INDEX_SPARSE_OWNER_FAILED")?
+    }
     async fn server_leg(
         &self,
         context: &Context,
@@ -205,26 +233,17 @@ impl Store {
                 .cloned()
                 .ok_or("INDEX_READ_INVALID")?
         };
-        let database = self
-            .content_root(context)
-            .join(".index-replacements")
-            .join(&les_core::sha256_hex(collection.as_bytes())[..24])
-            .join("bm25.sqlite");
-        let text = request["text"]
-            .as_str()
-            .ok_or("INDEX_QUERY_INVALID")?
-            .to_owned();
-        let filters = filters.clone();
-        let revision = revision.clone();
-        let lexical=tokio::task::spawn_blocking(move||->Result<Value>{
-            let tokens=les_core::lexical::current(&[text])?;
-            let terms=tokens["documents"][0]["terms"].as_object().ok_or("INDEX_SPARSE_CONTRACT_INVALID")?.keys().cloned().collect::<Vec<_>>();
-            if terms.is_empty(){return Ok(json!({"hits":[]}));}
-            let mut query=json!({"action":"search","database":database,"revision":revision,"terms":terms,"limit":prefetch*if overview{2}else{1},
-                "dataset_ids":filters["dataset_ids"],"doc_filter":filters["doc_filter"],"node_roles":filters["node_roles"],"ancestor_ids":filters["ancestor_ids"]});
-            if overview {query["group_size"]=json!(2);}
-            Ok(les_core::bm25::execute(&query)?)
-        }).await.map_err(|_|"INDEX_SPARSE_OWNER_FAILED")??;
+        let lexical = self
+            .lexical_hits(
+                context,
+                collection,
+                request["text"].as_str().ok_or("INDEX_QUERY_INVALID")?,
+                filters,
+                revision,
+                prefetch,
+                overview,
+            )
+            .await?;
         let hits = lexical["hits"]
             .as_array()
             .ok_or("INDEX_SPARSE_CONTRACT_INVALID")?;

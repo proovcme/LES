@@ -107,6 +107,79 @@ pub fn check_registration(request: &Value) -> Result<(), &'static str> {
     registration(&lexical_write::open(request)?, request)
 }
 
+/// Resolve a clause against published headings, then page its ordinal IDs.
+pub fn clause_positions(
+    database: &Path,
+    collection: &str,
+    dataset: &str,
+    file: &str,
+    clause: &str,
+    offset: usize,
+    limit: usize,
+) -> Result<(usize, Vec<String>), &'static str> {
+    const ERROR: &str = "INDEX_READ_UNAVAILABLE";
+    crate::chat_request::clause_heading("", clause)?;
+    let mut conn =
+        Connection::open_with_flags(database, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|_| ERROR)?;
+    let snapshot = conn.transaction().map_err(|_| ERROR)?;
+    let mut headings = snapshot
+        .prepare(
+            "SELECT DISTINCT coalesce(nullif(section_heading,''),parent_heading,'')
+        FROM lexical_chunks WHERE collection=?1 AND dataset_id=?2 AND doc_name=?3",
+        )
+        .map_err(|_| ERROR)?;
+    let names = headings
+        .query_map(params![collection, dataset, file], |r| {
+            r.get::<_, String>(0)
+        })
+        .map_err(|_| ERROR)?;
+    let mut chosen = None;
+    for name in names {
+        let name = name.map_err(|_| ERROR)?;
+        if crate::chat_request::clause_heading(&name, clause)? && chosen.replace(name).is_some() {
+            return Err("SOURCE_CLAUSE_AMBIGUOUS");
+        }
+    }
+    let Some(chosen) = chosen else {
+        return Ok((0, Vec::new()));
+    };
+    let parameters = params![collection, dataset, file, chosen];
+    let total = snapshot
+        .query_row(
+            "SELECT count(*) FROM lexical_chunks
+        WHERE collection=?1 AND dataset_id=?2 AND doc_name=?3
+        AND coalesce(nullif(section_heading,''),parent_heading,'')=?4",
+            parameters,
+            |r| r.get::<_, i64>(0),
+        )
+        .map_err(|_| ERROR)?;
+    let mut stmt = snapshot
+        .prepare(
+            "SELECT point_id FROM lexical_chunks
+        WHERE collection=?1 AND dataset_id=?2 AND doc_name=?3
+        AND coalesce(nullif(section_heading,''),parent_heading,'')=?4
+        ORDER BY chunk_ord,point_id LIMIT ?5 OFFSET ?6",
+        )
+        .map_err(|_| ERROR)?;
+    let ids = stmt
+        .query_map(
+            params![
+                collection,
+                dataset,
+                file,
+                chosen,
+                limit as i64,
+                offset as i64
+            ],
+            |r| r.get(0),
+        )
+        .map_err(|_| ERROR)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|_| ERROR)?;
+    Ok((usize::try_from(total).map_err(|_| ERROR)?, ids))
+}
+
 /// Locate an ordinal window using the publication catalog's existing index.
 /// Only a dense zero-based sequence can use a reading offset as an ordinal.
 pub fn reading_positions(

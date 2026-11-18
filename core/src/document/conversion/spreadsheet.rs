@@ -125,7 +125,7 @@ fn xlsx(bytes: &[u8], limit: u32, capture: bool) -> Result<Vec<Sheet>> {
             }
             dimensions(row, col)?;
             content_end = Some(content_end.map_or((row, col), |(r, c)| (r.max(row), c.max(col))));
-            if row > limit {
+            if !capture && row > limit {
                 continue;
             }
             if cell.formula.is_some() && matches!(cell.value, DataRef::Empty) {
@@ -140,6 +140,9 @@ fn xlsx(bytes: &[u8], limit: u32, capture: bool) -> Result<Vec<Sheet>> {
                 continue;
             }
             if capture {
+                if !typed_rows.contains_key(&row) && typed_rows.len() > limit as usize {
+                    return Err(LIMIT);
+                }
                 let values = typed_rows.entry(row).or_default();
                 values.resize(values.len().max(col as usize + 1), Value::Null);
                 values[col as usize] = typed(&cell.value)?;
@@ -179,7 +182,7 @@ fn xls(bytes: &[u8], limit: u32, capture: bool) -> Result<Vec<Sheet>> {
         for (r, c, cell) in range.used_cells() {
             let (start_row, start_col) = range.start().unwrap_or((0, 0));
             let row = start_row + r as u32;
-            if row > limit {
+            if !capture && row > limit {
                 break;
             }
             let col = start_col as usize + c;
@@ -192,6 +195,9 @@ fn xls(bytes: &[u8], limit: u32, capture: bool) -> Result<Vec<Sheet>> {
                 continue;
             }
             if capture {
+                if !typed_rows.contains_key(&row) && typed_rows.len() > limit as usize {
+                    return Err(LIMIT);
+                }
                 let values = typed_rows.entry(row).or_default();
                 values.resize(values.len().max(col + 1), Value::Null);
                 values[col] = owned_typed(cell)?;
@@ -484,7 +490,7 @@ pub(super) fn read(bytes: &[u8], suffix: &str, path: &Path, request: &Value) -> 
         let mut tables = Vec::new();
         for mut sheet in sheets {
             // Structured ingestion must never publish only a navigation window.
-            if sheet.total as usize > limit + 1 {
+            if suffix == "csv" && sheet.total as usize > limit + 1 {
                 return Err("SPREADSHEET_LIMIT");
             }
             if suffix == "csv" {

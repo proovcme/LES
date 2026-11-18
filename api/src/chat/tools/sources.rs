@@ -6,6 +6,7 @@ pub(super) mod pdf_focus;
 pub(crate) mod retrieval;
 mod verification;
 mod word;
+mod workbook;
 use super::{envelope, Context, Prepared, Result};
 use retrieval::search;
 pub(crate) fn context_snapshot(args: &Value) -> bool {
@@ -182,6 +183,12 @@ pub(crate) async fn run_scoped(
     mut args: Value,
 ) -> Result<Value> {
     bind_selected_name(turn, &mut args)?;
+    if matches!(name, "read_source" | "read_excel_source") && args["automatic_focus"] == true {
+        if args["q"].as_str().is_none_or(|q| q.trim().is_empty()) {
+            return Err("INDEX_QUERY_INVALID".into());
+        }
+        args["_automatic_focus"] = json!(true);
+    }
     if name == "search_sources" {
         return search(context, turn, args).await;
     }
@@ -266,6 +273,9 @@ pub(crate) async fn run_scoped(
         return retrieval::read(context, turn, args).await;
     }
     if name == "read_excel_source" {
+        if let Some(result) = workbook::read(context.clone(), turn, &args).await? {
+            return Ok(result);
+        }
         let mut result = retrieval::read(context, turn, args).await?;
         result["tool"] = json!(name);
         result["warnings"]=json!(["Прочитаны проверенные индексированные разделы книги; это не полная выгрузка всех ячеек."]);

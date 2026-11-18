@@ -19,12 +19,12 @@
 
 | Метрика | Значение |
 | --- | --- |
-| Python-файлов под git | 731 |
-| Строк Python | 174273 |
+| Python-файлов под git | 728 |
+| Строк Python | 173883 |
 | PRODUCT_REACHABLE | 417 |
 | RUNTIME_SUPPORT | 5 |
 | TEST_OR_TOOL_ONLY | 286 |
-| DORMANT_CANDIDATE | 23 |
+| DORMANT_CANDIDATE | 20 |
 | Зарегистрированных API-маршрутов | 298 |
 | Ошибок разбора | 0 |
 
@@ -95,14 +95,11 @@
 | proxy/services/checklist_template_importer.py | 450 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/clarification_service.py | 225 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/document_object_model.py | 79 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
-| proxy/services/document_outline_service.py | 108 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/glossary_chat_service.py | 90 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/harvest_service.py | 213 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/help_chat_service.py | 97 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
-| proxy/services/kac_web_service.py | 180 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/les_md_chat_service.py | 66 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/office_passport_service.py | 175 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
-| proxy/services/parent_card_hydration_service.py | 172 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/preset_chat_service.py | 64 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/scoped_rag_builder.py | 111 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/sovushka_tone.py | 49 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |

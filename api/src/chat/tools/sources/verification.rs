@@ -25,7 +25,12 @@ pub(crate) async fn physical(context: Arc<Context>, sources: &Value) -> Result<(
         s["prepared_evidence_origin"] == true
             || matches!(
                 s["evidence_kind"].as_str(),
-                Some("physical_pdf_page" | "physical_pdf_unit" | "physical_word_section")
+                Some(
+                    "physical_pdf_page"
+                        | "physical_pdf_unit"
+                        | "physical_word_section"
+                        | "physical_workbook_row"
+                )
             )
     }) {
         let id = source["doc_id"].as_str().ok_or("SOURCE_IDENTITY_INVALID")?;

@@ -22,6 +22,45 @@ pub(super) struct Evidence {
 mod tests {
     use super::*;
     #[test]
+    fn separate_file_questions_focus_terminal_citations_without_renumbering() {
+        let files = [json!("Pump record.docx"), json!("Valve model.pdf")];
+        let mut evidence = Evidence {
+            sources: [0, 0, 1, 1, 1]
+                .into_iter()
+                .map(|file| json!({"doc_name":files[file]}))
+                .collect(),
+            ..Evidence::default()
+        };
+        let blocks = [
+            "pressure",
+            "pressure 7 bar",
+            "diameter 50 mm",
+            "diameter 60 mm",
+            "model",
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(i, body)| json!({"source_index":i+1,"text":body,"body_offset":0}))
+        .collect::<Vec<_>>();
+        let question =
+            "From Pump record report pressure in bar. From Valve model report diameter in mm.";
+        let selected = evidence.citation_focus(question, &files, &blocks).unwrap();
+        assert_eq!(
+            selected
+                .iter()
+                .map(|block| block["source_index"].as_u64().unwrap())
+                .collect::<Vec<_>>(),
+            [2, 3, 4]
+        );
+        assert!(evidence
+            .citation_focus("Compare these documents.", &files, &blocks)
+            .is_none());
+        // Text from a tool the model chose to call stays eligible in full.
+        evidence.explicit_reads.insert(1);
+        assert!(evidence.citation_focus(question, &files, &blocks).is_none());
+    }
+
+    #[test]
     fn ready_origins_update_prefetch_without_repeating_body_or_losing_chat_pins() {
         let source = json!({"doc_id":"first","doc_name":"First.pdf","dataset_id":"scope",
             "source_sha256":"a".repeat(64),"page":1,"qdrant_point_id":"point"});
@@ -469,6 +508,18 @@ mod tests {
                 && text.contains(&"a".repeat(64))
                 && text.contains("Exact proof 17.35 kW")
         );
+        let mut terminal = evidence.blocks[0].clone();
+        Evidence::terminal_block(&mut terminal);
+        let text = Evidence::text(&terminal);
+        assert!(text.starts_with("[Источник 1 | Source.pdf · стр. 3]\n"));
+        assert!(!text.contains("catalog-doc") && !text.contains("source_sha256"));
+        assert_eq!(
+            &text[terminal["body_offset"].as_u64().unwrap() as usize..],
+            "Exact proof 17.35 kW"
+        );
+        assert_eq!(terminal["source_index"], 1);
+        assert_eq!(terminal["canonical"], canonical);
+        assert_eq!(evidence.sources[0]["doc_id"], "catalog-doc");
     }
 }
 impl Evidence {
@@ -683,6 +734,29 @@ impl Evidence {
         }
         block
     }
+    pub(super) fn terminal_block(block: &mut Value) {
+        // The terminal model needs the citation label and body. Machine
+        // identities remain in the source map for verification and receipts.
+        let Some(text) = block["text"].as_str() else {
+            return;
+        };
+        let Some(offset) = block["body_offset"].as_u64().map(|n| n as usize) else {
+            return;
+        };
+        let Some((header, rest)) = text.split_once('\n') else {
+            return;
+        };
+        let Some((identity, body)) = rest.split_once('\n') else {
+            return;
+        };
+        if !header.starts_with("[Источник ") || header.len() + identity.len() + 2 > offset {
+            return;
+        }
+        let offset = offset - identity.len() - 1;
+        block["text"] = json!(format!("{header}\n{body}"));
+        block["body_offset"] = json!(offset);
+        block.as_object_mut().unwrap().remove("document_identity");
+    }
     fn key(source: &Value) -> Value {
         json!([
             source["doc_id"],
@@ -694,7 +768,9 @@ impl Evidence {
             source["part_page"],
             source["view_sha256"],
             source["ordinal"],
-            source["pdf_excerpt_line"]
+            source["pdf_excerpt_line"],
+            source["sheet_name"],
+            source["row"]
         ])
     }
     pub(super) fn add(&mut self, result: &Value) {
@@ -810,6 +886,96 @@ impl Evidence {
         first.extend(rest);
         Some(first)
     }
+    /// A terminal selection for independently named files can use only the
+    /// strongest matching reading units from each file. Units which supply
+    /// different query terms or tie stay together. The caller can retry with
+    /// the complete evidence when the selection leaves a part unanswered.
+    pub(super) fn citation_focus(
+        &self,
+        question: &str,
+        selected_files: &[Value],
+        blocks: &[Value],
+    ) -> Option<Vec<Value>> {
+        if selected_files.len() < 2 || !self.explicit_reads.is_empty() || blocks.len() > 240 {
+            return None;
+        }
+        let mut retained = std::collections::BTreeSet::new();
+        for file in selected_files {
+            let name = file.as_str()?;
+            let query = super::inspection::read_question(question, Some(name), selected_files);
+            if query == question {
+                return None;
+            }
+            let basename = name.rsplit(['/', '\\']).next().unwrap_or(name);
+            let title = basename.rsplit_once('.').map_or(basename, |(stem, _)| stem);
+            let candidates: Vec<_> = blocks
+                .iter()
+                .enumerate()
+                .filter_map(|(i, block)| {
+                    let index = block["source_index"].as_u64()?.checked_sub(1)? as usize;
+                    if self.sources.get(index)?["doc_name"] != *file {
+                        return None;
+                    }
+                    let body = Self::text(block).get(block["body_offset"].as_u64()? as usize..)?;
+                    Some((i, body))
+                })
+                .collect();
+            if candidates.is_empty() {
+                return None;
+            }
+            let texts: Vec<_> = [query, title]
+                .into_iter()
+                .chain(candidates.iter().map(|(_, body)| *body))
+                .map(str::to_owned)
+                .collect();
+            let tokens = les_core::lexical::reading(&texts).ok()?;
+            let terms = tokens["documents"][0]["terms"].as_object()?;
+            let terms: Vec<_> = terms
+                .keys()
+                .filter(|term| tokens["documents"][1]["terms"].get(*term).is_none())
+                .collect();
+            let matches: Vec<_> = candidates
+                .iter()
+                .enumerate()
+                .map(|(i, (index, _))| {
+                    let available = &tokens["documents"][i + 2]["terms"];
+                    (
+                        *index,
+                        terms
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(term, key)| available.get(*key).is_some().then_some(term))
+                            .collect::<std::collections::BTreeSet<_>>(),
+                    )
+                })
+                .collect();
+            if matches.iter().all(|(_, terms)| terms.is_empty()) {
+                return None;
+            }
+            for (index, terms) in &matches {
+                if !terms.is_empty()
+                    && !matches
+                        .iter()
+                        .any(|(_, other)| other.len() > terms.len() && terms.is_subset(other))
+                {
+                    retained.insert(*index);
+                }
+            }
+        }
+        (retained.len() < blocks.len()).then(|| {
+            retained
+                .into_iter()
+                .map(|index| {
+                    let mut block = blocks[index].clone();
+                    // Keep the proof ID and body. A focused unit belongs on its own,
+                    // even when it was originally included with a full document.
+                    block.as_object_mut().unwrap().remove("context_unit");
+                    block
+                })
+                .collect()
+        })
+    }
+
     pub(super) fn optional_blocks(&self) -> Vec<Value> {
         // Reading another source adds evidence. It does not silently replace
         // documents already read by native prefetch or an earlier tool call.
@@ -1051,6 +1217,9 @@ impl Evidence {
             Ok(value) => value,
             Err(code) => return json!({"status":"error","result":{"code":code}}),
         };
+        if let Some(envelope) = value.as_object_mut() {
+            envelope.remove("_pull_evidence");
+        }
         if let Some(result) = value["result"].as_object_mut() {
             result.remove("read_receipt");
         }

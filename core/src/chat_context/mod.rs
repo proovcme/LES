@@ -105,18 +105,17 @@ fn evidence_text(value: &Value, text: &str) -> String {
             );
         }
     }
-    let spans = value["body_offset"]
-        .as_u64()
-        .map(|offset| prose_addresses(original, offset as usize))
-        .unwrap_or_default();
-    let rendered = tabular::render_with_prose(text, index, &spans);
     let body = value["body_offset"]
         .as_u64()
-        .and_then(|n| value["text"].as_str()?.get(n as usize..));
-    if body.is_some_and(|s| tabular::rows(s).is_empty()) {
-        format!("[Фрагмент S{index}]\n{rendered}")
+        .and_then(|n| original.get(n as usize..))
+        .unwrap_or(original);
+    let spans = prose_addresses(body, 0);
+    let prefix = text.strip_suffix(body).unwrap_or("");
+    let rendered = tabular::render_with_prose(body, index, &spans);
+    if tabular::rows(body).is_empty() {
+        format!("[Фрагмент S{index}]\n{prefix}{rendered}")
     } else {
-        rendered
+        format!("{prefix}{rendered}")
     }
 }
 fn evidence_render(value: &Value) -> String {
