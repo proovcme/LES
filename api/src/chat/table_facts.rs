@@ -326,7 +326,7 @@ impl Rows {
             Ok(out)
         };
         let selected = refs("rows", true)?;
-        if decision.is_some_and(|answerable| answerable == selected.is_empty()) {
+        if decision == Some(true) && selected.is_empty() {
             return Err("TABLE_FACTS_REQUIRED");
         }
         if selected.is_empty() {
@@ -509,6 +509,9 @@ impl Rows {
                 .collect::<Result<Vec<_>, &str>>()?,
             None => Vec::new(),
         };
+        if decision == Some(false) && missing.is_empty() {
+            return Err("TABLE_FACTS_REQUIRED");
+        }
         if !missing.is_empty() {
             rendered.push_str("\n\nВ прочитанных источниках не подтверждено — ");
             rendered.push_str(&missing.join(", "));
@@ -519,7 +522,7 @@ impl Rows {
         }
         Ok(Some((
             rendered.trim().to_owned(),
-            json!({"schema":"les.table-facts.v1","status":"copied","rows":receipt,"sums":sums,"missing":missing}),
+            json!({"schema":"les.table-facts.v1","status":if missing.is_empty(){"copied"}else{"partial"},"rows":receipt,"sums":sums,"missing":missing}),
         )))
     }
 }
@@ -759,7 +762,19 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(proof["status"], "insufficient");
-        assert!(!answer.contains("Alpha") && !answer.contains("0.1"));
+        assert!(
+            !answer.contains("Alpha") && !answer.contains("0.1") && !answer.contains("[Источник")
+        );
+        let (answer, partial) = rows
+            .finish_checked(
+                r#"{"answerable":false,"rows":["S1R4"],"sums":[],"missing":["мощность"]}"#,
+                true,
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(partial["status"], "partial");
+        assert_eq!(partial["missing"], json!(["мощность"]));
+        assert!(answer.contains("[Источник 1]") && answer.contains("мощность"));
         assert!(rows
             .finish_checked(r#"{"answerable":true,"rows":["S1R4"],"sums":[]}"#, true)
             .unwrap()

@@ -22,9 +22,16 @@ beforeEach(() => {
     workspace.text = 'Мой черновик';
     workspace.messages = [{ role: 'ai', text: 'Подтверждено [1].', meta: { source_map: [{ index: 1, doc_id: 'doc-one', dataset_id: 'demo', doc_name: 'Тест с пробелами.md', snippet: 'Исходное доказательство' }] } }];
   });
-  vi.stubGlobal('fetch', vi.fn(async (path: string) => {
-    if (path.includes('/by-id/doc-one/viewer')) return new Response('<p>Исходное доказательство</p>', { headers: { 'Content-Type': 'text/html' } });
-    if (path.includes('/by-id/doc-one')) return json({ document: { id: 'doc-one', file_name: 'Тест с пробелами.md' } });
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
+    if (path === '/api/rag/sources/call') {
+      const { tool, args } = JSON.parse(String(init?.body));
+      const text = tool === 'read_excel_source' ? 'B2003 = 7654321' : args.offset ? 'Столбец 2: 32' : 'Текст оригинала';
+      return json({ result: { passages: [{ text }], next_offset: null } });
+    }
+    if (path.includes('/by-id/doc-one')) {
+      const name = new URL(path, 'http://localhost').searchParams.get('doc_name');
+      return json({ document: { id: 'doc-one', file_name: name } });
+    }
     throw new Error(`Unexpected fixture request: ${path}`);
   }));
   component = mount(App, { target: document.body, props: { workspace } });
@@ -97,9 +104,8 @@ it('opens evidence and its original, then returns with draft, scroll and focus p
   await settle(() => !!document.querySelector('dialog .source-actions'));
   expect(document.querySelector('blockquote')?.textContent).toContain('Исходное доказательство');
   const original = [...document.querySelectorAll('dialog button')].find((button) => button.textContent?.includes('Показать оригинал')) as HTMLButtonElement;
-  original.click(); await settle(() => !!document.querySelector('iframe'));
-  expect(document.querySelector('iframe')?.getAttribute('src')).toContain('doc_name=%D0%A2%D0%B5');
-  expect(document.querySelector('iframe')?.getAttribute('sandbox')).not.toContain('allow-same-origin');
+  original.click(); await settle(() => document.querySelector('.source-reading')?.textContent?.includes('Текст оригинала') === true);
+  expect(document.querySelector('dialog a[download]')?.getAttribute('href')).toContain('doc_name=%D0%A2%D0%B5');
   const back = [...document.querySelectorAll('dialog button')].find((button) => button.textContent?.includes('Вернуться к ответу')) as HTMLButtonElement;
   back.click(); await settle(() => !document.querySelector('dialog'));
   expect(document.querySelector<HTMLTextAreaElement>('#question')?.value).toBe('Мой черновик');
@@ -118,10 +124,10 @@ it('opens a table citation on its exact sheet and row', async () => {
   expect(document.querySelector('dialog .eyebrow')?.textContent).toContain('Часть 2 · A2003:B2003');
   const original = [...document.querySelectorAll<HTMLButtonElement>('dialog button')].find((button) => button.textContent?.includes('Показать оригинал'))!;
   original.click();
-  await settle(() => !!document.querySelector('iframe'));
-  const url = new URL(document.querySelector('iframe')!.src);
-  expect(url.searchParams.get('sheet')).toBe('Часть 2');
-  expect(url.searchParams.get('locator')).toBe('Часть 2!R2003');
+  await settle(() => document.querySelector('.source-reading')?.textContent?.includes('B2003 = 7654321') === true);
+  const [, request] = vi.mocked(fetch).mock.lastCall!;
+  expect(JSON.parse(String(request?.body))).toMatchObject({ tool: 'read_excel_source',
+    args: { doc_id: 'doc-one', dataset_id: 'demo', sheet_name: 'Часть 2', row_start: 2003, row_end: 2003, limit: 1 } });
 });
 
 it('separates cited revisions from found material and marks a conclusion without sources', async () => {
@@ -146,6 +152,7 @@ it('opens a Word citation at its table row', async () => {
   workspace.messages = [{ role: 'ai', text: 'Подтверждено [1].', meta: { source_map: [{
     index: 1, doc_id: 'doc-one', dataset_id: 'demo', doc_name: 'Ведомость.docx',
     quote: 'Столбец 2: 32', locator: { anchor: 't0r501' },
+    evidence_kind: 'physical_word_section', read_offset: 17, view_sha256: 'a'.repeat(64),
   }] } }];
   flushSync();
   document.querySelector<HTMLButtonElement>('[data-citation]')!.click();
@@ -153,8 +160,10 @@ it('opens a Word citation at its table row', async () => {
   expect(document.querySelector('dialog .eyebrow')?.textContent).toContain('таблица 1, строка 502');
   const original = [...document.querySelectorAll<HTMLButtonElement>('dialog button')].find((button) => button.textContent?.includes('Показать оригинал'))!;
   original.click();
-  await settle(() => !!document.querySelector('iframe'));
-  expect(new URL(document.querySelector('iframe')!.src).searchParams.get('locator')).toBe('t0r501');
+  await settle(() => document.querySelector('.source-reading')?.textContent?.includes('Столбец 2: 32') === true);
+  const [, request] = vi.mocked(fetch).mock.lastCall!;
+  expect(JSON.parse(String(request?.body))).toMatchObject({ tool: 'read_source',
+    args: { doc_id: 'doc-one', dataset_id: 'demo', offset: 17, view_sha256: 'a'.repeat(64) } });
 });
 
 it('does not submit during IME composition or Shift+Enter and submits Enter once', async () => {

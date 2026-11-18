@@ -6,8 +6,18 @@ enum Route<'a> {
     Datasets,
     Metadata(&'a str),
     Preview(&'a str, &'a str),
+    Open(&'a str),
 }
-fn route(path: &str) -> Option<Route<'_>> {
+fn route(method: &Method, path: &str) -> Option<Route<'_>> {
+    if *method == Method::POST {
+        let id = path
+            .strip_prefix("/api/documents/by-id/")?
+            .strip_suffix("/open-native")?;
+        return (!id.is_empty() && !id.contains('/')).then_some(Route::Open(id));
+    }
+    if *method != Method::GET {
+        return None;
+    }
     if path == "/api/documents/datasets" {
         return Some(Route::Datasets);
     }
@@ -21,10 +31,24 @@ fn route(path: &str) -> Option<Route<'_>> {
         .then_some(Route::Preview(id, page))
 }
 pub fn handles(request: &Request) -> bool {
-    request.method() == Method::GET && route(request.uri().path()).is_some()
+    route(request.method(), request.uri().path()).is_some()
 }
 pub async fn handle(context: Arc<Context>, request: Request) -> Response {
-    let cors = match auth::authorize(&context, request.headers(), false).await {
+    let method = request.method().clone();
+    let opening = method == Method::POST;
+    let headers = request.headers();
+    if opening
+        && (!crate::transport::local_browser(headers)
+            || headers
+                .get("sec-fetch-site")
+                .is_none_or(|site| site != "same-origin")
+            || ["forwarded", "x-forwarded-for", "x-real-ip"]
+                .iter()
+                .any(|name| headers.contains_key(*name)))
+    {
+        return failed("SOURCE_OPEN_ORIGIN_DENIED");
+    }
+    let cors = match auth::authorize(&context, headers, opening).await {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -32,7 +56,7 @@ pub async fn handle(context: Arc<Context>, request: Request) -> Response {
     let mut response = match context.workspace_slots.clone().try_acquire_owned() {
         Ok(permit) => tokio::task::spawn_blocking(move || {
             let _permit = permit;
-            read(&context, &uri).unwrap_or_else(|code| failed(&code))
+            read(&context, &method, &uri).unwrap_or_else(|code| failed(&code))
         })
         .await
         .unwrap_or_else(|_| failed("SOURCE_READ_FAILED")),
@@ -44,8 +68,8 @@ pub async fn handle(context: Arc<Context>, request: Request) -> Response {
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     response
 }
-fn read(context: &Context, uri: &Uri) -> Result<Response, String> {
-    let route = route(uri.path()).ok_or("SOURCE_DOCUMENT_NOT_FOUND")?;
+fn read(context: &Context, method: &Method, uri: &Uri) -> Result<Response, String> {
+    let route = route(method, uri.path()).ok_or("SOURCE_DOCUMENT_NOT_FOUND")?;
     let query = uri.query().unwrap_or("");
     if query.len() > 12000 {
         return Err("SOURCE_QUERY_INVALID".into());
@@ -89,7 +113,7 @@ fn read(context: &Context, uri: &Uri) -> Result<Response, String> {
         ));
     }
     let (id, page) = match route {
-        Route::Metadata(id) => (id, None),
+        Route::Metadata(id) | Route::Open(id) => (id, None),
         Route::Preview(id, page) => (
             id,
             Some(
@@ -107,6 +131,18 @@ fn read(context: &Context, uri: &Uri) -> Result<Response, String> {
     let digest = param("source_sha256");
     let args = json!({"doc_id":id,"dataset_id":param("dataset_id"),"file_name":param("doc_name")});
     let mut doc = catalog_document(context, &args)?;
+    if matches!(route, Route::Open(_)) {
+        if digest.is_empty() && doc["file_hash"].as_str().is_none_or(str::is_empty) {
+            return Err("SOURCE_REVISION_REQUIRED".into());
+        }
+        let (path, _file, _) = verified_original(context, &doc, digest)?;
+        open_original(&les_core::document_source::public_path(path))?;
+        return Ok(crate::json_response(
+            StatusCode::OK,
+            json!({"status":"opened"}),
+            "rust.documents",
+        ));
+    }
     let Some(page) = page else {
         if !digest.is_empty() {
             verified_file(context, &doc, digest)?;
@@ -174,14 +210,84 @@ fn read(context: &Context, uri: &Uri) -> Result<Response, String> {
     );
     Ok(response)
 }
+
+fn open_original(path: &std::path::Path) -> Result<(), &'static str> {
+    let ext = path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
+    if ![
+        "pdf", "doc", "docx", "xls", "xlsx", "xlsm", "csv", "txt", "md", "pptx", "json", "jsonl",
+    ]
+    .iter()
+    .any(|allowed| ext.eq_ignore_ascii_case(allowed))
+    {
+        return Err("SOURCE_OPEN_FORMAT_UNSUPPORTED");
+    }
+    system_open(path)
+}
+
+#[cfg(windows)]
+fn system_open(path: &std::path::Path) -> Result<(), &'static str> {
+    use std::{ffi::c_void, os::windows::ffi::OsStrExt, ptr::null_mut};
+
+    #[link(name = "shell32")]
+    unsafe extern "system" {
+        fn ShellExecuteW(
+            hwnd: *mut c_void,
+            operation: *const u16,
+            file: *const u16,
+            parameters: *const u16,
+            directory: *const u16,
+            show: i32,
+        ) -> isize;
+    }
+    let file: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+    let operation = [b'o' as u16, b'p' as u16, b'e' as u16, b'n' as u16, 0];
+    let result = unsafe {
+        ShellExecuteW(
+            null_mut(),
+            operation.as_ptr(),
+            file.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            1,
+        )
+    };
+    (result > 32).then_some(()).ok_or("SOURCE_OPEN_FAILED")
+}
+
+#[cfg(not(windows))]
+fn system_open(path: &std::path::Path) -> Result<(), &'static str> {
+    let program = if cfg!(target_os = "macos") {
+        "/usr/bin/open"
+    } else {
+        "/usr/bin/xdg-open"
+    };
+    std::process::Command::new(program)
+        .arg(path)
+        .spawn()
+        .map(|_| ())
+        .map_err(|_| "SOURCE_OPEN_FAILED")
+}
+
 fn failed(code: &str) -> Response {
     let (status, detail) = match code {
         "SOURCE_DOCUMENT_NOT_FOUND" | "PDF_DOCUMENT_NOT_FOUND" => {
             (StatusCode::NOT_FOUND, "Документ не найден.")
         }
-        "SOURCE_REVISION_CHANGED" | "PDF_REVISION_CHANGED" => (
+        "SOURCE_REVISION_CHANGED" | "PDF_REVISION_CHANGED" | "SOURCE_REVISION_REQUIRED" => (
             StatusCode::CONFLICT,
             "Редакция документа изменилась. Откройте текущий источник или повторите поиск.",
+        ),
+        "SOURCE_OPEN_ORIGIN_DENIED" => (
+            StatusCode::FORBIDDEN,
+            "Открытие оригинала доступно из локального окна Леса.",
+        ),
+        "SOURCE_OPEN_FORMAT_UNSUPPORTED" => (
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "Этот формат можно скачать из карточки источника.",
+        ),
+        "SOURCE_OPEN_FAILED" => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Не удалось открыть файл. Проверьте приложение по умолчанию для этого формата.",
         ),
         "PDF_PAGE_REQUIRED"
         | "PDF_PAGE_OUT_OF_RANGE"

@@ -41,22 +41,42 @@ fn trim(text: &str) -> &str {
 
 pub(super) fn to_table(name: &str, mut rows: BTreeMap<u32, Vec<Value>>) -> Option<Value> {
     rows.retain(|_, row| row.iter().any(|cell| !trim(&as_text(cell)).is_empty()));
-    let (&first, values) = rows.first_key_value()?;
     let width = rows.values().map(Vec::len).max()?;
-    let labels = values
-        .iter()
-        .map(|v| trim(&as_text(v)).to_owned())
-        .collect::<Vec<_>>();
-    // Only an initial row of recognizable column labels may supply names.
-    // Keep its cells and coordinates separately from the data rows.
-    let header = (rows.len() > 1 && crate::tables::has_column_labels(&labels)).then_some(first);
+    // Scan the first populated rows so blank space before a header does not
+    // affect recognition. A generic text header can precede typed data.
+    let header =
+        rows.iter()
+            .zip(rows.values().skip(1))
+            .take(20)
+            .find_map(|((&row, values), next)| {
+                let labels: Vec<_> = values
+                    .iter()
+                    .map(|v| trim(&as_text(v)).to_owned())
+                    .collect();
+                let populated = values
+                    .iter()
+                    .zip(&labels)
+                    .filter(|(_, label)| !label.is_empty());
+                let text_count = populated
+                    .clone()
+                    .filter(|(value, _)| value.is_string())
+                    .count();
+                let typed_data = next
+                    .iter()
+                    .any(|value| value.is_number() || value.is_boolean());
+                (crate::tables::has_column_labels(&labels)
+                    || text_count >= 2 && text_count == populated.count() && typed_data)
+                    .then_some(row)
+            });
     let header_values = header.and_then(|row| rows.remove(&row));
     let headers: Vec<_> = (0..width)
         .map(|i| {
-            labels
-                .get(i)
-                .filter(|v| header.is_some() && !v.is_empty())
-                .cloned()
+            header_values
+                .as_ref()
+                .and_then(|values| values.get(i))
+                .map(as_text)
+                .map(|text| trim(&text).to_owned())
+                .filter(|text| !text.is_empty())
                 .unwrap_or_else(|| format!("col_{}", i + 1))
         })
         .collect();

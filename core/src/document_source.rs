@@ -60,7 +60,7 @@ pub fn resolve(
     Ok(path)
 }
 
-fn public_path(path: PathBuf) -> PathBuf {
+pub fn public_path(path: PathBuf) -> PathBuf {
     #[cfg(windows)]
     if let Some(text) = path.to_str() {
         if let Some(unc) = text.strip_prefix(r"\\?\UNC\") {

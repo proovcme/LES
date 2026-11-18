@@ -529,6 +529,12 @@ pub(super) fn read(bytes: &[u8], suffix: &str, path: &Path, request: &Value) -> 
             if let Some(mut table) =
                 super::super::workbook_index::to_table(&sheet.name, sheet.typed_rows)
             {
+                if table["rows"]
+                    .as_array()
+                    .is_some_and(|rows| rows.len() > limit)
+                {
+                    return Err(LIMIT);
+                }
                 table["missing_formula_cache"] = json!(sheet.missing_formula_cache);
                 tables.push(table);
             }

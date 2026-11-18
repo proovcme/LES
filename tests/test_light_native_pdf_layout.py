@@ -99,8 +99,9 @@ def test_chat_reads_cells_while_the_index_keeps_its_search_representation(native
         assert bool(body.get('response_format'))==strict
         if strict:
             schema=body['response_format']['json_schema']['schema']
-            assert schema['required']==['answerable','rows','sums'] and schema['properties']['rows']['items']['type']=='string'
-        return {'text':json.dumps({'answerable':True,'rows':[f'S1R{row}'],'sums':[]})}
+            assert set(schema['required'])=={'answerable','rows','sums','missing'}
+            assert schema['properties']['rows']['items']['type']=='string'
+        return {'text':json.dumps({'answerable':True,'rows':[f'S1R{row}'],'sums':[],'missing':[]})}
     t.scripts.append(answer)
     result=t.client.post('/api/chat',json={'question':'How much Alpha item is in the documents?','session_id':'numeric-layout',
         'mode':mode,'retrieval_mode':'push','scope':{'scope_type':'dataset','dataset_ids':[dataset],'selected_sources_only':strict}}).raise_for_status().json()

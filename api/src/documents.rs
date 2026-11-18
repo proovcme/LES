@@ -13,6 +13,7 @@ use serde_json::{json, Value};
 use std::{
     fs::File,
     io::{Read, Seek, SeekFrom},
+    path::PathBuf,
     sync::Arc,
 };
 pub fn route(path: &str) -> Option<&str> {
@@ -51,6 +52,15 @@ pub(crate) fn verified_file(
     doc: &Value,
     expected: &str,
 ) -> Result<(File, u64), &'static str> {
+    let (_, file, length) = verified_original(context, doc, expected)?;
+    Ok((file, length))
+}
+
+fn verified_original(
+    context: &Context,
+    doc: &Value,
+    expected: &str,
+) -> Result<(PathBuf, File, u64), &'static str> {
     let expected = if expected.is_empty() {
         doc["file_hash"].as_str().unwrap_or("")
     } else {
@@ -75,7 +85,7 @@ pub(crate) fn verified_file(
         doc["file_name"].as_str().ok_or("SOURCE_IDENTITY_INVALID")?,
         &context.state_root.join("storage/datasets"),
     )?;
-    let mut file = File::open(path).map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let mut file = File::open(&path).map_err(|_| "SOURCE_UNAVAILABLE")?;
     let actual = les_core::pdf_source::fingerprint(&mut file).map_err(|e| {
         if e == "PDF_REVISION_CHANGED" {
             "SOURCE_REVISION_CHANGED"
@@ -89,7 +99,7 @@ pub(crate) fn verified_file(
     let length = file.metadata().map_err(|_| "SOURCE_READ_FAILED")?.len();
     file.seek(SeekFrom::Start(0))
         .map_err(|_| "SOURCE_READ_FAILED")?;
-    Ok((file, length))
+    Ok((path, file, length))
 }
 fn byte_range(value: Option<&str>, length: u64) -> Result<Option<(u64, u64)>, ()> {
     let Some(value) = value else { return Ok(None) };
