@@ -43,8 +43,8 @@ it('passes a physical Word citation to the shared reader without losing its unit
     evidence_kind: 'physical_word_section', view_sha256: 'b'.repeat(64),
     locator: { source_sha256: 'a'.repeat(64) },
   } } });
-  await vi.waitFor(() => { flushSync(); expect([...document.querySelectorAll('button')].some(b => b.textContent?.trim() === 'Прочитать текст')).toBe(true); });
-  [...document.querySelectorAll('button')].find(b => b.textContent?.trim() === 'Прочитать текст')!.click();
+  await vi.waitFor(() => { flushSync(); expect([...document.querySelectorAll('button')].some(b => b.textContent?.trim() === 'Показать оригинал')).toBe(true); });
+  [...document.querySelectorAll('button')].find(b => b.textContent?.trim() === 'Показать оригинал')!.click();
   await vi.waitFor(() => { flushSync(); expect(document.body.textContent).toContain('Цитируемый раздел'); });
   expect(read).toHaveBeenCalledWith({ tool: 'read_source', args: { doc_id: 'found-word', dataset_id: 'selected',
     source_sha256: 'a'.repeat(64), offset: 17, max_chars: 12000, view_sha256: 'b'.repeat(64) } });
