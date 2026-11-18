@@ -8,7 +8,7 @@ enum Route<'a> {
     Preview(&'a str, &'a str),
     Open(&'a str),
 }
-fn route(method: &Method, path: &str) -> Option<Route<'_>> {
+fn route<'a>(method: &Method, path: &'a str) -> Option<Route<'a>> {
     if *method == Method::POST {
         let id = path
             .strip_prefix("/api/documents/by-id/")?
