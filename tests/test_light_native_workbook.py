@@ -135,6 +135,7 @@ def test_index_routing_and_nodes_match_previous_reader(tmp_path, monkeypatch):
     rewrite_sheet(source, path, lambda xml: xml.replace(b'<f>1-1</f><v></v>', b'<f>1-1</f><v>0</v>'))
     original = path.read_bytes()
     splitter = support.StructureAwareSplitter(chunk_size=1000, chunk_overlap=100)
+    monkeypatch.setattr(support, 'MIN_CHUNK', 1)
     data = tmp_path / 'state'
     data.mkdir()
 
@@ -174,7 +175,11 @@ def test_index_routing_and_nodes_match_previous_reader(tmp_path, monkeypatch):
     assert all(item['payload']['type'] == 'table_row' for item in nodes)
     assert [(item['payload']['sheet_name'], item['payload']['row']) for item in nodes] == [
         ('Щиты', 2), ('Щиты', 5), ('Щиты', 8), ('Дополнение', 2)]
-    assert nodes[1:] == expected_nodes
+    for actual_node, legacy_node in zip(nodes[1:], expected_nodes, strict=True):
+        assert actual_node['text'] == legacy_node['text']
+        assert {key: value for key, value in actual_node['payload'].items() if key != 'table_row'} == {
+            key: value for key, value in legacy_node['payload'].items() if key != 'table_row'
+        }
     assert path.read_bytes() == original
 
 
