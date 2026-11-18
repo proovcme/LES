@@ -9,6 +9,8 @@ pub(super) struct Evidence {
     initial: Vec<(usize, Value)>,
     retained: Vec<(usize, Value)>,
     verified_reads: std::collections::BTreeSet<u64>,
+    explicit_reads: std::collections::BTreeSet<u64>,
+    search_heads: std::collections::BTreeSet<u64>,
     required: bool,
     retried: bool,
     delivered: std::collections::BTreeSet<u64>,
@@ -372,6 +374,73 @@ mod tests {
         assert_eq!(evidence.blocks, before);
     }
     #[test]
+    fn final_window_keeps_distinct_read_documents_before_extra_fragments() {
+        let passage = |doc, part, text: &str| {
+            json!({"text":text,"source":{
+                "doc_id":doc,"doc_name":doc,"dataset_id":"scope","qdrant_point_id":part
+            }})
+        };
+        let mut evidence = Evidence::new(true);
+        evidence.add(
+            &json!({"tool":"read_source","status":"ok","result":{"passages":[
+                passage("A", "a", "FIRST_DOCUMENT")
+            ]}}),
+        );
+        evidence.add(
+            &json!({"tool":"read_source","status":"ok","result":{"passages":[
+                passage("B", "b1", "SECOND_DOCUMENT"),
+                passage("B", "b2", &format!("EXTRA {}", "text ".repeat(180)))
+            ]}}),
+        );
+        let build = |limit| {
+            les_core::chat_context::execute(&json!({
+            "action":"assemble",
+            "preset":{"preset_id":"test","input_limit":limit,"generation_reserve":20,"safety_reserve":20},
+            "profile_prefix":"Use the visible evidence.",
+            "request_payload":{"question":"Compare both sources"},
+            "evidence":evidence.answer_blocks(2).unwrap(),
+            "source_map":evidence.sources
+        })).unwrap()
+        };
+        let packed = build(250);
+        let wire = packed["messages"].to_string();
+        assert!(wire.contains("FIRST_DOCUMENT") && wire.contains("SECOND_DOCUMENT"));
+        assert!(!wire.contains("EXTRA"));
+        let visible = les_core::chat_context::execute(&json!({
+            "action":"visible","packet":packed["packet"],"source_map":evidence.sources
+        }))
+        .unwrap();
+        assert_eq!(
+            evidence.omitted_explicit_reads(&visible),
+            vec![json!({"index":3,"doc_id":"B","label":"B"})]
+        );
+    }
+    #[test]
+    fn pull_keeps_the_leading_evidence_from_each_verified_search() {
+        let search = |doc: &str, parts: &[&str]| {
+            json!({
+                "tool":"search_sources","status":"ok","operation":"indexed_sections","result":{
+                    "pull_search":true,"index_revision":"rev",
+                    "read_receipt":{"schema":"les.indexed-read.v1","index_revision":"rev","point_ids":parts},
+                    "passages":parts.iter().map(|part| json!({"text":part,"source":{
+                        "doc_id":doc,"doc_name":doc,"dataset_id":"scope","qdrant_point_id":part
+                    }})).collect::<Vec<_>>()
+                }
+            })
+        };
+        let mut evidence = Evidence::new(true);
+        evidence.add(&search("one", &["A", "extra"]));
+        evidence.add(&search("two", &["B"]));
+        let blocks = evidence.answer_blocks(2).unwrap();
+        assert_eq!(
+            blocks
+                .iter()
+                .map(|b| b["source_index"].as_u64().unwrap())
+                .collect::<Vec<_>>(),
+            [1, 3, 2]
+        );
+    }
+    #[test]
     fn search_is_optional_but_read_promotes_text_and_keeps_exact_source_identity() {
         let source = json!({"doc_id":"catalog-doc","dataset_id":"ds","doc_name":format!("{}/Source.pdf","long-folder/".repeat(30)),"source_sha256":"a".repeat(64),"page":3,"qdrant_point_id":"point"});
         let mut envelope = json!({"status":"ok","tool":"search_sources","result":{"passages":[{"text":"Exact proof 17.35 kW","source":source}]},"sources":[source]});
@@ -436,6 +505,29 @@ impl Evidence {
                     .flatten()
                     .any(|s| s["index"] == source["index"])
         })
+    }
+    pub(super) fn omitted_explicit_reads(&self, visible: &Value) -> Vec<Value> {
+        self.blocks
+            .iter()
+            .chain(self.retained.iter().map(|(_, block)| block))
+            .chain(self.initial.iter().map(|(_, block)| block))
+            .filter_map(|block| block["source_index"].as_u64())
+            .filter(|index| {
+                (self.explicit_reads.contains(index) || self.search_heads.contains(index))
+                    && !visible
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .any(|source| source["index"] == *index)
+            })
+            .filter_map(|index| self.sources.get(index as usize - 1))
+            .map(|source| {
+                let name = source["doc_name"].as_str().unwrap_or("Документ");
+                let label = source["label"].as_str().unwrap_or(name);
+                let file = name.rsplit(['/', '\\']).next().unwrap_or(name);
+                json!({"index":source["index"],"doc_id":source["doc_id"],"label":format!("{file}{}", label.strip_prefix(name).unwrap_or(""))})
+            })
+            .collect()
     }
     pub(super) fn confirm_delivery(&mut self, visible: &Value) {
         self.delivered = visible
@@ -601,7 +693,8 @@ impl Evidence {
             source["part_sha256"],
             source["part_page"],
             source["view_sha256"],
-            source["ordinal"]
+            source["ordinal"],
+            source["pdf_excerpt_line"]
         ])
     }
     pub(super) fn add(&mut self, result: &Value) {
@@ -681,7 +774,41 @@ impl Evidence {
         if !indexes.is_empty() {
             self.delivered.clear();
         }
+        if reader && result["tool"] != "document_review" {
+            self.explicit_reads.extend(indexes.iter().copied());
+        }
+        if result["tool"] == "search_sources" && result["result"]["pull_search"] == true {
+            self.search_heads.extend(indexes.first().copied());
+        }
         self.verified_reads.extend(indexes);
+    }
+    pub(super) fn answer_blocks(&self, min_documents: usize) -> Option<Vec<Value>> {
+        if self.explicit_reads.is_empty() && self.search_heads.is_empty() {
+            return None;
+        }
+        let mut documents = std::collections::BTreeSet::new();
+        let (mut first, rest): (Vec<_>, Vec<_>) = self
+            .required_blocks()
+            .into_iter()
+            .chain(self.optional_blocks())
+            .partition(|block| {
+                let Some(index) = block["source_index"].as_u64() else {
+                    return false;
+                };
+                let head = self.search_heads.contains(&index);
+                if !head && !self.explicit_reads.contains(&index) {
+                    return false;
+                }
+                let source = &self.sources[index as usize - 1];
+                let doc = source["doc_id"].as_str();
+                let dataset = source["dataset_id"].as_str();
+                documents.insert((dataset, doc)) || head
+            });
+        if documents.len() < min_documents && self.search_heads.len() < min_documents {
+            return None;
+        }
+        first.extend(rest);
+        Some(first)
     }
     pub(super) fn optional_blocks(&self) -> Vec<Value> {
         // Reading another source adds evidence. It does not silently replace
@@ -720,7 +847,9 @@ impl Evidence {
                     .any(|p| p["text"].as_str().is_some_and(|s| !s.is_empty()))
             });
         if !initial && result["tool"] != "document_review" && has_text {
-            for block in self.blocks.drain(..) {
+            // Retained batches are consumed newest first. Reverse the insert
+            // order so the most relevant units within each read stay first.
+            for block in self.blocks.drain(..).rev() {
                 if let Some(source) = self.sources.iter().find(|s| {
                     Self::text(&block)
                         .starts_with(&format!("{}\n", s["header"].as_str().unwrap_or("")))

@@ -120,7 +120,8 @@ pub async fn run(
         candidate_documents = result["result"]["candidate_documents"].clone();
         prefetch = json!({"coverage":result["result"]["coverage"],
             "index_revision":result["result"]["index_revision"],"read_receipt":result["result"]["read_receipt"],"candidates":evidence.sources.len(),"selection_policy":result["result"]["selection_policy"],"candidate_documents":found_documents,
-            "fusion":result["result"]["fusion"],"fusion_trace":result["result"]["fusion_trace"],"read_failures":result["result"]["read_failures"]});
+            "fusion":result["result"]["fusion"],"fusion_trace":result["result"]["fusion_trace"],"read_failures":result["result"]["read_failures"],
+            "addressed_row_count":result["result"]["addressed_row_count"]});
         journal
             .checkpoint(
                 "retrieval_prefetch",
@@ -206,12 +207,21 @@ pub async fn run(
                 if native {
                     complete_pending(&mut exchanges, &agent.stop_reason());
                 }
-                let proofs = evidence.required_blocks();
-                let mut required = proofs.clone();
+                // A source-only multi-document Pull can answer after any
+                // round. Give each read document a place in that window
+                // before filling it with additional units from one read.
+                let ranked_reads = if source_reading && final_answer {
+                    evidence.answer_blocks(1)
+                } else if source_reading && retrieval_mode == "pull" {
+                    evidence.answer_blocks(2)
+                } else {
+                    None
+                };
+                let (initial, mut required) = match ranked_reads {
+                    Some(blocks) => (blocks, Vec::new()),
+                    None => (evidence.optional_blocks(), evidence.required_blocks()),
+                };
                 let proof_blocks = required.len();
-                // Discovery identities are available before inspection; facts
-                // enter the answer window only after an actual source read.
-                let initial = evidence.optional_blocks();
                 let table_mode = numeric_grounded
                     && (!table_feedback.is_null()
                         || super::table_facts::Rows::supported(
@@ -468,7 +478,7 @@ pub async fn run(
                 };
                 let trace = les_core::chat_context::execute(
                     &json!({"action":"prepared_trace","packet":packed["packet"],"purpose":"native_chat","source_map":evidence.sources,
-                        "evidence":initial.iter().chain(&proofs).collect::<Vec<_>>()}),
+                        "evidence":initial.iter().chain(required.iter().take(proof_blocks)).collect::<Vec<_>>()}),
                 )?;
                 if visible != published_sources {
                     journal
@@ -641,20 +651,32 @@ pub async fn run(
                 } else {
                     false
                 };
+                let omitted_reads = evidence.omitted_explicit_reads(&visible);
+                let table_window = contexts
+                    .last()
+                    .is_some_and(|c| c["table_selection"] == true)
+                    && evidence.read_omitted(&visible);
+                let omitted_document = omitted_reads.iter().any(|read| {
+                    read["doc_id"].as_str().is_some_and(|doc_id| {
+                        !visible
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .any(|source| source["doc_id"] == doc_id)
+                    })
+                });
                 if !citation_retry
+                    && !answer_window_retry
                     && tools.table.is_none()
                     && !review_active
                     && super::inspection::source_only(agent.results())
                     && contexts.last().is_some_and(|c| {
-                        c["table_selection"] == true
-                            && c["schema_reserved_tokens"].as_u64().is_some_and(|n| n > 1)
+                        c["schema_reserved_tokens"].as_u64().is_some_and(|n| n > 1)
                     })
-                    && evidence.read_omitted(&visible)
+                    && (table_window || omitted_document)
                 {
-                    // Preparing the answer window is distinct from repairing
-                    // a selection made in that window. Neither reopens tools.
                     answer_window_retry = true;
-                    citation_retry = true;
+                    citation_retry = table_window;
                     journal
                         .checkpoint(
                             "retrieval_prefetch",
@@ -663,8 +685,11 @@ pub async fn run(
                         .await?;
                     journal.checkpoint("reset", json!("")).await?;
                     sink.emit("reset", json!("")).await?;
-                    sink.progress("verification", "Проверяю продолжение документа")
-                        .await?;
+                    sink.progress(
+                        "verification",
+                        "Освобождаю место для прочитанных источников",
+                    )
+                    .await?;
                     agent.prepare_answer_window()?;
                     continue;
                 }
@@ -822,7 +847,7 @@ pub async fn run(
                 let completed = json!({"answer":answer,"response":answer,"sources":names,"source_map":visible,"citation_map":visible,
                     "history_id":journal.history,"latency_sec":started.elapsed().as_secs_f64(),"tokens":terminal["usage"]["completion_tokens"].as_u64().unwrap_or(0),"crag_status":"UNVALIDATED","success":true,
                     "source_scope":{"resolved":turn.scope["resolved_dataset_ids"],"used":visible.as_array().into_iter().flatten().map(|s|s["dataset_id"].clone()).collect::<Vec<_>>()},
-                    "query_route":{"channel":"generic","reason":"native_chat"},"retrieval_trace":{"engine":"rust.chat","status":if evidence.read_failures.is_empty(){"ok"}else{"degraded"},"read_failures":evidence.read_failures,"rounds":agent.rounds,"mode":retrieval_mode,"prefetch":prefetch,"contexts":contexts,"citation_syntax":citations,"grounding_retry":grounding_retry,"citation_retry":citation_retry,"answer_window_retry":answer_window_retry,"source_inspection":evidence.reading_trace()},
+                    "query_route":{"channel":"generic","reason":"native_chat"},"retrieval_trace":{"engine":"rust.chat","status":if evidence.read_failures.is_empty(){"ok"}else{"degraded"},"read_failures":evidence.read_failures,"omitted_reads":omitted_reads,"rounds":agent.rounds,"mode":retrieval_mode,"prefetch":prefetch,"contexts":contexts,"citation_syntax":citations,"grounding_retry":grounding_retry,"citation_retry":citation_retry,"answer_window_retry":answer_window_retry,"source_inspection":evidence.reading_trace()},
                     "artifact":{"completion_status":if !summary.is_null()&&summary["status"]!="recorded"{"incomplete"}else{"completed"},"execution_receipt":receipt,"execution_summary":summary,"validation":if table_facts.is_null(){"not_performed"}else if table_facts["status"]=="insufficient"{"insufficient_evidence"}else{"source_rows_verified"},"table_facts":table_facts,"tool_results":agent.results(),"egress_tag":turn.egress_tag,"attachment":{
                         "attachment_id":turn.attachment["attachment_id"],"name":turn.attachment["name"],"source_sha256":turn.attachment["source_sha256"],"media_type":turn.attachment["media_type"],"truncated":turn.attachment["truncated"]}},"model":turn.connection.public()});
                 agent.accept_completed(json!({"text":answer})).await?;

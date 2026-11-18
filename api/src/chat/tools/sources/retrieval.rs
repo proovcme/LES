@@ -1,8 +1,10 @@
 //! Query-time dense/BM25/RRF followed by generation-checked parent reads.
 use super::*;
 use crate::index_batch::configuration::{identity, tokenizer, Settings};
+mod addressed_rows;
 mod envelope;
 pub(super) mod failures;
+mod indexed_page;
 mod matching;
 mod packing;
 mod pagination;
@@ -35,9 +37,13 @@ use envelope::fit_envelope_budget;
 #[cfg(test)]
 use envelope::{canonical_chars, json_item_count};
 use pagination::Page;
-pub(super) async fn rank_units(points: Vec<Value>, query: String) -> Result<Vec<Value>> {
+pub(super) async fn rank_units(
+    points: Vec<Value>,
+    query: String,
+    automatic: bool,
+) -> Result<Vec<Value>> {
     Ok(
-        tokio::task::spawn_blocking(move || matching::rank(points, query))
+        tokio::task::spawn_blocking(move || matching::rank(points, query, automatic))
             .await
             .map_err(|_| "SOURCE_READ_FAILED")??,
     )
@@ -186,11 +192,13 @@ pub(in crate::chat) async fn initial(context: Arc<Context>, turn: &Prepared) -> 
         )
         .saturating_mul(2)
         .clamp(1, 16000);
-    search_with_navigation(
+    let pull = turn.profile["mode"] == "search"
+        && turn.request["retrieval_mode"].as_str().unwrap_or("pull") == "pull";
+    search_view(
         context,
         &SourceContext::from(turn),
-        json!({"q":turn.request["question"],"max_chars":chars}),
-        false,
+        json!({"q":turn.request["question"],"max_chars":chars,"_pull_pdf_focus":pull}),
+        ReadView::Prefetch,
     )
     .await
 }
@@ -200,17 +208,45 @@ pub(in crate::chat) async fn search(
     args: Value,
 ) -> Result<Value> {
     super::validate_search_cursor(&args)?;
-    let navigation = !super::context_snapshot(&args);
-    search_with_navigation(context, turn, args, navigation).await
+    let view = if super::context_snapshot(&args) {
+        ReadView::Context
+    } else {
+        ReadView::Navigation
+    };
+    search_view(context, turn, args, view).await
 }
-async fn search_with_navigation(
+fn focused_pdf_seeds(points: &[Value], limit: usize) -> Vec<Value> {
+    let is_pdf = |point: &Value| super::pdf_focus::is_pdf(&point["payload"]);
+    let ordinary = points.iter().filter(|p| !is_pdf(p)).count();
+    let available_pdf = points.len() - ordinary;
+    let mut pdf_left = available_pdf.min((limit / 2).max(limit.saturating_sub(ordinary)));
+    let mut ordinary_left = limit - pdf_left;
+    points
+        .iter()
+        .filter(|point| {
+            let slots = if is_pdf(point) {
+                &mut pdf_left
+            } else {
+                &mut ordinary_left
+            };
+            let fits = *slots > 0;
+            *slots = slots.saturating_sub(1);
+            fits
+        })
+        .cloned()
+        .collect()
+}
+
+async fn search_view(
     context: Arc<Context>,
     turn: &SourceContext,
     args: Value,
-    navigation: bool,
+    view: ReadView,
 ) -> Result<Value> {
+    let navigation = view == ReadView::Navigation;
     let control = trial::Control::requested(&args)?;
     let compact = super::packet::requested()? && super::context_snapshot(&args);
+    let overview_requested = args["view"] == "overview";
     let overview = control == trial::Control::DocumentCoverage;
     if overview && !compact {
         return Err("OVERVIEW_COMPACT_PACKET_REQUIRED".into());
@@ -240,6 +276,11 @@ async fn search_with_navigation(
         .as_str()
         .filter(|s| !s.trim().is_empty() && s.chars().count() <= 20000)
         .ok_or("INDEX_QUERY_INVALID")?;
+    let spreadsheet_addresses = if view == ReadView::Prefetch {
+        les_core::chat_request::sheet_rows(query)
+    } else {
+        Default::default()
+    };
     if args["view"] == "documents" {
         return super::catalog::search(context, turn, &args, &datasets).await;
     }
@@ -307,8 +348,17 @@ async fn search_with_navigation(
         .index_store
         .as_ref()
         .ok_or("INDEX_STORAGE_UNAVAILABLE")?;
+    let automatic_pdf = args["_pull_pdf_focus"] == true
+        && !overview_requested
+        && args["offset"].is_null()
+        && args["index_revision"].is_null();
+    let pool_limit = if automatic_pdf {
+        candidate_limit.max(128)
+    } else {
+        candidate_limit
+    };
     let request = json!({"collection":config["collection"],"text":query,"vector":vector,"dense_name":config["vector_names"]["dense"],
-        "limit":policy["retrieval_candidate_k"],"rank_constant":policy["rrf_rank_constant"],"fusion":config["fusion"],"preserve_heads":!navigation,"filters":{"dataset_ids":datasets,"doc_filter":files},"hierarchy":navigation,"overview":overview});
+        "limit":pool_limit,"rank_constant":policy["rrf_rank_constant"],"fusion":config["fusion"],"preserve_heads":!navigation,"filters":{"dataset_ids":datasets,"doc_filter":files},"hierarchy":navigation,"overview":overview});
     for attempt in 0..16 {
         let result: Result<Value> = async {
             let store_started = std::time::Instant::now();
@@ -317,10 +367,16 @@ async fn search_with_navigation(
             pinned_revision(&args, &result["revision"])?;
             let raw_points = result["points"].as_array().ok_or("INDEX_READ_INVALID")?;
             control.snapshot("retrieval",query,raw_points);
-            // Diversify the automatic shortlist. Explicit tool pagination must
-            // still expose every ranked match, including later pages of one file.
+            // Keep navigation in ranked order across pages, including matches
+            // from the same file.
             let ranked = reading_units(raw_points);
-            let points: Vec<Value> = if navigation {
+            let pdf_focus = automatic_pdf && raw_points.iter().any(|p| super::pdf_focus::is_pdf(&p["payload"]));
+            let navigation = navigation && !pdf_focus;
+            let points: Vec<Value> = if pdf_focus {
+                // A page can hold several unrelated search hits. Keep the
+                // original PDF hit positions until after excerpt selection.
+                focused_pdf_seeds(raw_points, candidate_limit.min(64))
+            } else if navigation {
                 ranked.iter().skip(offset).take(limit).cloned().collect()
             } else {
                 // The model limit is not an I/O shortlist. Hydrate candidates
@@ -330,7 +386,6 @@ async fn search_with_navigation(
             // These identities remain discoverable even when the corresponding
             // text did not fit. They are navigation, never admitted evidence.
             let mut candidates = Vec::new();
-            let discovery=packing::catalog(&ranked)?;
             let mut documents = std::collections::HashSet::new();
             // Discovery must describe the searched pool, not only the few hits
             // whose text was read. A relevant lower-ranked document is still
@@ -338,7 +393,11 @@ async fn search_with_navigation(
             for point in if navigation { &points } else { raw_points } {
                 let p = &point["payload"];
                 if !documents.insert(json!([p["dataset_id"],p["file_name"]]).to_string()) { continue; }
-                let doc = document(&context, &json!({"dataset_id":p["dataset_id"],"file_name":p["file_name"]})).await?;
+                let doc = match document(&context, &json!({"dataset_id":p["dataset_id"],"file_name":p["file_name"]})).await {
+                    Ok(doc) => doc,
+                    Err(error) if error.code == "SOURCE_DOCUMENT_NOT_FOUND" => continue,
+                    Err(error) => return Err(error),
+                };
                 scoped_document(turn, &doc)?;
                 if p["source_sha256"].as_str().is_some_and(|hash| !hash.is_empty() && doc["file_hash"] != hash) {
                     // Selected text was checked by passages(). An unread stale
@@ -346,7 +405,7 @@ async fn search_with_navigation(
                     continue;
                 }
                 candidates.push(json!({"doc_id":doc["id"],"dataset_id":doc["dataset_id"],
-                    "title":discovery["entries"].as_array().into_iter().flatten().find(|e|e["source"]["dataset_id"]==p["dataset_id"]&&e["source"]["file_name"]==p["file_name"]).map(|e|e["title"].clone()).unwrap_or(Value::Null),
+                    "title":les_core::context_selection::catalog_title(doc["file_name"].as_str().unwrap_or("")),
                     "path":doc["file_name"],
                     "file_name":doc["file_name"].as_str().unwrap_or("").rsplit(['/', '\\']).next().unwrap_or(""),
                     "source_sha256":doc["file_hash"],"page":p.get("source_page").filter(|v|!v.is_null()).unwrap_or(&p["page"]),
@@ -365,13 +424,20 @@ async fn search_with_navigation(
             } else {
                 None
             };
-            let mut reply=passages(&context,turn,&config["collection"],points.clone(),result["revision"].clone(),max_chars,"search_sources",context_budget,ReadMode{expand_document:!navigation,paginated:navigation,control}).await?;
+            let point_count = points.len();
+            let addressed = addressed_rows::read(
+                &context, store, config["collection"].as_str().ok_or("INDEX_COLLECTION_MISMATCH")?,
+                &datasets, &files, &spreadsheet_addresses,
+            ).await?;
+            let view = if pdf_focus && view == ReadView::Navigation { ReadView::Context } else { view };
+            let mut reply=passages(&context,turn,&config["collection"],points,result["revision"].clone(),max_chars,"search_sources",context_budget,ReadMode{view,control,query,addressed,pdf_focus}).await?;
+            let compact = compact || (pdf_focus && view != ReadView::Prefetch);
             eprintln!("{}", json!({"event":"source_search_timing","embedding_ms":embedding_ms,
                 "store_ms":store_ms,"reading_and_catalog_ms":store_started.elapsed().as_millis().saturating_sub(store_ms),
                 "total_ms":started.elapsed().as_millis(),"navigation":navigation}));
             reply["result"]["candidate_documents"] = json!(candidates);
             let total = ranked.len();
-            reply["result"]["selection_policy"] = json!({"schema":"les.context-selection.v1","seed_limit":if navigation{limit}else{64},"per_document_seed_limit":Value::Null,"raw_candidates":raw_points.len(),"eligible_candidates":total,"hydrated_candidates":points.len(),"navigation_requested":navigation});
+            reply["result"]["selection_policy"] = json!({"schema":"les.context-selection.v1","seed_limit":if navigation{limit}else{64},"per_document_seed_limit":Value::Null,"raw_candidates":raw_points.len(),"eligible_candidates":total,"hydrated_candidates":point_count,"navigation_requested":navigation});
             if overview {
                 reply["result"]["selection_policy"]["per_document_seed_limit"]=json!(2);
                 reply["result"]["selection_policy"]["fusion_unit"]=json!("document");
@@ -382,7 +448,7 @@ async fn search_with_navigation(
                 reply["result"]["fusion"] = result["fusion"].clone();
                 reply["result"]["fusion_trace"] = json!(raw_points.iter().map(|p|json!({"id":p["id"],"score":p["score"],"provenance":p["retrieval_fusion"]})).collect::<Vec<_>>());
             }
-            let next = offset + points.len();
+            let next = offset + point_count;
             reply["result"]["offset"] = json!(offset);
             reply["result"]["total_candidates"] = json!(total);
             reply["result"]["next_offset"] = if navigation && next < total { json!(next) } else { Value::Null };
@@ -394,6 +460,9 @@ async fn search_with_navigation(
             // Public tool replies have a wire limit. Internal prefetch must
             // retain its complete candidate catalog and fitting page units:
             // the model packer, not an MCP envelope, owns their admission.
+            if overview_requested && control == trial::Control::Off {
+                reply["result"]["overview"] = json!({"status":"context_fallback","complete_corpus":false});
+            }
             if overview {
                 reply["result"]["overview"] = json!({"schema":"les.overview-coverage.v2",
                     "discovery":"native-document-rrf","fusion_unit":"document","per_channel_document_limit":2,
@@ -406,7 +475,7 @@ async fn search_with_navigation(
                 envelope::fit_context(&mut reply,max_chars,true)?;
             } else if control==trial::Control::RrfWire {
                 envelope::fit_ranked_context(&mut reply,max_chars)?;
-            } else if args["view"] == "context" {
+            } else if args["view"] == "context" || overview_requested {
                 envelope::fit_context(&mut reply,max_chars,false)?;
             } else if navigation {
                 fit_envelope_budget(&mut reply, 22500, 240)?;
@@ -636,11 +705,21 @@ mod selection_tests {
         assert!(reply["sources"].as_array().unwrap().is_empty());
     }
 }
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum ReadView {
+    #[default]
+    Context,
+    Navigation,
+    Prefetch,
+}
+
 #[derive(Default)]
-struct ReadMode {
-    expand_document: bool,
-    paginated: bool,
+struct ReadMode<'a> {
+    view: ReadView,
     control: trial::Control,
+    query: &'a str,
+    addressed: Vec<Value>,
+    pdf_focus: bool,
 }
 async fn passages(
     context: &Context,
@@ -651,13 +730,18 @@ async fn passages(
     max_chars: usize,
     name: &str,
     context_budget: Option<usize>,
-    mode: ReadMode,
+    mode: ReadMode<'_>,
 ) -> Result<Value> {
     let ReadMode {
-        expand_document,
-        paginated,
+        view,
         control,
+        query,
+        addressed,
+        pdf_focus,
     } = mode;
+    let paginated = view == ReadView::Navigation;
+    let model_pack = view == ReadView::Prefetch;
+    let expand_document = !paginated;
     let store = context
         .index_store
         .as_ref()
@@ -680,7 +764,7 @@ async fn passages(
         }
         seeds.push(seed);
     }
-    if points.is_empty() {
+    if points.is_empty() && addressed.is_empty() {
         return Ok(envelope(
             name,
             "hybrid_search",
@@ -689,31 +773,28 @@ async fn passages(
         ));
     }
     let stage = std::time::Instant::now();
-    let hydrated = crate::index_store::sections::read(
-        context,
-        store,
-        &json!({"collection":collection,"revision":revision,"seeds":seeds,"scopes":scopes,
-            "document_budget_chars":if expand_document{Some(max_chars)}else{None}}),
-    )
-    .await?;
+    let hydrated = if seeds.is_empty() {
+        Value::Null
+    } else {
+        crate::index_store::sections::read(
+            context,
+            store,
+            &json!({"collection":collection,"revision":revision,"seeds":seeds,"scopes":scopes,
+                "document_budget_chars":if expand_document{Some(max_chars)}else{None}}),
+        )
+        .await?
+    };
     let sections_ms = stage.elapsed().as_millis();
     let (points, hydrated) = if expand_document {
-        let (points, hydrated) = views::project(points, hydrated)?;
-        let question = turn.request["question"].as_str().unwrap_or("").to_owned();
-        tokio::task::spawn_blocking(move || {
-            packing::read_plan(&points, hydrated, max_chars, context_budget, &question)
-        })
-        .await
-        .map_err(|_| "SOURCE_READ_FAILED")??
+        let (points, hydrated) = views::project_with_pdf_hits(points, hydrated, pdf_focus)?;
+        tokio::task::spawn_blocking(move || packing::read_plan(&points, hydrated))
+            .await
+            .map_err(|_| "SOURCE_READ_FAILED")??
     } else {
         (points, hydrated)
     };
     let plan_ms = stage.elapsed().as_millis().saturating_sub(sections_ms);
-    control.snapshot(
-        "read_plan",
-        turn.request["question"].as_str().unwrap_or(""),
-        &points,
-    );
+    control.snapshot("read_plan", query, &points);
     let word_started = std::time::Instant::now();
     let (points, hydrated) = if expand_document {
         super::word::hydrate(
@@ -737,7 +818,38 @@ async fn passages(
     };
     let pdf_ms = pdf_started.elapsed().as_millis();
     let packing_started = std::time::Instant::now();
-    let (points, hydrated) = views::project(points, hydrated)?;
+    let (mut points, mut hydrated) = views::project_with_pdf_hits(points, hydrated, pdf_focus)?;
+    if pdf_focus {
+        points = super::pdf_focus::index_excerpts(points, query)?;
+        // Focused PDF hits already carry their reading text. Broad parent
+        // expansion would add the same page again as an unfiltered block.
+        for group in ["sections", "documents"] {
+            for section in hydrated[group].as_array_mut().into_iter().flatten() {
+                if let Some(rows) = section["points"].as_array_mut() {
+                    rows.retain(|p| !super::pdf_focus::is_pdf(&p["payload"]));
+                }
+            }
+        }
+    }
+    let addressed_extra = if addressed.is_empty() {
+        0
+    } else {
+        let ranked_ids: std::collections::HashSet<_> = points
+            .iter()
+            .chain(["sections", "documents"].into_iter().flat_map(|key| {
+                hydrated[key]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .flat_map(|group| group["points"].as_array().into_iter().flatten())
+            }))
+            .map(|p| &p["id"])
+            .collect();
+        addressed
+            .iter()
+            .filter(|p| !ranked_ids.contains(&p["id"]))
+            .count()
+    };
     let (selected, total) = if paginated {
         (
             packing::prefix(&points, max_chars, context_budget),
@@ -747,21 +859,24 @@ async fn passages(
         let candidates = points.clone();
         let sections = hydrated["sections"].clone();
         let documents = hydrated["documents"].clone();
-        let question = turn.request["question"].as_str().unwrap_or("").to_owned();
+        let query = query.to_owned();
         tokio::task::spawn_blocking(move || {
             packing::controlled_query(
                 &candidates,
                 &sections,
                 &documents,
                 max_chars,
-                context_budget,
-                &question,
+                &query,
                 control,
+                model_pack,
             )
         })
         .await
         .map_err(|_| "SOURCE_READ_FAILED")??
     };
+    let addressed_row_count = addressed.len();
+    let selected = addressed_rows::prioritize(addressed, selected);
+    let total = total + addressed_extra;
     eprintln!(
         "{}",
         json!({"event":"source_context_timing","sections_ms":sections_ms,"plan_ms":plan_ms,
@@ -940,7 +1055,10 @@ async fn passages(
                 .unwrap_or(&a["page"])
                 .clone();
             let mut origin = reference(&origin, page);
-            origin["qdrant_point_id"] = alias["unit_id"].clone();
+            origin["qdrant_point_id"] = a
+                .get("qdrant_point_id")
+                .unwrap_or(&alias["unit_id"])
+                .clone();
             equivalents.push(origin);
         }
         if !equivalents.is_empty() {
@@ -949,19 +1067,24 @@ async fn passages(
         if p["reading_representation"].is_string() {
             source["reading_representation"] = p["reading_representation"].clone();
         }
+        if p["pdf_excerpt_line"].is_u64() {
+            source["pdf_excerpt_line"] = p["pdf_excerpt_line"].clone();
+            source["reading_unit_sha256"] = p["reading_unit_sha256"].clone();
+        }
         if let Some(document) = hydrated["documents"]
             .as_array()
             .into_iter()
             .flatten()
             .find(|d| {
-                d["points"]
-                    .as_array()
-                    .is_some_and(|rows| rows.iter().any(|r| r["id"] == point["id"]))
+                point["prefer_fragments"] != true
+                    && d["points"]
+                        .as_array()
+                        .is_some_and(|rows| rows.iter().any(|r| r["id"] == point["id"]))
             })
         {
             let rows = document["points"].as_array().unwrap();
-            // Only a fully selected document becomes an atomic context unit.
-            // Selection adds all its points contiguously or none as a unit.
+            // Complete documents with distinct query matches may fit whole.
+            // Documents matching the same query terms compete by fragment.
             if visuals_complete(p)
                 && document["read_plan_original_units"]
                     .as_u64()
@@ -1014,7 +1137,7 @@ async fn passages(
             "coverage":if included==total && all_visuals_read && hydrated["read_failures"].as_array().is_none_or(Vec::is_empty) && hydrated["read_plan"]["omitted_original_anchors"].as_u64().unwrap_or(0)==0 && hydrated["read_plan"]["word"]["omitted_units"].as_u64().unwrap_or(0)==0 && hydrated["read_plan"]["word"]["unresolved_anchors"].as_u64().unwrap_or(0)==0{"complete"}else{"bounded"},
             "complete_corpus":false,"coverage_scope":"selected_retrieval_candidates","read_plan":hydrated["read_plan"],
             "read_failures":hydrated["read_failures"].as_array().cloned().unwrap_or_default(),
-            "total_fragments":total,"included_fragments":included}),
+            "total_fragments":total,"included_fragments":included,"addressed_row_count":addressed_row_count}),
         sources,
     );
     if reply["result"]["read_failures"]
@@ -1037,14 +1160,6 @@ async fn passages(
             reply["warnings"] = json!([]);
         }
         reply["warnings"].as_array_mut().unwrap().push(json!("В контекст вошла ограниченная подборка. Полнота обзора всего набора и отсутствие ответа в остальных фрагментах не проверены."));
-    }
-    if context_budget.is_some() {
-        let cap = if name == "search_sources" {
-            19500
-        } else {
-            22000
-        };
-        fit_envelope_budget(&mut reply, cap, 230)?;
     }
     Ok(reply)
 }
@@ -1075,17 +1190,90 @@ pub(super) async fn read(
         .ok_or("INDEX_COLLECTION_MISMATCH")?;
     let revision = store.revision(&context, collection).await?;
     pinned_revision(&args, &revision)?;
+    let read_offset = args["offset"].as_u64().unwrap_or(0) as usize;
+    if read_offset > 0 && args["index_revision"].as_str().is_none_or(str::is_empty) {
+        return Err("SOURCE_CONTINUATION_REVISION_REQUIRED".into());
+    }
+    let limit = args["limit"].as_u64().unwrap_or(6).clamp(1, 16) as usize;
+    let positional = args["q"].as_str().is_none_or(|q| q.trim().is_empty())
+        && args["clause"].as_str().is_none_or(str::is_empty);
+    let page = if positional {
+        indexed_page::read(
+            &context,
+            store,
+            collection,
+            &doc,
+            &revision,
+            read_offset,
+            limit,
+        )
+        .await?
+    } else {
+        None
+    };
+    let (page_points, total_units, document_units) = match page {
+        Some((points, total)) => (points, total, total),
+        None => {
+            let (points, document_units) =
+                scan_indexed_source(&context, store, collection, &doc, &args).await?;
+            let total = points.len();
+            if read_offset >= total {
+                return Err("SOURCE_OFFSET_INVALID".into());
+            }
+            (
+                points.into_iter().skip(read_offset).take(limit).collect(),
+                total,
+                document_units,
+            )
+        }
+    };
+    // Admission follows query relevance. Reading order is presentation only.
+    let mut reply = passages(
+        &context,
+        turn,
+        &config["collection"],
+        page_points,
+        revision,
+        args["max_chars"].as_u64().unwrap_or(3000).clamp(1, 16000) as usize,
+        "read_source",
+        args["_context_budget_chars"].as_u64().map(|n| n as usize),
+        ReadMode {
+            view: ReadView::Navigation,
+            ..ReadMode::default()
+        },
+    )
+    .await?;
+    fit_envelope_budget(&mut reply, 22000, 230)?;
+    if args["_automatic_focus"] != true {
+        if let Some(rows) = reply["result"]["passages"].as_array_mut() {
+            rows.sort_by_key(|p| p["chunk_ord"].as_u64().unwrap_or(0));
+        }
+    }
+    Page::new(read_offset, total_units).apply(&mut reply, "total_fragments")?;
+    pagination::reading_scope(&mut reply, &args, document_units);
+    Ok(reply)
+}
+
+async fn scan_indexed_source(
+    context: &Context,
+    store: &crate::index_store::Store,
+    collection: &str,
+    doc: &Value,
+    args: &Value,
+) -> Result<(Vec<Value>, usize)> {
+    let filter = indexed_page::filter(doc);
     let mut points = Vec::new();
     let mut offset = Value::Null;
     let mut seen = std::collections::HashSet::new();
     let mut bytes = 0;
     loop {
-        let mut query = json!({"filter":{"must":[{"key":"dataset_id","match":{"value":doc["dataset_id"]}},{"key":"file_name","match":{"value":doc["file_name"]}}],"must_not":[{"key":"node_role","match":{"value":"navigation"}},{"key":"evidence_admissible","match":{"value":false}}]},"limit":128,"with_payload":true,"with_vector":false});
+        let mut query =
+            json!({"filter":filter,"limit":128,"with_payload":true,"with_vector":false});
         if !offset.is_null() {
             query["offset"] = offset.clone();
         }
         let result = store
-            .read_owned(&context, collection, "scroll", query)
+            .read_owned(context, collection, "scroll", query)
             .await?;
         let rows = result["points"].as_array().ok_or("INDEX_READ_INVALID")?;
         for row in rows {
@@ -1139,9 +1327,7 @@ pub(super) async fn read(
         .filter(|s| !s.trim().is_empty() && clause.is_empty());
     if let Some(query) = query {
         let query = query.to_owned();
-        points = tokio::task::spawn_blocking(move || matching::rank(points, query))
-            .await
-            .map_err(|_| "SOURCE_READ_FAILED")??;
+        points = rank_units(points, query, args["_automatic_focus"] == true).await?;
     }
     if points.is_empty() {
         return Err("SOURCE_SECTION_NOT_FOUND".into());
@@ -1150,36 +1336,7 @@ pub(super) async fn read(
         points.sort_by_key(|p| p["payload"]["chunk_ord"].as_u64().unwrap_or(0));
     }
     points = reading_units(&points);
-    let read_offset = args["offset"].as_u64().unwrap_or(0) as usize;
-    if read_offset >= points.len() {
-        return Err("SOURCE_OFFSET_INVALID".into());
-    }
-    let total_units = points.len();
-    let limit = args["limit"].as_u64().unwrap_or(6).clamp(1, 16) as usize;
-    let page_points: Vec<Value> = points.into_iter().skip(read_offset).take(limit).collect();
-    // Admission follows query relevance. Reading order is presentation only.
-    let mut reply = passages(
-        &context,
-        turn,
-        &config["collection"],
-        page_points,
-        revision,
-        args["max_chars"].as_u64().unwrap_or(3000).clamp(1, 16000) as usize,
-        "read_source",
-        args["_context_budget_chars"].as_u64().map(|n| n as usize),
-        ReadMode {
-            expand_document: false,
-            paginated: true,
-            control: trial::Control::Off,
-        },
-    )
-    .await?;
-    if let Some(rows) = reply["result"]["passages"].as_array_mut() {
-        rows.sort_by_key(|p| p["chunk_ord"].as_u64().unwrap_or(0));
-    }
-    Page::new(read_offset, total_units).apply(&mut reply, "total_fragments")?;
-    pagination::reading_scope(&mut reply, &args, document_units);
-    Ok(reply)
+    Ok((points, document_units))
 }
 
 pub(super) fn reading_scope(reply: &mut Value, args: &Value, document_units: usize) {

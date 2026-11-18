@@ -2,6 +2,7 @@
 mod catalog;
 pub(crate) mod packet;
 mod parts;
+pub(super) mod pdf_focus;
 pub(crate) mod retrieval;
 mod verification;
 mod word;

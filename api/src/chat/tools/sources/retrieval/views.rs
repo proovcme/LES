@@ -13,9 +13,10 @@ fn key(point: &Value) -> String {
     ])
     .to_string()
 }
-pub(super) fn project(
+pub(super) fn project_with_pdf_hits(
     seeds: Vec<Value>,
     mut hydrated: Value,
+    keep_pdf_hits: bool,
 ) -> Result<(Vec<Value>, Value), &'static str> {
     let mut views = HashMap::new();
     for group in ["sections", "documents"] {
@@ -64,7 +65,7 @@ pub(super) fn project(
                 }
                 views.insert(key(row), reading);
             }
-            if let Some(text) = p["pdf_page_view"].as_str() {
+            if let Some(text) = p["pdf_page_view"].as_str().filter(|_| !keep_pdf_hits) {
                 if p["pdf_page_view_schema"] != "les.pdf-page-view.v1"
                     || !p["page"].is_u64()
                     || text.chars().count() > 16000
@@ -130,6 +131,11 @@ pub(super) fn project(
         }
     }
     Ok((project(&seeds), hydrated))
+}
+
+#[cfg(test)]
+fn project(seeds: Vec<Value>, hydrated: Value) -> Result<(Vec<Value>, Value), &'static str> {
+    project_with_pdf_hits(seeds, hydrated, false)
 }
 
 #[cfg(test)]

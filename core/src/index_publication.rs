@@ -107,6 +107,78 @@ pub fn check_registration(request: &Value) -> Result<(), &'static str> {
     registration(&lexical_write::open(request)?, request)
 }
 
+/// Locate an ordinal window using the publication catalog's existing index.
+/// Only a dense zero-based sequence can use a reading offset as an ordinal.
+pub fn reading_positions(
+    database: &Path,
+    collection: &str,
+    dataset: &str,
+    file: &str,
+    offset: usize,
+    limit: usize,
+) -> Option<(usize, Vec<String>)> {
+    let offset = i64::try_from(offset).ok()?;
+    let limit = i64::try_from(limit).ok()?;
+    let mut conn =
+        Connection::open_with_flags(database, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).ok()?;
+    let snapshot = conn.transaction().ok()?;
+    let (count, distinct, first, last): (i64, i64, Option<i64>, Option<i64>) = snapshot
+        .query_row(
+            "SELECT count(chunk_ord),count(DISTINCT chunk_ord),min(chunk_ord),max(chunk_ord)
+             FROM lexical_chunks WHERE collection=?1 AND dataset_id=?2 AND doc_name=?3
+             AND typeof(chunk_ord)='integer'",
+            params![collection, dataset, file],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .ok()?;
+    if count == 0 || distinct != count || first != Some(0) || last != Some(count - 1) {
+        return None;
+    }
+    let mut rows = snapshot
+        .prepare(
+            "SELECT point_id FROM lexical_chunks WHERE collection=?1 AND dataset_id=?2 AND doc_name=?3
+             AND chunk_ord>=?4 AND typeof(chunk_ord)='integer' ORDER BY chunk_ord LIMIT ?5",
+        )
+        .ok()?;
+    let ids = rows
+        .query_map(params![collection, dataset, file, offset, limit], |row| {
+            row.get(0)
+        })
+        .ok()?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .ok()?;
+    Some((usize::try_from(count).ok()?, ids))
+}
+
+#[cfg(test)]
+#[test]
+fn reading_positions_seek_past_legacy_limits_and_reject_incomplete_ordinals() {
+    let db = std::env::temp_dir().join(format!(
+        "les-reading-positions-{}.sqlite",
+        std::process::id()
+    ));
+    let conn = Connection::open(&db).unwrap();
+    conn.execute_batch(
+        "CREATE TABLE lexical_chunks(collection TEXT,dataset_id TEXT,doc_name TEXT,chunk_ord INTEGER,point_id TEXT);
+         CREATE INDEX idx_lexical_neighbors ON lexical_chunks(collection,dataset_id,doc_name,chunk_ord);
+         WITH RECURSIVE n(i) AS (VALUES(0) UNION ALL SELECT i+1 FROM n WHERE i<4999)
+         INSERT INTO lexical_chunks SELECT 'c','d','file',i,'id-' || i FROM n;
+         INSERT INTO lexical_chunks VALUES ('c','d','file',NULL,'navigation'), ('c','other','file',0,'foreign');",
+    ).unwrap();
+    assert_eq!(
+        reading_positions(&db, "c", "d", "file", 4997, 2),
+        Some((5000, vec!["id-4997".into(), "id-4998".into()])),
+    );
+    conn.execute(
+        "UPDATE lexical_chunks SET chunk_ord=4998 WHERE point_id='id-4997'",
+        [],
+    )
+    .unwrap();
+    assert!(reading_positions(&db, "c", "d", "file", 4997, 2).is_none());
+    drop(conn);
+    std::fs::remove_file(db).unwrap();
+}
+
 pub fn check_source(path: &Path, expected: &Value) -> Result<(), &'static str> {
     let actual = files::fingerprint(&json!({"path":path})).map_err(|_| CHANGED)?;
     if actual["sha256"] == expected["file_hash"] && actual["size"] == expected["file_size"] {

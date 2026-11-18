@@ -404,7 +404,7 @@ pub(super) async fn read(
             .into_iter()
             .map(|u| json!({"payload":{"text":u["text"],"chunk_ord":u["ordinal"]},"unit":u}))
             .collect();
-        units = retrieval::rank_units(points, query.to_owned())
+        units = retrieval::rank_units(points, query.to_owned(), args["_automatic_focus"] == true)
             .await?
             .into_iter()
             .map(|p| p["unit"].clone())

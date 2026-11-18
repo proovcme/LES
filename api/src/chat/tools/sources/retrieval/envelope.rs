@@ -236,23 +236,15 @@ fn fit_budget(
     if compact {
         super::super::packet::encode(reply)?;
     }
-    let wire_chars = |value: &Value| {
-        if compact {
-            super::super::packet::encode(value)
-                .map(|v| canonical_chars(&v))
-                .unwrap_or(usize::MAX)
+    let wire_size = |value: &Value| -> Result<(usize, usize)> {
+        let encoded;
+        let value = if compact {
+            encoded = super::super::packet::encode(value)?;
+            &encoded
         } else {
-            canonical_chars(value)
-        }
-    };
-    let wire_items = |value: &Value| {
-        if compact {
-            super::super::packet::encode(value)
-                .map(|v| json_item_count(&v))
-                .unwrap_or(usize::MAX)
-        } else {
-            json_item_count(value)
-        }
+            value
+        };
+        Ok((canonical_chars(value), json_item_count(value)))
     };
     let ranked = text_budget.is_some();
     let text_budget = text_budget.unwrap_or(usize::MAX);
@@ -271,6 +263,9 @@ fn fit_budget(
     } else {
         max_items
     };
+    let fits = |value: &Value| {
+        wire_size(value).is_ok_and(|(chars, items)| chars <= max_chars && items <= max_items)
+    };
     let orig_passages = reply["result"]["passages"]
         .as_array()
         .cloned()
@@ -281,10 +276,7 @@ fn fit_budget(
         .map(|p| p["text"].as_str().map_or(0, |s| s.chars().count()))
         .sum();
     reconcile_document_units(reply, &orig_passages);
-    if wire_chars(reply) <= max_chars
-        && wire_items(reply) <= max_items
-        && (!ranked || (planned_text_chars <= text_budget && planned_units <= 32))
-    {
+    if fits(reply) && (!ranked || (planned_text_chars <= text_budget && planned_units <= 32)) {
         return Ok(());
     }
     // Debug ranks are optional transport data. They must never evict the
@@ -298,13 +290,13 @@ fn fit_budget(
         reply["result"]["fusion_trace_total"] = json!(rows.len());
         reply["result"]["fusion_trace_truncated"] = json!(!rows.is_empty());
     }
-    if wire_chars(reply) > max_chars || wire_items(reply) > max_items {
+    if !fits(reply) {
         compact_read_failures(reply);
     }
     // Source identities occur both beside each passage and in the public
     // source map. Remove only repeated aliases inside each identity before
     // spending the wire allowance on fewer original reading units.
-    if wire_chars(reply) > max_chars || wire_items(reply) > max_items {
+    if !fits(reply) {
         for source in reply["sources"].as_array_mut().into_iter().flatten() {
             compact_repeated_identity(source);
         }
@@ -319,7 +311,7 @@ fn fit_budget(
     // Exact duplicate origins are navigation, not extra read evidence. Keep
     // every primary pinned source; omit alias detail explicitly if it would
     // consume the body budget. Different text/revisions remain separate units.
-    if !ranked && (wire_chars(reply) > max_chars || wire_items(reply) > max_items) {
+    if !ranked && !fits(reply) {
         for source in reply["sources"].as_array_mut().into_iter().flatten() {
             compact_aliases(source);
         }
@@ -398,15 +390,17 @@ fn fit_budget(
         if !ranked {
             reconcile_document_units(reply, &orig_passages);
         }
-        if ranked && (wire_chars(reply) > max_chars || wire_items(reply) > max_items) {
+        let mut fits_unit = fits(reply);
+        if ranked && !fits_unit {
             // Unselected candidates must not erase aliases of fitting units.
             // Retry only this ready candidate without optional alias details.
             compact_aliases(&mut kept_passages.last_mut().unwrap()["source"]);
             compact_aliases(kept_sources.last_mut().unwrap());
             reply["result"]["passages"] = json!(kept_passages);
             reply["sources"] = json!(kept_sources);
+            fits_unit = fits(reply);
         }
-        if wire_chars(reply) > max_chars || wire_items(reply) > max_items {
+        if !fits_unit {
             kept_passages.pop();
             kept_sources.pop();
             kept_ids.pop();
@@ -439,7 +433,7 @@ fn fit_budget(
         for hint in hints {
             kept_hints.push(hint);
             reply["result"]["navigation_hints"] = json!(kept_hints);
-            if wire_chars(reply) > max_chars || wire_items(reply) > max_items {
+            if !fits(reply) {
                 kept_hints.pop();
                 reply["result"]["navigation_hints"] = json!(kept_hints);
                 break;
@@ -452,7 +446,7 @@ fn fit_budget(
         for cand in candidates.into_iter().take(cap) {
             kept_candidates.push(cand);
             reply["result"]["candidate_documents"] = json!(kept_candidates);
-            if wire_chars(reply) > max_chars || wire_items(reply) > max_items {
+            if !fits(reply) {
                 kept_candidates.pop();
                 reply["result"]["candidate_documents"] = json!(kept_candidates);
                 break;
@@ -466,7 +460,7 @@ fn fit_budget(
             kept.push(row);
             reply["result"]["fusion_trace"] = json!(kept);
             reply["result"]["fusion_trace_truncated"] = json!(kept.len() != total);
-            if wire_chars(reply) > max_chars || wire_items(reply) > max_items {
+            if !fits(reply) {
                 kept.pop();
                 reply["result"]["fusion_trace"] = json!(kept);
                 reply["result"]["fusion_trace_truncated"] = json!(true);
@@ -481,7 +475,7 @@ fn fit_budget(
             "planned_units":planned_units,"delivered_units":kept_passages.len(),
             "planned_text_chars":planned_text_chars,
             "delivered_text_chars":kept_passages.iter().map(|p|p["text"].as_str().map_or(0,|s|s.chars().count())).sum::<usize>(),
-            "wire_chars":wire_chars(reply),"wire_limit_chars":max_chars,
+            "wire_chars":wire_size(reply).map_or(usize::MAX, |(chars, _)| chars),"wire_limit_chars":max_chars,
             "body_omitted":omitted_any,"ranked_context":ranked,
             "skipped_text_budget":skipped_text,"skipped_wire_budget":skipped_wire,
             "skipped_unit_limit":skipped_count})

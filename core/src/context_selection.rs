@@ -3,7 +3,7 @@
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 mod discovery;
-pub use discovery::catalog;
+pub use discovery::{catalog, catalog_title};
 // Source volume, not the number of short Word paragraphs, is the primary
 // memory bound. Kept below the original 2048 * 100000-character worst case.
 pub const MAX_SOURCE_UNITS: usize = 16384;
@@ -70,6 +70,15 @@ fn content_key(unit: &Value) -> String {
 /// optional rank (retrieved rank; hydrated units inherit their parent's rank).
 /// All supplied origins must already have passed scope/revision checks.
 pub fn select(request: &Value) -> Result<Value, &'static str> {
+    select_units(request, false)
+}
+
+/// Rank candidates for the model packer, which owns the context budget.
+pub fn rank_for_model(request: &Value) -> Result<Value, &'static str> {
+    select_units(request, true)
+}
+
+fn select_units(request: &Value, model_pack: bool) -> Result<Value, &'static str> {
     let query = request["question"]
         .as_str()
         .filter(|s| s.len() <= 80000)
@@ -331,6 +340,33 @@ pub fn select(request: &Value) -> Result<Value, &'static str> {
                 .unwrap_or_else(|| u["source"].to_string())
         })
         .collect::<Vec<_>>();
+    let peers = if model_pack {
+        let mut best = BTreeMap::<&str, (f64, Vec<&str>)>::new();
+        for (group, terms) in groups.iter().zip(body) {
+            let matched = coverage(terms);
+            let entry = best.entry(group).or_default();
+            if matched > entry.0 {
+                *entry = (
+                    matched,
+                    weights
+                        .keys()
+                        .filter(|term| terms.contains(*term))
+                        .map(String::as_str)
+                        .collect(),
+                );
+            }
+        }
+        let mut counts = BTreeMap::<&[&str], usize>::new();
+        for (_, terms) in best.values() {
+            *counts.entry(terms).or_default() += 1;
+        }
+        groups
+            .iter()
+            .map(|group| counts[best[group.as_str()].1.as_slice()] > 1)
+            .collect::<Vec<_>>()
+    } else {
+        vec![false; units.len()]
+    };
     let mut selected_sources = BTreeSet::new();
     let mut covered = BTreeSet::new();
     let mut used = 0;
@@ -343,6 +379,9 @@ pub fn select(request: &Value) -> Result<Value, &'static str> {
         .iter()
         .map(|u| u["text"].as_str().unwrap().chars().count())
         .collect::<Vec<_>>();
+    let fits = |i: usize, used: usize, text_used: usize| {
+        model_pack || (used + costs[i] <= budget && text_used + lengths[i] <= text_budget)
+    };
     // A selected unit never changes. Update maximum redundancy once per new
     // selection instead of comparing every old pair again on every round.
     let mut redundant = vec![0.0_f64; units.len()];
@@ -353,9 +392,7 @@ pub fn select(request: &Value) -> Result<Value, &'static str> {
                 || (!selected_sources.contains(&groups[i])
                     && selected_sources.len() >= source_limit)
                 || relevance[i] == 0.0
-                || (group_selection && relevance[i] == 0.0)
-                || used + costs[i] > budget
-                || text_used + lengths[i] > text_budget
+                || !fits(i, used, text_used)
             {
                 continue;
             }
@@ -409,11 +446,13 @@ pub fn select(request: &Value) -> Result<Value, &'static str> {
             {
                 continue;
             }
-            if relevance[i] == 0.0
-                || chosen.contains(&i)
-                || used + costs[i] > budget
-                || text_used + lengths[i] > text_budget
-            {
+            if relevance[i] == 0.0 || chosen.contains(&i) || !fits(i, used, text_used) {
+                continue;
+            }
+            // Diversify among documents that cover the same query terms.
+            // A document with a distinct match keeps its normal priority.
+            if peers[i] && groups[i] == groups[index] {
+                redundant[i] = 1.0;
                 continue;
             }
             let intersection = body[i].intersection(&body[index]).count();
@@ -421,14 +460,18 @@ pub fn select(request: &Value) -> Result<Value, &'static str> {
             redundant[i] = redundant[i].max(intersection as f64 / union as f64);
         }
     }
-    Ok(
-        json!({"units":chosen.iter().map(|&i|units[i].clone()).collect::<Vec<_>>(),
+    Ok(json!({"units":chosen.iter().map(|&i| {
+            let mut unit = units[i].clone();
+            if peers[i] {
+                unit["prefer_fragments"] = json!(true);
+            }
+            unit
+        }).collect::<Vec<_>>(),
         "selection":{"schema":"les.context-selection.v1","input_units":input.len(),
             "unique_units":units.len(),"selected_units":chosen.len(),"used_chars":used,
             "max_chars":budget,"semantic_selection":group_selection,"used_text_chars":text_used,"query_term_coverage":coverage(&covered),
             "provenance_chars":chosen.iter().map(|&i|units[i]["equivalent_sources"].to_string().chars().count()).sum::<usize>(),
-            "complete_corpus":false}}),
-    )
+            "complete_corpus":false}}))
 }
 
 #[cfg(test)]

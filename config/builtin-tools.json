@@ -1578,7 +1578,7 @@
               "context",
               "overview"
             ],
-            "description": "passages: ranked locators with continuations; documents: catalog only; context: bounded structurally read evidence; overview: bounded document coverage. Neither context nor overview is a paginated stream or proof of complete corpus coverage; read_source continues a found document."
+            "description": "passages: ranked locators with continuations; documents: catalog only; context: bounded structurally read evidence; overview: returns a context snapshot with status context_fallback when document coverage is unavailable. Neither context nor overview is a paginated stream or proof of complete corpus coverage; read_source continues a found document."
           },
           "offset": {
             "type": "integer",
@@ -1635,7 +1635,7 @@
               "context",
               "overview"
             ],
-            "description": "passages: ranked locators with continuations; documents: catalog only; context: bounded structurally read evidence; overview: bounded document coverage. Neither context nor overview is a paginated stream or proof of complete corpus coverage; read_source continues a found document."
+            "description": "passages: ranked locators with continuations; documents: catalog only; context: bounded structurally read evidence; overview: returns a context snapshot with status context_fallback when document coverage is unavailable. Neither context nor overview is a paginated stream or proof of complete corpus coverage; read_source continues a found document."
           },
           "offset": {
             "type": "integer",

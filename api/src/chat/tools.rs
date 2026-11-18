@@ -284,30 +284,42 @@ impl Tools {
                 .cloned()
                 .ok_or("TOOL_NOT_ALLOWED")?;
             let mut args = call["args"].clone();
+            let pull = turn.profile["mode"] == "search"
+                && turn.scope["document_grounding_enabled"] == true
+                && turn.request["retrieval_mode"].as_str().unwrap_or("pull") == "pull";
+            let focus_pdf_read = pull
+                && name == "read_pdf_source"
+                && ["offset", "view_sha256", "max_chars"]
+                    .iter()
+                    .all(|field| args[*field].is_null());
             let read_grant = bounded_read(name, &mut args, self.read_max_chars, &contract);
             let source_request = source_request(name, &args);
             let operation = args["operation"].as_str().map(str::to_owned);
             let scope = turn.scope["resolved_dataset_ids"].clone();
-            let resolved = if let Some(id) = args["doc_id"].as_str().filter(|s| !s.is_empty()) {
-                let database = context.database.clone();
-                let id = id.to_owned();
-                let document = tokio::task::spawn_blocking(move || {
-                    super::unwrap(crate::library::catalog(
-                        &database,
-                        "library_document",
-                        json!({"doc_id":id}),
-                    ))
-                })
-                .await
-                .map_err(|_| "TOOL_SCOPE_VIOLATION")??;
-                if document.is_null() {
-                    vec![]
+            let (resolved, file_name) =
+                if let Some(id) = args["doc_id"].as_str().filter(|s| !s.is_empty()) {
+                    let database = context.database.clone();
+                    let id = id.to_owned();
+                    let document = tokio::task::spawn_blocking(move || {
+                        super::unwrap(crate::library::catalog(
+                            &database,
+                            "library_document",
+                            json!({"doc_id":id}),
+                        ))
+                    })
+                    .await
+                    .map_err(|_| "TOOL_SCOPE_VIOLATION")??;
+                    if document.is_null() {
+                        (vec![], None)
+                    } else {
+                        (
+                            vec![document["dataset_id"].clone()],
+                            document["file_name"].as_str().map(str::to_owned),
+                        )
+                    }
                 } else {
-                    vec![document["dataset_id"].clone()]
-                }
-            } else {
-                vec![]
-            };
+                    (vec![], args["doc_name"].as_str().map(str::to_owned))
+                };
             let actor = turn.request["session_id"].as_str().unwrap_or("native-chat");
             // Provider IDs are only unique within a provider response. The local
             // receipt also binds the execution ordinal; repeated HTTP requests never
@@ -398,7 +410,43 @@ impl Tools {
                     if ["search_sources", "read_source", "read_excel_source"].contains(&name) {
                         args["_context_budget_chars"] = json!(self.read_max_chars.min(16000));
                     }
-                    sources::run(context, turn, name, args).await
+                    if pull && name == "search_sources" {
+                        args["_pull_pdf_focus"] = json!(true);
+                    }
+                    let focus = pull && positionless_read(name, &args);
+                    if focus {
+                        args["q"] = json!(super::inspection::read_question(
+                            turn.request["question"]
+                                .as_str()
+                                .ok_or("INDEX_QUERY_INVALID")?,
+                            file_name.as_deref(),
+                            &sources::selected_files(turn),
+                        ));
+                        args["_automatic_focus"] = json!(true);
+                    }
+                    let mut result = sources::run(context, turn, name, args).await?;
+                    if pull && name == "search_sources" && result["operation"] == "indexed_sections"
+                    {
+                        result["result"]["pull_search"] = json!(true);
+                    }
+                    if focus && result["status"] == "ok" {
+                        result["result"]["automatic_focus"] = json!(true);
+                        result["result"]["next_offset"] = Value::Null;
+                    }
+                    if focus_pdf_read
+                        && result["status"] == "ok"
+                        && result["result"]["selection"] == "page_range"
+                    {
+                        let query = super::inspection::read_question(
+                            turn.request["question"]
+                                .as_str()
+                                .ok_or("INDEX_QUERY_INVALID")?,
+                            file_name.as_deref(),
+                            &sources::selected_files(turn),
+                        );
+                        sources::pdf_focus::focus_page(&mut result, query)?;
+                    }
+                    Ok(result)
                 }
             };
             // The extension wrapper must let its nested execution finish its receipt.
@@ -500,6 +548,14 @@ fn prefer_indexed_reader(selected: &[Value]) -> bool {
                 .is_none_or(|name| !name.to_ascii_lowercase().ends_with(".pdf"))
         })
 }
+fn positionless_read(name: &str, args: &Value) -> bool {
+    matches!(name, "read_source" | "read_excel_source")
+        && args["view"].as_str().is_none_or(|view| view == "text")
+        && ["q", "offset", "clause", "page", "view_sha256"]
+            .into_iter()
+            .all(|field| args[field].is_null())
+}
+
 fn source_request(name: &str, args: &Value) -> Option<Value> {
     if ![
         "search_sources",

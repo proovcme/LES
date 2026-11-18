@@ -35,6 +35,9 @@ fn unit(point: &Value, rank: usize) -> Result<Value, &'static str> {
             source.insert(field.into(), p[field].clone());
         }
     }
+    if p["pdf_excerpt_line"].is_u64() {
+        source.insert("qdrant_point_id".into(), p["retrieval_anchor_id"].clone());
+    }
     let address = if p["source_unit_id"].is_u64() {
         serde_json::json!(["word", p["source_unit_id"]])
     } else if p["page"].is_u64() {
@@ -45,24 +48,32 @@ fn unit(point: &Value, rank: usize) -> Result<Value, &'static str> {
     let literal = les_core::document_search_unit(
         &serde_json::json!({"canonical":p["canonical"],"kind":if p["canonical"]["kind"]=="table"{"table_rows"}else{"paragraph"},"heading":p["section_heading"]}),
     )?;
+    let heading = if p["pdf_excerpt_line"].is_u64() {
+        String::new()
+    } else {
+        format!(
+            "{} {}",
+            p["section_heading"].as_str().unwrap_or(""),
+            p["parent_heading"].as_str().unwrap_or("")
+        )
+    };
+    let has_rank = p["retrieval_expansion"] != true
+        && !(p["pdf_excerpt_line"].is_u64()
+            && super::super::pdf_focus::bare_code(p["text"].as_str().unwrap_or("")));
     Ok(
         serde_json::json!({"text":literal.as_ref().and_then(|u|u["text"].as_str()).unwrap_or(p["text"].as_str().unwrap_or("")),"unit_id":key(point),
         "read_identity":serde_json::json!([p["dataset_id"],p["file_name"],p["source_sha256"],address]),
-        "source":source,"source_rank":p["retrieval_source_rank"],"rank":if p["retrieval_expansion"]==true{Value::Null}else{serde_json::json!(rank)},"self_contained":matches!(p["reading_representation"].as_str(),Some("pdf_cells"|"word_structure"|"physical_pdf_page")),"heading":format!("{} {}",p["section_heading"].as_str().unwrap_or(""),p["parent_heading"].as_str().unwrap_or("")),"group":serde_json::json!([p["dataset_id"],p["file_name"],p["source_sha256"]]).to_string(),"point":point}),
+        "source":source,"source_rank":p["retrieval_source_rank"],"rank":if has_rank{serde_json::json!(rank)}else{Value::Null},"self_contained":matches!(p["reading_representation"].as_str(),Some("pdf_cells"|"pdf_excerpt"|"word_structure"|"physical_pdf_page")),"heading":heading,"group":serde_json::json!([p["dataset_id"],p["file_name"],p["source_sha256"]]).to_string(),"point":point}),
     )
 }
-pub(super) fn catalog(points: &[Value]) -> Result<Value, &'static str> {
-    les_core::context_selection::catalog(
-        &serde_json::json!({"units":points.iter().enumerate().map(|(i,p)|unit(p,i)).collect::<Result<Vec<_>,_>>()?}),
-    )
-}
-/// The final context alone owns semantic selection and content deduplication.
+/// Rank and deduplicate hydrated evidence. Internal prefetch leaves room
+/// calculations to the final model context.
 fn select_points(
     points: &[Value],
     query: &str,
     text_budget: usize,
-    context_budget: Option<usize>,
     control: super::trial::Control,
+    model_pack: bool,
 ) -> Result<Vec<Value>, &'static str> {
     control.snapshot("readable_pool", query, points);
     let input = points
@@ -70,17 +81,25 @@ fn select_points(
         .enumerate()
         .map(|(i, p)| unit(p, i))
         .collect::<Result<Vec<_>, _>>()?;
-    let result = les_core::context_selection::select(&serde_json::json!({
-        "question":query,"units":input,"max_chars":context_budget.unwrap_or(1_000_000),
-        "text_budget":text_budget,"identity_reserve_chars":if context_budget.is_some(){1024}else{0},"max_items":32,
+    let request = serde_json::json!({
+        "question":query,"units":input,"max_chars":1_000_000,
+        "text_budget":text_budget,"max_items":if model_pack {64} else {32},
         "policy":match control {super::trial::Control::RrfWire=>"rrf-order-v1",super::trial::Control::DocumentCoverage=>"document-coverage-v1",_=>"coverage-mmr-v1"}
-    }))?;
+    });
+    let result = if model_pack {
+        les_core::context_selection::rank_for_model(&request)
+    } else {
+        les_core::context_selection::select(&request)
+    }?;
     Ok(result["units"]
         .as_array()
         .unwrap()
         .iter()
         .map(|u| {
             let mut p = u["point"].clone();
+            if model_pack && u["prefer_fragments"] == true {
+                p["prefer_fragments"] = serde_json::json!(true);
+            }
             let mut aliases = p["payload"]["equivalent_points"]
                 .as_array()
                 .cloned()
@@ -119,59 +138,27 @@ fn same_parent(point: &Value, scope: &Value) -> bool {
         .all(|field| point["payload"][*field] == scope[*field])
 }
 
-// One budget owner for documents, parents and individual hits. Admission is
-// atomic, deduplicated, and counts source identities as well as text.
-struct Window {
-    selected: Vec<Value>,
-    seen: HashSet<String>,
-    text_left: usize,
-    context_left: usize,
-    overhead: usize,
-}
-impl Window {
-    fn new(text: usize, context: Option<usize>) -> Self {
-        Self {
-            selected: vec![],
-            seen: HashSet::new(),
-            text_left: text,
-            context_left: context.unwrap_or(usize::MAX),
-            overhead: if context.is_some() { 1024 } else { 0 },
-        }
-    }
-    fn admit(&mut self, rows: &[Value]) -> bool {
-        let mut unique = HashSet::new();
-        let rows: Vec<_> = rows
-            .iter()
-            .filter(|p| !self.seen.contains(&key(p)) && unique.insert(key(p)))
-            .collect();
-        let cost: usize = rows.iter().map(|r| chars(r)).sum();
-        let context_cost = cost + rows.len() * self.overhead;
-        if cost > self.text_left
-            || context_cost > self.context_left
-            || self.selected.len() + rows.len() > 32
-        {
-            return false;
-        }
-        self.text_left -= cost;
-        self.context_left -= context_cost;
-        for row in rows {
-            self.seen.insert(key(row));
-            self.selected.push(row.clone());
-        }
-        true
-    }
-}
-
 /// Explicit pages admit a contiguous prefix of the frozen reading stream.
 /// Neighbors must not consume cursor positions or bypass a non-fitting unit.
-pub(super) fn prefix(rows: &[Value], budget: usize, context: Option<usize>) -> Vec<Value> {
-    let mut window = Window::new(budget, context);
+pub(super) fn prefix(rows: &[Value], mut text_left: usize, context: Option<usize>) -> Vec<Value> {
+    let identity_reserve = if context.is_some() { 1024 } else { 0 };
+    let mut context_left = context.unwrap_or(usize::MAX);
+    let mut selected = Vec::new();
+    let mut seen = HashSet::new();
     for row in rows {
-        if !window.admit(std::slice::from_ref(row)) {
+        if !seen.insert(key(row)) {
+            continue;
+        }
+        let text = chars(row);
+        let cost = text + identity_reserve;
+        if selected.len() == 32 || text > text_left || cost > context_left {
             break;
         }
+        text_left -= text;
+        context_left -= cost;
+        selected.push(row.clone());
     }
-    window.selected
+    selected
 }
 
 #[cfg(test)]
@@ -180,9 +167,8 @@ pub(super) fn select(
     sections: &Value,
     documents: &Value,
     budget: usize,
-    context_budget: Option<usize>,
 ) -> (Vec<Value>, usize) {
-    select_query(seeds, sections, documents, budget, context_budget, "").unwrap()
+    select_query(seeds, sections, documents, budget, "").unwrap()
 }
 #[cfg(test)]
 pub(super) fn select_query(
@@ -190,37 +176,16 @@ pub(super) fn select_query(
     sections: &Value,
     documents: &Value,
     budget: usize,
-    context_budget: Option<usize>,
     query: &str,
 ) -> Result<(Vec<Value>, usize), &'static str> {
-    select_query_inner(
+    controlled_query(
         seeds,
         sections,
         documents,
         budget,
-        context_budget,
         query,
         super::trial::Control::Off,
-    )
-}
-
-pub(super) fn controlled_query(
-    seeds: &[Value],
-    sections: &Value,
-    documents: &Value,
-    budget: usize,
-    context_budget: Option<usize>,
-    query: &str,
-    control: super::trial::Control,
-) -> Result<(Vec<Value>, usize), &'static str> {
-    select_query_inner(
-        seeds,
-        sections,
-        documents,
-        budget,
-        context_budget,
-        query,
-        control,
+        false,
     )
 }
 
@@ -229,9 +194,6 @@ pub(super) fn controlled_query(
 pub(super) fn read_plan(
     seeds: &[Value],
     mut hydrated: Value,
-    _budget: usize,
-    _context_budget: Option<usize>,
-    _query: &str,
 ) -> Result<(Vec<Value>, Value), &'static str> {
     // This is an I/O bound, not a second retriever. Indexed wording, parent
     // length and lexical similarity must not reject an original before reading.
@@ -319,14 +281,14 @@ pub(super) fn read_plan(
     Ok((planned, hydrated))
 }
 
-fn select_query_inner(
+pub(super) fn controlled_query(
     seeds: &[Value],
     sections: &Value,
     documents: &Value,
     budget: usize,
-    context_budget: Option<usize>,
     query: &str,
     control: super::trial::Control,
+    model_pack: bool,
 ) -> Result<(Vec<Value>, usize), &'static str> {
     let retrieved: HashSet<String> = seeds.iter().map(key).collect();
     let mut all = retrieved.clone();
@@ -388,7 +350,7 @@ fn select_query_inner(
         let mut seen = HashSet::new();
         pool.retain(|p| seen.insert(key(p)));
     }
-    let selected = select_points(&pool, query, budget, context_budget, control)?;
+    let selected = select_points(&pool, query, budget, control, model_pack)?;
     control.snapshot("selection", query, &selected);
     Ok((selected, total))
 }
@@ -411,9 +373,9 @@ mod tests {
                 &Value::Null,
                 &Value::Null,
                 100,
-                None,
                 "query",
                 control,
+                false,
             )
             .unwrap();
             let right = controlled_query(
@@ -421,9 +383,9 @@ mod tests {
                 &Value::Null,
                 &Value::Null,
                 100,
-                None,
                 "query",
                 control,
+                false,
             )
             .unwrap();
             assert_eq!(left, right);
@@ -445,9 +407,6 @@ mod tests {
         let (plan, hydrated) = read_plan(
             &seeds,
             json!({"sections":[{"points":[optional]}],"documents":[]}),
-            1,
-            Some(1),
-            "unrelated query",
         )
         .unwrap();
         assert_eq!(plan.len(), 64);
@@ -481,9 +440,6 @@ mod tests {
         let (plan, hydrated) = read_plan(
             &[seed.clone()],
             serde_json::json!({"documents":[{"points":rows}],"sections":[]}),
-            1,
-            Some(1),
-            "",
         )
         .unwrap();
         assert_eq!(plan.len(), 33);
@@ -496,31 +452,15 @@ mod tests {
                 && p["payload"]["retrieval_rank"].is_null()));
     }
     #[test]
-    fn read_plan_is_query_independent_and_does_not_spend_the_answer_budget() {
+    fn read_plan_uses_rank_even_when_reading_units_differ_in_size() {
         let mut a = point("a", "a.pdf", &"x".repeat(1_100_000), 0);
         a["payload"]["retrieval_rank"] = json!(2);
         let mut b = point("b", "b.pdf", "tiny", 0);
         b["payload"]["retrieval_rank"] = json!(1);
         let seeds = vec![a, b];
-        let first = read_plan(
-            &seeds,
-            json!({"sections":[],"documents":[]}),
-            1,
-            Some(1),
-            "tiny",
-        )
-        .unwrap();
-        let other = read_plan(
-            &seeds,
-            json!({"sections":[],"documents":[]}),
-            100000,
-            Some(100000),
-            "different",
-        )
-        .unwrap();
-        assert_eq!(first, other);
-        assert_eq!(first.0.len(), 2);
-        assert_eq!(first.0[0]["id"], "b");
+        let (plan, _) = read_plan(&seeds, json!({"sections":[],"documents":[]})).unwrap();
+        assert_eq!(plan.len(), 2);
+        assert_eq!(plan[0]["id"], "b");
     }
     use serde_json::json;
     #[test]
@@ -531,9 +471,6 @@ mod tests {
         let (plan, _) = read_plan(
             &[seed.clone()],
             json!({"sections":[{"points":[seed.clone(),neighbor]}],"documents":[]}),
-            10000,
-            None,
-            "",
         )
         .unwrap();
         assert_eq!(plan.len(), 2);
@@ -555,13 +492,29 @@ mod tests {
         json!({"id":id,"payload":{"dataset_id":"ds","file_name":parent,"parent_id":parent,"text":text,"chunk_ord":ord}})
     }
     #[test]
+    fn final_selection_follows_the_search_query_instead_of_the_overall_topic() {
+        let seeds = [
+            point("fact", "a", "Расчётная мощность ВРУ 84 кВт.", 0),
+            point("topic", "b", "Общая справка по электроснабжению здания.", 1),
+        ];
+        let (selected, _) = select_query(
+            &seeds,
+            &Value::Null,
+            &Value::Null,
+            50,
+            "расчётная мощность ВРУ",
+        )
+        .unwrap();
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0]["id"], "fact");
+    }
+    #[test]
     fn original_read_plan_defers_text_budget_until_after_original_read() {
         let heavy = point("large", "calculation.docx", &"unrelated ".repeat(100), 0);
         let needed = point("needed", "basis.docx", "supply category requirement", 1);
         let hydrated =
             json!({"sections":[{"points":[heavy.clone(), needed.clone()]}],"documents":[]});
-        let (plan, trimmed) =
-            read_plan(&[heavy, needed], hydrated, 80, None, "supply category").unwrap();
+        let (plan, trimmed) = read_plan(&[heavy, needed], hydrated).unwrap();
         assert_eq!(plan.len(), 2);
         let needed = plan.iter().find(|p| p["id"] == "needed").unwrap();
         assert_eq!(needed["payload"]["retrieval_rank"], 1);
@@ -577,15 +530,8 @@ mod tests {
                 .collect::<HashSet<_>>(),
             plan.iter().map(key).collect::<HashSet<_>>()
         );
-        let (selected, _) = select_query(
-            &plan,
-            &Value::Null,
-            &Value::Null,
-            80,
-            None,
-            "supply category",
-        )
-        .unwrap();
+        let (selected, _) =
+            select_query(&plan, &Value::Null, &Value::Null, 80, "supply category").unwrap();
         assert_eq!(selected.len(), 1);
         assert_eq!(selected[0]["id"], "needed");
         assert!(selected.iter().map(chars).sum::<usize>() <= 80);
@@ -596,7 +542,7 @@ mod tests {
         let continuation = point("a2", "first", &"x".repeat(15), 1);
         let later = point("b", "second", "other hit", 0);
         let documents = json!([{"scope":first["payload"],"points":[first,continuation]}]);
-        let (selected, total) = select(&[first, later], &Value::Null, &documents, 20, None);
+        let (selected, total) = select(&[first, later], &Value::Null, &documents, 20);
         assert_eq!(selected.iter().map(key).collect::<Vec<_>>(), ["a", "b"]);
         assert_eq!(total, 3);
         assert!(selected.iter().map(chars).sum::<usize>() <= 20);
@@ -614,7 +560,6 @@ mod tests {
             &Value::Null,
             &documents,
             20,
-            None,
             "hit continuation",
         )
         .unwrap();
@@ -627,7 +572,7 @@ mod tests {
         let first = point("a", "large", "ranked proof", 0);
         let later = point("b", "small", &"x".repeat(16), 0);
         let documents = json!([{"scope":later["payload"],"points":[later]}]);
-        let (selected, _) = select(&[first, later], &Value::Null, &documents, 20, None);
+        let (selected, _) = select(&[first, later], &Value::Null, &documents, 20);
         assert_eq!(selected.iter().map(key).collect::<Vec<_>>(), ["a"]);
     }
     #[test]
@@ -644,7 +589,6 @@ mod tests {
             &sections,
             &Value::Null,
             55,
-            None,
             "actual answer",
         )
         .unwrap();
@@ -664,7 +608,7 @@ mod tests {
         let b = point("b", "small", "proof", 0);
         let sections =
             json!([{"scope":a["payload"],"points":[a]}, {"scope":b["payload"],"points":[b]}]);
-        let (selected, total) = select(&[a, b.clone()], &sections, &Value::Null, 20, None);
+        let (selected, total) = select(&[a, b.clone()], &sections, &Value::Null, 20);
         assert_eq!(selected, vec![b]);
         assert_eq!(total, 2);
     }
@@ -673,14 +617,7 @@ mod tests {
         let seeds: Vec<_> = (0..16)
             .map(|i| point(&i.to_string(), "sheet", &format!("x{i}"), i))
             .collect();
-        let (selected, total) = select(
-            &seeds,
-            &serde_json::json!([]),
-            &Value::Null,
-            16000,
-            Some(3500),
-        );
-        assert_eq!(total, 16);
+        let selected = prefix(&seeds, 16000, Some(3500));
         assert_eq!(selected.len(), 3);
         assert!(selected.iter().map(chars).sum::<usize>() + selected.len() * 1024 <= 3500);
     }

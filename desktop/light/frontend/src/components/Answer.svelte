@@ -36,6 +36,12 @@
         </ul></details>
       {:else}<p class="notice" role="status">Поиск работает с ограничениями: часть поискового контура недоступна. Проверьте источники перед использованием ответа.</p>{/if}
     {/if}
+    {#if message.meta?.retrieval_trace?.omitted_reads?.length}
+      <details>
+        <summary>Прочитанные фрагменты вне контекста ответа · {message.meta.retrieval_trace.omitted_reads.length}</summary>
+        <ul>{#each message.meta.retrieval_trace.omitted_reads as source (source.index)}<li>{source.label}</li>{/each}</ul>
+      </details>
+    {/if}
     {#if missingAttribution}
       <p class="notice" role="status">У вывода нет ссылки на фрагмент документа.</p>
     {/if}

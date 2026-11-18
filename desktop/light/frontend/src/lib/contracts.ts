@@ -37,11 +37,16 @@ export interface ContextReportCall {
   sources: ContextReportSource[]; omitted_sources: { index: number; doc_name: string }[];
 }
 export const contextPath = (sid: string) => `/api/workspace/memory/context/${encodeURIComponent(sid)}`;
+interface RetrievalTrace {
+  source_map?: Source[]; status?: string; read_failures?: SourceReadFailure[];
+  omitted_reads?: { index: number; label: string }[];
+  tool_loop?: { status?: string }; execution?: ExecutionSummary; citation_check?: CitationCheck;
+}
 export interface AnswerMeta {
   error?: { code?: string; detail: string };
   execution?: ExecutionSummary | null;
   source_map?: Source[]; partial?: boolean; completion_status?: string;
-  retrieval_trace?: { status?: string; read_failures?: SourceReadFailure[]; tool_loop?: { status?: string }; execution?: ExecutionSummary; citation_check?: CitationCheck };
+  retrieval_trace?: RetrievalTrace;
   blocker?: { action?: string }; total_status?: string;
 }
 export interface ChatPayload {
@@ -49,7 +54,7 @@ export interface ChatPayload {
   history_id?: number;
   execution?: ExecutionSummary | null;
   answer?: string; response?: string; sources?: string[]; source_map?: Source[];
-  retrieval_trace?: { source_map?: Source[]; status?: string; read_failures?: SourceReadFailure[]; tool_loop?: { status?: string }; execution?: ExecutionSummary; citation_check?: CitationCheck };
+  retrieval_trace?: RetrievalTrace;
   partial?: boolean; completion_status?: string;
   blocker?: { action?: string }; total_status?: string; crag_status?: string;
 }
