@@ -14107,7 +14107,7 @@
       "inbound": [
         "tools/build_light_package.py"
       ],
-      "lines": 96,
+      "lines": 100,
       "module": "tools.light_license_audit",
       "outbound": [
         "tools/__init__.py"
@@ -16197,7 +16197,7 @@
     "runtime_support": 5,
     "test_or_tool_only": 286,
     "tracked_python_files": 728,
-    "tracked_python_lines": 173883
+    "tracked_python_lines": 173887
   },
   "warnings": []
 }
