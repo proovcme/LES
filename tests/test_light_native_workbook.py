@@ -161,9 +161,9 @@ def test_index_routing_and_nodes_match_previous_reader(tmp_path, monkeypatch):
     for sheet, legacy in zip(actual, expected_sheets, strict=True):
         for key in ('sheet_name', 'headers', 'header_row'):
             assert sheet[key] == legacy[key]
-        data = [(row, values) for row, values in zip(sheet['row_numbers'], sheet['rows'], strict=True)
-                if row > sheet['header_row']]
-        assert data == list(zip(legacy['row_numbers'], legacy['rows'], strict=True))
+        body_rows = [(row, values) for row, values in zip(sheet['row_numbers'], sheet['rows'], strict=True)
+                     if row > sheet['header_row']]
+        assert body_rows == list(zip(legacy['row_numbers'], legacy['rows'], strict=True))
     assert [sheet['header_row'] for sheet in actual] == [3, 1]
     assert [sheet['row_numbers'] for sheet in actual] == [[2, 5, 8], [2]]
     assert actual[0]['rows'][0]['Наименование'] == 'Ведомость'
