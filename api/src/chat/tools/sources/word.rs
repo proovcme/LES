@@ -6,15 +6,22 @@ use std::{
     fs::File,
     sync::{Mutex, OnceLock},
 };
-static CACHE: OnceLock<Mutex<VecDeque<(String, Value)>>> = OnceLock::new();
+static CACHE: OnceLock<Mutex<VecDeque<(String, Value, usize)>>> = OnceLock::new();
+mod saved;
+mod window;
 /// Automatic chat admission reads Word originals before the common selector.
 /// The index anchor locates the document; it is never relabelled as its body.
 pub(super) async fn hydrate(
     context: &Context,
     turn: &SourceContext,
+    collection: &str,
     points: Vec<Value>,
     mut hydrated: Value,
+    surrounding_chars: usize,
 ) -> Result<(Vec<Value>, Value)> {
+    let mut statistics = json!({"schema":"les.word-read-window.v1","mode":"section-v1",
+        "documents":0,"original_units":0,"retained_units":0,"matched_units":0,
+        "unresolved_anchors":0,"omitted_units":0});
     let mut output = Vec::new();
     let mut text_bytes = 0usize;
     let mut documents = std::collections::HashSet::new();
@@ -49,10 +56,25 @@ pub(super) async fn hydrate(
         // This runs in passages' async owner; parsing and hashing stay off Tokio.
         let owned_context = context.state_root.clone();
         let original = doc.clone();
-        let view =
-            tokio::task::spawn_blocking(move || snapshot_at(&owned_context, &original, 30000))
-                .await
-                .map_err(|_| "SOURCE_READ_FAILED")?;
+        let cached = if saved::enabled()? {
+            saved::load(context, &doc, collection).await?
+        } else {
+            None
+        };
+        let view = match cached {
+            Some(view) => Ok(view),
+            None => {
+                if saved::enabled()? {
+                    eprintln!(
+                        "{}",
+                        json!({"event":"saved_word_read_legacy_original","doc_id":doc["id"]})
+                    );
+                }
+                tokio::task::spawn_blocking(move || snapshot_at(&owned_context, &original, 30000))
+                    .await
+                    .map_err(|_| "SOURCE_READ_FAILED")?
+            }
+        };
         let view = match view {
             Ok(value) => value,
             Err(failure)
@@ -62,14 +84,57 @@ pub(super) async fn hydrate(
                     &failure.code,
                 ) =>
             {
-                continue
+                continue;
             }
             Err(failure) => return Err(failure),
         };
-        for unit in view["units"]
-            .as_array()
-            .ok_or("DOCUMENT_STRUCTURE_INVALID")?
-        {
+        // A legacy text index can locate a document without a compatible unit
+        // hash. Retain that document prior separately; never invent a unit hit.
+        let source_rank = anchors
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| {
+                let a = &a["payload"];
+                a["dataset_id"] == doc["dataset_id"]
+                    && a["file_name"] == doc["file_name"]
+                    && a["source_sha256"] == doc["file_hash"]
+                    && a["retrieval_expansion"] != true
+            })
+            .map(|(i, a)| a["payload"]["retrieval_rank"].as_u64().unwrap_or(i as u64))
+            .min();
+        let plan = window::plan(&view, &anchors, &doc, surrounding_chars)?;
+        for field in [
+            "original_units",
+            "retained_units",
+            "matched_units",
+            "unresolved_anchors",
+            "omitted_units",
+        ] {
+            statistics[field] = json!(
+                statistics[field].as_u64().unwrap_or(0)
+                    + plan.statistics()[field].as_u64().unwrap_or(0)
+            );
+        }
+        statistics["documents"] = json!(statistics["documents"].as_u64().unwrap_or(0) + 1);
+        eprintln!(
+            "{}",
+            json!({"event":"word_read_scope","doc_id":doc["id"],
+            "source_sha256":doc["file_hash"],"window":plan.statistics()})
+        );
+        if plan.unresolved > 0 {
+            retrieval::failures::record(
+                &mut hydrated,
+                reference(&doc, Value::Null),
+                "WORD_ANCHOR_UNRESOLVED",
+            );
+        }
+        for read_offset in plan.indices.iter().copied() {
+            let unit = &view["units"][read_offset];
+            let owner = plan
+                .owner(read_offset)
+                .map(|a| &anchors[a.index])
+                .unwrap_or(&point);
+            let owner_payload = &owner["payload"];
             text_bytes += unit["text"].as_str().map_or(0, str::len);
             if output.len() >= les_core::context_selection::MAX_SOURCE_UNITS
                 || text_bytes > les_core::context_selection::MAX_SOURCE_TEXT_BYTES
@@ -78,25 +143,19 @@ pub(super) async fn hydrate(
             }
             let mut payload = json!({"dataset_id":doc["dataset_id"],"file_name":doc["file_name"],"source_sha256":doc["file_hash"],
                 "text":unit["text"],"reading_representation":"word_structure","word_physical":true,
-                "word_snapshot_sha256":view["view_sha256"],"retrieval_anchor_id":point["id"],
+                "word_snapshot_sha256":view["view_sha256"],"retrieval_anchor_id":owner_payload.get("retrieval_anchor_id").unwrap_or(&owner["id"]),
                 "chunk_ord":unit["ordinal"],"section_heading":unit["heading"],"source_unit_id":unit["ordinal"]});
+            // This is the original stream position, not the filtered window index.
+            payload["word_read_offset"] = json!(read_offset);
+            if view["saved_units"] == true {
+                payload["reading_origin"] = json!("published_canonical_unit");
+            }
             // An original document is not a dense hit at every paragraph.
             // Only a compatible indexed unit can inherit an anchor's rank.
-            let matched = anchors
-                .iter()
-                .enumerate()
-                .filter(|(_, a)| {
-                    let a = &a["payload"];
-                    a["dataset_id"] == doc["dataset_id"]
-                        && a["file_name"] == doc["file_name"]
-                        && a["source_sha256"] == doc["file_hash"]
-                        && a["word_reading_schema"] == "les.document-reading.v1"
-                        && a["source_unit_id"] == unit["ordinal"]
-                })
-                .map(|(i, a)| a["payload"]["retrieval_rank"].as_u64().unwrap_or(i as u64))
-                .min();
+            let matched = plan.matches.get(&read_offset).map(|a| a.rank);
             payload["retrieval_expansion"] = json!(matched.is_none());
             payload["retrieval_rank"] = json!(matched);
+            payload["retrieval_source_rank"] = json!(source_rank);
             for field in [
                 "ocr",
                 "visual_content",
@@ -107,6 +166,10 @@ pub(super) async fn hydrate(
             }
             for field in [
                 "ordinal",
+                "canonical",
+                "source_block_id",
+                "source_parent_id",
+                "source_heading_path",
                 "table_id",
                 "row_start",
                 "row_end",
@@ -134,6 +197,10 @@ pub(super) async fn hydrate(
             }
         }
     }
+    if !hydrated["read_plan"].is_object() {
+        hydrated["read_plan"] = json!({});
+    }
+    hydrated["read_plan"]["word"] = statistics;
     Ok((output, hydrated))
 }
 pub(super) fn supports(doc: &Value) -> bool {
@@ -150,6 +217,23 @@ pub(super) fn supports(doc: &Value) -> bool {
 }
 fn snapshot(context: &Context, doc: &Value) -> Result<Value> {
     snapshot_at(&context.state_root, doc, 120000)
+}
+fn verify_at(state: &std::path::Path, doc: &Value) -> Result<()> {
+    let path = les_core::document_source::resolve(
+        doc["source_path"].as_str().unwrap_or(""),
+        doc["dataset_id"]
+            .as_str()
+            .ok_or("SOURCE_IDENTITY_INVALID")?,
+        doc["file_name"].as_str().ok_or("SOURCE_IDENTITY_INVALID")?,
+        &state.join("storage/datasets"),
+    )?;
+    let actual = les_core::pdf_source::fingerprint(
+        &mut File::open(path).map_err(|_| "SOURCE_UNAVAILABLE")?,
+    )?;
+    if doc["file_hash"] != actual {
+        return Err("SOURCE_REVISION_CHANGED".into());
+    }
+    Ok(())
 }
 fn snapshot_at(state: &std::path::Path, doc: &Value, timeout_ms: u64) -> Result<Value> {
     let path = les_core::document_source::resolve(
@@ -185,7 +269,7 @@ fn snapshot_at(state: &std::path::Path, doc: &Value, timeout_ms: u64) -> Result<
         .get_or_init(Default::default)
         .lock()
         .map_err(|_| "SOURCE_READ_FAILED")?;
-    if let Some(i) = cache.iter().position(|(k, _)| *k == key) {
+    if let Some(i) = cache.iter().position(|(k, _, _)| *k == key) {
         let entry = cache.remove(i).unwrap();
         let value = entry.1.clone();
         cache.push_back(entry);
@@ -225,8 +309,13 @@ fn snapshot_at(state: &std::path::Path, doc: &Value, timeout_ms: u64) -> Result<
     if full["source_sha256"] != doc["file_hash"] {
         return Err("SOURCE_REVISION_CHANGED".into());
     }
-    let mut value = les_core::document_reading(&json!({"text":full["text"],"max_chars":4000}))?;
+    let mut value = les_core::document_reading(
+        &json!({"text":full["text"],"structure":full["metadata"]["docling_structure"],"max_chars":4000}),
+    )?;
     value["metadata"] = full["metadata"].clone();
+    if let Some(meta) = value["metadata"].as_object_mut() {
+        meta.remove("docling_structure");
+    }
     verify()?;
     eprintln!(
         "{}",
@@ -239,21 +328,16 @@ fn snapshot_at(state: &std::path::Path, doc: &Value, timeout_ms: u64) -> Result<
         .lock()
         .map_err(|_| "SOURCE_READ_FAILED")?;
     // Concurrent readers can finish the same immutable source. Keep one entry.
-    cache.retain(|(k, _)| k != &key);
+    cache.retain(|(k, _, _)| k != &key);
     while cache.len() >= 16
-        || cache
-            .iter()
-            .map(|(_, v)| v.to_string().len())
-            .sum::<usize>()
-            + size
-            > 16 * 1024 * 1024
+        || cache.iter().map(|(_, _, bytes)| *bytes).sum::<usize>() + size > 16 * 1024 * 1024
     {
         if cache.pop_front().is_none() {
             break;
         }
     }
     if size <= 16 * 1024 * 1024 {
-        cache.push_back((key, value.clone()));
+        cache.push_back((key, value.clone(), size));
     }
     Ok(value)
 }
@@ -265,9 +349,37 @@ pub(super) async fn read(
 ) -> Result<Value> {
     let owner = context.clone();
     let original = doc.clone();
-    let view = tokio::task::spawn_blocking(move || snapshot(&owner, &original))
-        .await
-        .map_err(|_| "SOURCE_READ_FAILED")??;
+    let cached = if saved::enabled()?
+        && doc["status"] == "INDEXED"
+        && context.index_store.is_some()
+        && args["q"].as_str().is_none_or(str::is_empty)
+        && args["clause"].as_str().is_none_or(str::is_empty)
+    {
+        let (config, _, _, _) = retrieval::configuration(context.clone(), false).await?;
+        saved::load(
+            &context,
+            &doc,
+            config["collection"]
+                .as_str()
+                .ok_or("INDEX_COLLECTION_MISMATCH")?,
+        )
+        .await?
+    } else {
+        None
+    };
+    let view = match cached {
+        Some(value) => value,
+        None => tokio::task::spawn_blocking(move || snapshot(&owner, &original))
+            .await
+            .map_err(|_| "SOURCE_READ_FAILED")??,
+    };
+    if view["saved_units"] == true
+        && args["index_revision"]
+            .as_str()
+            .is_some_and(|r| view["index_revision"] != r)
+    {
+        return Err("INDEX_CHANGED_DURING_SEARCH".into());
+    }
     if args["view_sha256"]
         .as_str()
         .is_some_and(|s| view["view_sha256"] != s)
@@ -278,6 +390,7 @@ pub(super) async fn read(
         .as_array()
         .cloned()
         .ok_or("DOCUMENT_STRUCTURE_INVALID")?;
+    let document_units = units.len();
     let clause = args["clause"].as_str().unwrap_or("");
     if !clause.is_empty() {
         les_core::chat_request::clause_heading("", clause)?;
@@ -291,7 +404,7 @@ pub(super) async fn read(
             .into_iter()
             .map(|u| json!({"payload":{"text":u["text"],"chunk_ord":u["ordinal"]},"unit":u}))
             .collect();
-        units = retrieval::rank_units(points, query.to_owned())
+        units = retrieval::rank_units(points, query.to_owned(), args["_automatic_focus"] == true)
             .await?
             .into_iter()
             .map(|p| p["unit"].clone())
@@ -331,6 +444,10 @@ pub(super) async fn read(
             source[field] = view["metadata"][field].clone();
         }
         source["view_sha256"] = view["view_sha256"].clone();
+        if view["saved_units"] == true {
+            source["read_offset"] = json!(offset + sources.len());
+            source["reading_origin"] = json!("published_canonical_unit");
+        }
         for field in [
             "ordinal",
             "heading",
@@ -345,7 +462,7 @@ pub(super) async fn read(
         source["section_heading"] = u["heading"].clone();
         sources.push(source.clone());
         passages.push(json!({"text":text,"body_sha256":les_core::sha256_hex(u["body"].as_str().unwrap_or("").as_bytes()),
-            "context_prefix_chars":u["context_prefix"].as_str().unwrap_or("").chars().count(),"source":source,"chunk_ord":u["ordinal"]}));
+            "canonical":u["canonical"],"context_prefix_chars":u["context_prefix"].as_str().unwrap_or("").chars().count(),"source":source,"chunk_ord":u["ordinal"]}));
     }
     if passages.is_empty() {
         return Err("SOURCE_ATOMIC_UNIT_OVERFLOW".into());
@@ -363,6 +480,12 @@ pub(super) async fn read(
         sources,
     );
     retrieval::bound_word(&mut reply)?;
+    if view["saved_units"] == true {
+        reply["result"]["index_revision"] = view["index_revision"].clone();
+        reply["result"]["reading_origin"] = json!("published_canonical_unit");
+        reply["result"]["coverage_scope"] = json!("published_reading_units");
+        reply["result"]["complete_original"] = json!(false);
+    }
     // Budget trimming changes the stream cursor, never skip a removed row.
     let kept = reply["result"]["passages"].as_array().map_or(0, Vec::len);
     reply["result"]["included_fragments"] = json!(kept);
@@ -374,5 +497,6 @@ pub(super) async fn read(
     if kept < count {
         reply["result"]["coverage"] = json!("bounded");
     }
+    retrieval::reading_scope(&mut reply, &args, document_units);
     Ok(reply)
 }

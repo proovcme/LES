@@ -127,6 +127,20 @@ fn scoring(body: &Value) -> Result<Option<ScoringQuery>> {
     if !input["rrf"].is_null() {
         return Err("EDGE_QUERY_NOT_SUPPORTED");
     }
+    if let Some(text) = input.get("text_query") {
+        let field = text["field"].as_str().ok_or("EDGE_QUERY_INVALID")?;
+        let query = text["text"]
+            .as_str()
+            .filter(|s| !s.is_empty() && s.len() <= 65536)
+            .ok_or("EDGE_QUERY_INVALID")?;
+        return Ok(Some(
+            TextQueryBuilder::new(field.try_into().map_err(|_| "EDGE_QUERY_INVALID")?, query)
+                .scoring(TextQueryScoring::Bm25(
+                    Bm25ParamsBuilder::new().k(1.2).b(0.75).build(),
+                ))
+                .build(),
+        ));
+    }
     let input = input.get("nearest").unwrap_or(input);
     let query = match persisted_vector(input)? {
         VectorPersisted::Dense(v) => {
@@ -195,6 +209,16 @@ impl Shard {
     }
     pub fn call(&self, action: &str, body: &Value) -> Result<Value> {
         match action {
+            "bm25_trial_prepare" => self.prepare_bm25_trial(),
+            "bm25_trial_digest" => self.bm25_trial_digest(),
+            "bm25_trial_search" => self.bm25_trial_lexical(
+                body,
+                &body["filters"],
+                body["limit"]
+                    .as_u64()
+                    .filter(|n| (1..=512).contains(n))
+                    .ok_or("EDGE_LIMIT_INVALID")? as usize,
+            ),
             "hybrid_search" => self.hybrid_search(body),
             "refresh_postings" => self.refresh_postings(false, |_| {}),
             "exists" => Ok(json!({"exists":true})),
@@ -296,7 +320,7 @@ impl Shard {
                         .collect::<Result<Vec<_>>>()?
                 ))
             }
-            "query" => {
+            "query" | "query_groups" => {
                 let mut request = QueryRequest::new(limit(&body["limit"], 10)?);
                 request.query = scoring(body)?;
                 request.prefetches = prefetches(&body["prefetch"], 0)?;
@@ -319,6 +343,20 @@ impl Shard {
                     body.get("with_vector").cloned().unwrap_or(json!(false)),
                 )
                 .map_err(|_| "EDGE_REQUEST_INVALID")?;
+                if action == "query_groups" {
+                    let groups = self
+                        .edge
+                        .query_groups(GroupRequest {
+                            groups: limit(&body["limit"], 128)?,
+                            group_size: limit(&body["group_size"], 2)?,
+                            group_by: serde_json::from_value(body["group_by"].clone())
+                                .map_err(|_| "EDGE_REQUEST_INVALID")?,
+                            query: request,
+                        })
+                        .map_err(|_| "EDGE_READ_FAILED")?;
+                    return Ok(json!({"groups":groups.into_iter().map(|g|json!({"id":g.key,
+                        "hits":g.hits.into_iter().map(|p|json!({"id":p.id,"payload":p.payload,"score":p.score,"version":p.version,"vector":p.vector.map(VectorStructPersisted::from)})).collect::<Vec<_>>()})).collect::<Vec<_>>()}));
+                }
                 let rows = self.edge.query(request).map_err(|_| "EDGE_READ_FAILED")?;
                 Ok(
                     json!({"points":rows.into_iter().map(|p|json!({"id":p.id,"payload":p.payload,"score":p.score,"version":p.version,"vector":p.vector.map(VectorStructPersisted::from)})).collect::<Vec<_>>()}),

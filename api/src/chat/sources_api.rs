@@ -40,6 +40,9 @@ fn prepare(context: &Context, input: &Value) -> Result<(String, Value, SourceCon
         .ok_or("TOOL_NOT_ALLOWED")?;
     let args = input["args"].clone();
     validate(context, name, &args)?;
+    if name == "search_sources" {
+        sources::validate_search_cursor(&args)?;
+    }
     if matches!(name, "search_sources" | "read_source" | "read_excel_source")
         && args["offset"].as_u64().is_some_and(|n| n > 0)
         && args["view"] != "documents"

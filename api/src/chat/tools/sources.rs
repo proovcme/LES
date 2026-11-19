@@ -1,11 +1,23 @@
 //! Registered identities and frozen user scope bind every source read.
 mod catalog;
+pub(crate) mod packet;
 mod parts;
+pub(super) mod pdf_focus;
 pub(crate) mod retrieval;
 mod verification;
 mod word;
+mod workbook;
 use super::{envelope, Context, Prepared, Result};
 use retrieval::search;
+pub(crate) fn context_snapshot(args: &Value) -> bool {
+    matches!(args["view"].as_str(), Some("context" | "overview"))
+}
+pub(crate) fn validate_search_cursor(args: &Value) -> Result<()> {
+    if context_snapshot(args) && args["offset"].as_u64().is_some_and(|n| n > 0) {
+        return Err("SOURCE_SNAPSHOT_OFFSET_INVALID".into());
+    }
+    Ok(())
+}
 /// Shared data-only scope for chat and MCP; no answer model or dialogue.
 pub(crate) struct SourceContext {
     pub request: Value,
@@ -69,6 +81,24 @@ fn bind_name(selected: &[Value], args: &mut Value) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn context_snapshots_reject_offsets_before_requesting_a_continuation_revision() {
+        for view in ["context", "overview"] {
+            for revision in [Value::Null, json!("current")] {
+                assert!(validate_search_cursor(
+                    &json!({"view":view,"offset":0,"index_revision":revision})
+                )
+                .is_ok());
+                let error = validate_search_cursor(
+                    &json!({"view":view,"offset":1,"index_revision":revision}),
+                )
+                .unwrap_err();
+                assert_eq!(error.code, "SOURCE_SNAPSHOT_OFFSET_INVALID");
+                assert_eq!(error.status, axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+            }
+        }
+        assert!(validate_search_cursor(&json!({"view":"passages","offset":1})).is_ok());
+    }
     #[test]
     fn only_a_unique_short_name_is_bound_to_the_explicit_selection() {
         let selected = vec![json!("folder/Source.pdf")];
@@ -153,6 +183,12 @@ pub(crate) async fn run_scoped(
     mut args: Value,
 ) -> Result<Value> {
     bind_selected_name(turn, &mut args)?;
+    if matches!(name, "read_source" | "read_excel_source") && args["automatic_focus"] == true {
+        if args["q"].as_str().is_none_or(|q| q.trim().is_empty()) {
+            return Err("INDEX_QUERY_INVALID".into());
+        }
+        args["_automatic_focus"] = json!(true);
+    }
     if name == "search_sources" {
         return search(context, turn, args).await;
     }
@@ -203,6 +239,7 @@ pub(crate) async fn run_scoped(
             "ocr_numbers_verified",
             "view_sha256",
             "extractor",
+            "table_projection_warning",
         ] {
             source[field] = result[field].clone();
         }
@@ -213,9 +250,19 @@ pub(crate) async fn run_scoped(
             .take(240)
             .collect::<String>());
         let missing_literal = result["literal_lookup"]["matched"] == false;
+        let table_notice = result["table_projection_warning"]
+            .as_str()
+            .map(crate::document_parser::projection_notice);
         let mut reply = envelope(name, "physical_page", result, vec![source]);
+        let mut warnings = Vec::new();
         if missing_literal {
-            reply["warnings"]=json!(["Дословное совпадение не найдено. Прочитан текст той же страницы; это не подтверждает наличие искомой фразы. При next_offset продолжи чтение."]);
+            warnings.push("Дословное совпадение не найдено. Прочитан текст той же страницы; это не подтверждает наличие искомой фразы. При next_offset продолжи чтение.");
+        }
+        if let Some(notice) = table_notice {
+            warnings.push(notice);
+        }
+        if !warnings.is_empty() {
+            reply["warnings"] = json!(warnings);
         }
         return Ok(reply);
     }
@@ -226,6 +273,9 @@ pub(crate) async fn run_scoped(
         return retrieval::read(context, turn, args).await;
     }
     if name == "read_excel_source" {
+        if let Some(result) = workbook::read(context.clone(), turn, &args).await? {
+            return Ok(result);
+        }
         let mut result = retrieval::read(context, turn, args).await?;
         result["tool"] = json!(name);
         result["warnings"]=json!(["Прочитаны проверенные индексированные разделы книги; это не полная выгрузка всех ячеек."]);

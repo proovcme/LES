@@ -2,6 +2,58 @@
 //! Evidence owns reading and delivery state.
 use serde_json::{json, Value};
 
+/// A file explicitly named in the question can have its own reading task.
+/// Keep the whole question when the text does not separate the tasks.
+pub(super) fn read_question<'a>(
+    question: &'a str,
+    file_name: Option<&str>,
+    selected_files: &[Value],
+) -> &'a str {
+    fn title(path: &str) -> String {
+        let file = path.rsplit(['/', '\\']).next().unwrap_or(path);
+        file.rsplit_once('.')
+            .map_or(file, |(stem, _)| stem)
+            .to_lowercase()
+    }
+
+    let Some(name) = file_name.map(title).filter(|name| !name.is_empty()) else {
+        return question;
+    };
+    let other_titles: Vec<_> = selected_files
+        .iter()
+        .filter_map(Value::as_str)
+        .map(title)
+        .filter(|other| !other.is_empty() && *other != name)
+        .collect();
+    let mut start = 0;
+    let mut matched = None;
+    let boundaries = question
+        .char_indices()
+        .filter(|&(i, c)| {
+            matches!(c, ';' | '\n' | '!' | '?')
+                || (c == '.' && {
+                    let tail = &question[i + 1..];
+                    tail.starts_with(char::is_whitespace)
+                        && tail.trim_start().starts_with(char::is_uppercase)
+                })
+        })
+        .map(|(i, c)| (i, c.len_utf8()))
+        .chain(std::iter::once((question.len(), 0)));
+    for (end, width) in boundaries {
+        let clause = question[start..end].trim();
+        start = end + width;
+        let lower = clause.to_lowercase();
+        if !lower.contains(&name) {
+            continue;
+        }
+        if matched.is_some() || other_titles.iter().any(|other| lower.contains(other)) {
+            return question;
+        }
+        matched = Some(clause);
+    }
+    matched.unwrap_or(question)
+}
+
 /// Compact navigation cards; no excerpt, score or authority claim enters here.
 pub(super) fn candidates(rows: &Value, max_chars: usize) -> Value {
     let input: Vec<_> = rows.as_array().into_iter().flatten().take(64).collect();
@@ -95,6 +147,17 @@ pub(super) fn answer_prompt(base: &str, can_refine: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_named_document_is_read_for_its_own_part_of_the_question() {
+        let selected = [json!("Folder/Схема 1.pdf"), json!("Folder/Расчёт.docx")];
+        let question = "По «Схема 1.pdf» укажи разъём. По «Расчёт» проверь п. 2.1 и число волокон.";
+        assert_eq!(
+            read_question(question, Some("Расчёт.docx"), &selected),
+            "По «Расчёт» проверь п. 2.1 и число волокон."
+        );
+        let joint = "Сопоставь «Схема 1» и «Расчёт» по составу оборудования.";
+        assert_eq!(read_question(joint, Some("Расчёт.docx"), &selected), joint);
+    }
     #[test]
     fn optional_navigation_cannot_evict_evidence_or_overflow_the_request() {
         let cards = json!((0..30)

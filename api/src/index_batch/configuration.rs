@@ -266,6 +266,7 @@ pub(crate) fn intake(
     input["embedding_execution"] = json!({"revision_id":resolved.revision["revision_id"],"allow_remote":job["watch"]["automatic"]!=1 && resolved.endpoint.locality=="remote"});
     input["schema"] = json!("les.index-batch.v1");
     input["database"] = json!(context.database);
+    input["owned_state"] = json!(context.state_root);
     input["source_root"] = json!(context.state_root.join("storage/datasets"));
     input["content_root"] = json!(context
         .index_store

@@ -72,13 +72,16 @@ def test_compiled_assets_stage_without_node_dependencies(tree):
     root, frontend, dist, runtime = tree
     (frontend / 'node_modules').mkdir()
     (frontend / 'node_modules/private.txt').write_text('not a runtime asset')
+    checked = builder.validated_assets(root)
+    assert checked == (dist, {'index.html', 'assets/main.js', 'build-receipt.json'})
+    assert not runtime.exists()  # Readiness checking must not stage or rebuild.
     builder.stage(root, runtime)
     assert (runtime / builder.FRONTEND / 'dist/index.html').is_file()
     assert not (runtime / builder.FRONTEND / 'node_modules').exists()
     assert not (runtime / builder.FRONTEND / 'src').exists()
 
 
-@pytest.mark.parametrize('kind', ['changed-source', 'changed-bundle', 'extra-file', 'traversal'])
+@pytest.mark.parametrize('kind', ['changed-source', 'changed-bundle', 'extra-file', 'traversal', 'missing-receipt'])
 def test_stale_or_unlisted_assets_never_enter_the_package(tree, kind):
     root, frontend, dist, runtime = tree
     if kind == 'changed-source':
@@ -87,6 +90,8 @@ def test_stale_or_unlisted_assets_never_enter_the_package(tree, kind):
         (dist / 'assets/main.js').write_text('modified bundle')
     elif kind == 'extra-file':
         (dist / 'private.txt').write_text('private')
+    elif kind == 'missing-receipt':
+        (dist / 'build-receipt.json').unlink()
     else:
         receipt = json.loads((dist / 'build-receipt.json').read_text())
         receipt['files']['../secret.txt'] = hashlib.sha256(b'secret').hexdigest()

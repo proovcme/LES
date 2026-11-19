@@ -13,9 +13,10 @@ fn key(point: &Value) -> String {
     ])
     .to_string()
 }
-pub(super) fn project(
+pub(super) fn project_with_pdf_hits(
     seeds: Vec<Value>,
     mut hydrated: Value,
+    keep_pdf_hits: bool,
 ) -> Result<(Vec<Value>, Value), &'static str> {
     let mut views = HashMap::new();
     for group in ["sections", "documents"] {
@@ -37,6 +38,14 @@ pub(super) fn project(
                 {
                     return Err("WORD_READING_VIEW_INVALID");
                 }
+                if unit["canonical"].is_object()
+                    && p["word_structure_sha256"]
+                        != les_core::sha256_hex(
+                            les_core::tool_execution::canonical_json(unit)?.as_bytes(),
+                        )
+                {
+                    return Err("WORD_READING_VIEW_INVALID");
+                }
                 let mut reading = row.clone();
                 reading["payload"]["text"] = json!(text);
                 reading["payload"]["reading_representation"] = json!("word_structure");
@@ -48,12 +57,15 @@ pub(super) fn project(
                     "start_byte",
                     "end_byte",
                     "ordinal",
+                    "canonical",
+                    "source_block_id",
+                    "source_parent_id",
                 ] {
                     reading["payload"][field] = unit[field].clone();
                 }
                 views.insert(key(row), reading);
             }
-            if let Some(text) = p["pdf_page_view"].as_str() {
+            if let Some(text) = p["pdf_page_view"].as_str().filter(|_| !keep_pdf_hits) {
                 if p["pdf_page_view_schema"] != "les.pdf-page-view.v1"
                     || !p["page"].is_u64()
                     || text.chars().count() > 16000
@@ -80,6 +92,25 @@ pub(super) fn project(
                     return row.clone();
                 }
                 let mut projected = views.get(&key(row)).unwrap_or(row).clone();
+                if views.contains_key(&key(row)) {
+                    // A canonical reading unit may live on a different indexed
+                    // point from the retrieved slice. Replacing its text must
+                    // not erase the retrieved score, fused rank or anchor ID.
+                    for field in ["score", "retrieval_fusion"] {
+                        if let Some(value) = row.get(field) {
+                            projected[field] = value.clone();
+                        }
+                    }
+                    for field in ["retrieval_rank", "retrieval_expansion"] {
+                        if let Some(value) = row["payload"].get(field) {
+                            projected["payload"][field] = value.clone();
+                        }
+                    }
+                    projected["payload"]["retrieval_anchor_id"] = row["payload"]
+                        .get("retrieval_anchor_id")
+                        .unwrap_or(&row["id"])
+                        .clone();
+                }
                 if row["payload"]["equivalent_points"].is_array() {
                     projected["payload"]["equivalent_points"] =
                         row["payload"]["equivalent_points"].clone();
@@ -103,8 +134,54 @@ pub(super) fn project(
 }
 
 #[cfg(test)]
+fn project(seeds: Vec<Value>, hydrated: Value) -> Result<(Vec<Value>, Value), &'static str> {
+    project_with_pdf_hits(seeds, hydrated, false)
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_reading_projection_preserves_the_retrieved_slice_rank_and_anchor() {
+        let view = page("canonical", "a", true);
+        let mut hit = page("retrieved-slice", "a", false);
+        hit["score"] = json!(0.67);
+        hit["retrieval_fusion"] = json!({"fusion_rank":7,"selection_rank":3});
+        hit["payload"]["retrieval_rank"] = json!(6);
+        let (points, _) = project(
+            vec![hit.clone()],
+            json!({"sections":[{"points":[view,hit.clone()]}],"documents":[]}),
+        )
+        .unwrap();
+        assert_eq!(points.len(), 1);
+        assert_eq!(points[0]["id"], "canonical");
+        assert_eq!(points[0]["score"], hit["score"]);
+        assert_eq!(points[0]["retrieval_fusion"], hit["retrieval_fusion"]);
+        assert_eq!(points[0]["payload"]["retrieval_rank"], 6);
+        assert_eq!(
+            points[0]["payload"]["retrieval_anchor_id"],
+            "retrieved-slice"
+        );
+        assert_eq!(hit["payload"]["text"], "Search text");
+    }
+    #[test]
+    fn typed_cells_are_bound_even_when_the_presentation_text_is_unchanged() {
+        let text = "|A|17.25|";
+        let unit = json!({"text":text,"ordinal":1,"canonical":{"schema":"les.document-structure.v1","kind":"table","rows":[["A","17.25"]]}});
+        let mut p = json!({"id":"a","payload":{"dataset_id":"d","file_name":"a.docx","source_sha256":"s","source_unit_id":1,
+            "text":"17.25","word_reading_schema":"les.document-reading.v1","word_reading_sha256":les_core::sha256_hex(text.as_bytes()),
+            "word_structure_sha256":les_core::sha256_hex(les_core::tool_execution::canonical_json(&unit).unwrap().as_bytes()),"word_reading_view":unit}});
+        project(
+            vec![p.clone()],
+            json!({"sections":[{"points":[p.clone()]}]}),
+        )
+        .unwrap();
+        p["payload"]["word_reading_view"]["canonical"]["rows"][0][1] = json!("117.25");
+        assert_eq!(
+            project(vec![p.clone()], json!({"sections":[{"points":[p]}]})).unwrap_err(),
+            "WORD_READING_VIEW_INVALID"
+        );
+    }
     #[test]
     fn a_word_embedding_slice_reveals_its_entire_hashed_table_unit() {
         let text = "|Позиция|кВт|\n|---|---|\n|Насос|17.25|\n";

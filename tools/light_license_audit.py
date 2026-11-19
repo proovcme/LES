@@ -59,15 +59,19 @@ def stage_notices(root: Path, payload: Path):
     manifests = ['desktop/light/src-tauri/Cargo.toml', 'core/Cargo.toml']
     if (payload / 'native/runtime/runtime-receipt.json').is_file():
         manifests.append('runtime/Cargo.toml')
-    if (payload / 'native/api/api-receipt.json').is_file():
+    api_receipt = payload / 'native/api/api-receipt.json'
+    api_features = []
+    if api_receipt.is_file():
         manifests.append('api/Cargo.toml')
+        api_features = json.loads(api_receipt.read_text(encoding='utf-8')).get('features', [])
     if (payload / 'native/parsers/parser-receipt.json').is_file():
         manifests.append('parsers/Cargo.toml')
     for manifest in manifests:
-        result = subprocess.run(['cargo', 'metadata', '--locked', '--offline', '--format-version', '1',
-            *(['--all-features'] if manifest == 'api/Cargo.toml' else []),
-            '--filter-platform', 'x86_64-pc-windows-msvc', '--manifest-path', str(root / manifest)],
-            capture_output=True, check=True, encoding='utf-8')
+        command = ['cargo', 'metadata', '--locked', '--offline', '--format-version', '1',
+                   '--filter-platform', 'x86_64-pc-windows-msvc', '--manifest-path', str(root / manifest)]
+        if manifest == 'api/Cargo.toml' and api_features:
+            command.extend(['--features', ','.join(api_features)])
+        result = subprocess.run(command, stdout=subprocess.PIPE, check=True, encoding='utf-8')
         cargo = json.loads(result.stdout)
         resolved = {node['id'] for node in cargo['resolve']['nodes']}
         for package in cargo['packages']:

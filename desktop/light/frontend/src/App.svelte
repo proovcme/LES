@@ -2,6 +2,7 @@
   import { onMount, tick } from 'svelte';
   import { errorMessage } from './lib/api';
   import type { Source } from './lib/contracts';
+  import { sourceOrigin as pickSourceOrigin, sourceReadStart, sourcePage } from './lib/contracts';
   import { Workspace } from './lib/workspace.svelte';
   import { connectNativeClose } from './lib/native-close';
   import Icon from './components/Icon.svelte';
@@ -75,6 +76,9 @@
     });
   }
   function openSource(value: Source) { sourceTrigger = document.activeElement as HTMLElement; source = value; }
+  function openOrigin(value: import('./lib/contracts').SourceOrigin) {
+    if (source) source = pickSourceOrigin(source, value);
+  }
   async function closeSource() { source = null; await tick(); (sourceTrigger?.isConnected ? sourceTrigger : composer)?.focus(); }
   function keyboard(event: KeyboardEvent) {
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && !event.ctrlKey && !event.altKey && !event.metaKey) {
@@ -183,7 +187,7 @@
           <div class="composer-actions">
             <input class="sr-only" type="file" bind:this={fileInput} tabindex="-1" aria-label="Выбрать файл" onchange={() => { const file = fileInput.files?.[0]; if (file) void workspace.attach(file, indexFile); fileInput.value = ''; }} />
             <button type="button" class="icon-button quiet" aria-label={workspace.indexedAttachments ? 'Прикрепить файл' : 'Прикрепить файл для чтения'} aria-haspopup={workspace.indexedAttachments ? 'dialog' : undefined} disabled={disabled || !workspace.session} onclick={() => workspace.indexedAttachments ? modal = 'attachment' : chooseFile(false)}><Icon name="paperclip" /></button>
-            <button type="button" class="scope-button quiet" disabled={disabled || !workspace.session} onclick={() => modal = 'scope'} title={scopeLabel}><Icon name="folder" /><span>{scopeLabel}</span></button><button type="button" class="icon-button quiet options-button" aria-label="Параметры ответа" aria-haspopup="dialog" data-active={workspace.reranker || workspace.retrievalMode !== 'pull'} disabled={disabled} onclick={() => modal = 'options'}><Icon name="settings" /></button>
+            <button type="button" class="scope-button quiet" disabled={disabled || !workspace.session} onclick={() => modal = 'scope'} title={scopeLabel}><Icon name="folder" /><span>{scopeLabel}</span></button><button type="button" class="icon-button quiet options-button" aria-label="Параметры ответа" aria-haspopup="dialog" data-active={workspace.retrievalMode !== 'pull'} disabled={disabled} onclick={() => modal = 'options'}><Icon name="settings" /></button>
             {#if workspace.busy}<button type="button" class="stop-button" aria-label="Остановить ответ" onclick={() => workspace.stop()}><Icon name="stop" /><span class="send-label">Остановить</span></button>{:else}<button type="submit" class="send-button" disabled={disabled || !workspace.session || !workspace.text.trim()} aria-label="Отправить вопрос"><Icon name="arrow" /><span class="send-label">Отправить</span></button>{/if}
           </div>
         </form>
@@ -237,11 +241,13 @@
         <option value="hybrid">Лес ищет, модель может дочитать</option>
       </select>
     </label>
-    <label class="option"><input type="checkbox" bind:checked={workspace.reranker} /><span><strong>Уточнять результаты поиска</strong><small>Для вопросов по документам. Если доступен реранкер, он пересортирует найденные фрагменты. Ответ может занять больше времени.</small></span></label>
     <div class="modal-footer"><button onclick={() => modal = null}>Готово</button></div>
   </Modal>
 {/if}
-{#if source}{#key source.index}<SourcePanel {source} close={closeSource} />{/key}{/if}
+{#if source}{#key `${source.index}:${source.doc_id}:${source.source_sha256}:${source.view_sha256}:${sourceReadStart(source)}:${sourcePage(source)}`}
+  {@const selected = source}
+  <SourcePanel source={selected} close={() => { if (source === selected) void closeSource(); }} selectOrigin={openOrigin} />
+{/key}{/if}
 {#if workspace.draftConflict}
   <Modal title="Два черновика одного диалога" close={() => workspace.draftConflict = null}>
     <p>В другом окне сохранён другой текст. Выберите, какую версию оставить.</p>

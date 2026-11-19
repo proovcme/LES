@@ -95,8 +95,9 @@ def test_styled_empty_tail_does_not_hide_real_data_outside_the_read_window(tmp_p
     assert value['sheets'][0]['row_numbers']==[2]
     sheet['A65006']='Late source data'
     book.save(path)
-    with pytest.raises(native_core.NativeCoreError,match='SPREADSHEET_LIMIT'):
-        read(path,view='tables',read_rows=10)
+    value=read(path,view='tables',read_rows=10)
+    assert value['sheets'][0]['rows']==[['ПВ-3',2],['Late source data',None]]
+    assert value['sheets'][0]['row_numbers']==[2,65006]
 
 
 def test_excel_container_signature_wins_over_incorrect_xls_extension(tmp_path):
@@ -111,8 +112,8 @@ def test_structured_reader_keeps_types_headers_and_physical_row_numbers(tmp_path
     value=read(path,view='tables',read_rows=20_000)
     assert value['extractor']=='les.spreadsheet-tables.v1'
     assert value['sheets'][0]['headers']==['Код','Количество','Согласовано']
-    assert value['sheets'][0]['rows']==[['U-1',25,True],['U-2',.125,False]]
-    assert value['sheets'][0]['row_numbers']==[3,5]
+    assert value['sheets'][0]['rows']==[['Преамбула',None,None],['U-1',25,True],['U-2',.125,False]]
+    assert value['sheets'][0]['row_numbers']==[1,3,5]
     with pytest.raises(native_core.NativeCoreError,match='SPREADSHEET_LIMIT'):read(path,view='tables',read_rows=2)
 
 

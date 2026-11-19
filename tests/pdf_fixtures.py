@@ -3,7 +3,7 @@ from io import BytesIO
 from PIL import Image
 
 
-def write_pdf(path, pages, *, drawing_segments=0):
+def write_pdf(path, pages, *, drawing_segments=0, page_size=(300,300)):
     """Accept ASCII text, literal PDF drawing operators, or None for a scan."""
     objects = [b'', b'']
     def add(data):
@@ -30,7 +30,7 @@ def write_pdf(path, pages, *, drawing_segments=0):
         if drawing_segments:
             content += b'\n' + b'\n'.join(f'{i%300} 0 m {i%300} 300 l S'.encode() for i in range(drawing_segments))
         content_id = add(stream(content))
-        children.append(add(f'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Resources << {resources} >> /Contents {content_id} 0 R >>'.encode()))
+        children.append(add(f'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {page_size[0]} {page_size[1]}] /Resources << {resources} >> /Contents {content_id} 0 R >>'.encode()))
     objects[0] = b'<< /Type /Catalog /Pages 2 0 R >>'
     objects[1] = f'<< /Type /Pages /Count {len(children)} /Kids [{" ".join(f"{n} 0 R" for n in children)}] >>'.encode()
     result = bytearray(b'%PDF-1.4\n')

@@ -13,6 +13,9 @@ impl Drop for Fixture {
     }
 }
 fn setup(legacy: bool) -> (Fixture, PathBuf, Vec<Value>) {
+    setup_vectors(legacy, false)
+}
+fn setup_vectors(legacy: bool, named: bool) -> (Fixture, PathBuf, Vec<Value>) {
     let root = std::env::temp_dir().join(format!(
         "les-edge-{}-{}",
         std::process::id(),
@@ -30,6 +33,12 @@ fn setup(legacy: bool) -> (Fixture, PathBuf, Vec<Value>) {
             row["payload"].as_object_mut().unwrap().remove("node_role");
         }
     }
+    if named {
+        for row in &mut rows {
+            row["vector"]["aux"] = json!([0., 1., 0.]);
+            row["payload"]["nested"] = json!({"z":{"b":17.25,"a":117.25},"a":[2,1]});
+        }
+    }
     let source = root.join("source.jsonl");
     fs::write(
         &source,
@@ -37,17 +46,80 @@ fn setup(legacy: bool) -> (Fixture, PathBuf, Vec<Value>) {
     )
     .unwrap();
     let manifest = root.join("manifest.json");
+    let vectors = if named {
+        json!({"dense":{"size":3,"distance":"Cosine"},"aux":{"size":3,"distance":"Cosine"}})
+    } else {
+        json!({"dense":{"size":3,"distance":"Cosine"}})
+    };
     fs::write(
         &manifest,
         json!({"schema":"les.edge-import.v1","collection":"docs","source":source,
         "source_sha256":les_vector::digest(&source).unwrap(),"points":rows.len(),
-        "vectors":{"dense":{"size":3,"distance":"Cosine"}},"sparse_vectors":{}})
+        "vectors":vectors,"sparse_vectors":{}})
         .to_string(),
     )
     .unwrap();
     let target = root.join("edge");
     migration::import(&manifest, &target, |_| {}).unwrap();
     (Fixture(root), target, rows)
+}
+
+#[test]
+fn native_bm25_trial_requires_a_copy_preserves_originals_and_rejects_partial_publication() {
+    let (_fixture, target, _) = setup_vectors(false, true);
+    let shard = Shard::open(&target).unwrap();
+    shard.refresh_postings(true, |_| {}).unwrap();
+    let query = json!({"text":"кабелепровод", "lexical_backend":"matched-v1",
+        "filters":{"dataset_ids":["project"],"node_roles":["evidence"]},"limit":10});
+    assert_eq!(
+        shard.call("bm25_trial_search", &query).unwrap_err(),
+        "EDGE_BM25_COPY_REQUIRED"
+    );
+    fs::write(target.join("edge-bm25-trial.json"),json!({"schema":"les.edge-bm25-trial.v1",
+        "root":fs::canonicalize(&target).unwrap(),"collection":"docs","revision":shard.generation().unwrap(),"phase":"allowed"}).to_string()).unwrap();
+    let before = shard.call("bm25_trial_digest", &json!({})).unwrap();
+    for _ in 0..4 {
+        assert_eq!(before, shard.call("bm25_trial_digest", &json!({})).unwrap());
+    }
+    let prepared = shard.call("bm25_trial_prepare", &json!({})).unwrap();
+    assert_eq!(prepared["phase"], "ready");
+    assert_eq!(before, shard.call("bm25_trial_digest", &json!({})).unwrap());
+    drop(shard);
+    let shard = Shard::open(&target).unwrap();
+    assert_eq!(before, shard.call("bm25_trial_digest", &json!({})).unwrap());
+    let marker_path = target.join("edge-bm25-trial.json");
+    let mut marker: Value = serde_json::from_slice(&fs::read(&marker_path).unwrap()).unwrap();
+    marker.as_object_mut().unwrap().remove("digest_schema");
+    fs::write(&marker_path, marker.to_string()).unwrap();
+    assert_eq!(
+        shard.call("bm25_trial_digest", &json!({})).unwrap_err(),
+        "EDGE_BM25_TRIAL_DIGEST_SCHEMA_INVALID"
+    );
+    fs::write(&marker_path, prepared.to_string()).unwrap();
+    for backend in ["sqlite-v1", "matched-v1", "raw-v1", "context-v1"] {
+        let mut q = query.clone();
+        q["lexical_backend"] = json!(backend);
+        assert_eq!(
+            shard.call("bm25_trial_search", &q).unwrap()["hits"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        q["filters"]["dataset_ids"] = json!(["another-project"]);
+        assert!(
+            shard.call("bm25_trial_search", &q).unwrap()["hits"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+    }
+    let writer = Writer::acquire(&shard.content_root(), "docs").unwrap();
+    writer.journal("begin",json!({"dataset":"project","file_name":"first.pdf","db_file_name":"first.pdf","ids":["future"]})).unwrap();
+    assert_eq!(
+        shard.call("bm25_trial_search", &query).unwrap_err(),
+        "INDEX_RECOVERY_REQUIRED"
+    );
 }
 fn search(shard: &Shard, text: &str) -> Value {
     shard

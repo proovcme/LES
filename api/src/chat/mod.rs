@@ -25,6 +25,7 @@ use serde_json::Value;
 #[derive(Clone)]
 pub struct Sink {
     sender: tokio::sync::mpsc::Sender<Value>,
+    checkpoint: std::sync::Arc<std::sync::Mutex<(String, usize)>>,
 }
 impl Sink {
     pub async fn emit(&self, event: &str, data: Value) -> Result<()> {
@@ -34,6 +35,12 @@ impl Sink {
             .map_err(|_| "CHAT_CANCELLED".into())
     }
     pub async fn progress(&self, stage: &str, label: &str) -> Result<()> {
+        if let Ok(mut current) = self.checkpoint.lock() {
+            current.0 = stage.to_owned();
+            if stage == "generation" {
+                current.1 += 1;
+            }
+        }
         self.emit("progress", serde_json::json!({"stage":stage,"label":label}))
             .await
     }

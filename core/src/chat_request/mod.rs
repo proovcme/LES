@@ -2,6 +2,8 @@
 pub mod egress;
 pub mod journal;
 mod scope;
+mod sheet_rows;
+pub use sheet_rows::sheet_rows;
 #[cfg(test)]
 mod tests;
 use serde_json::{json, Value};

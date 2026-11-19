@@ -28,12 +28,12 @@ beforeEach(() => {
 });
 afterEach(() => { workspace.dispose(); vi.unstubAllGlobals(); });
 
-it('sends the explicit saved scope and optional reranker through the real contract', async () => {
-  await workspace.initialize(); workspace.text = 'Вопрос'; workspace.reranker = true;
+it('sends the explicit saved scope through the native chat contract', async () => {
+  await workspace.initialize(); workspace.text = 'Вопрос';
   await workspace.send(); await workspace.persist();
   const call = vi.mocked(fetch).mock.calls.find(([path]) => path === '/api/chat/stream')!;
   const body = JSON.parse(String(call[1]!.body));
-  expect(body.scope.dataset_ids).toEqual(['demo']); expect(body.reranker_enabled).toBe(true);
+  expect(body.scope.dataset_ids).toEqual(['demo']); expect(body).not.toHaveProperty('reranker_enabled');
   expect(body.session_id).toBe(sid); expect(body).not.toHaveProperty('provider_config');
   expect(workspace.messages.at(-1)?.text).toBe('Ответ'); expect(workspace.text).toBe('');
   expect(writes[0].text).toBe('Вопрос'); expect(writes.at(-1)?.text).toBe('');

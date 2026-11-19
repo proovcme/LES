@@ -24,6 +24,13 @@ fn mapping(headers: &[String]) -> Map<String, Value> {
         })
         .collect()
 }
+pub(crate) fn has_column_labels(headers: &[String]) -> bool {
+    mapping(headers)
+        .values()
+        .filter(|target| *target != "skip")
+        .count()
+        >= 2
+}
 fn kind(headers: &[String], sheet: &str) -> String {
     let text = format!("{} {sheet}", headers.join(" ")).to_lowercase();
     if ["позиция", "поз.", "поз "].iter().any(|v| text.contains(v))
@@ -117,14 +124,21 @@ pub(crate) fn prepare(request: &Value) -> Result<Value> {
         }
         let config = json!({"rows":inputs,"mapping":mapped,"doc_type":last,
             "doc_title":format!("{} / {name}",field(request,"stem")),"source_file":request["source_file"]});
-        let normalized = normalize::rows(&config)?;
-        all.extend(
-            normalized["rows"]
-                .as_array()
-                .ok_or(INVALID)?
-                .iter()
-                .cloned(),
-        );
+        let mut normalized = normalize::rows(&config)?;
+        let rows = normalized["rows"].as_array_mut().ok_or(INVALID)?;
+        if request["workbook"] == true {
+            if let (Some(row), Some(values)) = (rows.first_mut(), sheet["header_values"].as_array())
+            {
+                let raw: Vec<_> = values
+                    .iter()
+                    .enumerate()
+                    .map(|(i, value)| (format!("col_{}", i + 1), value.clone()))
+                    .collect();
+                row["source_header_raw"] = json!(normalize::raw_json(&raw)?);
+                row["source_header_row"] = sheet["header_row"].clone();
+            }
+        }
+        all.append(rows);
         if all.len() > 200_000 {
             return Err(LIMIT);
         }

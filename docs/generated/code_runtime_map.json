@@ -1140,6 +1140,7 @@
         "tests/test_light_native_tool_executor.py",
         "tests/test_light_native_unicode.py",
         "tests/test_light_native_workbook.py",
+        "tests/test_light_overview_groups.py",
         "tests/test_light_pdf_source_tool.py",
         "tests/test_light_resource_memory.py",
         "tests/test_light_section_coverage.py",
@@ -1721,7 +1722,6 @@
         "tests/oracles/project_python.py",
         "tests/test_chunking_w2.py",
         "tests/test_forest_visualizer.py",
-        "tests/test_light_collection_safety.py",
         "tests/test_light_native_intake_execution.py",
         "tests/test_light_native_preparation.py",
         "tests/test_rag_config.py",
@@ -2341,7 +2341,6 @@
         "proxy/services/document_explorer_service.py",
         "proxy/services/document_object_model.py",
         "proxy/services/document_original_service.py",
-        "proxy/services/document_outline_service.py",
         "proxy/services/document_review_tool.py",
         "proxy/services/document_set_model.py",
         "proxy/services/document_task_store.py",
@@ -2370,7 +2369,6 @@
         "proxy/services/job_service.py",
         "proxy/services/kac_pdf_service.py",
         "proxy/services/kac_service.py",
-        "proxy/services/kac_web_service.py",
         "proxy/services/kot_service.py",
         "proxy/services/les_md_chat_service.py",
         "proxy/services/les_md_service.py",
@@ -2417,7 +2415,6 @@
         "proxy/services/ontology_service.py",
         "proxy/services/openai_compatible_transport_service.py",
         "proxy/services/operation_progress_service.py",
-        "proxy/services/parent_card_hydration_service.py",
         "proxy/services/pd_rd_manifest_service.py",
         "proxy/services/pdf_contour_service.py",
         "proxy/services/pdf_page_context_service.py",
@@ -3897,7 +3894,6 @@
         "proxy/services/document_explorer_service.py",
         "proxy/services/document_object_model.py",
         "proxy/services/document_original_service.py",
-        "proxy/services/document_outline_service.py",
         "proxy/services/document_review_tool.py",
         "proxy/services/document_set_model.py",
         "proxy/services/document_task_store.py",
@@ -3926,7 +3922,6 @@
         "proxy/services/job_service.py",
         "proxy/services/kac_pdf_service.py",
         "proxy/services/kac_service.py",
-        "proxy/services/kac_web_service.py",
         "proxy/services/kot_service.py",
         "proxy/services/les_md_chat_service.py",
         "proxy/services/les_md_service.py",
@@ -3973,7 +3968,6 @@
         "proxy/services/ontology_service.py",
         "proxy/services/openai_compatible_transport_service.py",
         "proxy/services/operation_progress_service.py",
-        "proxy/services/parent_card_hydration_service.py",
         "proxy/services/pd_rd_manifest_service.py",
         "proxy/services/pdf_contour_service.py",
         "proxy/services/pdf_page_context_service.py",
@@ -5598,18 +5592,6 @@
       "windows_runtime_explicit": false
     },
     {
-      "inbound": [],
-      "lines": 108,
-      "module": "proxy.services.document_outline_service",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py"
-      ],
-      "path": "proxy/services/document_outline_service.py",
-      "status": "DORMANT_CANDIDATE",
-      "windows_runtime_explicit": false
-    },
-    {
       "inbound": [
         "proxy/services/chat_evidence_application_service.py",
         "tests/test_light_document_review.py",
@@ -6113,8 +6095,7 @@
     },
     {
       "inbound": [
-        "proxy/services/kac_pdf_service.py",
-        "proxy/services/kac_web_service.py"
+        "proxy/services/kac_pdf_service.py"
       ],
       "lines": 222,
       "module": "proxy.services.kac_service",
@@ -6124,19 +6105,6 @@
       ],
       "path": "proxy/services/kac_service.py",
       "status": "PRODUCT_REACHABLE",
-      "windows_runtime_explicit": false
-    },
-    {
-      "inbound": [],
-      "lines": 180,
-      "module": "proxy.services.kac_web_service",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/kac_service.py"
-      ],
-      "path": "proxy/services/kac_web_service.py",
-      "status": "DORMANT_CANDIDATE",
       "windows_runtime_explicit": false
     },
     {
@@ -7163,18 +7131,6 @@
       ],
       "path": "proxy/services/operation_progress_service.py",
       "status": "PRODUCT_REACHABLE",
-      "windows_runtime_explicit": false
-    },
-    {
-      "inbound": [],
-      "lines": 172,
-      "module": "proxy.services.parent_card_hydration_service",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py"
-      ],
-      "path": "proxy/services/parent_card_hydration_service.py",
-      "status": "DORMANT_CANDIDATE",
       "windows_runtime_explicit": false
     },
     {
@@ -10435,6 +10391,7 @@
         "tests/test_light_native_intake.py",
         "tests/test_light_native_intake_execution.py",
         "tests/test_light_native_numeric_evidence.py",
+        "tests/test_light_native_overview.py",
         "tests/test_light_native_parser_pipeline.py",
         "tests/test_light_native_pdf_layout.py",
         "tests/test_light_native_preparation.py",
@@ -10928,13 +10885,12 @@
     },
     {
       "inbound": [],
-      "lines": 283,
+      "lines": 286,
       "module": "tests.test_light_collection_safety",
       "outbound": [
         "backend/document_catalog.py",
         "backend/index_replacement.py",
         "backend/native_core.py",
-        "backend/rag_config.py",
         "tests/native_batch_fixtures.py",
         "tests/test_light_native_api.py",
         "tests/test_light_native_batch_api.py"
@@ -11074,7 +11030,8 @@
       "inbound": [
         "tests/test_light_native_batch_api.py",
         "tests/test_light_native_folder_watch.py",
-        "tests/test_light_native_intake_execution.py"
+        "tests/test_light_native_intake_execution.py",
+        "tests/test_light_overview_groups.py"
       ],
       "lines": 149,
       "module": "tests.test_light_edge_migration",
@@ -11182,7 +11139,7 @@
     },
     {
       "inbound": [],
-      "lines": 122,
+      "lines": 127,
       "module": "tests.test_light_frontend_assets",
       "outbound": [
         "proxy/light_frontend.py",
@@ -11504,21 +11461,25 @@
         "tests/test_light_collection_safety.py",
         "tests/test_light_native_batch_api.py",
         "tests/test_light_native_chat_turn.py",
+        "tests/test_light_native_context_control.py",
         "tests/test_light_native_conversation.py",
         "tests/test_light_native_dataset_reader.py",
         "tests/test_light_native_docx_parts.py",
+        "tests/test_light_native_evidence_packet.py",
         "tests/test_light_native_folder_watch.py",
         "tests/test_light_native_index_batch.py",
         "tests/test_light_native_indexed_attachment.py",
         "tests/test_light_native_intake_execution.py",
         "tests/test_light_native_mail.py",
         "tests/test_light_native_numeric_evidence.py",
+        "tests/test_light_native_overview.py",
         "tests/test_light_native_pdf_layout.py",
         "tests/test_light_native_public_upload.py",
         "tests/test_light_native_publication.py",
         "tests/test_light_native_retrieval_modes.py",
         "tests/test_light_native_source_presentation.py",
-        "tests/test_light_native_table_publication.py"
+        "tests/test_light_native_table_publication.py",
+        "tests/test_light_native_word_window.py"
       ],
       "lines": 933,
       "module": "tests.test_light_native_api",
@@ -11634,19 +11595,23 @@
       "inbound": [
         "tests/test_chat_mail_query.py",
         "tests/test_light_native_attachments.py",
+        "tests/test_light_native_context_control.py",
         "tests/test_light_native_conversation.py",
         "tests/test_light_native_document_review.py",
         "tests/test_light_native_docx_parts.py",
+        "tests/test_light_native_evidence_packet.py",
         "tests/test_light_native_model_discovery.py",
         "tests/test_light_native_model_settings.py",
         "tests/test_light_native_numeric_evidence.py",
+        "tests/test_light_native_overview.py",
         "tests/test_light_native_pdf_layout.py",
         "tests/test_light_native_public_chat.py",
         "tests/test_light_native_public_upload.py",
         "tests/test_light_native_retrieval_modes.py",
-        "tests/test_light_native_source_presentation.py"
+        "tests/test_light_native_source_presentation.py",
+        "tests/test_light_native_word_window.py"
       ],
-      "lines": 375,
+      "lines": 386,
       "module": "tests.test_light_native_chat_turn",
       "outbound": [
         "backend/light_qdrant_runtime.py",
@@ -11667,6 +11632,18 @@
       "module": "tests.test_light_native_cli",
       "outbound": [],
       "path": "tests/test_light_native_cli.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
+      "lines": 55,
+      "module": "tests.test_light_native_context_control",
+      "outbound": [
+        "tests/test_light_native_api.py",
+        "tests/test_light_native_chat_turn.py"
+      ],
+      "path": "tests/test_light_native_context_control.py",
       "status": "TEST_OR_TOOL_ONLY",
       "windows_runtime_explicit": false
     },
@@ -11854,6 +11831,18 @@
     },
     {
       "inbound": [],
+      "lines": 75,
+      "module": "tests.test_light_native_evidence_packet",
+      "outbound": [
+        "tests/test_light_native_api.py",
+        "tests/test_light_native_chat_turn.py"
+      ],
+      "path": "tests/test_light_native_evidence_packet.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
       "lines": 91,
       "module": "tests.test_light_native_filesystem",
       "outbound": [
@@ -11884,7 +11873,7 @@
     },
     {
       "inbound": [],
-      "lines": 275,
+      "lines": 276,
       "module": "tests.test_light_native_format_conversion",
       "outbound": [
         "backend/converter.py",
@@ -11903,7 +11892,7 @@
         "tests/test_light_native_dispatch_sources.py",
         "tests/test_light_native_table_publication.py"
       ],
-      "lines": 140,
+      "lines": 197,
       "module": "tests.test_light_native_format_dispatch",
       "outbound": [
         "backend/format_process.py",
@@ -12001,7 +11990,7 @@
         "tests/test_light_native_mail.py",
         "tests/test_light_native_retrieval_modes.py"
       ],
-      "lines": 262,
+      "lines": 285,
       "module": "tests.test_light_native_intake_execution",
       "outbound": [
         "backend/document_catalog.py",
@@ -12129,6 +12118,19 @@
     },
     {
       "inbound": [],
+      "lines": 102,
+      "module": "tests.test_light_native_overview",
+      "outbound": [
+        "tests/pdf_fixtures.py",
+        "tests/test_light_native_api.py",
+        "tests/test_light_native_chat_turn.py"
+      ],
+      "path": "tests/test_light_native_overview.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
       "lines": 16,
       "module": "tests.test_light_native_parser_package",
       "outbound": [
@@ -12140,7 +12142,7 @@
     },
     {
       "inbound": [],
-      "lines": 242,
+      "lines": 375,
       "module": "tests.test_light_native_parser_pipeline",
       "outbound": [
         "tests/pdf_fixtures.py",
@@ -12154,7 +12156,7 @@
       "inbound": [
         "tests/test_light_native_parser_pipeline.py"
       ],
-      "lines": 129,
+      "lines": 130,
       "module": "tests.test_light_native_pdf_layout",
       "outbound": [
         "proxy/services/model_connection_contracts.py",
@@ -12273,7 +12275,7 @@
     },
     {
       "inbound": [],
-      "lines": 885,
+      "lines": 1002,
       "module": "tests.test_light_native_retrieval_modes",
       "outbound": [
         "proxy/services/model_connection_contracts.py",
@@ -12426,7 +12428,19 @@
     },
     {
       "inbound": [],
-      "lines": 194,
+      "lines": 105,
+      "module": "tests.test_light_native_word_window",
+      "outbound": [
+        "tests/test_light_native_api.py",
+        "tests/test_light_native_chat_turn.py"
+      ],
+      "path": "tests/test_light_native_word_window.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
+      "lines": 206,
       "module": "tests.test_light_native_workbook",
       "outbound": [
         "backend/document_router.py",
@@ -12485,10 +12499,23 @@
     },
     {
       "inbound": [],
-      "lines": 145,
+      "lines": 56,
+      "module": "tests.test_light_overview_groups",
+      "outbound": [
+        "backend/native_core.py",
+        "tests/test_light_edge_migration.py"
+      ],
+      "path": "tests/test_light_overview_groups.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
+      "lines": 164,
       "module": "tests.test_light_package",
       "outbound": [
-        "tools/build_light_package.py"
+        "tools/build_light_package.py",
+        "tools/publication_check.py"
       ],
       "path": "tests/test_light_package.py",
       "status": "TEST_OR_TOOL_ONLY",
@@ -13608,7 +13635,7 @@
         "tests/test_light_frontend_assets.py",
         "tools/build_light_package.py"
       ],
-      "lines": 107,
+      "lines": 122,
       "module": "tools.build_light_frontend",
       "outbound": [
         "tools/__init__.py"
@@ -13821,7 +13848,7 @@
       "inbound": [
         "tests/test_light_grounding_760.py"
       ],
-      "lines": 241,
+      "lines": 244,
       "module": "tools.evaluate_light_chat",
       "outbound": [
         "tools/__init__.py"
@@ -14080,7 +14107,7 @@
       "inbound": [
         "tools/build_light_package.py"
       ],
-      "lines": 96,
+      "lines": 100,
       "module": "tools.light_license_audit",
       "outbound": [
         "tools/__init__.py"
@@ -14229,8 +14256,10 @@
       "windows_runtime_explicit": false
     },
     {
-      "inbound": [],
-      "lines": 156,
+      "inbound": [
+        "tests/test_light_package.py"
+      ],
+      "lines": 157,
       "module": "tools.publication_check",
       "outbound": [
         "tools/__init__.py"
@@ -16161,14 +16190,14 @@
   ],
   "schema": "les.code-runtime-map.v1",
   "summary": {
-    "dormant_candidates": 23,
+    "dormant_candidates": 20,
     "parse_warnings": 0,
     "product_reachable": 417,
     "registered_api_routes": 298,
     "runtime_support": 5,
-    "test_or_tool_only": 281,
-    "tracked_python_files": 726,
-    "tracked_python_lines": 173574
+    "test_or_tool_only": 286,
+    "tracked_python_files": 728,
+    "tracked_python_lines": 173912
   },
   "warnings": []
 }

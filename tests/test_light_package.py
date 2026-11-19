@@ -7,6 +7,25 @@ from pathlib import Path
 from tools import build_light_package as package
 
 
+def test_publication_scan_rejects_user_paths_on_each_platform(tmp_path):
+    from tools.publication_check import sensitive_text_hits
+
+    # Build synthetic paths so the guard also scans this regression itself.
+    paths = [
+        "/".join(["C:", "Users", "sample-user", "private.txt"]),
+        "\\".join(["C:", "Users", "sample-user", "private.txt"]),
+        "/".join(["", "Users", "sample-user", "private.txt"]),
+        "/".join(["", "home", "sample-user", "private.txt"]),
+    ]
+    fixture = tmp_path / "fixture.txt"
+    fixture.write_text("\n".join(paths), encoding="utf-8")
+    assert sensitive_text_hits(tmp_path, [fixture.name]) == [
+        (fixture.name, line, "local user path") for line in range(1, 5)
+    ]
+    fixture.write_text("/usr/share/example\n/Users/\n/home/\n", encoding="utf-8")
+    assert sensitive_text_hits(tmp_path, [fixture.name]) == []
+
+
 def test_windows_native_payload_excludes_application_python(tmp_path):
     package.stage_native_code(tmp_path)
     assert (tmp_path / "les.cmd").read_bytes() == (package.ROOT / "tools/les-native.cmd").read_bytes()

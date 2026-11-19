@@ -54,7 +54,7 @@ fn source_nodes(
     super::super::source_nodes::run(
         &json!({"schema":"les.document-source-nodes.v1","kind":if pdf {"pdf"} else {"markdown"},"ocr":metadata["ocr"],
         "dataset_id":request["dataset_id"],"file_key":request["file_key"],"size":size,"overlap":overlap,
-        "unit":chunking["unit"],"tokenizer":chunking["tokenizer"],"minimum":request["minimum"],"final_minimum":request["final_minimum"],
+        "unit":chunking["unit"],"structural":chunking["structural"],"tokenizer":chunking["tokenizer"],"minimum":request["minimum"],"final_minimum":request["final_minimum"],
         "payload_type":payload_type,"route_metadata":metadata}),
         |op, value| match op {
             0 => {
@@ -267,6 +267,10 @@ pub(super) fn prepare(
             .as_object_mut()
             .unwrap()
             .remove("pdf_page_views");
+        route["metadata"]
+            .as_object_mut()
+            .unwrap()
+            .remove("docling_structure");
     } else if suffix == "pptx" {
         let content = presentation::read(bytes)?;
         route["metadata"] = json!({"domain":"DOCUMENT","doc_type":"OTHER","content_type":"text","slide_count":content["slides"],"format_owner":"rust.format-dispatch.v1"});

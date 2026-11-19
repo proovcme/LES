@@ -69,8 +69,24 @@ fn integer(config: &Value, key: &str, minimum: u64, maximum: u64) -> Result<usiz
 fn payload(request: &Value, value: Map<String, Value>) -> Result<Value> {
     let mut merged = Map::new();
     if let Some(route) = request.get("route_metadata") {
-        merged.extend(route.as_object().ok_or(INVALID)?.clone());
-        merged.remove("pdf_page_views");
+        // Do not clone a whole document/tree before discarding it per child.
+        merged.extend(
+            route
+                .as_object()
+                .ok_or(INVALID)?
+                .iter()
+                .filter(|(key, _)| {
+                    !matches!(
+                        key.as_str(),
+                        "pdf_page_views"
+                            | "pdf_table_projection_warnings"
+                            | "pdf_ocr_warnings"
+                            | "docx_table_headers"
+                            | "docling_structure"
+                    )
+                })
+                .map(|(key, value)| (key.clone(), value.clone())),
+        );
     }
     // Source identity wins over classification annotations. A route cannot
     // silently change the physical page or turn a projection into another type.
@@ -87,6 +103,46 @@ fn push(out: &mut Vec<Value>, node: Value) -> Result<()> {
     }
     out.push(node);
     Ok(())
+}
+fn reading_parts(text: &str) -> Result<Value> {
+    let units = super::structure::for_index(super::structure::units(text, 12000)?);
+    Ok(
+        json!({"chunks":units.iter().map(|unit|unit["text"].clone()).collect::<Vec<_>>(),"units":units}),
+    )
+}
+#[cfg(test)]
+#[test]
+fn intermediate_page_units_do_not_sever_rows_or_lose_table_captions() {
+    let header = "|Position|Quantity|Mass|\n|---|---|---|\n";
+    let rows = (0..800)
+        .map(|i| format!("|Valve {i}|1|69.0|\n"))
+        .collect::<Vec<_>>();
+    let text = format!("# Equipment\n{header}{}", rows.join(""));
+    let v = reading_parts(&text).unwrap();
+    let parts = v["chunks"].as_array().unwrap();
+    assert!(parts.len() > 1);
+    for row in &rows {
+        assert_eq!(
+            parts
+                .iter()
+                .filter(|p| p.as_str().unwrap().contains(row.trim()))
+                .count(),
+            1
+        );
+    }
+    assert!(parts
+        .iter()
+        .filter(|p| p.as_str().unwrap().contains("Valve"))
+        .all(|p| p.as_str().unwrap().contains(header)));
+    let request = json!({"file_key":"manual.pdf","dataset_id":"set","size":1800,"overlap":150,"structural":true});
+    let pages = from_pdf(&request, &format!("## Page 1\n{text}"), &|_, _| {
+        panic!("no IO needed")
+    })
+    .unwrap();
+    assert!(pages
+        .iter()
+        .filter(|p| p["text"].as_str().unwrap().contains("Valve"))
+        .all(|p| p["text"].as_str().unwrap().contains(header)));
 }
 fn from_pdf(
     request: &Value,
@@ -122,10 +178,17 @@ fn from_pdf(
         if text.is_empty() || text == "[no text extracted]" {
             continue;
         }
-        let parts = chunks::execute(
-            &json!({"text":text,"kind":"page","size":size,"overlap":overlap}),
-            None,
-        )?;
+        // A token splitter cannot recover a caption removed by an earlier
+        // character splitter. Keep reading units intact until the final budget.
+        let parts = if request["structural"] == true {
+            reading_parts(text)?
+        } else {
+            chunks::execute(
+                &json!({"text":text,"kind":"page","size":size,"overlap":overlap}),
+                None,
+            )?
+        };
+        let units = parts["units"].as_array().cloned().unwrap_or_default();
         let parts = parts["chunks"].as_array().ok_or(INVALID)?;
         let passport = passports
             .get(&page.to_string())
@@ -147,6 +210,17 @@ fn from_pdf(
                 request["ocr"] == true || passport.is_some_and(|p| present(&p["requires_ocr"]));
             let mut meta = json!({"type":"pdf_page_text","source_layer":if ocr {"pdf_ocr_text"} else {"pdf_text_layer"},
                 "page":page,"page_part":number,"page_parts":parts.len(),"source_ref":reference}).as_object().unwrap().clone();
+            if let Some(unit) = units.get(index) {
+                meta.insert("source_reading_unit".into(), unit.clone());
+            }
+            if let Some(warning) = request["route_metadata"]["pdf_table_projection_warnings"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|w| w["page"] == page)
+            {
+                meta.insert("table_projection_warning".into(), warning["code"].clone());
+            }
             if index == 0 {
                 if let Some(view) = request["route_metadata"]["pdf_page_views"]
                     .as_array()
@@ -222,12 +296,20 @@ fn from_markdown(request: &Value, text: &str) -> Result<Vec<Value>> {
         // A readable source unit is independent of embedding/token budgets.
         // The final builder may split its search representation, retaining one
         // complete, hashed reading anchor for all children.
-        return super::structure::units(text, 4000)?.into_iter().map(|unit| {
+        let typed = &request["route_metadata"]["docling_structure"];
+        let units = if typed.is_object() {
+            super::canonical::units(typed, 4000)?
+        } else {
+            super::structure::units(text, 4000)?
+        };
+        return super::structure::for_index(units).into_iter().map(|unit| {
             let ordinal=unit["ordinal"].as_u64().ok_or(INVALID)?;
             let body=unit["text"].as_str().ok_or(INVALID)?;
             let mut meta=json!({"type":"word_structure","word_reading_view":unit,
                 "word_reading_schema":"les.document-reading.v1",
                 "word_reading_sha256":crate::sha256_hex(body.as_bytes()),
+                "word_structure_sha256":crate::sha256_hex(crate::tool_execution::canonical_json(&unit)?.as_bytes()),
+                "source_block_id":unit["source_block_id"],"source_parent_id":unit["source_parent_id"],"source_heading_path":unit["source_heading_path"],
                 "section_heading":unit["heading"],"source_unit_id":ordinal})
                 .as_object().unwrap().clone();
             meta.insert("source_ref".into(),json!(format!("{file}#unit={ordinal}")));
@@ -256,7 +338,9 @@ fn from_markdown(request: &Value, text: &str) -> Result<Vec<Value>> {
         if !section.chars().any(char::is_alphanumeric) {
             continue;
         }
-        let parts = if section.chars().count() > 2000 {
+        let parts = if request["structural"] == true {
+            reading_parts(section)?
+        } else if section.chars().count() > 2000 {
             let config = json!({"text":section,"size":size,"overlap":overlap,"kind":"structured"});
             if let Some(local) = local.as_ref() {
                 chunks::execute(&config, Some(&|v| local.count(v)))?

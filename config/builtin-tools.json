@@ -57,8 +57,8 @@
       "retry": "safe",
       "idempotency": "derived",
       "result_budget": {
-        "max_chars": 7000,
-        "max_items": 20
+        "max_chars": 24000,
+        "max_items": 8192
       },
       "model_owned_fields": [],
       "provenance": "source_refs_required",
@@ -137,8 +137,8 @@
       "retry": "safe",
       "idempotency": "derived",
       "result_budget": {
-        "max_chars": 7000,
-        "max_items": 20
+        "max_chars": 24000,
+        "max_items": 8192
       },
       "model_owned_fields": [],
       "provenance": "source_refs_required",
@@ -896,7 +896,7 @@
       "version": "1.0.0",
       "title": "Read Excel source",
       "category": "source",
-      "summary": "Read indexed text/table chunks for Excel-like sources and mark sheet/range extraction as missing when unavailable.",
+      "summary": "Read verified workbook rows. Use q for a position or code, or use sheet_name with row_start and row_end for physical rows. Repeat continuation to read more.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -911,6 +911,14 @@
           },
           "q": {
             "type": "string"
+          },
+          "sheet_name": {"type": "string", "minLength": 1, "maxLength": 31},
+          "row_start": {"type": "integer", "minimum": 1, "maximum": 1048576},
+          "row_end": {"type": "integer", "minimum": 1, "maximum": 1048576},
+          "view_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "automatic_focus": {
+            "type": "boolean",
+            "description": "Use the ranked focus order; repeat the returned continuation arguments unchanged."
           },
           "limit": {
             "type": "integer",
@@ -965,6 +973,14 @@
           "q": {
             "type": "string"
           },
+          "sheet_name": {"type": "string", "minLength": 1, "maxLength": 31},
+          "row_start": {"type": "integer", "minimum": 1, "maximum": 1048576},
+          "row_end": {"type": "integer", "minimum": 1, "maximum": 1048576},
+          "view_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "automatic_focus": {
+            "type": "boolean",
+            "description": "Use the ranked focus order; repeat the returned continuation arguments unchanged."
+          },
           "limit": {
             "type": "integer",
             "minimum": 1
@@ -1000,8 +1016,8 @@
       "retry": "safe",
       "idempotency": "derived",
       "result_budget": {
-        "max_chars": 7000,
-        "max_items": 20
+        "max_chars": 24000,
+        "max_items": 8192
       },
       "model_owned_fields": [],
       "provenance": "source_refs_required",
@@ -1139,7 +1155,7 @@
       "idempotency": "derived",
       "result_budget": {
         "max_chars": 24000,
-        "max_items": 256
+        "max_items": 8192
       },
       "model_owned_fields": [],
       "provenance": "source_refs_required",
@@ -1252,6 +1268,10 @@
           "q": {
             "type": "string"
           },
+          "automatic_focus": {
+            "type": "boolean",
+            "description": "Use the ranked focus order; repeat the returned continuation arguments unchanged."
+          },
           "clause": {
             "type": "string"
           },
@@ -1331,6 +1351,10 @@
           "q": {
             "type": "string"
           },
+          "automatic_focus": {
+            "type": "boolean",
+            "description": "Use the ranked focus order; repeat the returned continuation arguments unchanged."
+          },
           "clause": {
             "type": "string"
           },
@@ -1396,7 +1420,7 @@
       "idempotency": "derived",
       "result_budget": {
         "max_chars": 24000,
-        "max_items": 256
+        "max_items": 8192
       },
       "model_owned_fields": [],
       "provenance": "source_refs_required",
@@ -1575,9 +1599,10 @@
             "enum": [
               "passages",
               "documents",
-              "context"
+              "context",
+              "overview"
             ],
-            "description": "passages: ranked search locators with continuations; documents: catalog only; context: the same bounded, structurally read context as automatic chat RAG, without an answer model. Context is not a paginated stream; read_source continues a found document."
+            "description": "passages: ranked locators with continuations; documents: catalog only; context: bounded structurally read evidence; overview: returns a context snapshot with status context_fallback when document coverage is unavailable. Neither context nor overview is a paginated stream or proof of complete corpus coverage; read_source continues a found document."
           },
           "offset": {
             "type": "integer",
@@ -1630,8 +1655,11 @@
             "type": "string",
             "enum": [
               "passages",
-              "documents"
-            ]
+              "documents",
+              "context",
+              "overview"
+            ],
+            "description": "passages: ranked locators with continuations; documents: catalog only; context: bounded structurally read evidence; overview: returns a context snapshot with status context_fallback when document coverage is unavailable. Neither context nor overview is a paginated stream or proof of complete corpus coverage; read_source continues a found document."
           },
           "offset": {
             "type": "integer",
@@ -1655,8 +1683,8 @@
       "retry": "safe",
       "idempotency": "derived",
       "result_budget": {
-        "max_chars": 7000,
-        "max_items": 20
+        "max_chars": 24000,
+        "max_items": 8192
       },
       "model_owned_fields": [],
       "provenance": "source_refs_required",

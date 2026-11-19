@@ -98,10 +98,11 @@ async fn execute(
     };
     match result {
         Ok(value) => Ok(value),
-        Err(error) => {
+        Err(mut error) => {
+            error.checkpoint = sink.checkpoint.lock().ok().map(|state| state.clone());
             eprintln!(
                 "{}",
-                json!({"event":"chat_request_failed","history_id":journal.history,"code":error.code})
+                json!({"event":"chat_request_failed","history_id":journal.history,"code":error.code,"checkpoint":error.checkpoint})
             );
             if let Err(storage) = journal.fail(&error.payload()).await {
                 eprintln!(
@@ -195,7 +196,10 @@ async fn handle_turn(context: Arc<Context>, request: Request, caller: Option<Str
         Err(e) => return failed(e),
     };
     let (sender, mut receiver) = tokio::sync::mpsc::channel::<Value>(32);
-    let sink = Sink { sender };
+    let sink = Sink {
+        sender,
+        checkpoint: Default::default(),
+    };
     if !streaming {
         // Poll execution and drain progress together. JSON uses exactly the same
         // backpressure, persistence and provider path as streaming.

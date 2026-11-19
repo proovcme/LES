@@ -90,13 +90,13 @@ pub fn contract(
     }
     let unit = get("RAG_CHUNK_UNIT", "tokens");
     let (size, overlap) = if unit == "tokens" {
-        let mut size = number("RAG_CHUNK_TOKENS", 430)?;
-        let overlap = number("RAG_CHUNK_OVERLAP_TOKENS", 50)?;
-        let budget = number("COREML_EMBED_SEQ_LEN", 512)?
-            .checked_sub(32)
-            .ok_or("INDEX_SETTINGS_INVALID")?;
-        if size.saturating_add(overlap) > budget {
-            size = budget.saturating_sub(overlap).max(64);
+        let mut size = number("RAG_CHUNK_TOKENS", 512)?;
+        let overlap = number("RAG_CHUNK_OVERLAP_TOKENS", 64)?;
+        if get("EMBED_BACKEND", backend) == "coreml" {
+            let budget = number("COREML_EMBED_SEQ_LEN", 512)?
+                .checked_sub(32)
+                .ok_or("INDEX_SETTINGS_INVALID")?;
+            size = size.min(budget);
         }
         (size, overlap)
     } else if unit == "chars" {
@@ -129,8 +129,8 @@ pub fn contract(
     fields.sort_unstable();
     let mut result = json!({"schema":"les.rag.index-contract.v3","collection":get("RAG_COLLECTION_NAME",collection),
         "embedding_model":canonical,"embedding_api_model":model,"embedding_backend":backend,"vector_size":dimension,
-        "document_embedding_mode":"raw-v1","chunk_unit":unit,"chunk_size":size,"chunk_overlap":overlap,
-        "chunker_revision":"structure-aware-final-budget-v2","qdrant_schema":"named","dense_vector_name":get("RAG_DENSE_VECTOR_NAME","dense"),
+        "document_embedding_mode":"metadata-v1","chunk_unit":unit,"chunk_size":size,"chunk_overlap":overlap,
+        "chunker_revision":"canonical-source-final-budget-v4","qdrant_schema":"named","dense_vector_name":get("RAG_DENSE_VECTOR_NAME","dense"),
         "sparse_vector_name":get("RAG_SPARSE_VECTOR_NAME","bm25_sparse"),"sparse_tokenizer_revision":get("RAG_SPARSE_TOKENIZER_REVISION","les-bm25-v1"),
         "point_embedding_fingerprint":format!("{:x}",Sha1::digest(fields.join("\n").as_bytes())),
         "hierarchy_schema":"les.rag.hierarchy.v1","hierarchy_builder":"deterministic-heading-stack-v1",

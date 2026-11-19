@@ -2,6 +2,9 @@
 use serde_json::{json, Value};
 pub(super) fn project(payload: &Value, context_chars: usize) -> Value {
     let mut value = payload.clone();
+    if let Some(envelope) = value.as_object_mut() {
+        envelope.remove("_pull_evidence");
+    }
     if value["status"] != "ok" {
         return value;
     }

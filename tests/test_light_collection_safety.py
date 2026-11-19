@@ -134,10 +134,13 @@ def test_real_404_creates_and_publishes_a_native_identity(collection,monkeypatch
     assert len(case.model.calls)==1
     assert not setup(case).raise_for_status().json()['created'] and len(case.model.calls)==1
     assert case.client.get('/api/rag/index/setup').json()['phase']=='completed'
-    from backend import rag_config
-    for key in ['EMBEDDING_MODEL','RAG_VECTOR_SIZE','EMBED_BACKEND','EMBED_MODEL']:monkeypatch.delenv(key,raising=False)
-    monkeypatch.setenv('RAG_COLLECTION_NAME','docs');monkeypatch.setenv('RAG_CHUNK_UNIT','chars');monkeypatch.setenv('RAG_INDEX_CONTRACT_PATH',str(case.contract))
-    assert rag_config.index_contract_status()['compatible']
+    # The native contract's consumer validates its actual representation. The
+    # retired Python writer only knows raw-v1 and cannot judge metadata-v1.
+    from backend import native_core
+    frozen=native_core.required('index_configuration',request={'contract':value,
+        'settings':{'RAG_COLLECTION_NAME':'docs','RAG_CHUNK_UNIT':'chars'}})
+    assert frozen['collection']=='docs' and frozen['node_preparation']['structural'] is True
+    assert frozen['chunking']['chunk_size']==value['chunk_size']
 
 
 @pytest.mark.parametrize('missing_collection',[False,True])

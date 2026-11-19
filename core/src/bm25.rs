@@ -297,13 +297,37 @@ fn search(r: &Value) -> Result<Value> {
         args.push(json!(values).to_string().into());
     }
     let limit = r["limit"].as_i64().ok_or("INDEX_SPARSE_REQUEST_INVALID")?;
+    let group_size = r
+        .get("group_size")
+        .map(|value| {
+            value
+                .as_i64()
+                .filter(|n| (1..=8).contains(n))
+                .ok_or("INDEX_SPARSE_REQUEST_INVALID")
+        })
+        .transpose()?;
+    if let Some(size) = group_size {
+        args.push(size.into());
+    }
     args.push(limit.into());
     let clause = if clauses.is_empty() {
         "1".into()
     } else {
         clauses.join(" AND ")
     };
-    let mut statement = sql(tx.prepare(&format!("SELECT d.id,SUM(q.idf*p.tf*2.2/(p.tf+1.2*(.25+.75*d.length/?))) AS score FROM query_terms q CROSS JOIN postings p ON p.term=q.term JOIN docs d ON d.id=p.doc WHERE {clause} GROUP BY d.id ORDER BY score DESC,d.id LIMIT ?")))?;
+    let scored = format!(
+        "SELECT d.id,d.dataset,d.file,SUM(q.idf*p.tf*2.2/(p.tf+1.2*(.25+.75*d.length/?))) AS score FROM query_terms q CROSS JOIN postings p ON p.term=q.term JOIN docs d ON d.id=p.doc WHERE {clause} GROUP BY d.id"
+    );
+    let query = if group_size.is_some() {
+        format!(
+            "WITH scored AS ({scored}), grouped AS (SELECT *,ROW_NUMBER() OVER (PARTITION BY dataset,file ORDER BY score DESC,id) AS position FROM scored) SELECT id,score FROM grouped WHERE position<=? ORDER BY score DESC,id LIMIT ?"
+        )
+    } else {
+        format!(
+            "SELECT d.id,SUM(q.idf*p.tf*2.2/(p.tf+1.2*(.25+.75*d.length/?))) AS score FROM query_terms q CROSS JOIN postings p ON p.term=q.term JOIN docs d ON d.id=p.doc WHERE {clause} GROUP BY d.id ORDER BY score DESC,d.id LIMIT ?"
+        )
+    };
+    let mut statement = sql(tx.prepare(&query))?;
     let hits = sql(sql(
         statement.query_map(rusqlite::params_from_iter(args), |row| {
             Ok(json!([row.get::<_, String>(0)?, row.get::<_, f64>(1)?]))

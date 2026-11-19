@@ -147,7 +147,6 @@ dialog::backdrop { background: #143b2a60; backdrop-filter: blur(3px); }
 .source-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .page-selector { display: flex; align-items: center; gap: 12px; margin: 20px 0; }.page-selector input { width: 90px; }
 .pdf-page { display: block; max-width: 100%; height: auto; border: 1px solid var(--forest-line); margin-top: 24px; }
-.document-frame { width: 100%; height: 58dvh; min-height: 300px; border: 1px solid var(--forest-line); border-radius: 12px; margin-top: 24px; background: white; }
 @keyframes breathe { 50% { opacity: .35; } }
 @media(max-width:850px) {
   .app-shell { grid-template-columns: minmax(0,1fr); }

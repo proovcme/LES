@@ -66,6 +66,7 @@ fn convert_document(
     }
     let mut chunking = request["chunking"].clone();
     chunking["tokenizer"] = request["node_preparation"]["tokenizer"].clone();
+    chunking["structural"] = request["node_preparation"]["structural"].clone();
     let dataset = input["dataset_id"].as_str().ok_or_else(|| error(INVALID))?;
     let data_dir = Path::new(
         request["content_root"]
@@ -75,7 +76,7 @@ fn convert_document(
     .join(dataset);
     let response=crate::worker_host::run_documents(&json!({"schema":"les.worker-host.v1","program":worker["program"],"directory":worker["directory"],
         "args":["--serve-document-formats"],"context":"les.format-dispatch.v1","timeout_ms":worker["timeout_ms"],
-        "input":{"schema":"les.document-convert.v1","pipeline":"nodes","mail_index":mail_index,"path":path,"data_dir":data_dir,"dataset_id":dataset,"file_key":input["file_name"],
+        "input":{"schema":"les.document-convert.v1","pipeline":"nodes","mail_index":mail_index,"path":path,"data_dir":data_dir,"owned_state":request["owned_state"],"dataset_id":dataset,"file_key":input["file_name"],
             "node_spool":input["node_spool"],"source_sha256":input["source_sha256"],"chunking":chunking,
             "minimum":worker["minimum"],"final_minimum":worker["final_minimum"],"table_row_limit":worker["table_row_limit"],"ocr":worker["ocr"],"ocr_unavailable":worker["ocr_unavailable"],
             "pdf_page_size":worker["pdf_page_size"].as_u64().unwrap_or(1800),"pdf_page_overlap":worker["pdf_page_overlap"].as_u64().unwrap_or(150)}})).map_err(error)?;
@@ -95,6 +96,25 @@ fn convert_document(
         return Err(error("FORMAT_WORKER_RESPONSE_INVALID"));
     }
     let mut result = value["value"].clone();
+    let warnings = ["pdf_table_projection_warnings", "pdf_ocr_warnings"]
+        .iter()
+        .flat_map(|key| {
+            result["route"]["metadata"][*key]
+                .as_array()
+                .into_iter()
+                .flatten()
+        })
+        .collect::<Vec<_>>();
+    if !warnings.is_empty() {
+        let codes = warnings
+            .iter()
+            .filter_map(|w| w["code"].as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        eprintln!(
+            "{}",
+            json!({"event":"native_document_read_warnings","dataset_id":dataset,"source_sha256":input["source_sha256"],"entries":warnings.len(),"codes":codes,"nodes":result["count"]})
+        );
+    }
     result["route"]
         .as_object_mut()
         .ok_or_else(|| error(INVALID))?
@@ -133,7 +153,11 @@ pub fn run(request: &Value, bridge: impl Fn(u8, &Value) -> Result<Value>) -> Res
         })
         .filter(|v| (1..=65_536).contains(v))
         .ok_or("EMBEDDING_DESCRIPTOR_INVALID")?;
-    if !database.is_absolute()
+    if (!request["owned_state"].is_null()
+        && !request["owned_state"]
+            .as_str()
+            .is_some_and(|p| Path::new(p).is_absolute()))
+        || !database.is_absolute()
         || !root.is_absolute()
         || !source_root.is_absolute()
         || !spool_dir.is_absolute()

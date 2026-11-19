@@ -219,10 +219,12 @@ pub(super) fn assemble(request: &Value) -> Result<Value> {
     }
     let coverage_sources = visible(&preliminary, sources);
     let reservation = coverage::reservation(&coverage_sources);
-    if let Some(item) = &reservation {
+    let packet = if let Some(item) = &reservation {
         candidates.push(candidate("request", vec![item.clone()], true));
-    }
-    let packet = pack(request, &candidates)?;
+        pack(request, &candidates)?
+    } else {
+        preliminary
+    };
     if packet["overflow"] == true {
         return Ok(packet);
     }
@@ -231,18 +233,21 @@ pub(super) fn assemble(request: &Value) -> Result<Value> {
         .filter(|s| s.is_object())
         .map(|s| s["index"].clone())
         .collect();
+    let mut removed_sources = false;
     for candidate in candidates.iter_mut().filter(|c| c["kind"] == "source_map") {
-        candidate["objects"]
-            .as_array_mut()
-            .ok_or(ERROR)?
-            .retain(|item| {
-                let payload = &item["payload"];
-                !payload.is_object()
-                    || !truth(&payload["index"])
-                    || indexes.contains(&payload["index"])
-            });
+        let objects = candidate["objects"].as_array_mut().ok_or(ERROR)?;
+        let before = objects.len();
+        objects.retain(|item| {
+            let payload = &item["payload"];
+            !payload.is_object() || !truth(&payload["index"]) || indexes.contains(&payload["index"])
+        });
+        removed_sources |= objects.len() != before;
     }
-    let mut packet = pack(request, &candidates)?;
+    let mut packet = if removed_sources {
+        pack(request, &candidates)?
+    } else {
+        packet
+    };
     if packet["overflow"] == true {
         return Ok(packet);
     }

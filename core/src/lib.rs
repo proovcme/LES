@@ -47,6 +47,7 @@ pub mod model_capabilities;
 pub mod model_profile;
 pub mod model_request;
 pub mod model_secrets;
+pub mod overview;
 pub mod pdf_source;
 mod process_guard;
 mod receipts;
@@ -54,6 +55,7 @@ pub use receipts::execute as execution_receipt;
 pub mod document_image;
 pub mod retrieval_fusion;
 mod retrieval_quality;
+pub mod search_context;
 pub mod skills;
 mod source_scan;
 pub mod system_memory;
@@ -72,7 +74,9 @@ pub use document::conversion::{
     serve_with as serve_document_formats_with,
     serve_with_parts as serve_document_formats_with_parts,
 };
+pub use document::indexable_extensions;
 pub use document::reading_units as document_reading;
+pub use document::search_reading_unit as document_search_unit;
 pub use files::{fingerprint as file_fingerprint, sha256_hex};
 pub use index_sources::plan as plan_index_sources;
 pub fn supports_native_mail_dispatch(path: &std::path::Path) -> bool {

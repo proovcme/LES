@@ -23,24 +23,13 @@ pub(crate) fn supports_mail(path: &Path) -> bool {
             || s.eq_ignore_ascii_case("msg") && msg::available()
     })
 }
+pub(super) const EXTENSIONS: &[&str] = &[
+    "xlsx", "xlsm", "xls", "csv", "pptx", "docx", "doc", "txt", "md", "json", "jsonl", "pdf",
+];
 pub(crate) fn supports(path: &Path) -> bool {
-    path.extension().and_then(|s| s.to_str()).is_some_and(|s| {
-        matches!(
-            s.to_ascii_lowercase().as_str(),
-            "xlsx"
-                | "xlsm"
-                | "xls"
-                | "csv"
-                | "pptx"
-                | "docx"
-                | "doc"
-                | "txt"
-                | "md"
-                | "json"
-                | "jsonl"
-                | "pdf"
-        )
-    })
+    path.extension()
+        .and_then(|s| s.to_str())
+        .is_some_and(|s| EXTENSIONS.contains(&s.to_ascii_lowercase().as_str()))
 }
 
 fn bytes(path: &Path) -> Result<Vec<u8>> {

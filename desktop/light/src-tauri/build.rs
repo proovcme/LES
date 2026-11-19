@@ -1,7 +1,15 @@
 fn main() {
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
-            "startup_status", "retry_start", "open_browser", "editor_ready", "editor_close_result", "pick_folder", "update_check", "update_install",
+            "startup_status",
+            "retry_start",
+            "open_browser",
+            "editor_ready",
+            "editor_close_result",
+            "pick_folder",
+            "update_check",
+            "update_install",
         ]),
-    )).expect("desktop permissions");
+    ))
+    .expect("desktop permissions");
 }
