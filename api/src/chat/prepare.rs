@@ -1,4 +1,4 @@
-use super::{unwrap, Context, Result};
+use super::{unwrap, Context, Result, Sink};
 use crate::model_runtime;
 use serde_json::{json, Value};
 use std::{path::Path, sync::Arc};
@@ -21,12 +21,15 @@ pub async fn prepare(
     context: Arc<Context>,
     input: Value,
     caller: Option<String>,
+    sink: &Sink,
 ) -> Result<Prepared> {
-    let owner = context.clone();
-    let mut turn =
-        tokio::task::spawn_blocking(move || prepare_sync(&owner, input, caller.as_deref()))
-            .await
-            .map_err(|_| "CHAT_PREPARATION_FAILED")??;
+    let mut turn = match prepare_once(context.clone(), input.clone(), caller.clone()).await {
+        Err(error) if capability_needs_refresh(&error.code) => {
+            refresh_local_answer(context.clone(), sink).await?;
+            prepare_once(context.clone(), input, caller).await?
+        }
+        other => other?,
+    };
     if let Some(id) = turn.request["attachment_id"].as_str() {
         let attachment =
             crate::attachments::bound(context, id.to_owned(), turn.attachment_owner.clone())
@@ -45,6 +48,92 @@ pub async fn prepare(
         turn.attachment = attachment;
     }
     Ok(turn)
+}
+async fn prepare_once(
+    context: Arc<Context>,
+    input: Value,
+    caller: Option<String>,
+) -> Result<Prepared> {
+    tokio::task::spawn_blocking(move || prepare_sync(&context, input, caller.as_deref()))
+        .await
+        .map_err(|_| "CHAT_PREPARATION_FAILED")?
+}
+
+fn capability_needs_refresh(code: &str) -> bool {
+    matches!(
+        code,
+        "CAPABILITY_SNAPSHOT_STALE" | "CAPABILITY_SNAPSHOT_MISSING"
+    )
+}
+
+pub(crate) fn can_refresh_answer(revision: &Value, code: &str) -> bool {
+    revision["locality"] == "loopback" && capability_needs_refresh(code)
+}
+
+async fn refresh_local_answer(context: Arc<Context>, sink: &Sink) -> Result<()> {
+    let owner = context.clone();
+    let initial = tokio::task::spawn_blocking(move || answer_execution(&owner))
+        .await
+        .map_err(|_| "CHAT_PREPARATION_FAILED")??;
+    if initial["revision"]["locality"] != "loopback" {
+        return resolve_answer(&context, &initial).map(|_| ());
+    }
+
+    let slot = &context.chat.get().ok_or("CHAT_SERVICE_BUSY")?.local;
+    let _permit = tokio::time::timeout(std::time::Duration::from_secs(30), slot.acquire())
+        .await
+        .map_err(|_| "MODEL_QUEUE_TIMEOUT")?
+        .map_err(|_| "MODEL_QUEUE_TIMEOUT")?;
+    let owner = context.clone();
+    let pending = tokio::task::spawn_blocking(move || {
+        let execution = answer_execution(&owner)?;
+        match resolve_answer(&owner, &execution) {
+            Ok(_) => Ok(None),
+            Err(error) if can_refresh_answer(&execution["revision"], &error.code) => {
+                Ok(Some(execution["revision"].clone()))
+            }
+            Err(error) => Err(error),
+        }
+    })
+    .await
+    .map_err(|_| "CHAT_PREPARATION_FAILED")??;
+    let Some(revision) = pending else {
+        return Ok(());
+    };
+    let connection = revision["connection_id"]
+        .as_str()
+        .ok_or("CHAT_ANSWER_PROBE_FAILED")?;
+    sink.progress("model_check", "Проверяю подключение локальной модели")
+        .await?;
+    crate::model_registry::probe::run(
+        context.clone(),
+        connection,
+        "chat:local-answer",
+        &json!({"revision_id":revision["revision_id"],
+            "capabilities":["chat_completions","streaming","tools","structured_output"]}),
+        crate::model_registry::probe::Mode::LocalAnswer,
+    )
+    .await?;
+    // Ollama acknowledges keep_alive=0 before Windows necessarily reclaims
+    // the runner's memory. Give that shutdown a chance without lowering the gate.
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(20);
+    if les_core::system_memory::available()? < 4 * 1024 * 1024 * 1024 {
+        sink.progress(
+            "model_check_wait",
+            "Жду освобождения памяти после проверки модели",
+        )
+        .await?;
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            if les_core::system_memory::available()? >= 4 * 1024 * 1024 * 1024 {
+                break;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err("CHAT_MEMORY_GUARD".into());
+            }
+        }
+    }
+    Ok(())
 }
 pub(crate) fn answer(context: &Context) -> Result<model_runtime::Resolved> {
     let execution = answer_execution(context)?;
@@ -119,6 +208,7 @@ pub(super) fn admit(request: &Value) -> Result<()> {
 fn prepare_sync(context: &Context, request: Value, caller: Option<&str>) -> Result<Prepared> {
     let database = &context.database;
     let execution = answer_execution(context)?;
+    let connection = resolve_answer(context, &execution)?;
     let attachment_owner = caller.map(|v| les_core::sha256_hex(v.as_bytes()));
     let sid = request["session_id"].as_str().unwrap_or("");
     let session = if sid.is_empty() {
@@ -247,7 +337,6 @@ fn prepare_sync(context: &Context, request: Value, caller: Option<&str>) -> Resu
     if egress_tag.is_some() && !memory.is_empty() {
         return Err("CLOUD_MEMORY_LOCAL_ONLY".into());
     }
-    let connection = resolve_answer(context, &execution)?;
     Ok(Prepared {
         request,
         scope,

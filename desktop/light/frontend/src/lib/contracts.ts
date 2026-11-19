@@ -65,7 +65,7 @@ export interface CitationCheck { status?: string; linked?: number[] }
 export interface SourceReadFailure { source: { doc_name?: string }; code: string; message: string }
 export interface StreamEvent { event: string; data: unknown }
 export interface Dataset { id: string; name: string; documents?: number; document_count?: number }
-export interface ModelRole { model_id: string; connection_id: string; status?: string; code?: string }
+export interface ModelRole { model_id: string; connection_id: string; status?: string; code?: string; auto_refresh?: boolean }
 export const emptyScope = (): Scope => ({ scope_type: 'none', project_ids: [], dataset_ids: [], selected_sources_only: false });
 export const sourcesFor = (payload: ChatPayload): Source[] => payload.source_map ?? payload.retrieval_trace?.source_map ?? [];
 export const sourcePage = (source: Source): number => {

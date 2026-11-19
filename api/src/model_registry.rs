@@ -1,6 +1,6 @@
 //! Read model connections directly from the native transaction owner.
 mod discovery;
-mod probe;
+pub(crate) mod probe;
 pub mod settings;
 use crate::{auth, error, json_response, Context};
 use axum::{
@@ -177,7 +177,9 @@ pub async fn handle(context: Arc<Context>, request: Request) -> Response {
                                     Ok(resolved)=>resolved.public(),
                                     Err(code)=>{
                                         let r=&execution["revision"];
-                                        json!({"connection_id":r["connection_id"],"revision_id":r["revision_id"],"display_name":r["display_name"],"model_id":r["model_id"],"locality":r["locality"],"status":"blocked","code":code.split(':').next().unwrap_or(&code)})
+                                        let code = code.split(':').next().unwrap_or(&code);
+                                        json!({"connection_id":r["connection_id"],"revision_id":r["revision_id"],"display_name":r["display_name"],"model_id":r["model_id"],"locality":r["locality"],"status":"blocked","code":code,
+                                            "auto_refresh":role=="answer"&&crate::chat::prepare::can_refresh_answer(r,code)})
                                     }
                                 }
                             };

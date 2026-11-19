@@ -529,9 +529,6 @@ impl Evidence {
             ..Self::default()
         }
     }
-    pub(super) fn requires_sources(&self) -> bool {
-        self.required
-    }
     pub(super) fn has_reads(&self) -> bool {
         !self.verified_reads.is_empty()
     }
@@ -631,6 +628,16 @@ impl Evidence {
         if let Some(code) = source["table_projection_warning"].as_str() {
             note.push_str(crate::document_parser::projection_notice(code));
             note.push('\n');
+        }
+        let group = &source["workbook_group"];
+        if let (Some(position), Some(row), Some(title)) = (
+            group["position"].as_str(),
+            group["row"].as_u64(),
+            group["title"].as_str(),
+        ) {
+            note.push_str(&format!(
+                "Группа этой строки (позиция {position}, строка {row} того же листа): {title}\n"
+            ));
         }
         if source["visual_content"] == true {
             note.push_str("Документ содержит рисунки/вложения. Текстовая выдержка не подтверждает геометрию, графики и детали изображений. Оригиналы доступны через read_source view=parts; OCR не гарантирует чтение всех надписей.\n");
@@ -758,6 +765,17 @@ impl Evidence {
         block.as_object_mut().unwrap().remove("document_identity");
     }
     fn key(source: &Value) -> Value {
+        if source["workbook_group"].is_object()
+            && source["sheet_name"].is_string()
+            && source["row"].is_u64()
+        {
+            return json!([
+                source["doc_id"],
+                source["source_sha256"],
+                source["sheet_name"],
+                source["row"]
+            ]);
+        }
         json!([
             source["doc_id"],
             source["source_sha256"],
@@ -885,6 +903,21 @@ impl Evidence {
         }
         first.extend(rest);
         Some(first)
+    }
+    pub(super) fn prioritize_workbook_groups(&self, question: &str, blocks: &mut [Value]) {
+        use les_core::tables::group_identifiers as identifiers;
+        let wanted: std::collections::HashSet<_> = identifiers(question).collect();
+        if wanted.is_empty() {
+            return;
+        }
+        blocks.sort_by_cached_key(|block| {
+            let group = block["source_index"]
+                .as_u64()
+                .and_then(|i| i.checked_sub(1))
+                .and_then(|i| self.sources.get(i as usize))
+                .and_then(|source| source["workbook_group"]["title"].as_str());
+            !group.is_some_and(|name| identifiers(name).any(|id| wanted.contains(&id)))
+        });
     }
     /// A terminal selection for independently named files can use only the
     /// strongest matching reading units from each file. Units which supply
@@ -1219,6 +1252,7 @@ impl Evidence {
         };
         if let Some(envelope) = value.as_object_mut() {
             envelope.remove("_pull_evidence");
+            envelope.remove("_pull_workbook_evidence");
         }
         if let Some(result) = value["result"].as_object_mut() {
             result.remove("read_receipt");

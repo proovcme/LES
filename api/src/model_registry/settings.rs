@@ -37,6 +37,7 @@ fn fail(status: StatusCode, code: &str) -> Response {
         | "CAPABILITY_EVIDENCE_INSUFFICIENT" => {
             "Сначала проверьте возможности этой ревизии модели."
         }
+        "MODEL_MEMORY_GUARD" => "Для проверки локальной модели нужно не менее 4 ГБ свободной оперативной памяти. Освободите память и повторите проверку.",
         "CONNECTION_NOT_FOUND" | "CONNECTION_REVISION_NOT_FOUND" => "Подключение не найдено.",
         "SECRET_VALUE_INVALID" => "Введите действующий ключ без переноса строки.",
         "ENDPOINT_INVALID" => "Проверьте адрес сервиса, HTTPS и выбранное расположение.",
@@ -289,7 +290,8 @@ pub async fn handle(context: Arc<Context>, request: Request) -> Response {
     let mut response = if let Some(input) = input {
         let actor = format!("admin:{}", &les_core::sha256_hex(caller.as_bytes())[..16]);
         if action == "test" {
-            match super::probe::run(context, &id, &actor, &input).await {
+            match super::probe::run(context, &id, &actor, &input, super::probe::Mode::Manual).await
+            {
                 Ok(value) => json_response(StatusCode::OK, value, "rust.model-settings"),
                 Err(code) => fail(
                     if code == "CONNECTION_REVISION_NOT_FOUND" {

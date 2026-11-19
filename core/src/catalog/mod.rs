@@ -173,6 +173,7 @@ fn dispatch(request: &Value) -> Result<Value> {
         | "reader_retry"
         | "reader_finish"
         | "intake_enqueue"
+        | "intake_retry"
         | "intake_watch_startup"
         | "intake_watch_due"
         | "intake_watch_set"

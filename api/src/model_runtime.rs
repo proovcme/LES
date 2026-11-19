@@ -245,15 +245,32 @@ pub fn resolve(execution: &Value, role: &str, env_path: &Path) -> Result<Resolve
         revision["locality"].as_str().ok_or("LOCALITY_INVALID")?,
         true,
     )?;
-    let observed = options["observed_context_tokens"]
+    let advertised = options["observed_context_tokens"]
         .as_str()
         .and_then(|s| s.trim().parse::<u64>().ok())
         .filter(|v| *v > 0);
-    let operator = revision["requested_context_tokens"]
+    let requested = revision["requested_context_tokens"]
         .as_u64()
-        .filter(|v| *v > 0)
+        .filter(|v| *v > 0);
+    let operator = requested
         .map(|v| json!({"input_tokens":v}))
         .unwrap_or(Value::Null);
+    let observed = if options["chat_protocol"] == "native_chat_v1" {
+        options["active_context_tokens"]
+            .as_str()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|v| *v > 0)
+            .map(|active| advertised.map_or(active, |maximum| active.min(maximum)))
+            // Older receipts contain only the trained maximum. Keep their
+            // previous automatic window until a real allocation is observed.
+            .or_else(|| {
+                advertised.map(|maximum| {
+                    requested.map_or(maximum.min(32768), |context| context.min(maximum))
+                })
+            })
+    } else {
+        advertised
+    };
     let profile = les_core::model_profile::resolve(
         &json!({"model_id":revision["model_id"],"context_tokens":observed,"observed":observed.is_some()}),
         &operator,

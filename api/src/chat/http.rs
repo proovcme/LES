@@ -71,7 +71,7 @@ async fn execute(
 ) -> Result<Value> {
     if saved["created"] != true {
         if saved["status"] == "completed" {
-            return Ok(saved["response"].clone());
+            return Ok(super::view::with_cited_excerpts(saved["response"].clone()));
         }
         return Err("CHAT_REQUEST_NOT_REPLAYABLE".into());
     }
@@ -92,7 +92,10 @@ async fn execute(
     let result = match result {
         Ok(value) => {
             let value = super::view::decorate(value);
-            journal.finish(&request, &value).await.map(|_| value)
+            journal
+                .finish(&request, &value)
+                .await
+                .map(|_| super::view::with_cited_excerpts(value))
         }
         Err(error) => Err(error),
     };

@@ -3,25 +3,26 @@ use super::{field, normalize, output, Result, INVALID, LIMIT, SCHEMA};
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 
-fn mapping(headers: &[String]) -> Map<String, Value> {
-    headers
+pub(super) fn column_target(header: &str) -> &'static str {
+    let lower = header.to_lowercase();
+    SCHEMA["mapping_rules"]
+        .as_array()
+        .unwrap()
         .iter()
-        .map(|header| {
-            let lower = header.to_lowercase();
-            let key = SCHEMA["mapping_rules"]
+        .find(|rule| {
+            rule[1]
                 .as_array()
                 .unwrap()
                 .iter()
-                .find(|rule| {
-                    rule[1]
-                        .as_array()
-                        .unwrap()
-                        .iter()
-                        .any(|hint| lower.contains(hint.as_str().unwrap()))
-                })
-                .map_or("skip", |rule| rule[0].as_str().unwrap());
-            (header.clone(), json!(key))
+                .any(|hint| lower.contains(hint.as_str().unwrap()))
         })
+        .map_or("skip", |rule| rule[0].as_str().unwrap())
+}
+
+fn mapping(headers: &[String]) -> Map<String, Value> {
+    headers
+        .iter()
+        .map(|header| (header.clone(), json!(column_target(header))))
         .collect()
 }
 pub(crate) fn has_column_labels(headers: &[String]) -> bool {

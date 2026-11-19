@@ -77,6 +77,7 @@
       location.assign(url);
     });
   }
+  function openStatus() { return navigate(statusPath, location.origin); }
   function openSource(value: Source) { sourceTrigger = document.activeElement as HTMLElement; source = value; }
   function openOrigin(value: import('./lib/contracts').SourceOrigin) {
     if (source) source = pickSourceOrigin(source, value);
@@ -129,7 +130,7 @@
     </div>
     <div class="nav-footer">
       <button class="nav-item" disabled={disabled} onclick={() => { modal = 'update'; mobileNav = false; }}><Icon name="status" />Обновление</button>
-      <button class="nav-item" disabled={disabled} onclick={() => navigate(statusPath, location.origin)}><Icon name="status" />Состояние</button>
+      <button class="nav-item" disabled={disabled} onclick={openStatus}><Icon name="status" />Состояние</button>
       {#if workspace.nativeModelSettings || workspace.legacyURL}
         <button class="nav-item" disabled={disabled} onclick={openModels}><Icon name="settings" />{workspace.nativeModelSettings ? 'Модели' : 'Настройки'}</button>
       {/if}
@@ -140,7 +141,7 @@
     <header class="chat-header">
       <button class="mobile-menu icon-button quiet" aria-label={mobileNav ? 'Закрыть меню' : 'Открыть меню'} aria-expanded={mobileNav} onclick={() => mobileNav = !mobileNav}><Icon name={mobileNav ? 'close' : 'menu'} /></button>
       <div class="chat-heading"><h1>{workspace.session?.title || 'Новый диалог'}</h1></div>
-      <div class="model-indicator" title="Назначенная модель ответов"><span>{workspace.model?.model_id || 'Модель не назначена'}<small>{workspace.service || 'Модель ответов'}{workspace.model?.status === 'blocked' ? ' · требует проверки' : ''}</small></span></div>
+      <div class="model-indicator" title="Назначенная модель ответов"><span>{workspace.model?.model_id || 'Модель не назначена'}<small>{workspace.service || 'Модель ответов'}{workspace.model?.auto_refresh ? ' · проверится при отправке' : workspace.model?.status === 'blocked' ? ' · требует проверки' : ''}</small></span></div>
     </header>
     <div id="chat-content" class="chat-content" tabindex="-1">
       {#if workspace.notice}<p class="notice" role="status">{workspace.notice}</p>{/if}
@@ -202,7 +203,7 @@
 {#if modal === 'data'}
   <DataLibrary datasets={workspace.datasets} refresh={() => workspace.refreshDatasets()}
     useProject={(id) => workspace.setScope({ scope_type: 'project', project_ids: [id], dataset_ids: [], selected_sources_only: false })}
-    close={() => modal = null} />
+    showIndexing={openStatus} close={() => modal = null} />
 {/if}
 <AgentMemory bind:this={memoryEditor} bind:open={memoryOpen} projectId={workspace.session?.project_id || 0} onDirty={(value) => memoryDirty = value} />
 {#if modal === 'sessions'}

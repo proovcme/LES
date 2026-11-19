@@ -13,7 +13,7 @@ use parquet::{
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeSet, HashMap, HashSet},
     fs::{self, File, OpenOptions},
     io::{BufRead, BufReader, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
@@ -541,6 +541,11 @@ pub(super) fn select(request: &Value) -> Result<Value> {
     let start = request["row_start"].as_u64();
     let end = request["row_end"].as_u64().or(start);
     let query = field(request, "q").trim();
+    let group_ids: HashSet<_> = if request["match_group"] == true {
+        super::group_identifiers(query).collect()
+    } else {
+        HashSet::new()
+    };
     let lexical = crate::lexical::reading(&[query.to_owned()])?;
     let keys: Vec<_> = lexical["documents"][0]["terms"]
         .as_object()
@@ -592,11 +597,12 @@ pub(super) fn select(request: &Value) -> Result<Value> {
         }
         Ok(())
     };
+    let mut groups = super::groups::Groups::default();
     for row in reader
         .get_row_iter(None)
         .map_err(|error| failure(&error, READ))?
     {
-        let row = row_value(&row.map_err(|error| failure(&error, READ))?)?;
+        let mut row = row_value(&row.map_err(|error| failure(&error, READ))?)?;
         scanned += 1;
         if sheet.is_some_and(|s| row["sheet_name"].as_str() != Some(s)) {
             continue;
@@ -614,10 +620,24 @@ pub(super) fn select(request: &Value) -> Result<Value> {
             }
         }
         let coordinate = row["source_row"].as_u64();
-        if start.is_some_and(|s| coordinate.is_none_or(|n| n < s))
-            || end.is_some_and(|e| coordinate.is_none_or(|n| n > e))
+        let outside = start.is_some_and(|s| coordinate.is_none_or(|n| n < s))
+            || end.is_some_and(|e| coordinate.is_none_or(|n| n > e));
+        let group = groups.observe(&row, !outside);
+        if outside {
+            continue;
+        }
+        if request["match_group"] == true
+            && !group
+                .as_ref()
+                .and_then(|value| value["title"].as_str())
+                .is_some_and(|title| {
+                    super::group_identifiers(title).any(|id| group_ids.contains(&id))
+                })
         {
             continue;
+        }
+        if let Some(group) = group {
+            row["workbook_group"] = group;
         }
         batch.push(row);
         if batch.len() >= 128 {
@@ -649,4 +669,45 @@ pub(super) fn select(request: &Value) -> Result<Value> {
         rows.extend(retained.into_iter().map(|(row, _, _)| row));
     }
     output(json!({"rows":rows,"matches":matches,"row_count":scanned,"source_sha256":hash}))
+}
+
+pub(super) fn groups(request: &Value) -> Result<Value> {
+    let rows = request["rows"]
+        .as_array()
+        .filter(|rows| (1..=512).contains(&rows.len()))
+        .ok_or(INVALID)?;
+    let mut targets = HashMap::<_, HashSet<_>>::new();
+    for row in rows {
+        let sheet = row["sheet_name"].as_str().ok_or(INVALID)?;
+        let coordinate = row["row"].as_u64().ok_or(INVALID)?;
+        targets.entry(sheet).or_default().insert(coordinate);
+    }
+    let (reader, hash) = open(path(request)?)?;
+    if request["source_sha256"] != hash {
+        return Err("PARQUET_SOURCE_CHANGED");
+    }
+    let mut groups = super::groups::Groups::default();
+    let mut matches = Vec::new();
+    for row in reader
+        .get_row_iter(None)
+        .map_err(|error| failure(&error, READ))?
+    {
+        let row = row_value(&row.map_err(|error| failure(&error, READ))?)?;
+        let sheet = field(&row, "sheet_name");
+        let wanted = row["source_row"]
+            .as_u64()
+            .and_then(|n| targets.get_mut(sheet).map(|rows| (n, rows)))
+            .is_some_and(|(n, rows)| rows.remove(&n));
+        if let Some(group) = groups.observe(&row, wanted) {
+            matches
+                .push(json!({"sheet_name":sheet,"row":row["source_row"],"workbook_group":group}));
+        }
+        if wanted && targets.get(sheet).is_some_and(HashSet::is_empty) {
+            targets.remove(sheet);
+            if targets.is_empty() {
+                break;
+            }
+        }
+    }
+    output(json!({"rows":matches}))
 }

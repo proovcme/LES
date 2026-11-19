@@ -136,6 +136,7 @@ pub(super) fn assemble(request: &Value) -> Result<Value> {
     ];
     let projected: Vec<_> = sources
         .iter()
+        .filter(|_| request["compact_source_evidence"] != true)
         .map(|source| {
             if let Some(object) = source.as_object() {
                 Value::Object(

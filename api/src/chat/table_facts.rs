@@ -11,15 +11,7 @@ pub(super) struct Rows {
     headers: BTreeMap<(u64, u64), Vec<String>>,
     literal_sources: HashSet<u64>,
 }
-pub(super) const CONTRACT: &str = "Верни только JSON с полями answerable, rows, sums и missing. В missing кратко назови запрошенные сведения, для которых не нашлось подтверждения. Если всё подтверждено, оставь missing пустым. \
-    Проверь каждую часть вопроса по видимым источникам. Помести в rows адреса фрагментов, \
-    которые непосредственно подтверждают запрошенные сведения, включая подтверждённые части неполного ответа. Для каждой части выбери минимальный достаточный набор. Пропусти фрагменты, которые только называют объект или документ. \
-    answerable=true при непустом rows, иначе false. Копируй адреса из контекста: S…R… для строк, \
-    S…P… для абзацев, S… для помеченного целого фрагмента. Лес скопирует исходный текст и поставит ссылки. \
-    Проверяй предмет, показатель, вид и редакцию документа. Совпадение названия без нужного показателя \
-    не подтверждает факт. Номер строки Excel не является адресом S…R…. \
-    Только для явно запрошенной суммы заполни sums объектами с column (номер C) и unit_column \
-    (номер C или null) по табличным ячейкам. Во всех остальных случаях sums пуст.";
+pub(super) const SUM_CONTRACT: &str = "Для явно запрошенного сложения видимых табличных ячеек можно передать вычисление Лесу: верни один JSON с answerable=true, rows с адресами S…R… всех слагаемых и sums с объектами column (номер C) и unit_column (номер C или null). При обычном вопросе о содержимом таблицы отвечай текстом со ссылками.";
 pub(super) fn quote_sources(sources: &mut Value, receipt: &Value) {
     for source in sources.as_array_mut().into_iter().flatten() {
         let quotes = receipt["rows"]
@@ -60,6 +52,7 @@ impl Rows {
             _ => self.data.get(&reference.key()),
         }
     }
+    #[cfg(test)]
     pub(super) fn format(&self, native: bool) -> Value {
         let ids = self
             .data
@@ -248,6 +241,23 @@ impl Rows {
     fn finish(&self, answer: &str) -> Result<Option<(String, Value)>, &'static str> {
         self.finish_checked(answer, false)
     }
+    pub(super) fn finish_sum(&self, answer: &str) -> Result<Option<(String, Value)>, &'static str> {
+        let value: Value = match serde_json::from_str(json_answer(answer)) {
+            Ok(value) => value,
+            Err(_) => return Ok(None),
+        };
+        if !value["sums"]
+            .as_array()
+            .is_some_and(|sums| !sums.is_empty())
+        {
+            return Ok(None);
+        }
+        if !self.present() {
+            return Err("TABLE_FACTS_REQUIRED");
+        }
+        self.finish_value(&value, true)
+    }
+    #[cfg(test)]
     pub(super) fn finish_checked(
         &self,
         answer: &str,
@@ -256,12 +266,7 @@ impl Rows {
         if !self.present() {
             return Ok(None);
         }
-        let text = answer
-            .trim()
-            .strip_prefix("```json")
-            .or_else(|| answer.trim().strip_prefix("```"))
-            .map(|s| s.trim().trim_end_matches("```").trim())
-            .unwrap_or(answer.trim());
+        let text = json_answer(answer);
         let value: Value = match serde_json::from_str(text) {
             Ok(v) => v,
             Err(_) => {
@@ -287,6 +292,16 @@ impl Rows {
                 };
             }
         };
+        self.finish_value(&value, require_decision)
+    }
+    fn finish_value(
+        &self,
+        value: &Value,
+        require_decision: bool,
+    ) -> Result<Option<(String, Value)>, &'static str> {
+        let calculating = value["sums"]
+            .as_array()
+            .is_some_and(|sums| !sums.is_empty());
         let object = value.as_object().ok_or("TABLE_FACTS_REQUIRED")?;
         if object
             .keys()
@@ -347,6 +362,16 @@ impl Rows {
         for id in &selected {
             let key = id.key();
             let (cells, source) = self.get(*id).ok_or("TABLE_ROW_NOT_VISIBLE")?;
+            if calculating {
+                if !matches!(id, Reference::Row(..)) {
+                    return Err("TABLE_VALUE_INVALID");
+                }
+                receipt.push(
+                    json!({"source_index":key.0,"row":key.1,"kind":"table_row","cells":cells,
+                    "doc_id":source["doc_id"],"source_sha256":source["source_sha256"]}),
+                );
+                continue;
+            }
             if matches!(id, Reference::Paragraph(..)) {
                 if !rendered.is_empty() {
                     rendered.push('\n');
@@ -480,6 +505,12 @@ impl Rows {
                 sums.push(json!({"column":column+1,"operands":values,"result":result,"unit":unit}));
             }
         }
+        if calculating {
+            let indexes: BTreeSet<_> = selected.iter().map(|id| id.key().0).collect();
+            for index in indexes {
+                rendered.push_str(&format!(" [Источник {index}]"));
+            }
+        }
         if selected.iter().any(|id| {
             self.get(*id)
                 .is_some_and(|(_, s)| s["table_projection_warning"].is_string())
@@ -525,6 +556,14 @@ impl Rows {
             json!({"schema":"les.table-facts.v1","status":if missing.is_empty(){"copied"}else{"partial"},"rows":receipt,"sums":sums,"missing":missing}),
         )))
     }
+}
+fn json_answer(answer: &str) -> &str {
+    let answer = answer.trim();
+    answer
+        .strip_prefix("```json")
+        .or_else(|| answer.strip_prefix("```"))
+        .map(|text| text.trim().trim_end_matches("```").trim())
+        .unwrap_or(answer)
 }
 const SCALE: i128 = 1_000_000_000_000;
 fn decimal(value: &str) -> Result<i128, &'static str> {

@@ -19,6 +19,9 @@ native-tls = "=0.2.18"
 outlook-pst = "=1.2.0"
 pdfium-render = { version = "=0.9.3", default-features = false, features = ["pdfium_7763"] }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "=0.61.2", features = ["Win32_System_Registry"] }
+
 [features]
 edge = ["dep:les-vector"]
 

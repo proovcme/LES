@@ -11752,7 +11752,7 @@
         "tests/test_light_native_mail.py",
         "tests/test_light_native_retrieval_modes.py"
       ],
-      "lines": 285,
+      "lines": 320,
       "module": "tests.test_light_native_intake_execution",
       "outbound": [
         "backend/document_catalog.py",
@@ -15959,7 +15959,7 @@
     "runtime_support": 5,
     "test_or_tool_only": 286,
     "tracked_python_files": 715,
-    "tracked_python_lines": 171765
+    "tracked_python_lines": 171800
   },
   "warnings": []
 }

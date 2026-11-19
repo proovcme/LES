@@ -16,6 +16,13 @@ const CAPABILITIES: &[&str] = &[
 const LIMIT: usize = 262_144;
 const PROBE: &str = "LES capability check.";
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Mode {
+    Manual,
+    LocalEmbeddings,
+    LocalAnswer,
+}
+
 async fn exchange(
     endpoint: &crate::model_runtime::Endpoint,
     auth: &Option<String>,
@@ -183,11 +190,12 @@ fn verified(capability: &str, data: &[u8]) -> bool {
     }
 }
 
-pub(super) async fn run(
+pub(crate) async fn run(
     context: Arc<Context>,
     id: &str,
     actor: &str,
     input: &Value,
+    mode: Mode,
 ) -> Result<Value, &'static str> {
     let fields = input
         .as_object()
@@ -237,6 +245,25 @@ pub(super) async fn run(
             return Err("CONNECTION_DISABLED");
         }
         let locality = row["locality"].as_str().ok_or("ENDPOINT_INVALID")?;
+        if mode != Mode::Manual
+            && (locality != "loopback" || head["value"]["revision_id"] != row["revision_id"])
+        {
+            return Err(if mode == Mode::LocalAnswer {
+                "CHAT_ANSWER_MODEL_CHANGED"
+            } else {
+                "INDEX_SETUP_MODEL_CHANGED"
+            });
+        }
+        if mode == Mode::LocalAnswer {
+            let binding = crate::library::catalog(
+                &owner.database,
+                "model_execution_snapshot",
+                json!({"role":"answer"}),
+            );
+            if binding["value"]["revision"]["revision_id"] != row["revision_id"] {
+                return Err("CHAT_ANSWER_MODEL_CHANGED");
+            }
+        }
         let endpoint = crate::model_runtime::validate(
             row["base_url"].as_str().ok_or("ENDPOINT_INVALID")?,
             locality,
@@ -295,18 +322,58 @@ pub(super) async fn run(
         };
         let context_tokens = row["requested_context_tokens"].as_u64().unwrap_or(8192);
         if supported(&observations, "chat_completions") {
+            let mut chat_options = json!({"num_predict":1});
+            if let Some(context) = row["requested_context_tokens"].as_u64() {
+                chat_options["num_ctx"] = json!(context);
+            }
             let payload = json!({"model":model,"messages":[{"role":"user","content":PROBE}],"think":false,"stream":false,
-                "options":{"num_predict":1,"num_ctx":context_tokens},"keep_alive":0});
+                "options":chat_options,"keep_alive":"30s"});
             if let Ok((200, raw)) = exchange(&endpoint, &auth, "chat", Some(payload), true).await {
                 if serde_json::from_slice::<Value>(&raw)
                     .is_ok_and(|v| v["message"].is_object() && v["done"] == true)
                 {
                     options["chat_protocol"] = json!("native_chat_v1");
+                    if let (Some(name), Ok((200, raw))) = (
+                        model.as_str(),
+                        exchange(&endpoint, &auth, "ps", None, true).await,
+                    ) {
+                        let tagged = (!name.contains(':')).then(|| format!("{name}:latest"));
+                        if let Ok(running) = serde_json::from_slice::<Value>(&raw) {
+                            if let Some(active) = running["models"]
+                                .as_array()
+                                .into_iter()
+                                .flatten()
+                                .find(|entry| {
+                                    ["name", "model"].iter().any(|key| {
+                                        entry[*key].as_str().is_some_and(|value| {
+                                            value == name || Some(value) == tagged.as_deref()
+                                        })
+                                    })
+                                })
+                                .and_then(|entry| entry["context_length"].as_u64())
+                                .filter(|n| *n > 0)
+                            {
+                                options["active_context_tokens"] = json!(active.to_string());
+                            }
+                        }
+                    }
+                    let _ = exchange(
+                        &endpoint,
+                        &auth,
+                        "generate",
+                        Some(json!({"model":model,"keep_alive":0})),
+                        true,
+                    )
+                    .await;
                     // Verify structured output through the transport used by chat.
                     // A compatibility response may spend its short limit thinking.
                     if selected.iter().any(|v| v == "structured_output") {
                         let schema = json!({"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"],"additionalProperties":false});
-                        let body = json!({"model":model,"messages":[{"role":"user","content":"Return JSON with ok=true."}],"think":false,"stream":false,"format":schema,"options":{"num_predict":128,"num_ctx":context_tokens}});
+                        let mut body = json!({"model":model,"messages":[{"role":"user","content":"Return JSON with ok=true."}],"think":false,"stream":false,"format":schema,"options":chat_options});
+                        body["options"]["num_predict"] = json!(128);
+                        if mode == Mode::LocalAnswer {
+                            body["keep_alive"] = json!(0);
+                        }
                         let ok = match exchange(&endpoint, &auth, "chat", Some(body), true).await {
                             Ok((200, raw)) => serde_json::from_slice::<Value>(&raw)
                                 .ok()
@@ -363,6 +430,26 @@ pub(super) async fn run(
         }
     }
     let actor = actor.to_owned();
+    if mode != Mode::Manual {
+        let (required, not_ready) = if mode == Mode::LocalAnswer {
+            ("chat_completions", "CHAT_ANSWER_PROBE_FAILED")
+        } else {
+            ("embeddings", "EMBEDDING_MODEL_NOT_READY")
+        };
+        let evidence = observations
+            .iter()
+            .find(|row| row["capability"] == required)
+            .ok_or(not_ready)?;
+        if evidence["state"] != "supported" {
+            return Err(match evidence["detail"].as_str() {
+                Some("UPSTREAM_TIMEOUT") if mode == Mode::LocalAnswer => "UPSTREAM_TIMEOUT",
+                Some(
+                    "MODEL_ENDPOINT_UNREACHABLE" | "UPSTREAM_UNREACHABLE" | "UPSTREAM_TIMEOUT",
+                ) => "MODEL_ENDPOINT_UNREACHABLE",
+                _ => not_ready,
+            });
+        }
+    }
     let snapshot = tokio::task::spawn_blocking(move || {
         les_core::catalog::record_probe(&context.database, &revision, &actor, observations, options)
     })

@@ -4,7 +4,7 @@
   import Icon from './Icon.svelte';
   import { ApiError, errorMessage } from '../lib/api';
   import UvyazkaInstall from './UvyazkaInstall.svelte';
-  import { companionAddress, engineering, rememberCompanion, savedCompanion, syncCompanion, type CompanionProject } from '../lib/engineering';
+  import { companionAddress, engineering, rememberCompanion, syncCompanion, type CompanionProject } from '../lib/engineering';
   let { close, refresh, currentProject, useProject }: {
     close: () => void; refresh: () => Promise<void>; currentProject?: number; useProject?: (id: number) => Promise<void>;
   } = $props();
@@ -37,12 +37,12 @@
     if (!notice) notice = projects.length ? 'Проекты Увязки обновлены в Лесе.' : 'В Увязке пока нет проектов.';
   }
   onMount(() => {
-    void run('Проверяю подключение к Увязке…', async () => {
+    void run('Подключаю Увязку…', async () => {
       const saved = await engineering<{ url: string | null }>('', 'connection');
       if (saved.url) {
         url = saved.url;
         await connect('');
-      } else if (savedCompanion()) {
+      } else {
         await connect(url);
       }
     });
@@ -92,7 +92,7 @@
   <form onsubmit={(event) => { event.preventDefault(); void run('Обновляю проекты Увязки…', () => connect(url)); }}>
     <label for="uvyazka-address">Локальный адрес Увязки</label>
     <input id="uvyazka-address" type="url" bind:value={url} oninput={clearConnection} required disabled={!!busy} />
-    <div class="modal-footer"><button disabled={!!busy || !url.trim()}><Icon name="external" />{connected ? 'Обновить проекты' : 'Подключить Увязку'}</button></div>
+    <div class="modal-footer"><button disabled={!!busy || !url.trim()}><Icon name="external" />{failure ? 'Повторить подключение' : connected ? 'Обновить проекты' : 'Подключить Увязку'}</button></div>
   </form>
   {#if connected}
     {#if projects.length > 1}
@@ -147,7 +147,7 @@
   {#if busy}<p role="status" aria-live="polite">{busy}</p><progress aria-label={busy}></progress>{/if}
   {#if notice}<p role="status">{notice}</p>{/if}
   {#if failure}<p class="error" role="alert">{failure}</p>{/if}
-  {#if !connected || reason === 'ENGINEERING_UNAVAILABLE' || reason === 'ENGINEERING_VIEWER_UPDATE_REQUIRED'}<UvyazkaInstall {reason} />{/if}
+  <UvyazkaInstall {reason} />
   <p class="muted">Список проектов берётся из Увязки. Просмотр открывается в Увязке. Для поиска по содержимому сначала добавьте файл в индекс Леса.</p>
   <div class="modal-footer"><button class="quiet" onclick={close}><Icon name="back" />Вернуться в чат</button></div>
 </Modal>

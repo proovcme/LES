@@ -14,16 +14,16 @@ const settle = async () => { for (let i = 0; i < 12; i++) { await new Promise(r 
 const target: ModelLocator = { provider: 'uvyazka', project_id: 'example', dataset_id: 'snapshot', object_id: 'elements:42', native_id: '42',
   source_sha256: 'a'.repeat(64), source_name: 'Example.rvt', section: 'elements', coverage: { status: 'partial' }, approval_status: 'unreviewed' };
 
-it('offers installation and retry when Uvyazka is unavailable without launching an installer', async () => {
+it('connects on first open and offers installation when Windows has no Uvyazka', async () => {
   const calls: string[] = [];
   vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {
     const { action } = JSON.parse(init.body as string); calls.push(action);
     return action === 'connection' ? new Response(JSON.stringify({ url: null }))
-      : new Response(JSON.stringify({ code: 'ENGINEERING_UNAVAILABLE', detail: 'Увязка не отвечает.' }), { status: 422 });
+      : new Response(JSON.stringify({ code: 'ENGINEERING_DESKTOP_NOT_INSTALLED', detail: 'Настольная Увязка не найдена.' }), { status: 422 });
   }));
   component = mount(EngineeringModels, { target: document.body, props: { close: vi.fn(), refresh: vi.fn() } }); await settle();
-  document.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); await settle();
-  expect(document.body.textContent).toContain('Если она уже установлена');
+  expect(document.body.textContent).toContain('Настольная Увязка не найдена.');
+  expect(document.body.textContent).toContain('Повторить подключение');
   const install = Array.from(document.querySelectorAll('a')).find(a => a.textContent?.includes('Установить с GitHub'))!;
   expect(install.href).toBe('https://github.com/proovcme/uvyazka/releases'); expect(install.target).toBe('_blank');
   expect(calls).toEqual(['connection', 'sync_projects']); expect(document.querySelector('button[disabled]')).toBeNull();
@@ -78,7 +78,6 @@ it('previews without import and reuses the same registered read after timeout', 
       : new Response(JSON.stringify({ notice: 'Снимок поставлен в очередь.' }));
   }));
   component = mount(EngineeringModels, { target: document.body, props: { close: vi.fn(), refresh } }); await settle();
-  document.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); await settle();
   expect(reads).toHaveLength(0);
   Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Просмотр файла')!.click(); await settle();
   expect(reads).toHaveLength(0); expect(refresh).not.toHaveBeenCalled();

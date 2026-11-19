@@ -19,7 +19,11 @@ pub(crate) fn message(key: &str) -> &'static str {
         "INDEX_UPDATE_BUSY"=>"Индекс сейчас обновляется. Повторите после завершения обработки.",
         "DOCUMENT_TOKENIZER_UNAVAILABLE"=>"Не найден локальный токенизатор модели поиска. Укажите его файл или явно выберите нарезку по символам.",
         "INDEX_SCHEMA_MIGRATION_REQUIRED"=>"Структура индекса несовместима с настройкой. Требуется явная миграция.",
-        "INDEX_MEMORY_GUARD"=>"Для проверки модели поиска освободите оперативную память: требуется не менее 4 ГБ.",
+        "INDEX_MEMORY_GUARD"=>"Для запуска индексации нужно не менее 4 ГБ свободной оперативной памяти.",
+        "CAPABILITY_SNAPSHOT_STALE"|"CAPABILITY_SNAPSHOT_MISSING"=>"Нужно заново проверить назначенную модель поиска. Откройте «Модели», выполните проверку и повторите индексацию.",
+        "CAPABILITY_REQUIRED"=>"Назначенная модель не подтвердила поддержку векторов для поиска. Проверьте её в разделе «Модели» и повторите индексацию.",
+        "MODEL_ENDPOINT_UNREACHABLE"|"UPSTREAM_TIMEOUT"=>"Сервис модели поиска не ответил. Проверьте, что он запущен, и повторите индексацию.",
+        "EMBEDDING_MODEL_NOT_READY"=>"Не удалось подтвердить работу модели поиска. Проверьте подключение в разделе «Модели» и повторите индексацию.",
         "INDEX_CONTRACT_INVALID"=>"Файл описания индекса повреждён. Восстановите его из резервной копии; Лес не перезапишет его автоматически.",
         "EDGE_STORAGE_NOT_EMPTY"=>"В папке индекса есть посторонние файлы. Выберите отдельную пустую папку для хранилища Леса.",
         "INDEX_SETUP_MODEL_CHANGED"|"INDEX_SETUP_PLAN_CHANGED"=>"Модель или настройки изменились во время создания индекса. Верните прежнее назначение и повторите восстановление.",
@@ -65,6 +69,39 @@ fn selected(context: &Context) -> Result<Value, &'static str> {
     }
     Ok(result["value"].clone())
 }
+pub(crate) async fn ensure_intake(
+    context: Arc<Context>,
+    allow_remote: bool,
+) -> Result<Value, String> {
+    let result = ensure(context.clone(), allow_remote, false, false, None, true).await;
+    if !matches!(
+        result.as_ref().err().map(String::as_str),
+        Some("CAPABILITY_SNAPSHOT_STALE" | "CAPABILITY_SNAPSHOT_MISSING")
+    ) {
+        return result;
+    }
+    let owner = context.clone();
+    let binding = tokio::task::spawn_blocking(move || selected(&owner))
+        .await
+        .map_err(|_| "MODEL_REGISTRY_UNAVAILABLE")??;
+    let revision = &binding["revision"];
+    if revision["locality"] != "loopback" {
+        return result;
+    }
+    let connection = revision["connection_id"]
+        .as_str()
+        .ok_or("MODEL_REGISTRY_UNAVAILABLE")?;
+    crate::model_registry::probe::run(
+        context.clone(),
+        connection,
+        "intake:local-embeddings",
+        &json!({"revision_id":revision["revision_id"],"capabilities":["embeddings"]}),
+        crate::model_registry::probe::Mode::LocalEmbeddings,
+    )
+    .await?;
+    ensure(context, allow_remote, false, false, None, true).await
+}
+
 fn dimension(bytes: &[u8], model: &str) -> Result<u64, &'static str> {
     let split = bytes
         .iter()

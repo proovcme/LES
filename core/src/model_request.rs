@@ -152,7 +152,9 @@ pub fn prepare(
             return Err("INVALID_OUTPUT_FIELD");
         }
         body = json!({"model":model,"messages":system});
-        body[field] = json!(output);
+        if request["provider_output_default"] != true {
+            body[field] = json!(output);
+        }
         let local = connection["locality"] != "remote";
         if reasoning && !local {
             return Err("REASONING_MODE_UNSUPPORTED");

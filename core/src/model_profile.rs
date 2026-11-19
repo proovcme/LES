@@ -79,12 +79,7 @@ pub fn resolve(
     );
     if let Some(context) = context {
         sources.push(json!("observed_backend_capacity"));
-        let usable = if extended {
-            context
-        } else {
-            context.min(32768)
-        };
-        preset["input_token_limit"] = json!(requested.map_or(usable, |n| usable.min(n)));
+        preset["input_token_limit"] = json!(requested.map_or(context, |n| context.min(n)));
         if preset["input_token_limit"].as_u64().unwrap() >= 16384 {
             preset["generation_reserve_tokens"] =
                 json!(4096.max(preset["generation_reserve_tokens"].as_u64().unwrap()));
@@ -142,6 +137,19 @@ mod tests {
         assert_eq!(result["normal_tool_count"], 2);
     }
 
+    #[test]
+    fn provider_capacity_is_independent_of_the_model_name() {
+        let capacity = json!({"model_id":"Qwen3.5:9b","context_tokens":65536,"observed":true});
+        assert_eq!(
+            resolve(&capacity, &Value::Null, &Value::Null).unwrap()["input_token_limit"],
+            65536
+        );
+        let operator = json!({"input_tokens":49152});
+        assert_eq!(
+            resolve(&capacity, &operator, &Value::Null).unwrap()["input_token_limit"],
+            49152
+        );
+    }
     #[test]
     fn generation_reserve_uses_the_requested_context_window() {
         let preset = resolve(

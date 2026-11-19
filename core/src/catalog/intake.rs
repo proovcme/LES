@@ -5,7 +5,9 @@ mod watch;
 
 const FIELDS: &str = "j.id,'dataset_intake' AS type,'native_external' AS source,j.dataset_id,
     j.dataset_name,j.status,j.phase,j.total,j.processed,j.errors,j.message,j.reason_code,
-    j.index_pending,j.indexed,j.index_errors,j.index_skipped,j.recoveries,j.started_at,j.updated_at,j.finished_at";
+    j.index_pending,j.indexed,j.index_errors,j.index_skipped,j.recoveries,j.started_at,j.updated_at,j.finished_at,
+    (j.phase='index' AND j.root NOT IN ('les:chat-index:v1','les:mail-index:v1')
+      AND (j.status='waiting' OR (j.status='failed' AND j.index_pending>0))) AS can_retry";
 
 pub(super) fn init(conn: &Connection) -> Result<()> {
     conn.execute_batch(
@@ -25,6 +27,7 @@ pub(super) fn init(conn: &Connection) -> Result<()> {
          DROP INDEX IF EXISTS native_intakes_active_folder_dataset;
          CREATE UNIQUE INDEX IF NOT EXISTS native_intakes_active_directory_dataset
          ON native_intakes(dataset_id) WHERE finished_at IS NULL AND root NOT IN ('les:chat-index:v1','les:mail-index:v1');
+         CREATE INDEX IF NOT EXISTS idx_docs_source ON documents(dataset_id,file_name);
          CREATE TABLE IF NOT EXISTS les_indexed_attachments(
             id TEXT PRIMARY KEY, owner TEXT NOT NULL, key_hash TEXT NOT NULL,
             fingerprint TEXT NOT NULL, dataset_id TEXT NOT NULL, doc_id TEXT NOT NULL,
@@ -47,21 +50,33 @@ fn public_job(conn: &Connection, id: &str) -> Result<Value> {
         ),
         [id],
     )?;
-    with_current_stage(conn, &mut job)?;
+    with_live_progress(conn, &mut job)?;
     Ok(job)
 }
 
-fn with_current_stage(conn: &Connection, job: &mut Value) -> Result<()> {
+fn with_live_progress(conn: &Connection, job: &mut Value) -> Result<()> {
     if job["phase"] != "index" || job["status"] != "running" {
         return Ok(());
     }
+    let id = job["id"].as_str().unwrap_or_default();
+    let counts = index_counts(conn, id)?;
     let current = first(
         conn,
-        "SELECT file_name,stage FROM documents WHERE dataset_id=?1 AND status='PENDING'
-         AND stage IN ('WAITING_RESOURCES','CONVERT','EMBED','UPSERT')
-         ORDER BY CASE stage WHEN 'UPSERT' THEN 0 WHEN 'EMBED' THEN 1 ELSE 2 END,file_name LIMIT 1",
-        [job["dataset_id"].as_str()],
+        "SELECT d.file_name,d.stage FROM native_intake_files f
+         JOIN documents d ON d.dataset_id=?2 AND d.file_name=f.file_name AND d.source_path=f.source_path
+         WHERE f.job_id=?1 AND d.status='PENDING'
+         AND d.stage IN ('WAITING_RESOURCES','CONVERT','EMBED','UPSERT')
+         ORDER BY CASE d.stage WHEN 'UPSERT' THEN 0 WHEN 'EMBED' THEN 1 ELSE 2 END,d.file_name LIMIT 1",
+        params![id,job["dataset_id"].as_str()],
     )?;
+    for (field, counter) in [
+        ("indexed", "indexed"),
+        ("index_errors", "errors"),
+        ("index_pending", "pending"),
+        ("index_skipped", "skipped"),
+    ] {
+        job[field] = counts[counter].as_i64().unwrap_or_default().into();
+    }
     let Some(stage) = current["stage"].as_str() else {
         return Ok(());
     };
@@ -124,6 +139,58 @@ fn enqueue(conn: &Connection, args: &Args) -> Result<Value> {
     )?;
     watch::bind(conn, &id, dataset, root, parse_limit, args)?;
     public_job(conn, &id)
+}
+
+fn retry(conn: &Connection, id: &str, now: &str) -> Result<Value> {
+    let job = public_job(conn, id)?;
+    let folder = first(
+        conn,
+        "SELECT root,parse_limit FROM native_intakes WHERE id=?1
+         AND root NOT IN ('les:chat-index:v1','les:mail-index:v1')",
+        [id],
+    )?;
+    if job.is_null() || folder.is_null() {
+        return Err(Failure::missing("Задание индексации папки не найдено."));
+    }
+    match job["status"].as_str() {
+        Some("queued" | "running") => return Ok(job),
+        Some("waiting") if job["can_retry"] == 1 => {
+            conn.execute(
+                "UPDATE native_intakes SET retry_at=0,updated_at=?2 WHERE id=?1 AND status='waiting'",
+                params![id, now],
+            )?;
+        }
+        Some("failed") if job["can_retry"] == 1 => {
+            let dataset = job["dataset_id"].as_str().unwrap();
+            let busy: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM native_intakes WHERE dataset_id=?1 AND finished_at IS NULL)",
+                [dataset],
+                |row| row.get(0),
+            )?;
+            if busy {
+                return Err(Failure::conflict(
+                    "Этот набор уже обрабатывается. Обновите состояние.",
+                ));
+            }
+            conn.execute(
+                "UPDATE native_intakes SET status='queued',phase='scan',finished_at=NULL,retry_at=0,
+                    resolved_root=NULL,total=0,processed=0,errors=0,indexed=0,index_pending=0,index_errors=0,
+                    index_skipped=0,reason_code='',message='Повторно проверяю папку',updated_at=?2
+                 WHERE id=?1 AND status='failed'",
+                params![id, now],
+            )?;
+            watch::bind(
+                conn,
+                id,
+                dataset,
+                folder["root"].as_str().unwrap(),
+                folder["parse_limit"].as_i64().unwrap(),
+                &Args::new(),
+            )?;
+        }
+        _ => return Err(Failure::conflict("Это задание уже завершено.")),
+    }
+    public_job(conn, id)
 }
 
 fn claim(conn: &Connection, now: &str) -> Result<Value> {
@@ -320,10 +387,8 @@ fn register(conn: &Connection, id: &str, args: &Args, now: &str) -> Result<Value
     Ok(json!({"processed":processed,"total":total,"phase":phase}))
 }
 
-fn checkpoint(conn: &Connection, id: &str, args: &Args, now: &str) -> Result<Value> {
-    let reason = text(args, "reason")?;
-    let note = text(args, "message")?;
-    let counts = first(conn, "SELECT
+fn index_counts(conn: &Connection, id: &str) -> Result<Value> {
+    first(conn, "SELECT
          sum(CASE WHEN upper(d.status)='INDEXED' AND d.chunk_count>0 THEN 1 ELSE 0 END) AS indexed,
          sum(CASE WHEN d.id IS NULL OR upper(coalesce(d.status,'')) NOT IN ('PENDING','PARSING','RUNNING','QUEUED','SKIPPED')
                        AND (upper(coalesce(d.status,''))<>'INDEXED' OR coalesce(d.chunk_count,0)<=0)
@@ -337,15 +402,38 @@ fn checkpoint(conn: &Connection, id: &str, args: &Args, now: &str) -> Result<Val
              WHERE candidate.dataset_id=j.dataset_id AND candidate.file_name=f.file_name
              ORDER BY candidate.rowid LIMIT 1)
              AND d.source_path=f.source_path
-         WHERE j.id=?1 AND j.phase='index'", [id])?;
+         WHERE j.id=?1 AND j.phase='index'", [id])
+}
+
+fn checkpoint(conn: &Connection, id: &str, args: &Args, now: &str) -> Result<Value> {
+    let reason = text(args, "reason")?;
+    let note = text(args, "message")?;
+    let counts = index_counts(conn, id)?;
     let indexed = counts["indexed"].as_i64().unwrap_or_default();
     let errors = counts["errors"].as_i64().unwrap_or_default();
     let pending = counts["pending"].as_i64().unwrap_or_default();
     let skipped = counts["skipped"].as_i64().unwrap_or_default();
-    let watched = !watch::binding(conn, id)?.is_null();
-    let deferred = watched && pending > 0 && !reason.is_empty();
-    let (status, reason, message, retry_at) = if deferred {
+    let watch = watch::binding(conn, id)?;
+    let watched = !watch.is_null();
+    let follow_up = watched && pending > 0 && !reason.is_empty();
+    let keep_job = matches!(
+        reason,
+        "CAPABILITY_SNAPSHOT_STALE"
+            | "CAPABILITY_SNAPSHOT_MISSING"
+            | "CAPABILITY_REQUIRED"
+            | "INDEX_MEMORY_GUARD"
+            | "INDEX_UPDATE_BUSY"
+            | "INDEX_SERVICE_UNAVAILABLE"
+            | "EMBEDDING_MODEL_NOT_ASSIGNED"
+            | "EMBEDDING_MODEL_NOT_READY"
+            | "MODEL_ENDPOINT_UNREACHABLE"
+            | "UPSTREAM_TIMEOUT"
+    );
+    let deferred = follow_up && !keep_job;
+    if follow_up {
         watch::index_deferred(conn, id, reason, note)?;
+    }
+    let (status, reason, message, retry_at) = if deferred {
         ("failed", reason, note.to_owned(), 0.0)
     } else if pending == 0 && errors > 0 {
         ("failed", "INDEX_DOCUMENT_ERRORS", format!("Проиндексировано {indexed}, с ошибками: {errors}. Откройте список документов для подробностей."), 0.0)
@@ -420,14 +508,19 @@ pub(super) fn execute(conn: &Connection, action: &str, args: &Args) -> Result<Va
         let mut rows = rows(
             conn,
             &format!(
-                "SELECT {FIELDS} FROM native_intakes j JOIN datasets d
+                "SELECT {FIELDS},
+                 (j.finished_at IS NOT NULL AND EXISTS(
+                    SELECT 1 FROM native_intakes newer WHERE newer.dataset_id=j.dataset_id
+                    AND newer.root=j.root AND newer.updated_at>j.updated_at
+                 )) AS superseded
+                 FROM native_intakes j JOIN datasets d
           ON d.id=j.dataset_id WHERE coalesce(d.dataset_scope,'user')<>'system'
           ORDER BY j.updated_at DESC LIMIT ?1"
             ),
             [limit],
         )?;
         for row in &mut rows {
-            with_current_stage(conn, row)?;
+            with_live_progress(conn, row)?;
         }
         return Ok(Value::Object(
             rows.into_iter()
@@ -480,6 +573,7 @@ pub(super) fn execute(conn: &Connection, action: &str, args: &Args) -> Result<Va
     }
     let id = text(args, "id")?;
     match action {
+        "intake_retry" => retry(conn, id, &now),
         "intake_get" if !table(conn, "native_intakes")? => Ok(Value::Null),
         "intake_get" => public_job(conn, id),
         "intake_manifest" => manifest(conn, id, args, &now),

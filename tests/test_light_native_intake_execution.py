@@ -150,6 +150,36 @@ def test_explicit_folder_index_retries_exhausted_errors_without_reindexing_ready
         assert db.execute("SELECT status,parse_attempts,last_error FROM documents WHERE id='outside'").fetchone()==('ERROR',4,'Original failure')
 
 
+def test_intake_status_uses_live_manifest_progress_and_marks_past_attempt(tmp_path):
+    if not os.getenv('LES_CORE_LIBRARY'):
+        pytest.skip('Build native core')
+    database = tmp_path / 'meta.db'
+    MetaDB(str(database))
+    with sqlite3.connect(database) as db:
+        db.execute("INSERT INTO datasets(id,name) VALUES('ds','Folder')")
+        db.execute("DROP INDEX IF EXISTS idx_docs_source")
+    job = catalog_call(database, 'intake_enqueue', root='folder', dataset_id='ds', parse_limit=2)['id']
+    catalog_call(database, 'intake_claim')
+    files = [{'file_name': name, 'source_path': name} for name in ('ready.txt', 'current.txt')]
+    catalog_call(database, 'intake_manifest', id=job, root='folder', files=files)
+    batch = catalog_call(database, 'intake_batch', id=job)
+    catalog_call(database, 'intake_register', id=job,
+                 files=[{**file, 'file_size': 10, 'file_mtime': 1.0} for file in batch])
+    with sqlite3.connect(database) as db:
+        assert [row[2] for row in db.execute("PRAGMA index_info(idx_docs_source)")] == ['dataset_id', 'file_name']
+        db.execute("UPDATE documents SET status='INDEXED',chunk_count=3 WHERE file_name='ready.txt'")
+        db.execute("UPDATE documents SET stage='EMBED' WHERE file_name='current.txt'")
+        db.execute("INSERT INTO documents(id,dataset_id,file_name,source_path,status,stage) "
+                   "VALUES('elsewhere','ds','outside.txt','outside.txt','PENDING','UPSERT')")
+        assert db.execute("SELECT indexed FROM native_intakes").fetchone() == (0,)
+    live = catalog_call(database, 'intake_list')[job]
+    assert (live['indexed'], live['index_pending'], live['current_file']) == (1, 1, 'current.txt')
+    catalog_call(database, 'intake_fail', id=job, reason='INDEX_SERVICE_UNAVAILABLE', message='Failed')
+    new = catalog_call(database, 'intake_enqueue', root='folder', dataset_id='ds', parse_limit=2)['id']
+    jobs = catalog_call(database, 'intake_list')
+    assert jobs[job]['superseded'] == 1 and jobs[new]['superseded'] == 0
+
+
 def test_manual_attach_keeps_the_receipt_of_an_existing_automatic_watch_job(tmp_path):
     if not os.getenv('LES_CORE_LIBRARY'):pytest.skip('Build native core')
     database=tmp_path/'meta.db';MetaDB(str(database))
@@ -232,8 +262,13 @@ def test_cold_native_intake_model_guard_pdf_and_owner_death(tmp_path,storage,fre
             from proxy.services.model_connection_registry_service import ModelConnectionRegistry
             ModelConnectionRegistry(str(database)).bind_role(ConnectionRole.EMBEDDINGS,
                 revision,expected_binding_revision=None,actor='admin:test')
-            with sqlite3.connect(database) as db:db.execute('UPDATE native_intakes SET retry_at=0 WHERE id=?',[job])
+            with sqlite3.connect(database) as db:
+                db.execute("UPDATE les_model_capability_snapshots SET expires_at='2000-01-01T00:00:00+00:00' WHERE connection_revision_id=?", [revision])
+            retry = client.post('/api/light/intake', json={'id': job}).raise_for_status().json()
+            assert retry['id'] == job
             wait_for(lambda:progress(job)['status']=='completed',timeout=40)
+            with sqlite3.connect(database) as db:
+                assert db.execute("SELECT max(expires_at) FROM les_model_capability_snapshots WHERE connection_revision_id=?", [revision]).fetchone()[0] > '2000-01-01'
             with closing(QdrantClient(url=url,api_key=key,check_compatibility=False)) as vectors:
                 assert vectors.get_collection('docs').config.params.vectors['dense'].size==2
                 points,_=vectors.scroll('docs',limit=100,with_payload=True)

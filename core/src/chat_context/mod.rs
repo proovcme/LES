@@ -2,6 +2,7 @@
 mod assembly;
 mod coverage;
 mod presentation;
+pub use presentation::attach_cited_excerpts;
 mod prose;
 mod tabular;
 use serde_json::{json, Value};

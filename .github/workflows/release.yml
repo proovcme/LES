@@ -60,3 +60,23 @@ jobs:
           path: dist/installers
           if-no-files-found: error
           retention-days: 14
+
+  installed:
+    name: Windows installed · ${{ matrix.scenario }}
+    needs: package
+    runs-on: windows-2022
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [fresh, upgrade]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: LES-RAG-candidate-${{ github.sha }}
+          path: ${{ runner.temp }}/les-candidate
+      - name: Install and start the exact candidate
+        env:
+          LES_INSTALL_SCENARIO: ${{ matrix.scenario }}
+        run: .github/scripts/check-installed-candidate.ps1 -Candidate (Join-Path $env:RUNNER_TEMP 'les-candidate') -Scenario $env:LES_INSTALL_SCENARIO

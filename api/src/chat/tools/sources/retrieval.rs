@@ -13,7 +13,7 @@ mod query_cache;
 mod ready;
 mod trial;
 mod views;
-fn original_reader(name: &str) -> &'static str {
+pub(super) fn original_reader(name: &str) -> &'static str {
     match name
         .rsplit('.')
         .next()
@@ -611,6 +611,18 @@ async fn search_view(
                             Err(error) => eprintln!("{}", json!({"event":"pull_pdf_evidence_unavailable","code":error.code})),
                         }
                     }
+                }
+            }
+            if args["_pull_pdf_focus"] == true && offset == 0 && !overview_requested {
+                // Read matching descendants in shortlisted books even if the
+                // index returned only the group heading or neighbouring rows.
+                let groups = super::workbook::group_evidence(
+                    context.clone(), turn, query,
+                    reply["result"]["candidate_documents"].as_array().map(Vec::as_slice).unwrap_or_default(),
+                    max_chars,
+                ).await;
+                if groups.is_object() {
+                    reply["_pull_workbook_evidence"] = groups;
                 }
             }
             Ok(reply)
@@ -1264,6 +1276,7 @@ async fn passages(
         sources.push(source.clone());
         output.push(json!({"text":text,"canonical":p["canonical"],"source":source,"chunk_ord":p["chunk_ord"],"source_ref":p["source_ref"]}));
     }
+    super::workbook::attach_groups(context, &mut output, &mut sources).await;
     if output.is_empty() {
         if let Some(code) = hydrated["read_failures"][0]["code"].as_str() {
             return Err(code.into());
