@@ -1,4 +1,4 @@
-# LES RAG 0.1.1 — руководство пользователя
+# LES RAG 0.1.2 — руководство пользователя
 
 Установщики для Windows доступны в [GitHub Releases](https://github.com/proovcme/LES/releases/latest).
 

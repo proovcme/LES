@@ -276,7 +276,7 @@ async fn perform(
         let (temp, name) = receive(&context, request).await?;
         if index {
             let caller = caller.ok_or("ATTACHMENT_REQUEST_INVALID")?;
-            return crate::intake::queue_attachment(context, temp, name, caller, key).await;
+            return crate::intake::queue_attachment(context, temp, name, caller, key, None).await;
         }
         publish(context, &temp, name, caller, key).await
     };

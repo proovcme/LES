@@ -24,6 +24,10 @@ def source_digest(root):
         if path.is_dir() or path.name.endswith('.test.ts'):
             continue
         digest.update(path.relative_to(directory).as_posix().encode() + b'\0' + path.read_bytes() + b'\0')
+    shared_nav = root / 'qdrant_visualizer/app-nav.css'
+    if shared_nav.is_symlink():
+        raise ValueError('Symlinks are not frontend build inputs')
+    digest.update(b'qdrant_visualizer/app-nav.css\0' + shared_nav.read_bytes() + b'\0')
     return digest.hexdigest()
 
 

@@ -82,6 +82,31 @@ impl Companion {
         }
         serde_json::from_slice(&bytes).map_err(|_| "ENGINEERING_RESPONSE_INVALID".into())
     }
+    async fn projects(&self) -> Result<Value> {
+        let value = self.get("/api/projects", &[]).await?;
+        let mut seen = HashSet::new();
+        let mut projects = Vec::new();
+        for row in value["projects"]
+            .as_array()
+            .ok_or("ENGINEERING_RESPONSE_INVALID")?
+        {
+            let source_id = id(row, "id")?;
+            let name = row["name"]
+                .as_str()
+                .map(str::trim)
+                .filter(|s| !s.is_empty() && s.len() <= 1024 && !s.chars().any(char::is_control))
+                .ok_or("ENGINEERING_RESPONSE_INVALID")?;
+            if !seen.insert(source_id) || row["project_id"].as_str().is_some_and(|v| v != source_id)
+            {
+                return Err("ENGINEERING_IDENTITY_MISMATCH".into());
+            }
+            projects
+                .push(json!({"id":source_id,"name":name,"available":row["status"]!="unavailable"}));
+        }
+        Ok(
+            json!({"projects":projects,"default_project":value["default_project"],"url":self.url.as_str()}),
+        )
+    }
     async fn object(
         &self,
         project: &str,
@@ -242,19 +267,64 @@ impl Companion {
 fn id<'a>(body: &'a Value, field: &str) -> Result<&'a str> {
     les_core::engineering::identity(&body[field]).map_err(str::to_owned)
 }
+async fn catalog(context: &Context, action: &'static str, arguments: Value) -> Result<Value> {
+    let permit = tokio::time::timeout(
+        Duration::from_secs(10),
+        context.workspace_slots.clone().acquire_owned(),
+    )
+    .await
+    .map_err(|_| "ENGINEERING_PROJECT_SYNC_FAILED")?
+    .map_err(|_| "ENGINEERING_PROJECT_SYNC_FAILED")?;
+    let database = context.database.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        les_core::catalog::execute(&json!({"schema":"les.catalog.v1","database":database,"action":action,"arguments":arguments}))
+    }).await.map_err(|_| "ENGINEERING_PROJECT_SYNC_FAILED")?;
+    if result["status"] != "completed" {
+        return Err("ENGINEERING_PROJECT_SYNC_FAILED".into());
+    }
+    Ok(result["value"].clone())
+}
+async fn sync_projects(context: &Context, companion: &Companion, remember: bool) -> Result<Value> {
+    let mut value = companion.projects().await?;
+    value["projects"] = catalog(
+        context,
+        "project_sync_uvyazka",
+        json!({"origin":companion.url.as_str(),"projects":value["projects"],"remember":remember}),
+    )
+    .await?;
+    Ok(value)
+}
+async fn local_project(context: &Context, companion: &Companion, project: &str) -> Result<i64> {
+    let lookup = catalog(
+        context,
+        "project_uvyazka_lookup",
+        json!({"origin":companion.url.as_str(),"source_id":project}),
+    )
+    .await?;
+    if let Some(id) = lookup["local_id"].as_i64() {
+        return Ok(id);
+    }
+    sync_projects(context, companion, false).await?["projects"]
+        .as_array()
+        .and_then(|projects| projects.iter().find(|p| p["id"] == project))
+        .and_then(|p| p["local_id"].as_i64())
+        .ok_or_else(|| "ENGINEERING_PROJECT_UNAVAILABLE".into())
+}
 async fn perform(context: Arc<Context>, body: Value) -> Result<Value> {
+    if body["action"] == "refresh_projects" || body["action"] == "connection" {
+        let saved = catalog(&context, "project_uvyazka_connection", json!({})).await?;
+        let origin = saved["origin"].as_str();
+        if body["action"] == "connection" || origin.is_none() {
+            return Ok(json!({"url":origin,"projects":[]}));
+        }
+        let companion = Companion::new(origin.ok_or("ENGINEERING_ENDPOINT_INVALID")?)?;
+        return sync_projects(&context, &companion, false).await;
+    }
     let companion = Companion::new(body["url"].as_str().ok_or("ENGINEERING_ENDPOINT_INVALID")?)?;
     match body["action"].as_str() {
-        Some("projects") => {
-            let value = companion.get("/api/projects", &[]).await?;
-            let projects = value["projects"]
-                .as_array()
-                .ok_or("ENGINEERING_RESPONSE_INVALID")?
-                .iter()
-                .map(|p| json!({"id":p["id"],"name":p["name"]}))
-                .collect::<Vec<_>>();
-            Ok(json!({"projects":projects,"url":companion.url.as_str()}))
-        }
+        Some("projects") => companion.projects().await,
+        Some("sync_projects") => sync_projects(&context, &companion, true).await,
         Some("datasets") => {
             companion
                 .get(
@@ -278,6 +348,7 @@ async fn perform(context: Arc<Context>, body: Value) -> Result<Value> {
                 .try_acquire_owned()
                 .map_err(|_| "ATTACHMENT_QUEUE_BUSY")?;
             let project = id(&body, "project_id")?;
+            let local_project = local_project(&context, &companion, project).await?;
             let dataset = if body["action"] == "read_import" {
                 companion.read_registered(&body).await?
             } else {
@@ -326,15 +397,17 @@ async fn perform(context: Arc<Context>, body: Value) -> Result<Value> {
                 context,
                 temp,
                 name,
-                "uvyazka-explicit-import".into(),
+                format!("uvyazka-project-{local_project}"),
                 Some(hash),
+                Some(local_project),
             )
             .await?;
             queued["engineering_origin"] = value["origin"].clone();
-            queued["notice"] = json!("Снимок поставлен в общую очередь индексации. Готовность поиска появится после обработки; исходный файл не изменён.");
+            queued["notice"] = json!("Снимок поставлен в общую очередь индексации. После обработки он появится в поиске по проекту.");
             Ok(queued)
         }
-        Some("viewer") => {
+        Some("viewer" | "preview") => {
+            let preview = body["action"] == "preview";
             let capabilities = companion
                 .get("/simulation/les-capabilities.json", &[])
                 .await
@@ -345,18 +418,46 @@ async fn perform(context: Arc<Context>, body: Value) -> Result<Value> {
                         "ENGINEERING_VIEWER_UPDATE_REQUIRED".into()
                     }
                 })?;
-            if capabilities["contract"] != "uvyazka.les-viewer.v1" {
+            if capabilities["contract"] != "uvyazka.les-viewer.v1"
+                || (preview && capabilities["dataset_preview"] != true)
+            {
                 return Err("ENGINEERING_VIEWER_UPDATE_REQUIRED".into());
             }
             let target = &body["target"];
-            let project = id(target, "project_id")?;
-            let dataset = id(target, "dataset_id")?;
-            let object = id(target, "object_id")?;
+            let (project, dataset, object, expected) = if preview {
+                let project = id(&body, "project_id")?;
+                let dataset = if body["doc_id"].is_string() {
+                    companion.read_registered(&body).await?
+                } else {
+                    id(&body, "dataset_id")?.to_owned()
+                };
+                (project, dataset, "@dataset", None)
+            } else {
+                let object = id(target, "object_id")?;
+                if object == "@dataset" {
+                    return Err("ENGINEERING_REQUEST_INVALID".into());
+                }
+                (
+                    id(target, "project_id")?,
+                    id(target, "dataset_id")?.to_owned(),
+                    object,
+                    Some(
+                        les_core::engineering::digest(&target["source_sha256"])
+                            .map_err(str::to_owned)?,
+                    ),
+                )
+            };
+            let (_, part) = companion.object(project, &dataset, object, true).await?;
             let hash =
-                les_core::engineering::digest(&target["source_sha256"]).map_err(str::to_owned)?;
-            let (_, part) = companion.object(project, dataset, object, true).await?;
-            if part["source"]["sha256"] != hash
+                les_core::engineering::digest(&part["source"]["sha256"]).map_err(str::to_owned)?;
+            if expected.is_some_and(|expected| expected != hash)
                 || part["freshness"]["status"] != "content_hash_matches"
+                || (preview
+                    && body["doc_id"].is_string()
+                    && part["source"]["doc_id"] != body["doc_id"])
+                || (preview
+                    && body["expected_source_sha256"].is_string()
+                    && body["expected_source_sha256"] != hash)
             {
                 return Err("ENGINEERING_SOURCE_CHANGED".into());
             }
@@ -366,12 +467,13 @@ async fn perform(context: Arc<Context>, body: Value) -> Result<Value> {
                 .map_err(|_| "ENGINEERING_ENDPOINT_INVALID")?;
             url.query_pairs_mut().extend_pairs([
                 ("project", project),
-                ("les_dataset", dataset),
+                ("les_dataset", &dataset),
                 ("les_object", object),
                 ("les_sha256", hash),
             ]);
             Ok(
-                json!({"url":url.as_str(),"target":target,"notice":"Откроется отдельное окно Увязки; наличие геометрии определяется её читателем."}),
+                json!({"url":url.as_str(),"target":{"project_id":project,"dataset_id":dataset,
+                    "object_id":object,"source_sha256":hash},"notice":"Редакция проверена. Откройте источник во вьювере Увязки."}),
             )
         }
         _ => Err("ENGINEERING_ACTION_INVALID".into()),
@@ -413,12 +515,14 @@ pub async fn handle(context: Arc<Context>, request: Request) -> Response {
 }
 fn message(code: &str) -> &'static str {
     match code {
-        "ENGINEERING_ENDPOINT_INVALID"=>"Укажите локальный адрес Увязки с портом, например http://127.0.0.1:8765/.",
+        "ENGINEERING_ENDPOINT_INVALID"=>"Укажите локальный адрес Увязки с портом. Адрес настольной Увязки по умолчанию — http://127.0.0.1:17881/.",
         "ENGINEERING_UNAVAILABLE"=>"Увязка не отвечает. Запустите её и проверьте адрес.",
+        "ENGINEERING_PROJECT_SYNC_FAILED"=>"Не удалось сохранить список проектов Увязки. Повторите синхронизацию.",
+        "ENGINEERING_PROJECT_UNAVAILABLE"=>"Проект не найден в Увязке. Обновите список проектов.",
         "ENGINEERING_PERMISSION_DENIED"=>"Увязка отклонила чтение. Проверьте её локальную панель и совместимость подключения; исходники не изменены.",
         "ENGINEERING_READ_FAILED"=>"Увязка не смогла прочитать выбранный файл. Проверьте оригинал и установленный читатель; данные не поставлены в индекс.",
         "ENGINEERING_READ_TIMEOUT"=>"Увязка не успела ответить. Чтение может продолжаться в ней; повторите действие. Неполные данные в индекс не отправлены.",
-        "ENGINEERING_VIEWER_UPDATE_REQUIRED"=>"Для открытия точного объекта нужен вьювер Увязки с поддержкой ссылок LES. Обновите Увязку; ссылка на другой объект не подставляется.",
+        "ENGINEERING_VIEWER_UPDATE_REQUIRED"=>"Для этой ссылки нужна совместимая версия вьювера Увязки. Обновите Увязку.",
         "ENGINEERING_SOURCE_CHANGED"=>"Редакция исходного файла изменилась или недоступна. Обновите снимок в Увязке; старые данные не опубликованы заново.",
         "ENGINEERING_SNAPSHOT_LIMIT"|"ENGINEERING_OBJECT_LIMIT"|"ENGINEERING_RESPONSE_LIMIT"=>"Снимок превышает предел этого подключения. Ничего не обрезано и не поставлено в индекс.",
         "ENGINEERING_TIMEOUT"=>"Не удалось завершить чтение за три минуты. Проверьте Увязку и повторите подключение.",

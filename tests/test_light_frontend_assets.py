@@ -58,6 +58,9 @@ def tree(tmp_path):
     for name in builder.INPUTS:
         (frontend / name).write_text('{}', encoding='utf-8')
     (frontend / 'src/main.ts').write_text('export const title="Лес"', encoding='utf-8')
+    shared_nav = root / 'qdrant_visualizer/app-nav.css'
+    shared_nav.parent.mkdir()
+    shared_nav.write_text('.app-nav { display: flex; }', encoding='utf-8')
     dist = frontend / 'dist'
     (dist / 'assets').mkdir(parents=True)
     (dist / 'index.html').write_text('<html>Лес</html>', encoding='utf-8')

@@ -15,6 +15,72 @@ fn ensure(conn: &Connection) -> Result<()> {
     CREATE TABLE IF NOT EXISTS les_project_links(id INTEGER PRIMARY KEY AUTOINCREMENT,project_id INTEGER NOT NULL,kind TEXT NOT NULL,ref TEXT NOT NULL,created_at TEXT NOT NULL,UNIQUE(project_id,kind,ref));")?;
     Ok(())
 }
+fn sync_uvyazka(conn: &Connection, args: &Args) -> Result<Value> {
+    let origin = text(args, "origin")?;
+    let projects = args["projects"]
+        .as_array()
+        .ok_or_else(|| Failure::invalid("Invalid Uvyazka projects"))?;
+    ensure(conn)?;
+    conn.execute_batch("CREATE TABLE IF NOT EXISTS les_uvyazka_projects(
+        origin TEXT NOT NULL, source_id TEXT NOT NULL, project_id INTEGER NOT NULL UNIQUE,
+        present INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(origin,source_id));
+        CREATE TABLE IF NOT EXISTS les_uvyazka_connection(id INTEGER PRIMARY KEY CHECK(id=1), origin TEXT NOT NULL);")?;
+    if boolean(args, "remember", false)? {
+        conn.execute(
+            "INSERT INTO les_uvyazka_connection(id,origin) VALUES(1,?1)
+            ON CONFLICT(id) DO UPDATE SET origin=excluded.origin",
+            [origin],
+        )?;
+    }
+    conn.execute(
+        "UPDATE les_uvyazka_projects SET present=0 WHERE origin=?1",
+        [origin],
+    )?;
+    let mut result = Vec::with_capacity(projects.len());
+    for project in projects {
+        let source_id = crate::engineering::identity(&project["id"]).map_err(Failure::invalid)?;
+        let name = project["name"]
+            .as_str()
+            .filter(|name| !trim(name).is_empty())
+            .ok_or_else(|| Failure::invalid("Invalid Uvyazka project name"))?;
+        let local_id: Option<i64> = conn
+            .query_row(
+                "SELECT p.id FROM les_projects p JOIN les_uvyazka_projects m ON p.id=m.project_id
+             WHERE m.origin=?1 AND m.source_id=?2",
+                params![origin, source_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let local_id = if let Some(id) = local_id {
+            conn.execute(
+                "UPDATE les_projects SET name=?1 WHERE id=?2",
+                params![name, id],
+            )?;
+            if table(conn, "datasets")? {
+                conn.execute(
+                    "UPDATE datasets SET name=?1 WHERE id=?2",
+                    params![format!("Увязка · {name}"), format!("uvyazka-{id}")],
+                )?;
+            }
+            id
+        } else {
+            conn.execute(
+                "INSERT INTO les_projects(name,created_at) VALUES(?1,?2)",
+                params![name, now()],
+            )?;
+            conn.last_insert_rowid()
+        };
+        conn.execute(
+            "INSERT INTO les_uvyazka_projects(origin,source_id,project_id) VALUES(?1,?2,?3)
+            ON CONFLICT(origin,source_id) DO UPDATE SET project_id=excluded.project_id,present=1",
+            params![origin, source_id, local_id],
+        )?;
+        let mut item = project.clone();
+        item["local_id"] = local_id.into();
+        result.push(item);
+    }
+    Ok(json!(result))
+}
 fn now() -> String {
     chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
@@ -110,14 +176,44 @@ pub(super) fn execute(conn: &Connection, action: &str, args: &Args) -> Result<Va
         }
         "project_list" => {
             if table(conn, "les_projects")? {
+                let sql = if table(conn, "les_uvyazka_projects")? {
+                    "SELECT p.*,m.source_id AS uvyazka_id,m.present AS uvyazka_present
+                     FROM les_projects p LEFT JOIN les_uvyazka_projects m ON p.id=m.project_id
+                     ORDER BY p.status='archived',p.id DESC LIMIT ?"
+                } else {
+                    "SELECT * FROM les_projects ORDER BY status='archived',id DESC LIMIT ?"
+                };
                 Ok(json!(rows(
                     conn,
-                    "SELECT * FROM les_projects ORDER BY status='archived',id DESC LIMIT ?",
+                    sql,
                     [integer(args, "limit", 100)?.min(500)]
                 )?))
             } else {
                 Ok(json!([]))
             }
+        }
+        "project_sync_uvyazka" => sync_uvyazka(conn, args),
+        "project_uvyazka_connection" => {
+            if !table(conn, "les_uvyazka_connection")? {
+                return Ok(Value::Null);
+            }
+            first(
+                conn,
+                "SELECT origin FROM les_uvyazka_connection WHERE id=1",
+                [],
+            )
+        }
+        "project_uvyazka_lookup" => {
+            if !table(conn, "les_uvyazka_projects")? {
+                return Ok(Value::Null);
+            }
+            first(
+                conn,
+                "SELECT p.id AS local_id FROM les_projects p
+                JOIN les_uvyazka_projects m ON p.id=m.project_id
+                WHERE m.origin=?1 AND m.source_id=?2 AND m.present=1",
+                params![text(args, "origin")?, text(args, "source_id")?],
+            )
         }
         "project_get" => get(conn, id),
         "project_links" => links(
@@ -141,6 +237,9 @@ pub(super) fn execute(conn: &Connection, action: &str, args: &Args) -> Result<Va
         }
         "project_delete" => {
             ensure(conn)?;
+            if table(conn, "les_uvyazka_projects")? {
+                conn.execute("DELETE FROM les_uvyazka_projects WHERE project_id=?", [id])?;
+            }
             conn.execute("DELETE FROM les_project_links WHERE project_id=?", [id])?;
             Ok(json!(
                 conn.execute("DELETE FROM les_projects WHERE id=?", [id])? > 0
@@ -201,5 +300,47 @@ pub(super) fn execute(conn: &Connection, action: &str, args: &Args) -> Result<Va
             Ok(Value::Object(meta))
         }
         _ => Err(Failure::invalid("Unknown project action")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn uvyazka_sync_preserves_local_identity_and_project_links() {
+        let conn = Connection::open_in_memory().unwrap();
+        let call = |action, args: Value| execute(&conn, action, args.as_object().unwrap()).unwrap();
+        let private = call("project_create", json!({"name":"Same name"}))["id"].clone();
+        let args = |projects| json!({"origin":"http://127.0.0.1:8772/","projects":projects,"remember":true});
+        let first = call(
+            "project_sync_uvyazka",
+            args(json!([
+                {"id":"source-a","name":"Same name"},{"id":"source-b","name":"Second"}
+            ])),
+        );
+        let local = &first[0]["local_id"];
+        assert_ne!(local, &private);
+        call(
+            "project_link",
+            json!({"project_id":local,"kind":"dataset","ref":"sample"}),
+        );
+        let second = call(
+            "project_sync_uvyazka",
+            args(json!([{"id":"source-a","name":"Renamed"}])),
+        );
+        assert_eq!(&second[0]["local_id"], local);
+        let projects = call("project_list", json!({}));
+        assert_eq!(projects[0]["uvyazka_present"], 0);
+        assert_eq!(projects[1]["name"], "Renamed");
+        assert_eq!(projects[2]["name"], "Same name");
+        assert_eq!(
+            call("project_links", json!({"project_id":local}))[0]["ref"],
+            "sample"
+        );
+        assert_eq!(
+            call("project_uvyazka_connection", json!({}))["origin"],
+            "http://127.0.0.1:8772/"
+        );
     }
 }

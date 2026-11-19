@@ -68,5 +68,20 @@
     const button = event.target.closest('[data-les-back]');
     if (button) { event.preventDefault(); back(); }
   });
+  const menuButton = document.querySelector('[data-les-menu]');
+  const menu = menuButton && document.getElementById(menuButton.getAttribute('aria-controls'));
+  if (menu) {
+    function toggleMenu(open) {
+      menu.classList.toggle('mobile-open', open);
+      menuButton.setAttribute('aria-expanded', String(open));
+      menuButton.setAttribute('aria-label', open ? 'Закрыть меню' : 'Открыть меню');
+      if (open) menu.querySelector('a')?.focus();
+      else menuButton.focus();
+    }
+    menuButton.addEventListener('click', () => toggleMenu(!menu.classList.contains('mobile-open')));
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && menu.classList.contains('mobile-open')) toggleMenu(false);
+    });
+  }
   window.lesNavigation = {record, back, canonical};
 })();

@@ -14,7 +14,7 @@ function boot(url, locked=false) {
     history: {pushState(_,__,value){current=new URL(value,current)}, replaceState(_,__,value){current=new URL(value,current)}},
     sessionStorage: {getItem(key){if(locked)throw Error('locked');return saved.get(key)},
       setItem(key,value){if(locked)throw Error('locked');saved.set(key,value)}},
-    document: {addEventListener(name,handler){events[name]=handler}},
+    document: {querySelector(){return null},addEventListener(name,handler){events[name]=handler}},
     window: {addEventListener(name,handler){events[name]=handler},emitEvent(name,value){delivered.push([name,value])}},
   };
   vm.runInNewContext(source, context);

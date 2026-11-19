@@ -19,12 +19,12 @@
 
 | Метрика | Значение |
 | --- | --- |
-| Python-файлов под git | 728 |
-| Строк Python | 173912 |
+| Python-файлов под git | 715 |
+| Строк Python | 171765 |
 | PRODUCT_REACHABLE | 417 |
 | RUNTIME_SUPPORT | 5 |
 | TEST_OR_TOOL_ONLY | 286 |
-| DORMANT_CANDIDATE | 20 |
+| DORMANT_CANDIDATE | 7 |
 | Зарегистрированных API-маршрутов | 298 |
 | Ошибок разбора | 0 |
 
@@ -41,7 +41,7 @@
 | sovushka/pages/diag.py | 1606 | 1 |
 | proxy/services/checklist_review_service.py | 1518 | 1 |
 | proxy/routers/mail.py | 1502 | 4 |
-| proxy/services/retrieval_service.py | 1440 | 12 |
+| proxy/services/retrieval_service.py | 1440 | 11 |
 | proxy/services/cad_bim_graph.py | 1425 | 3 |
 | proxy/services/tool_harness_service.py | 1275 | 25 |
 | proxy/services/context_memory_service.py | 1175 | 8 |
@@ -88,24 +88,11 @@
 | Файл | Строк | Почему только кандидат |
 | --- | --- | --- |
 | proxy/services/active_state_service.py | 129 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
-| proxy/services/agent_router_service.py | 467 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
-| proxy/services/asbuilt_chat_service.py | 122 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
-| proxy/services/asbuilt_intake_service.py | 424 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/asbuilt_ocr.py | 159 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/checklist_template_importer.py | 450 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
-| proxy/services/clarification_service.py | 225 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
-| proxy/services/document_object_model.py | 79 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/glossary_chat_service.py | 90 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
-| proxy/services/harvest_service.py | 213 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
-| proxy/services/help_chat_service.py | 97 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
-| proxy/services/les_md_chat_service.py | 66 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
-| proxy/services/office_passport_service.py | 175 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
-| proxy/services/preset_chat_service.py | 64 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/scoped_rag_builder.py | 111 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
-| proxy/services/sovushka_tone.py | 49 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
-| proxy/services/spreadsheet_object_model.py | 153 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/table_detect.py | 86 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
-| proxy/services/tool_provider_projection_service.py | 23 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 | proxy/services/update_service.py | 1082 | Нет доказанного статического пути; проверить dynamic/subprocess/external use |
 
 ## Ограничения

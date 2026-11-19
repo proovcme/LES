@@ -13,7 +13,7 @@ jobs:
     timeout-minutes: 90
     env:
       PYTHONUTF8: '1'
-      UV_FROZEN: '1'
+      UV_PYTHON: '3.13.12'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -29,22 +29,23 @@ jobs:
           workspaces: |
             desktop/light/src-tauri
             core
-            runtime
-            api
-      - name: Install frozen build environment
-        run: uv sync --frozen --extra mcp
+          cache-on-failure: true
       - name: Build desktop shell
         run: cargo build --locked --release --manifest-path desktop/light/src-tauri/Cargo.toml
       - name: Build locked static frontend
-        run: uv run python tools/build_light_frontend.py
+        run: uv run --no-project python -m tools.build_light_frontend
       - name: Build native service owner and API
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/core/target
         run: |
-          uv run python tools/build_native_runtime.py --output native/runtime
+          uv run --no-project python -m tools.build_native_runtime --output native/runtime
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          uv run python tools/build_native_api.py --output native/api
+          uv run --no-project python -m tools.build_native_api --output native/api
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Build pinned offline payload
-        run: uv run python tools/build_light_package.py --output dist/payload --desktop-exe desktop/light/src-tauri/target/release/les-light.exe --native-runtime native/runtime/les-runtime.exe --native-api native/api/les-api.exe
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/core/target
+        run: uv run --no-project python -m tools.build_light_package --output dist/payload --desktop-exe desktop/light/src-tauri/target/release/les-light.exe --native-runtime native/runtime/les-runtime.exe --native-api native/api/les-api.exe
       - name: Validate packaged files
         run: pwsh -NoProfile -File installers/windows/light/package.ps1 -Mode Validate -Source dist/payload
       - name: Build offline and web installers
@@ -52,7 +53,7 @@ jobs:
         run: |
           $nsis = 'C:/Program Files (x86)/NSIS/makensis.exe'
           if (-not (Test-Path -LiteralPath $nsis)) { choco install nsis --yes --no-progress }
-          uv run python tools/build_light_installers.py --payload dist/payload --output dist/installers --makensis $nsis
+          uv run --no-project python -m tools.build_light_installers --payload dist/payload --output dist/installers --makensis $nsis
       - uses: actions/upload-artifact@v4
         with:
           name: LES-RAG-candidate-${{ github.sha }}

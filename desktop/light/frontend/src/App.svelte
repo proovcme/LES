@@ -5,6 +5,7 @@
   import { sourceOrigin as pickSourceOrigin, sourceReadStart, sourcePage } from './lib/contracts';
   import { Workspace } from './lib/workspace.svelte';
   import { connectNativeClose } from './lib/native-close';
+  import { rememberCompanion, syncCompanion } from './lib/engineering';
   import Icon from './components/Icon.svelte';
   import Modal from './components/Modal.svelte';
   import Answer from './components/Answer.svelte';
@@ -42,6 +43,7 @@
     workspace.beforeClose = async () => { await memoryEditor?.flush(); };
     const bridge = connectNativeClose(workspace);
     void bridge.ready.then(() => workspace.initialize()).then(() => {
+      void syncCompanion().then(({ url }) => { if (url) rememberCompanion(url); }).catch(() => undefined);
       const url = new URL(location.href);
       const panel = url.searchParams.get('panel');
       if (panel === 'data' || panel === 'profiles' || panel === 'mcp' || panel === 'update' || panel === 'engineering'
@@ -222,7 +224,9 @@
 {:else if modal === 'update'}
   <UpdatePanel close={() => modal = null} />
 {:else if modal === 'engineering'}
-  <EngineeringModels refresh={() => workspace.refreshDatasets()} close={() => modal = null} />
+  <EngineeringModels refresh={() => workspace.refreshDatasets()} close={() => modal = null}
+    currentProject={workspace.session?.scope.project_ids[0]}
+    useProject={(id) => action(() => workspace.setScope({ scope_type: 'project', project_ids: [id], dataset_ids: [], selected_sources_only: false }))} />
 {:else if modal === 'attachment'}
   <Modal title="Прикрепить файл" close={() => modal = null}>
     <p>Прочитать файл в этом диалоге или сохранить его в наборе «Вложения чата» для поиска.</p>

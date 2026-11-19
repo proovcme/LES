@@ -1,12 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { errorMessage, request } from '../lib/api';
+  import { syncCompanion } from '../lib/engineering';
   import type { Dataset } from '../lib/contracts';
   import Icon from './Icon.svelte';
   import Modal from './Modal.svelte';
   import FolderWatches from './FolderWatches.svelte';
 
-  type Project = { id: number; name: string; status: string };
+  type Project = { id: number; name: string; status: string; uvyazka_id?: string; uvyazka_present?: number };
   type Desktop = Window & { __TAURI__?: { core: { invoke: (name: string, args?: object) => Promise<string | null> } } };
   let { datasets, refresh, useProject, close }: {
     datasets: Dataset[]; refresh: () => Promise<void>; useProject: (id: number) => Promise<void>; close: () => void;
@@ -39,7 +40,10 @@
   async function loadProjects() {
     projects = (await request<{ projects: Project[] }>('/api/projects')).projects.filter((entry) => entry.status !== 'archived');
   }
-  onMount(() => { void act('Загружаем данные…', async () => { await Promise.all([loadProjects(), refresh()]); }); });
+  onMount(() => {
+    void act('Загружаем данные…', async () => { await Promise.all([loadProjects(), refresh()]); });
+    void syncCompanion().then((result) => result.url ? loadProjects() : undefined).catch(() => undefined);
+  });
 
   async function choose() {
     if (!pick) return;
@@ -137,7 +141,7 @@
     {#if projects.length}
       <ul class="project-list">
         {#each projects as item (item.id)}
-          <li><span>{item.name}</span><button class="quiet" disabled={!!busy} onclick={() => act('Открываем проект…', async () => { await useProject(item.id); close(); })}>Открыть в чате</button></li>
+          <li><span>{item.name}{#if item.uvyazka_id} <small class="muted">· {item.uvyazka_present === 0 ? 'Снят с регистрации в Увязке' : 'Увязка'}</small>{/if}</span><button class="quiet" disabled={!!busy} onclick={() => act('Открываем проект…', async () => { await useProject(item.id); close(); })}>Открыть в чате</button></li>
         {/each}
       </ul>
     {/if}
