@@ -6,20 +6,80 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
-concurrency:
-  group: les-rag-checks-${{ github.ref }}
-  cancel-in-progress: true
 jobs:
-  windows:
+  checks:
+    name: Format, static contracts and publication
     runs-on: windows-2022
-    # The first optimized Docling/Xberg + Edge build can exceed 90 minutes.
-    # Preserve the full behavior gate after compilation on a cold runner.
+    timeout-minutes: 20
+    concurrency:
+      group: les-checks-${{ github.ref }}
+      cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+    env:
+      PYTHONUTF8: '1'
+      UV_FROZEN: '1'
+    steps:
+      - uses: actions/checkout@v4
+      # These checks do not compile dependencies or wait for native binaries.
+      - name: Check all Rust formatting first
+        run: |
+          foreach ($crate in 'core', 'runtime', 'api', 'parsers', 'vector', 'desktop/light/src-tauri') {
+            cargo fmt --manifest-path "$crate/Cargo.toml" --check
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          }
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.13.12'
+          enable-cache: true
+      - name: Prepare contract checks
+        run: |
+          choco install make --yes --no-progress
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          uv sync --frozen --extra mcp
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Verify contracts and publication
+        run: |
+          make verify-fast
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          make public-check
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+  frontend:
+    name: Frontend types and behavior
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    concurrency:
+      group: les-frontend-${{ github.ref }}
+      cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.14.0'
+          cache: npm
+          cache-dependency-path: desktop/light/frontend/package-lock.json
+      - run: npm ci --prefix desktop/light/frontend
+      - run: npm run check --prefix desktop/light/frontend
+      - run: npm test --prefix desktop/light/frontend
+  windows:
+    name: Native build and full behavior
+    needs: [checks, frontend]
+    runs-on: windows-2022
+    # A newer push must not repeatedly cancel an almost finished acceptance run.
+    concurrency:
+      group: les-native-${{ github.ref }}
+      cancel-in-progress: false
+    # Preserve the complete behavior gate even on a cold runner.
     timeout-minutes: 150
     env:
       PYTHONUTF8: '1'
       UV_FROZEN: '1'
       CARGO_INCREMENTAL: '0'
       CARGO_BUILD_JOBS: '1'
+      # Optimized acceptance binaries; installer optimization stays in release.yml.
+      # Full LTO and dependency debug symbols made feedback take over two hours.
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_PROFILE_RELEASE_LTO: 'false'
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16'
+      CARGO_PROFILE_RELEASE_OPT_LEVEL: '2'
       # The core builder and all service builders share dependency artifacts.
       CARGO_TARGET_DIR: ${{ github.workspace }}/core/target
     steps:
@@ -70,6 +130,19 @@ jobs:
           "LES_TEST_NATIVE_RUNTIME=$((Resolve-Path native/runtime/les-runtime.exe).Path)" >> $env:GITHUB_ENV
           "LES_TEST_NATIVE_API=$((Resolve-Path native/api/les-api.exe).Path)" >> $env:GITHUB_ENV
           "LES_TEST_NATIVE_QDRANT=$((Resolve-Path native/qdrant/qdrant.exe).Path)" >> $env:GITHUB_ENV
+      - name: Retain native candidates for isolated acceptance
+        uses: actions/upload-artifact@v4
+        with:
+          name: LES-native-candidate-${{ github.sha }}
+          path: |
+            native/core/les_core.dll
+            native/core/core-receipt.json
+            native/runtime/les-runtime.exe
+            native/runtime/runtime-receipt.json
+            native/api/les-api.exe
+            native/api/api-receipt.json
+          if-no-files-found: error
+          retention-days: 7
       - name: Build native Word and PDF table parsers
         run: |
           cargo fmt --manifest-path parsers/Cargo.toml --check
@@ -77,17 +150,22 @@ jobs:
           uv run python tools/native_asset.py parsers --output native/parsers
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           "LES_TEST_NATIVE_DOCUMENT_PARSERS=$((Resolve-Path native/parsers/les-document-parsers.exe).Path)" >> $env:GITHUB_ENV
-      - name: Check static frontend
+      - name: Retain native parsers for isolated acceptance
+        uses: actions/upload-artifact@v4
+        with:
+          name: LES-parsers-candidate-${{ github.sha }}
+          path: |
+            native/parsers/les-document-parsers.exe
+            native/parsers/parser-receipt.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Build frontend for integration tests
         run: |
           uv run python tools/build_light_frontend.py
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          npm.cmd test --prefix desktop/light/frontend
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Verify code and offline behavior
         run: |
           make verify
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          make public-check
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           make test
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
@@ -95,7 +173,11 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
   desktop:
     name: Windows desktop
+    needs: [checks, frontend]
     runs-on: windows-2022
+    concurrency:
+      group: les-desktop-${{ github.ref }}
+      cancel-in-progress: false
     timeout-minutes: 45
     env:
       CARGO_INCREMENTAL: '0'

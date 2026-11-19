@@ -7,6 +7,34 @@ use std::{
     path::Path,
 };
 
+fn unavailable(stage: &'static str, cause: impl std::fmt::Display) -> &'static str {
+    eprintln!(
+        "{}",
+        json!({"event":"model_settings_io_failed","stage":stage,"cause":cause.to_string()})
+    );
+    "SECRET_STORE_UNAVAILABLE"
+}
+
+fn publish(temporary: &Path, path: &Path, expected: &str) -> Result<(), &'static str> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    loop {
+        if read(path)? != expected {
+            return Err("SECRET_STORE_CHANGED");
+        }
+        match fs::rename(temporary, path) {
+            Ok(()) => return Ok(()),
+            Err(error)
+                if cfg!(windows)
+                    && matches!(error.raw_os_error(), Some(5 | 32 | 33))
+                    && std::time::Instant::now() < deadline =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(error) => return Err(unavailable("atomic_publish", error)),
+        }
+    }
+}
+
 pub fn key(reference: &str) -> Result<&str, &'static str> {
     let key = reference
         .trim()
@@ -40,10 +68,10 @@ fn read(path: &Path) -> Result<String, &'static str> {
         Ok(file) => {
             file.take(8 * 1024 * 1024 + 1)
                 .read_to_string(&mut text)
-                .map_err(|_| "SECRET_STORE_UNAVAILABLE")?;
+                .map_err(|error| unavailable("read_text", error))?;
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(_) => return Err("SECRET_STORE_UNAVAILABLE"),
+        Err(error) => return Err(unavailable("read_open", error)),
     }
     if text.len() > 8 * 1024 * 1024 {
         Err("SECRET_STORE_LIMIT")
@@ -110,7 +138,7 @@ pub fn replace(
         return Err("SECRET_STORE_PATH_INVALID");
     }
     let parent = path.parent().ok_or("SECRET_STORE_PATH_INVALID")?;
-    fs::create_dir_all(parent).map_err(|_| "SECRET_STORE_UNAVAILABLE")?;
+    fs::create_dir_all(parent).map_err(|error| unavailable("create_directory", error))?;
     let file_name = path
         .file_name()
         .ok_or("SECRET_STORE_PATH_INVALID")?
@@ -122,7 +150,7 @@ pub fn replace(
         .create(true)
         .truncate(false)
         .open(lock_path)
-        .map_err(|_| "SECRET_STORE_UNAVAILABLE")?;
+        .map_err(|error| unavailable("lock_open", error))?;
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
         match lock.try_lock() {
@@ -131,7 +159,7 @@ pub fn replace(
                 std::thread::sleep(std::time::Duration::from_millis(10))
             }
             Err(std::fs::TryLockError::WouldBlock) => return Err("SECRET_STORE_BUSY"),
-            Err(_) => return Err("SECRET_STORE_UNAVAILABLE"),
+            Err(error) => return Err(unavailable("lock_acquire", error)),
         }
     }
     let existing = read(path)?;
@@ -169,19 +197,16 @@ pub fn replace(
     }
     let mut output = options
         .open(&temporary)
-        .map_err(|_| "SECRET_STORE_UNAVAILABLE")?;
-    let result = (|| {
+        .map_err(|error| unavailable("temporary_create", error))?;
+    let result: Result<(), &'static str> = (|| {
         #[cfg(windows)]
         copy_dacl(path, &temporary)?;
         output
             .write_all((lines.join("\n") + "\n").as_bytes())
             .and_then(|_| output.sync_all())
-            .map_err(|_| "SECRET_STORE_UNAVAILABLE")?;
+            .map_err(|error| unavailable("temporary_sync", error))?;
         drop(output);
-        if read(path)? != existing {
-            return Err("SECRET_STORE_CHANGED");
-        }
-        fs::rename(&temporary, path).map_err(|_| "SECRET_STORE_UNAVAILABLE")?;
+        publish(&temporary, path, &existing)?;
         #[cfg(unix)]
         File::open(parent)
             .and_then(|f| f.sync_all())
@@ -258,7 +283,10 @@ fn copy_dacl(source: &Path, target: &Path) -> Result<(), &'static str> {
         )
     };
     if read != 0 {
-        return Err("SECRET_STORE_UNAVAILABLE");
+        return Err(unavailable(
+            "permissions_read",
+            std::io::Error::from_raw_os_error(read as i32),
+        ));
     }
     let write = unsafe {
         SetNamedSecurityInfoW(
@@ -275,7 +303,10 @@ fn copy_dacl(source: &Path, target: &Path) -> Result<(), &'static str> {
     if write == 0 {
         Ok(())
     } else {
-        Err("SECRET_STORE_UNAVAILABLE")
+        Err(unavailable(
+            "permissions_write",
+            std::io::Error::from_raw_os_error(write as i32),
+        ))
     }
 }
 pub(crate) fn execute(request: &Value) -> Result<Value, &'static str> {
@@ -320,5 +351,85 @@ pub(crate) fn execute(request: &Value) -> Result<Value, &'static str> {
             request["actor"].as_str().ok_or("SECRET_ACTOR_REQUIRED")?,
         ),
         _ => Err("SECRET_ACTION_INVALID"),
+    }
+}
+
+#[cfg(all(test, windows))]
+mod publish_tests {
+    use super::*;
+    use std::os::windows::fs::OpenOptionsExt;
+    #[test]
+    fn temporary_windows_readers_delay_atomic_save_without_losing_external_changes() {
+        for external_change in [false, true] {
+            let nonce = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let root = std::env::temp_dir()
+                .join(format!("les-settings-share-{}-{nonce}", std::process::id()));
+            fs::create_dir(&root).unwrap();
+            let path = root.join("fixture.env");
+            fs::write(&path, "OTHER=unchanged\n").unwrap();
+            // A short-lived scanner/editor permits reading but denies renaming.
+            let reader = OpenOptions::new()
+                .read(true)
+                .share_mode(3)
+                .open(&path)
+                .unwrap();
+            let target = path.clone();
+            let writer = std::thread::spawn(move || {
+                replace(&target, "env:OPENAI_API_KEY", "fixture-value", "fixture")
+            });
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+            while !writer.is_finished()
+                && !fs::read_dir(&root)
+                    .unwrap()
+                    .any(|p| p.unwrap().path().extension().is_some_and(|e| e == "tmp"))
+                && std::time::Instant::now() < deadline
+            {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            assert!(
+                !writer.is_finished(),
+                "A transient read handle must not immediately fail publication"
+            );
+            assert_eq!(fs::read_to_string(&path).unwrap(), "OTHER=unchanged\n");
+            if external_change {
+                fs::write(&path, "OTHER=external-change\n").unwrap();
+                // Keep rename denied until the writer has observed the change;
+                // releasing it immediately would create an unrelated foreign-
+                // writer compare/rename race outside the shared-lock protocol.
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+                while !writer.is_finished() && std::time::Instant::now() < deadline {
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+                assert!(writer.is_finished());
+            }
+            drop(reader);
+            let result = writer.join().unwrap();
+            if external_change {
+                assert_eq!(result.unwrap_err(), "SECRET_STORE_CHANGED");
+                assert_eq!(
+                    fs::read_to_string(&path).unwrap(),
+                    "OTHER=external-change\n"
+                );
+            } else {
+                assert!(result.is_ok());
+                assert_eq!(file_values(&path).unwrap()["OTHER"], "unchanged");
+                assert_eq!(
+                    file_values(&path).unwrap()["OPENAI_API_KEY"],
+                    "fixture-value"
+                );
+            }
+            assert!(!fs::read_dir(&root).unwrap().any(|p| p
+                .unwrap()
+                .path()
+                .extension()
+                .is_some_and(|e| e == "tmp")));
+            fs::remove_file(&path).unwrap();
+            fs::remove_file(root.join("fixture.env.lock")).unwrap();
+            fs::remove_dir(root).unwrap();
+        }
     }
 }

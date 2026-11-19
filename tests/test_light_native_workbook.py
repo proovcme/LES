@@ -135,6 +135,7 @@ def test_index_routing_and_nodes_match_previous_reader(tmp_path, monkeypatch):
     rewrite_sheet(source, path, lambda xml: xml.replace(b'<f>1-1</f><v></v>', b'<f>1-1</f><v>0</v>'))
     original = path.read_bytes()
     splitter = support.StructureAwareSplitter(chunk_size=1000, chunk_overlap=100)
+    monkeypatch.setattr(support, 'MIN_CHUNK', 1)
     data = tmp_path / 'state'
     data.mkdir()
 
@@ -156,18 +157,29 @@ def test_index_routing_and_nodes_match_previous_reader(tmp_path, monkeypatch):
     monkeypatch.setattr(openpyxl, 'load_workbook', fail)
     assert asdict(probe_document(path)) == expected_probe
     actual = read_xlsx_sheets(str(path))
-    assert actual == expected_sheets
+    assert len(actual) == len(expected_sheets)
+    for sheet, legacy in zip(actual, expected_sheets, strict=True):
+        for key in ('sheet_name', 'headers', 'header_row'):
+            assert sheet[key] == legacy[key]
+        body_rows = [(row, values) for row, values in zip(sheet['row_numbers'], sheet['rows'], strict=True)
+                     if row > sheet['header_row']]
+        assert body_rows == list(zip(legacy['row_numbers'], legacy['rows'], strict=True))
     assert [sheet['header_row'] for sheet in actual] == [3, 1]
-    assert [sheet['row_numbers'] for sheet in actual] == [[5, 8], [2]]
-    assert actual[0]['rows'][0]['Количество'] == 0
-    assert actual[0]['rows'][0]['Примечание'] is False
+    assert [sheet['row_numbers'] for sheet in actual] == [[2, 5, 8], [2]]
+    assert actual[0]['rows'][0]['Наименование'] == 'Ведомость'
+    assert actual[0]['rows'][1]['Количество'] == 0
+    assert actual[0]['rows'][1]['Примечание'] is False
     route, nodes = index()
     assert asdict(route) == asdict(expected_route)
-    assert len(nodes) == len(expected_nodes) == 3
+    assert len(nodes) == len(expected_nodes) + 1 == 4
     assert all(item['payload']['type'] == 'table_row' for item in nodes)
     assert [(item['payload']['sheet_name'], item['payload']['row']) for item in nodes] == [
-        ('Щиты', 5), ('Щиты', 8), ('Дополнение', 2)]
-    assert nodes == expected_nodes
+        ('Щиты', 2), ('Щиты', 5), ('Щиты', 8), ('Дополнение', 2)]
+    for actual_node, legacy_node in zip(nodes[1:], expected_nodes, strict=True):
+        assert actual_node['text'] == legacy_node['text']
+        assert {key: value for key, value in actual_node['payload'].items() if key != 'table_row'} == {
+            key: value for key, value in legacy_node['payload'].items() if key != 'table_row'
+        }
     assert path.read_bytes() == original
 
 

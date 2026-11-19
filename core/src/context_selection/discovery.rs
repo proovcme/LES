@@ -1,6 +1,13 @@
 //! Navigation preserves document hierarchy; previews are never answer evidence.
 use serde_json::{json, Value};
 use std::collections::HashMap;
+
+pub fn catalog_title(path: &str) -> String {
+    let mut parts = path.rsplit(['/', '\\']).take(5).collect::<Vec<_>>();
+    parts.reverse();
+    parts.join(" / ")
+}
+
 pub fn catalog(request: &Value) -> Result<Value, &'static str> {
     let units = request["units"]
         .as_array()
@@ -29,9 +36,7 @@ pub fn catalog(request: &Value) -> Result<Value, &'static str> {
                 .as_str()
                 .or_else(|| source["file_name"].as_str())
                 .unwrap_or("");
-            let mut parts = path.rsplit(['/', '\\']).take(5).collect::<Vec<_>>();
-            parts.reverse();
-            let title = parts.join(" / ");
+            let title = catalog_title(path);
             let i = entries.len();
             positions.insert(key, i);
             entries.push(

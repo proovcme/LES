@@ -317,9 +317,146 @@ pub(crate) fn page_view(raw: &str, page: u64, tables: Option<&Value>) -> Result<
     Ok(found.then_some(out))
 }
 
+pub(crate) struct PageProjection {
+    pub text: Option<String>,
+    pub warning: Option<&'static str>,
+}
+pub(crate) const TABLE_PROJECTION_NOTICE: &str = "Текст страницы прочитан. Расположение ячеек таблицы не подтверждено: строки, столбцы и вычисления проверьте по оригиналу.";
+pub(crate) const TABLE_PROJECTION_TIMEOUT: &str = "PDF_TABLE_LAYOUT_TIMEOUT";
+pub(crate) fn projection_notice(code: &str) -> &'static str {
+    if code == TABLE_PROJECTION_TIMEOUT {
+        "Текст страницы прочитан. Дополнительный разбор таблиц превысил время ожидания; расположение ячеек и вычисления проверьте по оригиналу."
+    } else {
+        TABLE_PROJECTION_NOTICE
+    }
+}
+
+/// Availability of an auxiliary layout worker is separate from source identity.
+/// Memory admission, invalid caches and revision errors remain hard failures.
+pub(crate) fn optional_tables(
+    result: Result<Option<Value>>,
+) -> Result<(Option<Value>, Option<&'static str>)> {
+    match result {
+        Ok(value) => Ok((value, None)),
+        Err("WORKER_TIMEOUT") => {
+            eprintln!(
+                "{}",
+                json!({"event":"pdf_optional_layout_unavailable","code":"WORKER_TIMEOUT","original_read_required":true})
+            );
+            Ok((None, Some(TABLE_PROJECTION_TIMEOUT)))
+        }
+        Err(code) => Err(code),
+    }
+}
+
+pub(crate) fn known_layout_timeout(state: &Value, sha: &str, revision: &Value) -> bool {
+    state["code"] == "WORKER_TIMEOUT"
+        && state["source_sha256"] == sha
+        && state["parser_revision"] == *revision
+}
+
+pub(crate) fn read_projection_warning(indexed: &Value, read: &Value) -> Value {
+    if read["table_projection_warning"].is_string()
+        || read["extractor"] == "les.pdfium.xberg-page.v1"
+    {
+        read["table_projection_warning"].clone()
+    } else {
+        indexed.clone()
+    }
+}
+// The original text is owned and revision-checked by PDFium. An optional table
+// enrichment may fail its independent literal proof without invalidating that
+// original. Never expose even a prefix of a rejected table projection.
+pub(crate) fn page_projection(
+    raw: &str,
+    page: u64,
+    tables: Option<&Value>,
+) -> Result<PageProjection> {
+    match page_view(raw, page, tables) {
+        Ok(text) => Ok(PageProjection {
+            text,
+            warning: None,
+        }),
+        Err("PDF_TABLE_SOURCE_MISMATCH") => {
+            eprintln!(
+                "{}",
+                json!({"event":"pdf_table_projection_rejected","page":page,"code":"PDF_TABLE_SOURCE_MISMATCH","original_text_preserved":true})
+            );
+            Ok(PageProjection {
+                text: None,
+                warning: Some("PDF_TABLE_SOURCE_MISMATCH"),
+            })
+        }
+        Err(code) => Err(code),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn optional_timeout_never_waives_identity_or_memory_guards() {
+        let (tables, warning) = optional_tables(Err("WORKER_TIMEOUT")).unwrap();
+        assert!(tables.is_none());
+        assert_eq!(warning, Some(TABLE_PROJECTION_TIMEOUT));
+        for code in [
+            "SOURCE_CHANGED_DURING_INDEXING",
+            "XBERG_PDF_TABLES_INVALID",
+            "DOCUMENT_PARSER_CACHE_INVALID",
+            "MEMORY_ADMISSION_BLOCKED",
+        ] {
+            assert_eq!(optional_tables(Err(code)).unwrap_err(), code);
+        }
+        let revision = json!("parser-revision");
+        let state =
+            json!({"code":"WORKER_TIMEOUT","source_sha256":"source","parser_revision":revision});
+        assert!(known_layout_timeout(&state, "source", &revision));
+        assert!(!known_layout_timeout(&state, "changed", &revision));
+        assert!(!known_layout_timeout(
+            &state,
+            "source",
+            &json!("other-parser")
+        ));
+        let old = json!(TABLE_PROJECTION_TIMEOUT);
+        assert_eq!(
+            read_projection_warning(
+                &old,
+                &json!({"table_projection_warning":null,"extractor":"les.pdfium.page.v1"})
+            ),
+            old
+        );
+        assert!(read_projection_warning(
+            &old,
+            &json!({"table_projection_warning":null,"extractor":"les.pdfium.xberg-page.v1"})
+        )
+        .is_null());
+        assert_eq!(
+            read_projection_warning(
+                &Value::Null,
+                &json!({"table_projection_warning":"PDF_TABLE_SOURCE_MISMATCH"})
+            ),
+            "PDF_TABLE_SOURCE_MISMATCH"
+        );
+        assert!(!known_layout_timeout(
+            &json!({"code":"SOURCE_CHANGED_DURING_INDEXING","source_sha256":"source","parser_revision":revision}),
+            "source",
+            &revision
+        ));
+    }
+    #[test]
+    fn rejected_optional_table_cannot_replace_or_invalidate_original_text() {
+        let raw = "Original physical page: Valve 117.25 kg";
+        let tables = json!({"tables":[{"page":1,"cells":[["Valve","17.25"]]}]});
+        assert_eq!(
+            page_view(raw, 1, Some(&tables)).unwrap_err(),
+            "PDF_TABLE_SOURCE_MISMATCH"
+        );
+        let projection = page_projection(raw, 1, Some(&tables)).unwrap();
+        assert!(projection.text.is_none());
+        assert_eq!(projection.warning, Some("PDF_TABLE_SOURCE_MISMATCH"));
+        assert_eq!(projection.text.as_deref().unwrap_or(raw), raw);
+        assert!(page_projection(raw, 1, Some(&json!({"tables":null}))).is_err());
+    }
     #[test]
     fn pdf_tables_preserve_cells_and_physical_page_without_changing_numbers() {
         let value = json!({"tables":[{"page":2,"cells":[["Position","Quantity"],["Alpha item","-17.25"],["Beta | item","0"]]}]});

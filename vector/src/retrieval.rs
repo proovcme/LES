@@ -4,7 +4,7 @@ use les_core::retrieval_fusion::retrieve as fuse;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 
-fn query_filter(filters: &Value) -> Result<Value> {
+pub(crate) fn query_filter(filters: &Value) -> Result<Value> {
     let mut must = Vec::new();
     for (key, field) in [
         ("dataset_ids", "dataset_id"),
@@ -51,24 +51,56 @@ impl Shard {
         let filter = query_filter(filters)?;
         let text = request["text"].as_str().ok_or("EDGE_QUERY_INVALID")?;
         let values = les_core::lexical::current(&[text.to_owned()])?;
-        let lexical = !values["documents"][0]["terms"]
-            .as_object()
-            .ok_or("CORE_LEXICAL_RESPONSE_INVALID")?
-            .is_empty();
+        let lexical = crate::bm25_trial::mode(request)?
+            .is_some_and(|field| field != "_les_bm25_tokens_trial_v1")
+            || !values["documents"][0]["terms"]
+                .as_object()
+                .ok_or("CORE_LEXICAL_RESPONSE_INVALID")?
+                .is_empty();
         let prefetch = if lexical { (limit * 2).max(24) } else { limit };
-        let dense = self.call(
-            "query",
-            &json!({"query":request["vector"],"using":request["dense_name"],
-            "filter":filter,"limit":prefetch,"with_payload":true}),
-        )?;
-        let dense = dense["points"]
-            .as_array()
-            .ok_or("EDGE_RESPONSE_INVALID")?
-            .clone();
+        let dense_request = json!({"query":request["vector"],"using":request["dense_name"],
+            "filter":filter,"limit":prefetch,"with_payload":true});
+        let overview = request["overview"] == true;
+        let dense = if overview {
+            let mut points = Vec::new();
+            for query in
+                les_core::overview::dense_requests(&dense_request, &filters["dataset_ids"])?
+            {
+                les_core::overview::merge_dense(
+                    &mut points,
+                    &self.call("query_groups", &query)?,
+                    prefetch,
+                )?;
+            }
+            points
+        } else {
+            self.call("query", &dense_request)?["points"]
+                .as_array()
+                .ok_or("EDGE_RESPONSE_INVALID")?
+                .clone()
+        };
         if !lexical {
-            return Ok(dense);
+            return if overview {
+                les_core::overview::fuse_documents(
+                    &[dense],
+                    limit,
+                    request["rank_constant"].as_f64().unwrap_or(2.),
+                    request["fusion"].as_str().unwrap_or("rrf"),
+                    request["preserve_heads"] == true,
+                )
+            } else {
+                Ok(dense)
+            };
         }
-        let hits = self.lexical_search(text, filters, prefetch)?;
+        let mut lexical_filters = filters.clone();
+        if overview {
+            lexical_filters["group_size"] = json!(2);
+        }
+        let hits = self.bm25_trial_lexical(
+            request,
+            &lexical_filters,
+            prefetch * if overview { 2 } else { 1 },
+        )?;
         let hits = hits["hits"].as_array().ok_or("EDGE_RESPONSE_INVALID")?;
         let mut lexical = Vec::new();
         if !hits.is_empty() {
@@ -109,7 +141,12 @@ impl Shard {
                 lexical.push(row);
             }
         }
-        fuse(
+        let fusion = if overview {
+            les_core::overview::fuse_documents
+        } else {
+            fuse
+        };
+        fusion(
             &[dense, lexical],
             limit,
             request["rank_constant"].as_f64().unwrap_or(2.),
@@ -118,6 +155,9 @@ impl Shard {
         )
     }
     pub fn hybrid_search(&self, request: &Value) -> Result<Value> {
+        if crate::bm25_trial::mode(request)?.is_some() {
+            self.bm25_trial_marker(true)?;
+        }
         request["text"]
             .as_str()
             .filter(|s| !s.trim().is_empty() && s.len() <= 65536)

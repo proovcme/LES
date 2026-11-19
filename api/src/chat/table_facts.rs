@@ -9,8 +9,17 @@ pub(super) struct Rows {
     data: BTreeMap<(u64, u64), (Vec<String>, Value)>,
     paragraphs: BTreeMap<(u64, u64), (Vec<String>, Value)>,
     headers: BTreeMap<(u64, u64), Vec<String>>,
+    literal_sources: HashSet<u64>,
 }
-pub(super) const CONTRACT:&str="Финальный ответ по источникам: верни только JSON {\"answerable\":false,\"rows\":[],\"sums\":[]}. Сначала реши, есть ли в тексте именно запрошенные сведения для нужного предмета. Совпадение наименования строки ещё не подтверждает наличие показателя. Если сведений нет, answerable=false, rows и sums пустые. При наличии подтверждения поставь answerable=true и заполни rows скопированными адресами: S…R… для строк таблиц, S…P… для текстовых абзацев, S… для явно помеченного целого фрагмента. Не переписывай значения: Лес скопирует оригинал и добавит ссылки. Пояснения до и после таблицы доступны отдельно по S…P…, не заменяй их строками таблицы. Для справки выбери относящиеся к вопросу абзацы и строки в связном порядке. Не выбирай строку только за совпадение названия: количество, масса и другие поля не заменяют отсутствующий показатель. Физический номер строки Excel не является адресом S…R…. Только для запрошенной суммы табличных ячеек заполни sums объектами с column (номер C) и unit_column (номер C либо null). Текстовые абзацы и целые фрагменты не являются ячейками для сложения. Без суммы оставь sums пустым. Данные другого вида, стадии или редакции документа не подтверждают условия вопроса.";
+pub(super) const CONTRACT: &str = "Верни только JSON с полями answerable, rows, sums и missing. В missing кратко назови запрошенные сведения, для которых не нашлось подтверждения. Если всё подтверждено, оставь missing пустым. \
+    Проверь каждую часть вопроса по видимым источникам. Помести в rows адреса фрагментов, \
+    которые непосредственно подтверждают запрошенные сведения, включая подтверждённые части неполного ответа. Для каждой части выбери минимальный достаточный набор. Пропусти фрагменты, которые только называют объект или документ. \
+    answerable=true при непустом rows, иначе false. Копируй адреса из контекста: S…R… для строк, \
+    S…P… для абзацев, S… для помеченного целого фрагмента. Лес скопирует исходный текст и поставит ссылки. \
+    Проверяй предмет, показатель, вид и редакцию документа. Совпадение названия без нужного показателя \
+    не подтверждает факт. Номер строки Excel не является адресом S…R…. \
+    Только для явно запрошенной суммы заполни sums объектами с column (номер C) и unit_column \
+    (номер C или null) по табличным ячейкам. Во всех остальных случаях sums пуст.";
 pub(super) fn quote_sources(sources: &mut Value, receipt: &Value) {
     for source in sources.as_array_mut().into_iter().flatten() {
         let quotes = receipt["rows"]
@@ -97,8 +106,9 @@ impl Rows {
             column["enum"] = json!(columns);
         }
         json!({"type":"json_schema","json_schema":{"name":"les_source_rows","strict":true,"schema":{
-        "type":"object","additionalProperties":false,"required":["answerable","rows","sums"],"properties":{
+        "type":"object","additionalProperties":false,"required":["answerable","rows","sums","missing"],"properties":{
             "answerable":{"type":"boolean"},
+            "missing":{"type":"array","maxItems":8,"items":{"type":"string","maxLength":160}},
             "rows":{"type":"array","maxItems":128,"items":item},
             "sums":{"type":"array","maxItems":if columns.is_empty(){0}else{16},"items":{"type":"object","additionalProperties":false,"required":["column","unit_column"],"properties":{"column":column,"unit_column":{"type":["integer","null"],"minimum":1,"maximum":width}}}}
         }}}})
@@ -110,6 +120,8 @@ impl Rows {
                     .as_array()
                     .is_some_and(|rows| Self::supported(rows)))
                 || b["record_kind"] == "spreadsheet_row"
+                || b["table_geometry_unverified"] == true
+                || b["canonical"]["schema"] == "les.document-structure.v1"
                 || !les_core::chat_context::table_rows(b["text"].as_str().unwrap_or("")).is_empty()
         })
     }
@@ -138,28 +150,69 @@ impl Rows {
             else {
                 return;
             };
-            let text = value["text"].as_str().unwrap_or("");
-            if let Some(offset) = value["body_offset"].as_u64() {
-                for (line, paragraph) in les_core::chat_context::prose_spans(text, offset as usize)
+            let canonical = &value["canonical"];
+            if value["table_geometry_unverified"] == true {
+                if let Some(body) = value["body_offset"]
+                    .as_u64()
+                    .and_then(|n| value["text"].as_str()?.get(n as usize..))
                 {
+                    out.literal_sources.insert(index);
+                    out.data
+                        .insert((index, 0), (vec![body.to_owned()], source.clone()));
+                }
+                return;
+            }
+            if canonical["schema"] == "les.document-structure.v1" {
+                out.literal_sources.insert(index);
+                if canonical["kind"] == "paragraph" {
+                    if let Some(text) = canonical["text"].as_str() {
+                        out.paragraphs
+                            .insert((index, 1), (vec![text.to_owned()], source.clone()));
+                        out.data
+                            .insert((index, 0), (vec![text.to_owned()], source.clone()));
+                    }
+                } else if canonical["kind"] == "table" {
+                    let strings = |row: &Value| {
+                        row.as_array()?
+                            .iter()
+                            .map(|c| c.as_str().map(str::to_owned))
+                            .collect::<Option<Vec<_>>>()
+                    };
+                    let header = strings(&canonical["header"]);
+                    for (r, row) in canonical["rows"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .enumerate()
+                    {
+                        if let Some(cells) = strings(row) {
+                            if let Some(header) = &header {
+                                out.headers.insert((index, r as u64 + 1), header.clone());
+                            }
+                            out.data
+                                .insert((index, r as u64 + 1), (cells, source.clone()));
+                        }
+                    }
+                }
+                return; // Typed cells are authoritative; never parse presentation.
+            }
+            let original = value["text"].as_str().unwrap_or("");
+            let text = value["body_offset"]
+                .as_u64()
+                .and_then(|offset| original.get(offset as usize..))
+                .unwrap_or(original);
+            if value["body_offset"].is_u64() {
+                for (line, paragraph) in les_core::chat_context::prose_addresses(text, 0) {
                     out.paragraphs
                         .insert((index, line), (vec![paragraph], source.clone()));
                 }
-            }
-            if let Some(body) = value["body_offset"]
-                .as_u64()
-                .and_then(|n| text.get(n as usize..))
-                .filter(|s| {
-                    !s.trim().is_empty() && les_core::chat_context::table_rows(s).is_empty()
-                })
-            {
-                out.data
-                    .insert((index, 0), (vec![body.to_owned()], source.clone()));
+                if !text.trim().is_empty() && les_core::chat_context::table_rows(text).is_empty() {
+                    out.data
+                        .insert((index, 0), (vec![text.to_owned()], source.clone()));
+                }
             }
             let headers = les_core::chat_context::table_headers(text);
-            for (row, cells) in
-                les_core::chat_context::table_rows(value["text"].as_str().unwrap_or(""))
-            {
+            for (row, cells) in les_core::chat_context::table_rows(text) {
                 let header = headers.iter().rev().find(|(h, labels)| {
                     *h < row
                         && labels.len() == cells.len()
@@ -237,7 +290,7 @@ impl Rows {
         let object = value.as_object().ok_or("TABLE_FACTS_REQUIRED")?;
         if object
             .keys()
-            .any(|k| !["answerable", "rows", "sums"].contains(&k.as_str()))
+            .any(|k| !["answerable", "rows", "sums", "missing"].contains(&k.as_str()))
         {
             return Err("TABLE_FACTS_REQUIRED");
         }
@@ -273,7 +326,7 @@ impl Rows {
             Ok(out)
         };
         let selected = refs("rows", true)?;
-        if decision.is_some_and(|answerable| answerable == selected.is_empty()) {
+        if decision == Some(true) && selected.is_empty() {
             return Err("TABLE_FACTS_REQUIRED");
         }
         if selected.is_empty() {
@@ -283,18 +336,10 @@ impl Rows {
             {
                 return Err("TABLE_FACTS_REQUIRED");
             }
-            let indexes = self
-                .data
-                .keys()
-                .map(|(s, _)| *s)
-                .collect::<std::collections::BTreeSet<_>>();
-            let citations = indexes
-                .iter()
-                .take(16)
-                .map(|n| format!("[Источник {n}]"))
-                .collect::<Vec<_>>()
-                .join(" ");
-            return Ok(Some((format!("В прочитанных фрагментах не удалось подтвердить запрошенные показатели. Нужен подходящий документ или дополнительное чтение. {citations}"),json!({"schema":"les.table-facts.v1","status":"insufficient","rows":[],"sums":[]}))));
+            return Ok(Some((
+                "В прочитанных фрагментах не удалось подтвердить запрошенные сведения.".into(),
+                json!({"schema":"les.table-facts.v1","status":"insufficient","rows":[],"sums":[]}),
+            )));
         }
         let mut rendered = String::new();
         let mut receipt = Vec::new();
@@ -306,7 +351,12 @@ impl Rows {
                 if !rendered.is_empty() {
                     rendered.push('\n');
                 }
-                rendered.push_str(&format!("{}\n\n[Источник {}]\n", cells[0], key.0));
+                let text = if self.literal_sources.contains(&key.0) {
+                    les_core::chat_context::literal_markdown(&cells[0])
+                } else {
+                    cells[0].clone()
+                };
+                rendered.push_str(&format!("{}\n\n[Источник {}]\n", text, key.0));
                 previous_header.clear();
                 receipt.push(json!({"source_index":key.0,"row":null,"paragraph_line":key.1,"address":id.label(),
                     "kind":"source_excerpt","cells":cells,"doc_id":source["doc_id"],"source_sha256":source["source_sha256"]}));
@@ -329,7 +379,13 @@ impl Rows {
                         .join(" · ")],
                 )
             };
-            let escape = |v: &str| v.replace('|', "\\|").replace('\n', "<br>");
+            let escape = |v: &str| {
+                if self.literal_sources.contains(&key.0) {
+                    les_core::chat_context::literal_markdown(v)
+                } else {
+                    v.replace('|', "\\|").replace('\n', "<br>")
+                }
+            };
             if names != previous_header {
                 if !rendered.is_empty() {
                     rendered.push('\n');
@@ -424,12 +480,49 @@ impl Rows {
                 sums.push(json!({"column":column+1,"operands":values,"result":result,"unit":unit}));
             }
         }
+        if selected.iter().any(|id| {
+            self.get(*id)
+                .is_some_and(|(_, s)| s["table_projection_warning"].is_string())
+        }) {
+            rendered.push_str("\n\n");
+            rendered.push_str(crate::document_parser::TABLE_PROJECTION_NOTICE);
+        }
+        let missing: Vec<_> = match value.get("missing") {
+            Some(items) => items
+                .as_array()
+                .filter(|items| items.len() <= 8)
+                .ok_or("TABLE_FACTS_REQUIRED")?
+                .iter()
+                .map(|item| {
+                    let text = item
+                        .as_str()
+                        .filter(|s| !s.trim().is_empty() && s.chars().count() <= 160)
+                        .ok_or("TABLE_FACTS_REQUIRED")?;
+                    // A model-authored label is never a citation or a new factual answer.
+                    let text = text
+                        .replace(['[', ']'], "")
+                        .split_whitespace()
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    Ok(les_core::chat_context::literal_markdown(&text))
+                })
+                .collect::<Result<Vec<_>, &str>>()?,
+            None => Vec::new(),
+        };
+        if decision == Some(false) && missing.is_empty() {
+            return Err("TABLE_FACTS_REQUIRED");
+        }
+        if !missing.is_empty() {
+            rendered.push_str("\n\nВ прочитанных источниках не подтверждено — ");
+            rendered.push_str(&missing.join(", "));
+            rendered.push('.');
+        }
         if rendered.chars().count() > 16000 {
             return Err("TABLE_ANSWER_TOO_LARGE");
         }
         Ok(Some((
             rendered.trim().to_owned(),
-            json!({"schema":"les.table-facts.v1","status":"copied","rows":receipt,"sums":sums}),
+            json!({"schema":"les.table-facts.v1","status":if missing.is_empty(){"copied"}else{"partial"},"rows":receipt,"sums":sums,"missing":missing}),
         )))
     }
 }
@@ -502,6 +595,75 @@ fn display(value: i128) -> String {
 mod tests {
     use super::*;
     #[test]
+    fn unverified_pdf_layout_is_an_exact_excerpt_never_cells_for_arithmetic() {
+        let text = "|Valve|117.25|";
+        let block = json!({"schema":"les.evidence-block.v1","source_index":1,
+            "body_offset":0,"text":text,"table_geometry_unverified":true});
+        let source = json!({"index":1,"doc_id":"doc","source_sha256":"revision",
+            "table_projection_warning":"PDF_TABLE_SOURCE_MISMATCH"});
+        let objects = les_core::chat_context::execute(
+            &json!({"action":"objects","prefix":"e","values":[block.clone()]}),
+        )
+        .unwrap();
+        let render = objects[0]["render"].as_str().unwrap();
+        assert!(render.contains("[Фрагмент S1]"));
+        assert!(!render.contains("S1R") && !render.contains("C2:"));
+        assert!(Rows::supported(&[block.clone()]));
+        let rows = Rows::new(
+            &json!({"sections":[{"kind":"evidence","objects":[{"payload":block}]}]}),
+            &json!([source]),
+        );
+        assert_eq!(
+            rows.finish_checked(r#"{"answerable":true,"rows":["S1R1"],"sums":[]}"#, true)
+                .unwrap_err(),
+            "TABLE_ROW_NOT_VISIBLE"
+        );
+        let (answer, receipt) = rows
+            .finish_checked(r#"{"answerable":true,"rows":["S1"],"sums":[]}"#, true)
+            .unwrap()
+            .unwrap();
+        assert_eq!(receipt["rows"][0]["cells"], json!([text]));
+        assert!(answer.contains(crate::document_parser::TABLE_PROJECTION_NOTICE));
+        assert_eq!(
+            rows.finish_checked(
+                r#"{"answerable":true,"rows":["S1"],"sums":[{"column":1,"unit_column":null}]}"#,
+                true
+            )
+            .unwrap_err(),
+            "TABLE_VALUE_INVALID"
+        );
+    }
+    #[test]
+    fn canonical_cells_drive_model_addresses_and_values_without_markdown_reparsing() {
+        let prefix = "[Источник 1]\n";
+        let block = json!({"schema":"les.evidence-block.v1","source_index":1,"body_offset":prefix.len(),
+            "text":format!("{prefix}|Presentation|117.25|"),
+            "canonical":{"schema":"les.document-structure.v1","kind":"table","header":["Item","Quantity"],"rows":[["125*480 | DN_100","17.25"]]}});
+        let object = les_core::chat_context::execute(
+            &json!({"action":"objects","prefix":"e","values":[block.clone()]}),
+        )
+        .unwrap();
+        let render = object[0]["render"].as_str().unwrap();
+        assert!(render.contains("S1R1 C1: 125*480 | DN_100; C2: 17.25"));
+        assert!(!render.contains("117.25"));
+        let rows = Rows::new(
+            &json!({"sections":[{"kind":"evidence","objects":[{"payload":block}]}]}),
+            &json!([{"index":1,"doc_id":"doc","source_sha256":"r"}]),
+        );
+        let (answer, receipt) = rows
+            .finish_checked(r#"{"answerable":true,"rows":["S1R1"],"sums":[]}"#, true)
+            .unwrap()
+            .unwrap();
+        assert!(answer.contains("125\\*480 &#124; DN\\_100"));
+        assert_eq!(
+            receipt["rows"][0]["cells"],
+            json!(["125*480 | DN_100", "17.25"])
+        );
+        assert!(rows
+            .finish_checked(r#"{"answerable":true,"rows":["S1R2"],"sums":[]}"#, true)
+            .is_err());
+    }
+    #[test]
     fn mixed_evidence_keeps_selectable_prose_and_numeric_cells_separate() {
         let prefix = "[Source 1]\n{}\n";
         let body = "Before: 17.35 kW.\n\n|Name|Qty|\n|---|---|\n|Pump|29|\n\nAfter: 42.75 m.";
@@ -512,21 +674,28 @@ mod tests {
         let packet = json!({"sections":[{"kind":"evidence","objects":[{"payload":unit}]}]});
         let sources = json!([{"index":1,"doc_id":"doc","source_sha256":"r1"}]);
         let rows = Rows::new(&packet, &sources);
+        let terminal = json!({"sections":[{"kind":"evidence","objects":[{"payload":{
+            "schema":"les.evidence-block.v1","source_index":1,"body_offset":0,"text":body
+        }}]}]});
+        assert_eq!(
+            rows.format(true),
+            Rows::new(&terminal, &sources).format(true)
+        );
         let ids =
             &rows.format(true)["json_schema"]["schema"]["properties"]["rows"]["items"]["enum"];
-        for id in ["S1P3", "S1R7", "S1P9"] {
+        for id in ["S1P1", "S1R5", "S1P7"] {
             assert!(ids.as_array().unwrap().contains(&json!(id)));
         }
         let (text, proof) = rows
-            .finish_checked(r#"{"answerable":true,"rows":["S1P3"],"sums":[]}"#, true)
+            .finish_checked(r#"{"answerable":true,"rows":["S1P1"],"sums":[]}"#, true)
             .unwrap()
             .unwrap();
         assert_eq!(text, "Before: 17.35 kW.\n\n[Источник 1]");
-        assert_eq!(proof["rows"][0]["paragraph_line"], 3);
+        assert_eq!(proof["rows"][0]["paragraph_line"], 1);
         assert_eq!(proof["rows"][0]["kind"], "source_excerpt");
         assert_eq!(proof["rows"][0]["cells"], json!(["Before: 17.35 kW."]));
         assert!(!text.contains("Pump") && !text.contains("29") && !text.contains("42.75"));
-        for id in ["S1P7", "S1R3", "S2P3"] {
+        for id in ["S1P5", "S1R1", "S2P1"] {
             assert_eq!(
                 rows.finish_checked(
                     &json!({"answerable":true,"rows":[id],"sums":[]}).to_string(),
@@ -537,7 +706,7 @@ mod tests {
             );
         }
         assert_eq!(
-            rows.finish(r#"{"rows":["S1P3"],"sums":[{"column":1,"unit_column":null}]}"#)
+            rows.finish(r#"{"rows":["S1P1"],"sums":[{"column":1,"unit_column":null}]}"#)
                 .unwrap_err(),
             "TABLE_VALUE_INVALID"
         );
@@ -593,7 +762,19 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(proof["status"], "insufficient");
-        assert!(!answer.contains("Alpha") && !answer.contains("0.1"));
+        assert!(
+            !answer.contains("Alpha") && !answer.contains("0.1") && !answer.contains("[Источник")
+        );
+        let (answer, partial) = rows
+            .finish_checked(
+                r#"{"answerable":false,"rows":["S1R4"],"sums":[],"missing":["мощность"]}"#,
+                true,
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(partial["status"], "partial");
+        assert_eq!(partial["missing"], json!(["мощность"]));
+        assert!(answer.contains("[Источник 1]") && answer.contains("мощность"));
         assert!(rows
             .finish_checked(r#"{"answerable":true,"rows":["S1R4"],"sums":[]}"#, true)
             .unwrap()
@@ -621,6 +802,7 @@ mod tests {
         Rows {
             data,
             paragraphs: BTreeMap::new(),
+            literal_sources: HashSet::new(),
             headers: BTreeMap::from([(
                 (1, 4),
                 vec!["Item".into(), "Unit".into(), "Quantity".into()],
@@ -632,7 +814,7 @@ mod tests {
         let rows = sample();
         let (limited, receipt) = rows.finish(r#"{"rows":[],"sums":[]}"#).unwrap().unwrap();
         assert_eq!(receipt["status"], "insufficient");
-        assert!(limited.contains("В прочитанных фрагментах") && limited.contains("[Источник 1]"));
+        assert!(limited.contains("В прочитанных фрагментах") && !limited.contains("[Источник"));
         let schema = rows.format(true);
         assert!(
             schema["json_schema"]["schema"]["properties"]["rows"]["items"]["enum"]

@@ -241,6 +241,8 @@ fn read_pages(
     document: FPDF_DOCUMENT,
     ocr: Option<&crate::pdf_ocr::Ocr<'_>>,
     tables: Option<&Value>,
+    layout_warning: Option<&'static str>,
+    allow_partial_ocr: bool,
 ) -> Result<Value, &'static str> {
     let count = unsafe { pdf.FPDF_GetPageCount(document) };
     if !(0..=10_000).contains(&count) {
@@ -250,6 +252,9 @@ fn read_pages(
     let mut bytes = 0;
     let mut needs_ocr = false;
     let mut page_views = Vec::new();
+    let mut table_warnings = Vec::new();
+    let mut ocr_warnings = Vec::new();
+    let mut readable_pages = 0;
     let mut view_bytes = 0;
     for index in 0..count {
         let page = unsafe { pdf.FPDF_LoadPage(document, index) };
@@ -257,9 +262,18 @@ fn read_pages(
             return Err("PDF_PAGE_UNAVAILABLE");
         }
         let result = (|| {
-            let (mut text, native_view) = page_text(pdf, page, tables.is_none())?;
-            let view = if tables.is_some() {
-                crate::document_parser::page_view(&text, (index + 1) as u64, tables)?
+            let (mut text, native_view) =
+                page_text(pdf, page, tables.is_none() && layout_warning.is_none())?;
+            let view = if let Some(code) = layout_warning {
+                table_warnings.push(json!({"page":index+1,"code":code}));
+                None
+            } else if tables.is_some() {
+                let projection =
+                    crate::document_parser::page_projection(&text, (index + 1) as u64, tables)?;
+                if let Some(code) = projection.warning {
+                    table_warnings.push(json!({"page":index+1,"code":code}));
+                }
+                projection.text
             } else {
                 native_view
             };
@@ -277,26 +291,46 @@ fn read_pages(
             let scan = text.chars().take(20).count() < 20
                 && scan_objects(pdf, page, None, 0, text.is_empty())?;
             needs_ocr |= scan;
+            let mut unread = false;
             if let Some(ocr) = ocr.filter(|ocr| scan || ocr.reads_all_pages()) {
                 let recognition = ocr.page(pdf, page).inspect_err(|code| {
                     eprintln!(
                         "{}",
                         json!({"event":"pdf_ocr_failed","page":index+1,"reason":code})
                     );
-                })?;
+                });
+                let recognition = match recognition {
+                    Ok(value) => value,
+                    Err("OCR_NO_TEXT") if allow_partial_ocr => {
+                        unread = scan;
+                        None
+                    }
+                    Err(code) => return Err(code),
+                };
                 if scan
                     && recognition.as_ref().is_some_and(|s| s.trim().is_empty())
                     && text.trim().is_empty()
                 {
-                    return Err("OCR_READ_FAILED");
+                    if !allow_partial_ocr {
+                        return Err("OCR_READ_FAILED");
+                    }
+                    unread = true;
                 }
                 let recognized = recognition.unwrap_or_default();
+                if allow_partial_ocr && scan && recognized.trim().is_empty() {
+                    unread = true;
+                }
                 if text.trim().is_empty() {
                     text = recognized;
                 } else if !recognized.trim().is_empty() && recognized.trim() != text.trim() {
                     text.push('\n');
                     text.push_str(&recognized);
                 }
+            }
+            if unread {
+                ocr_warnings.push(json!({"page":index+1,"code":"OCR_NO_TEXT"}));
+            } else if !text.trim().is_empty() {
+                readable_pages += 1;
             }
             if !text.is_empty() {
                 bytes += text.len() + 32;
@@ -310,8 +344,11 @@ fn read_pages(
         unsafe { pdf.FPDF_ClosePage(page) };
         result?;
     }
+    if ocr.is_some() && readable_pages == 0 && !ocr_warnings.is_empty() {
+        return Err("OCR_NO_TEXT");
+    }
     Ok(
-        json!({"text":parts.join("\n\n"),"page_views":page_views,"needs_ocr":needs_ocr,"pages":count,"ocr":ocr.is_some()}),
+        json!({"text":parts.join("\n\n"),"page_views":page_views,"table_projection_warnings":table_warnings,"ocr_warnings":ocr_warnings,"needs_ocr":needs_ocr,"pages":count,"ocr":ocr.is_some()}),
     )
 }
 
@@ -399,6 +436,8 @@ fn read(library: &Library, path: &Path, options: &Value) -> Result<Value, &'stat
     if document.is_null() {
         return Err("PDF_OPEN_FAILED");
     }
+    let mut layout_warning = None;
+    let mut layout_state = Value::Null;
     let tables = if let Some(hash) = parser_hash
         .as_ref()
         .filter(|_| options["kind"] != "source_page")
@@ -408,8 +447,36 @@ fn read(library: &Library, path: &Path, options: &Value) -> Result<Value, &'stat
             unsafe { pdf.FPDF_CloseDocument(document) };
             return Err("PDF_PAGE_LIMIT");
         }
-        match crate::document_parser::pdf_tables(path, hash, count as u64) {
-            Ok(value) => value,
+        let projection =
+            (|| -> Result<(Option<Value>, Option<&'static str>, Value), &'static str> {
+                let revision = crate::document_parser::revision()?;
+                let previous = &options["pdf_table_projection_state"];
+                if crate::document_parser::known_layout_timeout(previous, hash, &revision) {
+                    // The OCR pass reuses this request's failed optional attempt,
+                    // bound to the same original and parser. It must not repeat a
+                    // whole-book timeout before it can recognize scanned pages.
+                    return Ok((
+                        None,
+                        Some(crate::document_parser::TABLE_PROJECTION_TIMEOUT),
+                        previous.clone(),
+                    ));
+                }
+                let (tables, warning) = crate::document_parser::optional_tables(
+                    crate::document_parser::pdf_tables(path, hash, count as u64),
+                )?;
+                let state = if warning.is_some() {
+                    json!({"code":"WORKER_TIMEOUT","source_sha256":hash,"parser_revision":revision})
+                } else {
+                    Value::Null
+                };
+                Ok((tables, warning, state))
+            })();
+        match projection {
+            Ok((value, warning, state)) => {
+                layout_warning = warning;
+                layout_state = state;
+                value
+            }
             Err(code) => {
                 unsafe { pdf.FPDF_CloseDocument(document) };
                 return Err(code);
@@ -423,7 +490,14 @@ fn read(library: &Library, path: &Path, options: &Value) -> Result<Value, &'stat
             read_page(pdf, document, options, parser_hash.as_deref(), ocr.as_ref())
         }
         Some("source_preview") => preview::render(pdf, document, options),
-        _ => read_pages(pdf, document, ocr.as_ref(), tables.as_ref()),
+        _ => read_pages(
+            pdf,
+            document,
+            ocr.as_ref(),
+            tables.as_ref(),
+            layout_warning,
+            options["allow_partial_ocr"] == true,
+        ),
     };
     unsafe { pdf.FPDF_CloseDocument(document) };
     if let Some(hash) = options["source_sha256"].as_str() {
@@ -432,7 +506,12 @@ fn read(library: &Library, path: &Path, options: &Value) -> Result<Value, &'stat
     if let Some(hash) = parser_hash {
         les_core::pdf_source::verify(&mut input.file, &hash)?;
     }
-    result
+    result.map(|mut value| {
+        if !layout_state.is_null() {
+            value["pdf_table_projection_state"] = layout_state;
+        }
+        value
+    })
 }
 
 fn read_page(
@@ -480,16 +559,21 @@ fn read_page(
         } else {
             None
         };
-        let tables = parser_hash
-            .filter(|_| !scanned)
-            .map(|hash| {
-                crate::document_parser::pdf_page_tables(hash, count as u64, number, || {
-                    snapshot::page(pdf, document, number)
+        let (tables, mut table_warning) = crate::document_parser::optional_tables(
+            parser_hash
+                .filter(|_| !scanned)
+                .map(|hash| {
+                    crate::document_parser::pdf_page_tables(hash, count as u64, number, || {
+                        snapshot::page(pdf, document, number)
+                    })
                 })
-            })
-            .transpose()?;
+                .transpose(),
+        )?;
         let view = if tables.is_some() {
-            crate::document_parser::page_view(&raw, number, tables.as_ref())?
+            let projection =
+                crate::document_parser::page_projection(&raw, number, tables.as_ref())?;
+            table_warning = projection.warning;
+            projection.text
         } else {
             native_view
         };
@@ -509,6 +593,7 @@ fn read_page(
         }
         if options["snapshot"] == true {
             return Ok(json!({"text":text,"page":number,"page_count":count,
+                "table_projection_warning":table_warning,
                 "ocr":scanned,"ocr_engine":if scanned{options["ocr"]["engine"].clone()}else{Value::Null},
                 "ocr_dpi":if scanned{options["ocr"]["dpi"].clone()}else{Value::Null},"ocr_numbers_verified":if scanned{json!(false)}else{Value::Null},
                 "extractor":if scanned{"les.pdfium.ocr-page.v1"}else if structured && tables.is_some(){"les.pdfium.xberg-page.v1"}else if structured{"les.pdfium.page.layout.v2"}else{"les.pdfium.page.v1"},
@@ -530,7 +615,7 @@ fn read_page(
             json!({"text":excerpt,"page":number,"page_count":count,"offset":offset,
             "next_offset":if next<count_chars {Some(next)} else {None},"complete":next==count_chars && offset==0,
             "selection":selection,"matched_query":query,
-            "total_chars":count_chars,"extractor":if structured && tables.is_some(){"les.pdfium.xberg-page.v1"}else if structured{"les.pdfium.page.layout.v2"}else{"les.pdfium.page.v1"},"source_sha256":options["source_sha256"]}),
+            "total_chars":count_chars,"table_projection_warning":table_warning,"extractor":if structured && tables.is_some(){"les.pdfium.xberg-page.v1"}else if structured{"les.pdfium.page.layout.v2"}else{"les.pdfium.page.v1"},"source_sha256":options["source_sha256"]}),
         )
     })();
     unsafe { pdf.FPDF_ClosePage(page) };

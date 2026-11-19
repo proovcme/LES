@@ -212,7 +212,10 @@ fn register(conn: &Connection, id: &str, args: &Args, now: &str) -> Result<Value
         .ok_or_else(|| Failure::missing("Набор документов удалён."))?;
     let processed = job["processed"].as_i64().unwrap_or_default();
     let total = job["total"].as_i64().unwrap_or_default();
-    let watched = !watch::binding(conn, id)?.is_null();
+    let watch_binding = watch::binding(conn, id)?;
+    let watched = !watch_binding.is_null();
+    let explicit_retry =
+        job["parse_limit"].as_i64().unwrap_or_default() > 0 && watch_binding["automatic"] != 1;
     let files = args["files"]
         .as_array()
         .filter(|files| files.len() <= 25 && (!files.is_empty() || watched && total == 0))
@@ -252,6 +255,7 @@ fn register(conn: &Connection, id: &str, args: &Args, now: &str) -> Result<Value
             let same_path = existing["source_path"] == path;
             let same_size = existing["file_size"].as_i64() == Some(size);
             let same_time = existing["file_mtime"].as_f64() == Some(mtime);
+            let retry_failed = explicit_retry && existing["status"] == "ERROR";
             if same_content && same_path && same_size {
                 if !same_time {
                     conn.execute(
@@ -259,7 +263,8 @@ fn register(conn: &Connection, id: &str, args: &Args, now: &str) -> Result<Value
                         params![doc_id, mtime],
                     )?;
                 }
-            } else if (watched && file["changed"] == 1)
+            } else if retry_failed
+                || (watched && file["changed"] == 1)
                 || compared.is_some()
                 || !same_size
                 || !same_time
@@ -270,7 +275,7 @@ fn register(conn: &Connection, id: &str, args: &Args, now: &str) -> Result<Value
             {
                 conn.execute("UPDATE documents SET status='PENDING',file_size=?2,file_mtime=?3,source_path=?4 WHERE id=?1",
                              params![doc_id,size,mtime,path])?;
-                if watched && file["changed"] == 1 {
+                if retry_failed || watched && file["changed"] == 1 {
                     conn.execute("UPDATE documents SET parse_attempts=0,retryable=0,retry_after=0,last_error='',error_code='',stage='' WHERE id=?1", [doc_id])?;
                 }
             }

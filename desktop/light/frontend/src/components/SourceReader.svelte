@@ -3,11 +3,12 @@
   import { request, errorMessage } from '../lib/api';
   import { renderAnswer } from '../lib/markdown';
   import Icon from './Icon.svelte';
-  let { docId, datasetId, digest, page, pdf, initialOffset = 0, viewSHA }: {
+  let { docId, datasetId, digest, page, pdf, initialOffset = 0, viewSHA, workbook }: {
     docId: string; datasetId?: string; digest?: string; page: number; pdf: boolean;
     initialOffset?: number; viewSHA?: string;
+    workbook?: { sheet?: string; row?: number };
   } = $props();
-  type Read = { result: { text?: string; passages?: { text: string }[]; next_offset?: number | null;
+  type Read = { warnings?: string[]; result: { text?: string; passages?: { text: string }[]; next_offset?: number | null;
     view_sha256?: string; index_revision?: string; ocr?: boolean; coverage?: string; unread_visual_count?: number } };
   let result = $state<Read | null>(null); let busy = $state(false); let error = $state('');
   let cursors = $state([0]); let position = $state(0); let alive = true;
@@ -29,11 +30,18 @@
       if (datasetId) args.dataset_id = datasetId;
       if (digest) args.source_sha256 = digest;
       if (pdf) args.page = page;
+      if (workbook?.sheet) {
+        args.sheet_name = workbook.sheet;
+        if (workbook.row) {
+          args.row_start = args.row_end = workbook.row;
+          args.limit = 1;
+        }
+      }
       if (previous?.index_revision) args.index_revision = previous.index_revision;
       const pinnedView = previous?.view_sha256 ?? initialPin;
       if (pinnedView) args.view_sha256 = pinnedView;
       const value = await request<Read>('/api/rag/sources/call', { method: 'POST', signal: controller.signal,
-        body: JSON.stringify({ tool: pdf ? 'read_pdf_source' : 'read_source', args }) });
+        body: JSON.stringify({ tool: pdf ? 'read_pdf_source' : workbook ? 'read_excel_source' : 'read_source', args }) });
       if (alive) { result = value; position = index; }
     } catch (failure) { if (alive) error = errorMessage(failure); }
     finally { clearTimeout(timer); if (alive) busy = false; }
@@ -45,19 +53,21 @@
   function restart() { result = null; initialPin = undefined; cursors = [0]; position = 0; void read(0); }
 </script>
 <section class="source-reading" aria-label="Текст первоисточника" aria-busy={busy}>
-  <h3>{pdf ? `Текст страницы ${page}` : 'Текст документа'}</h3>
+  <h3>{pdf ? `Текст страницы ${page}` : workbook?.row ? 'Строка оригинала' : 'Текст документа'}</h3>
   {#if busy}<p role="status">Читаю оригинал{pdf ? ' и при необходимости распознаю скан' : ''}…</p>{/if}
   {#if error}<p class="error" role="alert">{error}</p><div class="source-actions"><button class="quiet" disabled={busy} onclick={() => read(attempted)}>Повторить чтение</button><button class="quiet" disabled={busy} onclick={restart}>Начать заново</button></div>{/if}
   {#if result}
+    {#each result.warnings ?? [] as warning}<p class="notice" role="status">{warning}</p>{/each}
     {#if result.result.ocr}<p class="notice">{pdf ? 'Текст распознан со скана.' : 'В документе распознаны встроенные изображения.'} Возможны ошибки букв, чисел и расположения ячеек — проверьте оригинал.</p>{/if}
     {#if result.result.unread_visual_count}<p class="notice">Объектов без распознанного текста: {result.result.unread_visual_count}. Оригиналы сохранены; их содержимое требует визуальной проверки.</p>{/if}
-    <div class="answer-text">{@html html}</div>
-    <nav class="source-actions" aria-label="Порции текста">
+    {#if text}<div class="answer-text">{@html html}</div>{:else}<p class="muted">{workbook?.row ? 'В этой строке нет сохранённых данных.' : 'Нет извлечённого текста.'}</p>{/if}
+    {#if !workbook?.row}<nav class="source-actions" aria-label="Порции текста">
       {#if cursors[0] > 0}<button class="quiet" disabled={busy} onclick={restart}>К началу документа</button>{/if}
       <button class="quiet" disabled={busy || position === 0} onclick={() => read(position - 1)}><Icon name="back" />Предыдущая порция</button>
       <span class="muted">Порция {position + 1}</span>
       <button class="quiet" disabled={busy || next == null} onclick={forward}>Читать дальше</button>
     </nav>
     {#if !error && !busy && next == null}<p class="muted">{cursors[0] > 0 ? 'Достигнут конец извлечённого текста.' : pdf ? 'Все порции текста страницы показаны.' : 'Все порции извлечённого текста показаны.'}</p>{/if}
+    {/if}
   {/if}
 </section>

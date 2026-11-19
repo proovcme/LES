@@ -22,6 +22,42 @@ const START_INDEXING: &str = "/api/light/internal-intake-parse";
 const ENGINE: &str = "rust.intake";
 const MAX_FILES: usize = 50_000;
 
+#[cfg(test)]
+#[test]
+fn default_registration_admits_supported_macro_workbooks_and_presentations_without_parsing() {
+    let root = std::env::temp_dir().join(format!("les-native-suffix-scan-{}", std::process::id()));
+    fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    for name in ["Workbook.XLSM", "Slides.pptx", "Ignored.unknown"] {
+        fs::write(
+            root.join(name),
+            b"Opaque source; registration must not parse it",
+        )
+        .unwrap();
+    }
+    let policy = Policy {
+        allow_any: true,
+        roots: vec![],
+        suffixes: les_core::indexable_extensions().into_iter().collect(),
+    };
+    let files = scan(&root, &policy, false).unwrap();
+    assert_eq!(files.len(), 2);
+    assert!(files
+        .iter()
+        .any(|v| v["file_name"].as_str().unwrap().ends_with("Workbook.XLSM")));
+    assert!(files
+        .iter()
+        .any(|v| v["file_name"].as_str().unwrap().ends_with("Slides.pptx")));
+    for name in ["Workbook.XLSM", "Slides.pptx", "Ignored.unknown"] {
+        assert_eq!(
+            fs::read(root.join(name)).unwrap(),
+            b"Opaque source; registration must not parse it"
+        );
+    }
+    assert!(root.starts_with(std::env::temp_dir().canonicalize().unwrap()));
+    fs::remove_dir_all(root).unwrap();
+}
+
 pub struct Service {
     wake: Notify,
 }
@@ -518,11 +554,9 @@ fn policy(state: &Path) -> Option<Policy> {
             }
         })
         .collect();
+    let default_suffixes = les_core::indexable_extensions().join(",");
     let suffixes = settings
-        .get(
-            "RAG_UPLOAD_SUFFIXES",
-            ".pdf,.docx,.doc,.eml,.emlx,.msg,.xlsx,.xls,.csv,.json,.jsonl,.md,.txt",
-        )
+        .get("RAG_UPLOAD_SUFFIXES", &default_suffixes)
         .split(',')
         .map(|s| s.trim().to_lowercase())
         .filter(|s| !s.is_empty())

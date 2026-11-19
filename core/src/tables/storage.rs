@@ -524,3 +524,129 @@ pub(super) fn read(request: &Value) -> Result<Value> {
         json!({"rows":rows,"row_count":total,"offset":offset,"next_offset":if next<total{Some(next)}else{None},"complete":next==total,"source_sha256":hash,"owner":"rust.tables.parquet"}),
     )
 }
+
+/// Scan the pinned artifact once and page the ordered match list. Query
+/// scoring uses values, with frequent terms discounted within the workbook.
+pub(super) fn select(request: &Value) -> Result<Value> {
+    let (reader, hash) = open(path(request)?)?;
+    if request["source_sha256"] != hash {
+        return Err("PARQUET_SOURCE_CHANGED");
+    }
+    let offset = request["offset"].as_u64().ok_or(INVALID)? as usize;
+    let limit = request["limit"]
+        .as_u64()
+        .filter(|v| (1..=16).contains(v))
+        .ok_or(INVALID)? as usize;
+    let sheet = request["sheet_name"].as_str();
+    let start = request["row_start"].as_u64();
+    let end = request["row_end"].as_u64().or(start);
+    let query = field(request, "q").trim();
+    let lexical = crate::lexical::reading(&[query.to_owned()])?;
+    let keys: Vec<_> = lexical["documents"][0]["terms"]
+        .as_object()
+        .ok_or(INVALID)?
+        .keys()
+        .collect();
+    let mut retained = Vec::new();
+    let mut batch = Vec::new();
+    let mut frequencies = vec![0usize; keys.len()];
+    let mut scanned = 0usize;
+    let mut matches = 0usize;
+    let mut bytes = 0usize;
+    let mut process = |batch: &mut Vec<Value>| -> Result<()> {
+        let documents = if query.is_empty() {
+            Value::Null
+        } else {
+            let values = batch
+                .iter()
+                .map(super::normalize::row_values)
+                .collect::<Vec<_>>();
+            crate::lexical::reading(&values)?
+        };
+        for (i, row) in batch.drain(..).enumerate() {
+            let terms: Vec<_> = keys
+                .iter()
+                .enumerate()
+                .filter_map(|(n, key)| {
+                    documents["documents"][i]["terms"]
+                        .get(*key)
+                        .is_some()
+                        .then_some(n)
+                })
+                .collect();
+            if !query.is_empty() && terms.is_empty() {
+                continue;
+            }
+            for &term in &terms {
+                frequencies[term] += 1;
+            }
+            let position = matches;
+            matches += 1;
+            if !query.is_empty() || (offset..offset.saturating_add(limit)).contains(&position) {
+                bytes += field(&row, "raw_row").len();
+                if bytes > 24 * 1024 * 1024 {
+                    return Err(LIMIT);
+                }
+                retained.push((row, terms, position));
+            }
+        }
+        Ok(())
+    };
+    for row in reader
+        .get_row_iter(None)
+        .map_err(|error| failure(&error, READ))?
+    {
+        let row = row_value(&row.map_err(|error| failure(&error, READ))?)?;
+        scanned += 1;
+        if sheet.is_some_and(|s| row["sheet_name"].as_str() != Some(s)) {
+            continue;
+        }
+        if let (Some(first), Some(last), Some(header), Some(raw)) = (
+            start,
+            end,
+            row["source_header_row"].as_u64(),
+            row["source_header_raw"].as_str(),
+        ) {
+            if (first..=last).contains(&header) {
+                batch.push(
+                    json!({"sheet_name":row["sheet_name"],"source_row":header,"raw_row":raw}),
+                );
+            }
+        }
+        let coordinate = row["source_row"].as_u64();
+        if start.is_some_and(|s| coordinate.is_none_or(|n| n < s))
+            || end.is_some_and(|e| coordinate.is_none_or(|n| n > e))
+        {
+            continue;
+        }
+        batch.push(row);
+        if batch.len() >= 128 {
+            process(&mut batch)?;
+        }
+    }
+    process(&mut batch)?;
+    let mut rows = Vec::new();
+    if !query.is_empty() {
+        let weight = |tokens: &[usize]| {
+            tokens
+                .iter()
+                .map(|&i| ((scanned as f64 + 1.0) / (frequencies[i] as f64 + 1.0)).ln() + 1.0)
+                .sum::<f64>()
+        };
+        retained.sort_by(|a, b| {
+            weight(&b.1)
+                .total_cmp(&weight(&a.1))
+                .then_with(|| a.2.cmp(&b.2))
+        });
+        rows.extend(
+            retained
+                .into_iter()
+                .skip(offset)
+                .take(limit)
+                .map(|(row, _, _)| row),
+        );
+    } else {
+        rows.extend(retained.into_iter().map(|(row, _, _)| row));
+    }
+    output(json!({"rows":rows,"matches":matches,"row_count":scanned,"source_sha256":hash}))
+}

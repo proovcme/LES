@@ -52,7 +52,7 @@ pub fn list() -> Value {
         tool("list_datasets","Показать пользовательские наборы Леса и число готовых фрагментов.",true,false,&[],json!({})),
         tool("list_documents","Показать файлы набора, статусы обработки, размеры и ссылки на оригиналы.",true,false,&["dataset_id"],
             json!({"dataset_id":dataset,"q":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":100},"offset":{"type":"integer","minimum":0}})),
-        source_tool("search_sources","Найти источники: hybrid-поиск с точными ссылками и редакцией индекса. view=context — автоматическое дочитывание и отбор контекста, как в чате, без модели ответов; view=documents — только каталог. В обычном поиске продолжай через next_offset с прежним index_revision и параметрами."),
+        source_tool("search_sources","Найти источники: hybrid-поиск с точными ссылками и редакцией индекса. view=context — автоматическое дочитывание и отбор контекста, как в чате, без модели ответов; view=overview при недоступном обзоре возвращает подборку context со статусом context_fallback; view=documents — только каталог. В обычном поиске продолжай через next_offset с прежним index_revision и параметрами."),
         source_tool("read_source","Дочитать найденный doc_id: Word из проверенного оригинала целыми абзацами и строками таблиц, остальные форматы — индексированными разделами. Передавай source_sha256. Продолжение Word закрепляется view_sha256, индексированных разделов — index_revision. coverage=bounded не означает весь документ; view=parts/part — вложенные объекты Word."),
         source_tool("read_pdf_source","Читать настоящую физическую страницу PDF, включая настроенный OCR скана, по doc_id и page. Передавай source_sha256; длинную страницу дочитывай с next_offset и view_sha256 до null. OCR не подтверждает точность чисел; ошибка чтения не подтверждает отсутствие информации."),
         source_tool("read_excel_source","Читать проверенные индексированные разделы книги, с листами и адресами ячеек. Это не вычисление формул и не полная выгрузка всех ячеек. Для последовательного чтения используй read_source."),
@@ -79,7 +79,7 @@ pub fn list() -> Value {
         tool("les_chat","Начать или продолжить диалог в Лесе. Использует назначенную модель, историю, память, источники, навыки и инструменты чата. Может выполнять действия по вашему запросу.",false,true,&["question"],
             json!({"question":{"type":"string","minLength":1,"maxLength":20000},"session_id":{"type":"string"},"project_id":project,
                 "dataset_ids":{"type":"array","items":{"type":"string"}},"target_files":{"type":"array","items":{"type":"string"}},
-                "attachment_id":{"type":"string"},"reranker_enabled":{"type":"boolean"},
+                "attachment_id":{"type":"string"},
                 "selected_sources_only":{"type":"boolean"},"mode":{"enum":["agent","search","chat"],"default":"agent"}}))
     ]})
 }

@@ -253,6 +253,17 @@ def test_original_link_supports_unindexed_files_and_exact_legacy_provenance(nati
     assert part.headers['content-range']==f'bytes 5-14/{path.stat().st_size}'
     assert t.client.head('/api/documents/by-id/registered-document/raw').raise_for_status().content==b''
 
+@pytest.mark.parametrize('native_turn', ['public'], indirect=True)
+def test_native_open_rejects_cross_origin_and_stale_citations_before_launch(native_turn):
+    source_pdf(native_turn)
+    endpoint = '/api/documents/by-id/registered-document/open-native'
+    foreign = native_turn.client.post(endpoint, headers={'Sec-Fetch-Site': 'cross-site'})
+    assert foreign.status_code == 403 and foreign.json()['code'] == 'SOURCE_OPEN_ORIGIN_DENIED'
+    stale = native_turn.client.post(endpoint, headers={'Sec-Fetch-Site': 'same-origin'},
+                                    params={'source_sha256': '0' * 64})
+    assert stale.status_code == 409 and stale.json()['code'] == 'SOURCE_REVISION_CHANGED'
+
+
 def test_explicit_selected_file_binds_its_short_name_but_never_another_file(native_turn):
     t=native_turn;source_pdf(t)
     t.scripts.extend([{'tool':'read_pdf_source','args':{'dataset_id':'ds','doc_name':'Source.pdf','page':2}},{'text':'Прочитано [Источник 1]'}])

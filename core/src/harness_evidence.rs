@@ -149,7 +149,10 @@ fn pdf_read_coverage(request: &Value) -> Result<Value, &'static str> {
         {
             return Ok(json!({"complete":false,"code":"PDF_REVISION_CHANGED"}));
         }
-        if v["selection"] == "literal_match" {
+        if matches!(
+            v["selection"].as_str(),
+            Some("literal_match" | "query_excerpts")
+        ) {
             continue;
         }
         let key = (
@@ -304,6 +307,20 @@ mod source_tests {
             check(vec![part(0, "абв", "one"), part(0, "абв", "one")]),
             false
         );
+    }
+
+    #[test]
+    fn query_excerpts_do_not_schedule_a_full_page_read() {
+        let query = json!({"action":"pdf_read_coverage","results":[{
+            "tool":"read_pdf_source","status":"ok","result":{
+                "doc_id":"doc","source_sha256":"revision","page":2,"offset":0,
+                "total_chars":5000,"selection":"query_excerpts","passages":[{"text":"short excerpt"}]
+            }
+        }]});
+        let coverage = execute(&query).unwrap();
+        assert_eq!(coverage["complete"], true);
+        assert_eq!(coverage["pages"], 0);
+        assert!(coverage["continuation"].is_null());
     }
 }
 

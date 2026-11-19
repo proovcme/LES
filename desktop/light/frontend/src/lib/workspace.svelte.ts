@@ -44,7 +44,6 @@ export class Workspace {
   draftStatus = $state('');
   draftConflict = $state<Draft | null>(null);
   elapsed = $state(0);
-  reranker = $state(false);
   retrievalMode = $state<RetrievalMode>(retrievalPreference());
   private writer?: DraftWriter;
   private timer?: ReturnType<typeof setTimeout>;
@@ -310,7 +309,7 @@ export class Workspace {
       this.messages.push({ role: 'user', text: question }, { role: 'ai', text: '', meta: {} });
       reply = this.messages.length - 1;
       await streamChat({ question, session_id: session.session_id, project_id: session.project_id,
-        scope: session.scope, mode: session.role, reranker_enabled: this.reranker, attachment_id: attachment?.attachment_id,
+        scope: session.scope, mode: session.role, attachment_id: attachment?.attachment_id,
         retrieval_mode: this.retrievalMode,
       }, this.controller.signal, (item) => {
         if (!this.alive) return;

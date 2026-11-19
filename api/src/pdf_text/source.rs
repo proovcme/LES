@@ -1,10 +1,11 @@
 //! Original-backed snapshots: one OCR run per page, stable Unicode cursors.
 use super::*;
 use std::{
-    collections::VecDeque,
-    sync::{Mutex, OnceLock},
+    collections::{HashMap, VecDeque},
+    sync::{Arc, Mutex, OnceLock, Weak},
 };
-static CACHE: OnceLock<Mutex<VecDeque<(String, Value)>>> = OnceLock::new();
+static CACHE: OnceLock<Mutex<VecDeque<(String, Value, usize)>>> = OnceLock::new();
+static PAGE_READS: OnceLock<Mutex<HashMap<String, Weak<Mutex<()>>>>> = OnceLock::new();
 const MAX_CACHE_BYTES: usize = 8 * 1024 * 1024;
 
 /// A request-scoped Windows handle that disallows writes and replacement.
@@ -60,7 +61,35 @@ fn verify(
     .map_err(str::to_owned)
 }
 
-pub(super) fn read(mut input: Value, lease: Option<&ReadLease>) -> Result<Value, String> {
+fn cached_page(key: &str) -> Result<Option<Value>, String> {
+    let mut cache = CACHE
+        .get_or_init(Default::default)
+        .lock()
+        .map_err(|_| "PDF_READ_FAILED")?;
+    let Some(index) = cache.iter().position(|(cached, _, _)| cached == key) else {
+        return Ok(None);
+    };
+    let entry = cache.remove(index).unwrap();
+    let result = entry.1.clone();
+    cache.push_back(entry);
+    Ok(Some(result))
+}
+
+fn page_gate(key: &str) -> Result<Arc<Mutex<()>>, String> {
+    let mut reads = PAGE_READS
+        .get_or_init(Default::default)
+        .lock()
+        .map_err(|_| "PDF_READ_FAILED")?;
+    if let Some(gate) = reads.get(key).and_then(Weak::upgrade) {
+        return Ok(gate);
+    }
+    reads.retain(|_, gate| gate.strong_count() > 0);
+    let gate = Arc::new(Mutex::new(()));
+    reads.insert(key.into(), Arc::downgrade(&gate));
+    Ok(gate)
+}
+
+pub(super) fn read(input: Value, lease: Option<&ReadLease>) -> Result<Value, String> {
     let original = les_core::pdf_source::resolve(&input)?;
     // A warm cache never conceals a missing/replaced original.
     verify(&original, lease)?;
@@ -89,17 +118,14 @@ pub(super) fn read(mut input: Value, lease: Option<&ReadLease>) -> Result<Value,
         derived_key
     ])
     .to_string();
-    let mut cache = CACHE
-        .get_or_init(Default::default)
-        .lock()
-        .map_err(|_| "PDF_READ_FAILED")?;
-    let mut value = if let Some(i) = cache.iter().position(|(k, _)| *k == key) {
-        let entry = cache.remove(i).unwrap();
-        let value = entry.1.clone();
-        cache.push_back(entry);
-        value
-    } else {
-        let args = input["source"].clone();
+    let read_page = || -> Result<Value, String> {
+        // Slow I/O is shared only by requests for this exact page/version.
+        let gate = page_gate(&key)?;
+        let _reading = gate.lock().map_err(|_| "PDF_READ_FAILED")?;
+        if let Some(value) = cached_page(&key)? {
+            return Ok(value);
+        }
+        let mut input = input.clone();
         input["source"]
             .as_object_mut()
             .ok_or("PDF_SOURCE_INVALID")?
@@ -137,24 +163,24 @@ pub(super) fn read(mut input: Value, lease: Option<&ReadLease>) -> Result<Value,
             }
             full
         };
-        input["source"] = args;
         let size = full.to_string().len();
-        while cache.len() >= 32
-            || cache
-                .iter()
-                .map(|(_, v)| v.to_string().len())
-                .sum::<usize>()
-                + size
-                > MAX_CACHE_BYTES
-        {
-            if cache.pop_front().is_none() {
-                break;
-            }
-        }
         if size <= MAX_CACHE_BYTES {
-            cache.push_back((key, full.clone()));
+            let mut cache = CACHE
+                .get_or_init(Default::default)
+                .lock()
+                .map_err(|_| "PDF_READ_FAILED")?;
+            while cache.len() >= 32
+                || cache.iter().map(|(_, _, bytes)| bytes).sum::<usize>() + size > MAX_CACHE_BYTES
+            {
+                cache.pop_front();
+            }
+            cache.push_back((key.clone(), full.clone(), size));
         }
-        full
+        Ok(full)
+    };
+    let mut value = match cached_page(&key)? {
+        Some(value) => value,
+        None => read_page()?,
     };
     let text = value["text"]
         .as_str()
@@ -211,6 +237,13 @@ pub(super) fn read(mut input: Value, lease: Option<&ReadLease>) -> Result<Value,
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
+    #[test]
+    fn slow_page_does_not_lock_a_different_page() {
+        let first = page_gate("first-audit-page").unwrap();
+        let _reading = first.lock().unwrap();
+        assert!(Arc::ptr_eq(&first, &page_gate("first-audit-page").unwrap()));
+        assert!(page_gate("second-audit-page").unwrap().try_lock().is_ok());
+    }
     #[test]
     fn lease_prevents_writes_and_replacement_only_until_the_request_ends() {
         let root = std::env::temp_dir().join(format!("les-pdf-lease-{}", std::process::id()));

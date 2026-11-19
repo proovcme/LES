@@ -108,6 +108,9 @@ mod pdf;
 mod storage;
 mod word;
 use pdf::valid_hash;
-pub(crate) use pdf::{page_view, pdf_page_tables, pdf_tables};
+pub(crate) use pdf::{
+    known_layout_timeout, optional_tables, page_projection, pdf_page_tables, pdf_tables,
+    projection_notice, read_projection_warning, TABLE_PROJECTION_NOTICE, TABLE_PROJECTION_TIMEOUT,
+};
 use storage::{bounded, folder, state, temporary};
 pub(crate) use word::{legacy_word, word};

@@ -59,7 +59,8 @@ def build(root=ROOT):
     return receipt
 
 
-def stage(root, runtime):
+def validated_assets(root):
+    """Check the existing build without copying files, installing or rebuilding."""
     directory = root / FRONTEND
     # Old fixture/minimal source trees have no frontend, and remain packageable.
     if not (directory / 'package.json').is_file():
@@ -88,6 +89,14 @@ def stage(root, runtime):
             raise ValueError('Unsupported frontend build asset')
         if file_digest(path) != expected:
             raise ValueError('Frontend build asset hash mismatch')
+    return dist, actual
+
+
+def stage(root, runtime):
+    checked = validated_assets(root)
+    if checked is None:
+        return
+    dist, actual = checked
     target = runtime / FRONTEND / 'dist'
     target.mkdir(parents=True, exist_ok=True)
     for name in sorted(actual):
@@ -98,9 +107,15 @@ def stage(root, runtime):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--test', action='store_true', help='Run frontend tests without rebuilding')
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument('--test', action='store_true', help='Run frontend tests without rebuilding')
+    modes.add_argument('--check', action='store_true', help='Validate an existing build without rebuilding')
     args = parser.parse_args()
-    if args.test:
+    if args.check:
+        if validated_assets(ROOT) is None:
+            raise RuntimeError('Frontend source is missing')
+        print('Frontend build and receipt verified')
+    elif args.test:
         subprocess.run([npm_command(), 'test'], cwd=ROOT / FRONTEND, check=True)
     else:
         receipt = build()

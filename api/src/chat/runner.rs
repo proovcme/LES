@@ -120,7 +120,8 @@ pub async fn run(
         candidate_documents = result["result"]["candidate_documents"].clone();
         prefetch = json!({"coverage":result["result"]["coverage"],
             "index_revision":result["result"]["index_revision"],"read_receipt":result["result"]["read_receipt"],"candidates":evidence.sources.len(),"selection_policy":result["result"]["selection_policy"],"candidate_documents":found_documents,
-            "fusion":result["result"]["fusion"],"fusion_trace":result["result"]["fusion_trace"],"read_failures":result["result"]["read_failures"]});
+            "fusion":result["result"]["fusion"],"fusion_trace":result["result"]["fusion_trace"],"read_failures":result["result"]["read_failures"],
+            "addressed_row_count":result["result"]["addressed_row_count"]});
         journal
             .checkpoint(
                 "retrieval_prefetch",
@@ -182,6 +183,7 @@ pub async fn run(
     let mut citation_retry = false;
     let mut table_validation_retry = false;
     let mut answer_window_retry = false;
+    let mut citation_focus_expanded = false;
     let mut table_feedback = Value::Null;
     let mut table_rows = super::table_facts::Rows::default();
     loop {
@@ -206,12 +208,46 @@ pub async fn run(
                 if native {
                     complete_pending(&mut exchanges, &agent.stop_reason());
                 }
-                let proofs = evidence.required_blocks();
-                let mut required = proofs.clone();
+                // A source-only multi-document Pull can answer after any
+                // round. Give each read document a place in that window
+                // before filling it with additional units from one read.
+                let ranked_reads = if source_reading && final_answer {
+                    evidence.answer_blocks(1)
+                } else if source_reading && retrieval_mode == "pull" {
+                    evidence.answer_blocks(2)
+                } else {
+                    None
+                };
+                let (mut initial, mut required) = match ranked_reads {
+                    Some(blocks) => (blocks, Vec::new()),
+                    None => (evidence.optional_blocks(), evidence.required_blocks()),
+                };
+                let terminal_sources =
+                    (final_answer || direct) && numeric_grounded && source_reading;
+                let mut focused_citations = false;
+                if final_answer
+                    && answer_window_retry
+                    && !citation_focus_expanded
+                    && terminal_sources
+                    && required.is_empty()
+                    && turn.profile["mode"] == "search"
+                    && super::table_facts::Rows::supported(&initial)
+                {
+                    if let Some(focused) = evidence.citation_focus(
+                        turn.request["question"].as_str().unwrap_or(""),
+                        &tools::sources::selected_files(&turn),
+                        &initial,
+                    ) {
+                        initial = focused;
+                        focused_citations = true;
+                    }
+                }
+                if terminal_sources {
+                    for block in initial.iter_mut().chain(&mut required) {
+                        Evidence::terminal_block(block);
+                    }
+                }
                 let proof_blocks = required.len();
-                // Discovery identities are available before inspection; facts
-                // enter the answer window only after an actual source read.
-                let initial = evidence.optional_blocks();
                 let table_mode = numeric_grounded
                     && (!table_feedback.is_null()
                         || super::table_facts::Rows::supported(
@@ -313,8 +349,13 @@ pub async fn run(
                     .ok_or("CONTEXT_REQUIRED_SECTION_OVERFLOW")?;
                 let mut question = json!({"question":turn.request["question"],"attachment_context":turn.request["attachment_context"],"output_directive":turn.request["output_directive"],"response_length":turn.request["response_length"],"source_scope":turn.scope,"target_file":turn.request["target_file"],"target_files":turn.request["target_files"]});
                 if turn.scope["document_grounding_enabled"] == true {
-                    question["source_coverage_note"] = json!("Поисковые выдержки не означают полный просмотр файлов. Отсутствие факта в короткой выдаче не доказывает его отсутствие в документе. Для такого вывода дочитай нужный раздел либо явно ограничь ответ прочитанными фрагментами.");
-                    question["context_window_note"] = json!("Полные результаты сохранены в журнале. Предыдущие чтения и пары вызовов могут не поместиться в это окно. Цитируй только доказательства из текущей видимой карты; для отсутствующего фрагмента повтори чтение. Карточка файла или квитанция вызова не заменяет его текст.");
+                    if terminal_sources {
+                        question["source_coverage_note"] =
+                            json!("Ограничь выводы прочитанными фрагментами.");
+                    } else {
+                        question["source_coverage_note"] = json!("Поисковые выдержки не означают полный просмотр файлов. Отсутствие факта в короткой выдаче не доказывает его отсутствие в документе. Для такого вывода дочитай нужный раздел либо явно ограничь ответ прочитанными фрагментами.");
+                        question["context_window_note"] = json!("Полные результаты сохранены в журнале. Предыдущие чтения и пары вызовов могут не поместиться в это окно. Цитируй только доказательства из текущей видимой карты; для отсутствующего фрагмента повтори чтение. Карточка файла или квитанция вызова не заменяет его текст.");
+                    }
                     if !direct && !final_answer {
                         question["reader_contract"] = json!("Оригинал PDF проверяет read_pdf_source(doc_id, page из карты источников). read_source читает индекс и не выполняет просьбу открыть оригинал. Ошибка чтения не подтверждает оригинал.");
                     }
@@ -350,7 +391,7 @@ pub async fn run(
                 if prefetch["coverage"] == "no_matches" {
                     question["source_search_note"] = json!("Первичный поиск в выбранных документах не нашёл подтверждения. Отметь ограничение, если дальнейшее чтение не дало источника.");
                 }
-                if final_answer {
+                if final_answer && !table_mode {
                     question["final_answer"]=json!("Ответь по прочитанным данным. Новые вызовы инструментов недоступны. Если сведений недостаточно, обозначь это.");
                 }
                 if citation_retry {
@@ -359,13 +400,9 @@ pub async fn run(
                         question["table_selection_error"] = json!({"code":table_feedback["code"],
                             "instruction":"Проверь адреса выбранных строк, абзацев и колонок по нынешнему контексту. Сумма допускается только по табличным числовым ячейкам с совместимыми единицами. Если вопрос не требует сложения, оставь sums пустым. Прежний выбор не является доказательством."});
                     }
-                    question["citation_format_required"] = if answer_window_retry && table_mode {
-                        json!("Контекст расширен за счёт освобождённого места схем инструментов. Заново проверь исходный вопрос по нынешним строкам и верни JSON rows. Прежний черновик не является доказательством.")
-                    } else if table_mode {
-                        json!("Предыдущая форма не подтверждена. Верни JSON rows со скопированными адресами S…R…, S…P… или явно показанным S… из нынешнего контекста. Не переписывай значения.")
-                    } else {
-                        json!("Оформи ответ со ссылками [Источник N] на прочитанные доказательства. Используй только номера из видимой карты источников. Каждое фактическое утверждение свяжи с его источником. Не добавляй новые факты и не выдавай отсутствие сведений в выдержках за отсутствие в файле.")
-                    };
+                    if !table_mode {
+                        question["citation_format_required"] = json!("Оформи ответ со ссылками [Источник N] на прочитанные доказательства. Используй только номера из видимой карты источников. Каждое фактическое утверждение свяжи с его источником. Не добавляй новые факты и не выдавай отсутствие сведений в выдержках за отсутствие в файле.");
+                    }
                 }
                 // Search may answer from a verified prefetch while keeping
                 // refinement tools available. Do not force a redundant action
@@ -468,7 +505,7 @@ pub async fn run(
                 };
                 let trace = les_core::chat_context::execute(
                     &json!({"action":"prepared_trace","packet":packed["packet"],"purpose":"native_chat","source_map":evidence.sources,
-                        "evidence":initial.iter().chain(&proofs).collect::<Vec<_>>()}),
+                        "evidence":initial.iter().chain(required.iter().take(proof_blocks)).collect::<Vec<_>>()}),
                 )?;
                 if visible != published_sources {
                     journal
@@ -476,7 +513,7 @@ pub async fn run(
                         .await?;
                     published_sources = visible.clone();
                 }
-                contexts.push(json!({"delivery":"prepared","context":trace,"sources":visible,"schema_reserved_tokens":reserve,"table_selection":table_mode}));
+                contexts.push(json!({"delivery":"prepared","context":trace,"sources":visible,"schema_reserved_tokens":reserve,"table_selection":table_mode,"focused_citations":focused_citations}));
                 sink.emit("sources", json!({"source_map":visible,"sources":visible}))
                     .await?;
                 sink.progress("generation", "Модель читает контекст и отвечает")
@@ -603,6 +640,9 @@ pub async fn run(
                         disclosed.remove(0);
                     }
                 }
+                if payload["_pull_evidence"].is_object() {
+                    evidence.add(&payload["_pull_evidence"]);
+                }
                 evidence.add(&payload);
                 let projected = evidence.projection(&payload, tools.read_max_chars);
                 let effect = effective(&payload);
@@ -641,20 +681,32 @@ pub async fn run(
                 } else {
                     false
                 };
+                let omitted_reads = evidence.omitted_explicit_reads(&visible);
+                let table_window = contexts
+                    .last()
+                    .is_some_and(|c| c["table_selection"] == true)
+                    && evidence.read_omitted(&visible);
+                let omitted_document = omitted_reads.iter().any(|read| {
+                    read["doc_id"].as_str().is_some_and(|doc_id| {
+                        !visible
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .any(|source| source["doc_id"] == doc_id)
+                    })
+                });
                 if !citation_retry
+                    && !answer_window_retry
                     && tools.table.is_none()
                     && !review_active
                     && super::inspection::source_only(agent.results())
                     && contexts.last().is_some_and(|c| {
-                        c["table_selection"] == true
-                            && c["schema_reserved_tokens"].as_u64().is_some_and(|n| n > 1)
+                        c["schema_reserved_tokens"].as_u64().is_some_and(|n| n > 1)
                     })
-                    && evidence.document_omitted(&visible)
+                    && (table_window || omitted_document)
                 {
-                    // Preparing the answer window is distinct from repairing
-                    // a selection made in that window. Neither reopens tools.
                     answer_window_retry = true;
-                    citation_retry = true;
+                    citation_retry = table_window;
                     journal
                         .checkpoint(
                             "retrieval_prefetch",
@@ -663,8 +715,11 @@ pub async fn run(
                         .await?;
                     journal.checkpoint("reset", json!("")).await?;
                     sink.emit("reset", json!("")).await?;
-                    sink.progress("verification", "Проверяю продолжение документа")
-                        .await?;
+                    sink.progress(
+                        "verification",
+                        "Освобождаю место для прочитанных источников",
+                    )
+                    .await?;
                     agent.prepare_answer_window()?;
                     continue;
                 }
@@ -684,10 +739,19 @@ pub async fn run(
                 if selected_evidence && visible.as_array().is_none_or(Vec::is_empty) {
                     return Err("SOURCE_EVIDENCE_MISSING".into());
                 }
-                if visible
-                    .as_array()
-                    .is_some_and(|v| v.iter().any(|s| s["evidence_kind"] == "physical_pdf_page"))
-                {
+                if visible.as_array().is_some_and(|v| {
+                    v.iter().any(|s| {
+                        matches!(
+                            s["evidence_kind"].as_str(),
+                            Some(
+                                "physical_pdf_page"
+                                    | "physical_pdf_unit"
+                                    | "physical_word_section"
+                                    | "physical_workbook_row"
+                            )
+                        )
+                    })
+                }) {
                     sink.progress("verification", "Проверяю источники ответа")
                         .await?;
                     tools::sources::verify_physical(context.clone(), &visible).await?;
@@ -700,6 +764,33 @@ pub async fn run(
                         .is_some_and(|c| c["table_selection"] == true),
                 ) {
                     Ok(Some((text, receipt))) => {
+                        if contexts
+                            .last()
+                            .is_some_and(|c| c["focused_citations"] == true)
+                            && (receipt["status"] == "insufficient"
+                                || receipt["missing"]
+                                    .as_array()
+                                    .is_some_and(|parts| !parts.is_empty())
+                                || visible.as_array().into_iter().flatten().any(|source| {
+                                    !receipt["rows"]
+                                        .as_array()
+                                        .into_iter()
+                                        .flatten()
+                                        .any(|row| row["doc_id"] == source["doc_id"])
+                                }))
+                        {
+                            citation_focus_expanded = true;
+                            table_validation_retry = true;
+                            journal.checkpoint("reset", json!("")).await?;
+                            sink.emit("reset", json!("")).await?;
+                            sink.progress(
+                                "verification",
+                                "Проверяю оставшиеся фрагменты источников",
+                            )
+                            .await?;
+                            agent.revise_completion()?;
+                            continue;
+                        }
                         terminal["text"] = json!(text);
                         super::table_facts::quote_sources(&mut visible, &receipt);
                         table_facts = receipt;
@@ -717,6 +808,7 @@ pub async fn run(
                             return Err(code.into());
                         }
                         table_validation_retry = true;
+                        citation_focus_expanded = true;
                         citation_retry = true;
                         journal.checkpoint("reset", json!("")).await?;
                         sink.emit("reset", json!("")).await?;
@@ -733,6 +825,7 @@ pub async fn run(
                     &json!({"answer":terminal["text"],"sources":visible}),
                 )?;
                 if selected_evidence
+                    && table_facts["status"] != "insufficient"
                     && (citations["indexes"].as_array().is_none_or(Vec::is_empty)
                         || citations["unknown_indexes"]
                             .as_array()
@@ -816,7 +909,7 @@ pub async fn run(
                 let completed = json!({"answer":answer,"response":answer,"sources":names,"source_map":visible,"citation_map":visible,
                     "history_id":journal.history,"latency_sec":started.elapsed().as_secs_f64(),"tokens":terminal["usage"]["completion_tokens"].as_u64().unwrap_or(0),"crag_status":"UNVALIDATED","success":true,
                     "source_scope":{"resolved":turn.scope["resolved_dataset_ids"],"used":visible.as_array().into_iter().flatten().map(|s|s["dataset_id"].clone()).collect::<Vec<_>>()},
-                    "query_route":{"channel":"generic","reason":"native_chat"},"retrieval_trace":{"engine":"rust.chat","status":if evidence.read_failures.is_empty(){"ok"}else{"degraded"},"read_failures":evidence.read_failures,"rounds":agent.rounds,"mode":retrieval_mode,"prefetch":prefetch,"contexts":contexts,"citation_syntax":citations,"grounding_retry":grounding_retry,"citation_retry":citation_retry,"answer_window_retry":answer_window_retry,"source_inspection":evidence.reading_trace()},
+                    "query_route":{"channel":"generic","reason":"native_chat"},"retrieval_trace":{"engine":"rust.chat","status":if evidence.read_failures.is_empty(){"ok"}else{"degraded"},"read_failures":evidence.read_failures,"omitted_reads":omitted_reads,"rounds":agent.rounds,"mode":retrieval_mode,"prefetch":prefetch,"contexts":contexts,"citation_syntax":citations,"grounding_retry":grounding_retry,"citation_retry":citation_retry,"answer_window_retry":answer_window_retry,"source_inspection":evidence.reading_trace()},
                     "artifact":{"completion_status":if !summary.is_null()&&summary["status"]!="recorded"{"incomplete"}else{"completed"},"execution_receipt":receipt,"execution_summary":summary,"validation":if table_facts.is_null(){"not_performed"}else if table_facts["status"]=="insufficient"{"insufficient_evidence"}else{"source_rows_verified"},"table_facts":table_facts,"tool_results":agent.results(),"egress_tag":turn.egress_tag,"attachment":{
                         "attachment_id":turn.attachment["attachment_id"],"name":turn.attachment["name"],"source_sha256":turn.attachment["source_sha256"],"media_type":turn.attachment["media_type"],"truncated":turn.attachment["truncated"]}},"model":turn.connection.public()});
                 agent.accept_completed(json!({"text":answer})).await?;

@@ -3,6 +3,7 @@ use super::chunks::{offsets, trim, Measure};
 use regex::Regex;
 use serde_json::{json, Value};
 use std::{borrow::Cow, sync::LazyLock};
+mod structured;
 
 static DATA_URI: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)data:[^\s\x1c-\x1f;,]{1,120}(?:;[^\s\x1c-\x1f,]{1,80})*;base64,[A-Za-zİıſK0-9+/=\s\x1c-\x1f]{128,}").unwrap()
@@ -12,23 +13,7 @@ static CONTROL: LazyLock<Regex> =
 static SPACES: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[ \t]{3,}").unwrap());
 static NEWLINES: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\n{4,}").unwrap());
 
-pub(super) fn execute(
-    request: &Value,
-    measure: Option<&Measure<'_>>,
-) -> Result<Value, &'static str> {
-    let text = request["text"]
-        .as_str()
-        .ok_or("DOCUMENT_CHUNKING_INVALID")?;
-    let budget = request["size"]
-        .as_u64()
-        .filter(|&n| n > 0)
-        .and_then(|n| usize::try_from(n).ok())
-        .ok_or("DOCUMENT_CHUNKING_INVALID")?;
-    let minimum = request["minimum"]
-        .as_u64()
-        .and_then(|n| usize::try_from(n).ok())
-        .ok_or("DOCUMENT_CHUNKING_INVALID")?;
-
+fn sanitize(text: &str) -> (String, Value) {
     let mut uris = 0;
     let mut controls = 0;
     let clean = if text
@@ -51,6 +36,60 @@ pub(super) fn execute(
     let clean = SPACES.replace_all(&clean, "  ");
     let clean = NEWLINES.replace_all(&clean, "\n\n\n");
     let clean = trim(&clean);
+    (
+        clean.to_owned(),
+        json!({"data_uri_removed":uris,"base64_runs_removed":binary,"control_chars_removed":controls,"sanitized":uris!=0||binary!=0||controls!=0}),
+    )
+}
+pub(super) fn execute(
+    request: &Value,
+    measure: Option<&Measure<'_>>,
+) -> Result<Value, &'static str> {
+    let text = request["text"]
+        .as_str()
+        .ok_or("DOCUMENT_CHUNKING_INVALID")?;
+    let budget = request["size"]
+        .as_u64()
+        .filter(|n| *n > 0)
+        .and_then(|n| usize::try_from(n).ok())
+        .ok_or("DOCUMENT_CHUNKING_INVALID")?;
+    let minimum = request["minimum"]
+        .as_u64()
+        .and_then(|n| usize::try_from(n).ok())
+        .ok_or("DOCUMENT_CHUNKING_INVALID")?;
+    let (clean, quality) = sanitize(text);
+    let clean = clean.as_str();
+    if request["structural"] == true {
+        let mut unit = request
+            .get("reading_unit")
+            .filter(|u| u.is_object())
+            .cloned();
+        if let Some(unit) = &mut unit {
+            for key in ["body", "heading", "context_prefix", "table_header"] {
+                if let Some(text) = unit[key].as_str() {
+                    // Preserve separators around contextual fields while using
+                    // the same sanitation as unstructured source input.
+                    let ending = if text.ends_with("\n\n") {
+                        "\n\n"
+                    } else if text.ends_with('\n') {
+                        "\n"
+                    } else {
+                        ""
+                    };
+                    unit[key] = json!(format!("{}{ending}", sanitize(text).0));
+                }
+            }
+        }
+        let parts = structured::execute(
+            clean,
+            budget,
+            request["overlap"].as_u64().unwrap_or(0) as usize,
+            request["search_prefix"].as_str().unwrap_or(""),
+            measure,
+            unit.as_ref(),
+        )?;
+        return Ok(json!({"parts":parts,"quality":quality}));
+    }
     let mut parts = Vec::new();
     let indices = offsets(clean);
     let count = indices.len() - 1;
@@ -85,10 +124,7 @@ pub(super) fn execute(
             start = indices.binary_search(&next).expect("character boundary");
         }
     }
-    Ok(json!({"parts":parts,"quality":{
-        "data_uri_removed":uris, "base64_runs_removed":binary,
-        "control_chars_removed":controls, "sanitized":uris != 0 || binary != 0 || controls != 0
-    }}))
+    Ok(json!({"parts":parts,"quality":quality}))
 }
 
 fn remove_binary_runs(text: &str) -> (Cow<'_, str>, usize) {

@@ -1,5 +1,27 @@
 use super::*;
 use std::{cell::RefCell, io::Write};
+#[test]
+fn native_side_stories_keep_their_table_units_and_contiguous_ranges() {
+    use crate::document::canonical;
+    let native = "## Notes\n\n|Item|Quantity|\n|---|---|\n|Valve|17.25|\n";
+    let structure = json!({"schema":canonical::SCHEMA,"blocks":[{"id":"main","kind":"paragraph","text":"Body"},native_block(native,"native:related").unwrap()]});
+    let view = canonical::units(&structure, 4000).unwrap();
+    assert_eq!(
+        view.iter()
+            .map(|u| u["body"].as_str().unwrap())
+            .collect::<String>(),
+        canonical::render(&structure).unwrap()
+    );
+    assert!(view.iter().any(
+        |u| u["kind"] == "table_rows" && u["body"].as_str().unwrap().contains("|Valve|17.25|")
+    ));
+    let mut end = 0;
+    for (i, u) in view.iter().enumerate() {
+        assert_eq!(u["ordinal"], i);
+        assert_eq!(u["start_byte"], end);
+        end = u["end_byte"].as_u64().unwrap();
+    }
+}
 fn archive(body: &str, members: &[(&str, &[u8])]) -> Vec<u8> {
     let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
     let xml=format!("<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" xmlns:r=\"r\" xmlns:v=\"v\" xmlns:mc=\"mc\" xmlns:wps=\"wps\"><w:body>{body}</w:body></w:document>");

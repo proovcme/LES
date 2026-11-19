@@ -1,4 +1,7 @@
 //! No OCR, model hub, URL fetching or indexing. The LES host owns those policies.
+#[path = "../../core/src/document/canonical.rs"]
+#[allow(dead_code)] // The isolated parser renders; the host owns reading budgets.
+mod canonical;
 mod pdf;
 mod word;
 use serde_json::{json, Value};

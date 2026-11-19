@@ -3,6 +3,7 @@ pub mod artifacts;
 mod normalize;
 mod prepare;
 mod storage;
+pub(crate) use prepare::has_column_labels;
 use serde_json::{json, Value};
 use std::sync::LazyLock;
 pub(super) type Result<T> = std::result::Result<T, &'static str>;
@@ -21,6 +22,7 @@ pub fn execute(request: &Value) -> Result<Value> {
         Some("chunks") => normalize::chunks(request),
         Some("write") => storage::write(request),
         Some("read") => storage::read(request),
+        Some("select") => storage::select(request),
         Some("schema") => Ok(SCHEMA.clone()),
         Some("references") => artifacts::refs(request),
         Some("sum_rows") => sum_rows(request),

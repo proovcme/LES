@@ -4,6 +4,7 @@ use serde_json::{json, Value};
 pub struct Failure {
     pub code: String,
     pub status: StatusCode,
+    pub checkpoint: Option<(String, usize)>,
 }
 impl From<&str> for Failure {
     fn from(code: &str) -> Self {
@@ -47,6 +48,10 @@ impl Failure {
             || code == "CHAT_QUESTION_REQUIRED"
             || code == "CHAT_RESPONSE_LENGTH_INVALID"
             || code == "CHAT_RETRIEVAL_MODE_INVALID"
+            || matches!(
+                code,
+                "SOURCE_OFFSET_INVALID" | "SOURCE_SNAPSHOT_OFFSET_INVALID"
+            )
         {
             StatusCode::UNPROCESSABLE_ENTITY
         } else if matches!(code, "MODEL_QUEUE_TIMEOUT" | "CHAT_SERVICE_BUSY") {
@@ -57,6 +62,7 @@ impl Failure {
         Self {
             code: code.into(),
             status,
+            checkpoint: None,
         }
     }
     pub fn payload(&self) -> Value {
@@ -74,10 +80,13 @@ impl Failure {
             "SOURCE_ATOMIC_UNIT_OVERFLOW" => "Целая строка таблицы или абзац не помещается. Увеличьте max_chars; фрагмент не был обрезан.",
             "OCR_NO_TEXT" => "На странице не удалось распознать текст. Это не подтверждает отсутствие сведений в оригинале.",
             "OCR_UNAVAILABLE" => "Локальный OCR недоступен. Проверьте установленный обработчик распознавания; ответ по скану не подтверждён.",
+            "SOURCE_SNAPSHOT_OFFSET_INVALID"=>"Контекст поиска — готовый снимок, его нельзя листать через offset. Для продолжения чтения найденного документа используйте read_source, для страницы PDF — read_pdf_source.",
+            "SOURCE_OFFSET_INVALID"=>"Неверная позиция чтения. Используйте next_offset из предыдущей порции вместе с закреплённой редакцией; старые и новые порции нельзя смешивать.",
             "SOURCE_CONTINUATION_REVISION_REQUIRED"=>"Для продолжения передайте index_revision из предыдущего ответа. Не объединяйте выдержки разных поколений индекса.",
             "SOURCE_INDEX_NOT_READY"=>"В выбранных наборах нет готовых поисковых фрагментов. Подготовьте документы к поиску; это не отсутствие ответа в оригиналах.",
             "INDEX_NOT_CONFIGURED"=>"Поиск по документам ещё не настроен. Подготовьте набор к поиску в разделе «Данные» и повторите вопрос.",
             "INDEX_STORAGE_UNAVAILABLE"=>"Поисковое хранилище недоступно. Проверьте состояние Леса и повторите вопрос после восстановления.",
+            "INDEX_SOURCE_IDENTITY_INVALID"=>"В поисковом индексе не хватает идентификатора или редакции документа. Повторите обработку набора; ответ по этим данным не подтверждён.",
             "PDF_PAGE_VIEW_INVALID"=>"Повреждена сохранённая структура страницы PDF. Повторно обработайте документ; ответ по этой странице не подтверждён.",
             "TABLE_FACTS_REQUIRED"|"TABLE_ROW_NOT_VISIBLE"=>"Не удалось связать числовой ответ с прочитанными ячейками. Ответ не подтверждён; уточните вопрос или повторите чтение.",
             "TABLE_VALUE_INVALID"|"TABLE_UNITS_MISMATCH"=>"Не удалось проверить расчёт по выбранным ячейкам: проверьте значения и единицы. Пустые ячейки не считаются нулём.",
@@ -122,7 +131,12 @@ impl Failure {
             value if value.starts_with("TOOL_")=>"Инструмент не завершил действие. Откройте подробности; Лес не считает его выполненным.",
             _=>"Не удалось завершить запрос. Подробности сохранены в журнале. Проверьте подключение модели и повторите действие."
         };
-        json!({"code":self.code,"detail":detail,"message":detail,"retryable":self.status!=StatusCode::UNPROCESSABLE_ENTITY})
+        let mut payload = json!({"code":self.code,"detail":detail,"message":detail,"retryable":self.status!=StatusCode::UNPROCESSABLE_ENTITY});
+        if let Some((stage, count)) = &self.checkpoint {
+            payload["stage"] = json!(stage);
+            payload["model_call"] = json!(count);
+        }
+        payload
     }
 }
 pub type Result<T> = std::result::Result<T, Failure>;

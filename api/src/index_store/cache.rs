@@ -38,7 +38,7 @@ async fn prepare(context: &Context, store: &Store, body: &Value) -> Result<usize
     let limit = (500_000 / dimension).clamp(1, 256);
     'pages: loop {
         let mut request = json!({"filter":{"must":must},"limit":limit,
-            "with_payload":["dataset_id","file_name","embedding_fingerprint","content_hash"],
+            "with_payload":["dataset_id","file_name","embedding_fingerprint","content_hash","embedding_content_hash"],
             "with_vector":vector_fields});
         if !offset.is_null() {
             request["offset"] = offset;
@@ -58,9 +58,8 @@ async fn prepare(context: &Context, store: &Store, body: &Value) -> Result<usize
             {
                 return Err(UNAVAILABLE);
             }
-            let Some(hash) = payload["content_hash"]
-                .as_str()
-                .filter(|value| is_hash(value))
+            let Some(hash) =
+                les_core::search_context::cache_key(payload).filter(|value| is_hash(value))
             else {
                 continue;
             };

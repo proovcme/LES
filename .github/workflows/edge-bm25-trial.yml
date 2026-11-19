@@ -1,0 +1,59 @@
+name: Edge BM25 copy candidate
+on:
+  pull_request:
+    paths: ['vector/**', 'api/**', '.github/workflows/edge-bm25-trial.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: edge-bm25-copy-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  native:
+    runs-on: windows-2022
+    timeout-minutes: 100
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/core/target
+      CARGO_INCREMENTAL: '0'
+      CARGO_BUILD_JOBS: '1'
+      CARGO_PROFILE_RELEASE_LTO: 'false'
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16'
+      CARGO_PROFILE_RELEASE_OPT_LEVEL: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            core -> target
+            vector -> ../core/target
+            api -> ../core/target
+          cache-on-failure: true
+      - name: Test storage adapter
+        run: |
+          cargo fmt --manifest-path vector/Cargo.toml --check
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cargo test --locked --release --manifest-path vector/Cargo.toml
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cargo build --locked --release --manifest-path vector/Cargo.toml
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Retain storage candidate early
+        uses: actions/upload-artifact@v4
+        with:
+          name: edge-bm25-storage-${{ github.sha }}
+          path: core/target/release/les-vector.exe
+          retention-days: 3
+      - name: Test and build API for real local MCP
+        run: |
+          cargo test --locked --release --manifest-path api/Cargo.toml --features edge
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cargo build --locked --release --manifest-path api/Cargo.toml --features edge
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $proof = @{ schema = 'les.edge-bm25-build.v1'; source_commit = '${{ github.sha }}'; api_sha256 = (Get-FileHash core/target/release/les-api.exe -Algorithm SHA256).Hash.ToLower(); vector_sha256 = (Get-FileHash core/target/release/les-vector.exe -Algorithm SHA256).Hash.ToLower() }
+          $proof | ConvertTo-Json | Set-Content core/target/release/bm25-build.json -Encoding utf8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: edge-bm25-api-${{ github.sha }}
+          path: |
+            core/target/release/les-api.exe
+            core/target/release/bm25-build.json
+          retention-days: 3

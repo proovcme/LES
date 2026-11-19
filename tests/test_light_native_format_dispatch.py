@@ -80,6 +80,63 @@ def test_large_table_is_navigation_projection_with_full_parquet(tmp_path):
     assert len(read_rows(root/value['nodes'][0]['payload']['parquet_path']))==31
 
 
+def test_workbook_preserves_sparse_data_and_addresses_even_without_clear_headers(tmp_path):
+    original = tmp_path / 'sparse.xlsx'
+    book = Workbook()
+    sheet = book.active
+    sheet.title = 'Реестр'
+    sheet.append(['ID', 'Qty'])
+    sheet.append(['early-proof', 7])
+    sheet.append(['detail one', 'detail two', 'detail three'])
+    sheet.cell(20002, 1, 'late-proof')
+    sheet.cell(20002, 2, 731)
+    other = book.create_sheet('Поздняя шапка')
+    other.cell(21, 1, 'Наименование')
+    other.cell(21, 2, 'Количество')
+    other.cell(22, 1, 'late-header-proof')
+    other.cell(22, 2, 19)
+    book.save(original)
+
+    result = dispatch(original, tmp_path / 'data')
+    assert any(n['payload']['row'] == 2 and 'early-proof' in n['text'] for n in result['nodes'])
+    assert any(n['payload']['row'] == 22 and 'late-header-proof' in n['text'] for n in result['nodes'])
+    payload = result['nodes'][0]['payload']
+    request = {'action':'select','path':str(tmp_path/'data'/payload['parquet_path']),
+               'source_sha256':payload['parquet_sha256'],'offset':0,'limit':1}
+    for q, locator in [
+        ('late-proof', {}),
+        ('', {'sheet_name':'Реестр','row_start':20002,'row_end':20002}),
+    ]:
+        selected = native_core.required('tables', request={**request, **locator, 'q':q})
+        row, = selected['rows']
+        assert row['source_row'] == 20002 and '731' in row['raw_row']
+
+
+@pytest.mark.parametrize('count', [600, 601])
+def test_workbook_tail_stays_readable_across_index_projection_threshold(tmp_path, count):
+    original = tmp_path / 'workbook.xlsx'
+    book = Workbook()
+    sheet = book.active
+    sheet.title = 'Позиции'
+    sheet.append(['Наименование', 'Количество', 'Ед. изм.'])
+    for i in range(count - 1):
+        sheet.append([f'Крепёж {i:04}', i + 1, 'шт.'])
+    sheet.append(['Секция маркерная МК-901', 731, 'компл.'])
+    book.save(original)
+    data = tmp_path / 'data'
+    result = dispatch(original, data)
+    assert result['count'] == (count if count == 600 else 1)
+    payload = result['nodes'][0]['payload']
+    request = {'action':'select','path':str(data/payload['parquet_path']),
+               'source_sha256':payload['parquet_sha256'],'offset':0,'limit':1}
+    selected = native_core.required('tables', request={**request, 'q':'Секция маркерная МК-901'})
+    row, = selected['rows']
+    assert (row['sheet_name'], row['source_row']) == ('Позиции', count + 1)
+    assert '731' in row['raw_row'] and 'компл.' in row['raw_row']
+    with pytest.raises(native_core.NativeCoreError, match='PARQUET_SOURCE_CHANGED'):
+        native_core.required('tables', request={**request, 'source_sha256':'0'*64})
+
+
 def test_raw_node_spool_is_created_in_rust_and_never_overwritten(tmp_path):
     path=tmp_path/'book.xlsx';source(path);spool=tmp_path/'a.nodes'
     value=dispatch(path,tmp_path/'data',node_spool=str(spool))

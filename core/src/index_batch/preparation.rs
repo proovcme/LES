@@ -29,7 +29,9 @@ pub(super) fn prepare(
     revision: &str,
 ) -> Result<usize> {
     let mut reader = Nodes::open(input)?;
-    let mut builder = crate::document::nodes::Builder::new(config)?;
+    let mut config = config.clone();
+    config["source_name"] = json!(file);
+    let mut builder = crate::document::nodes::Builder::new(&config)?;
     let mut offset = 0;
     while offset < count {
         let batch = reader.take(&json!({"offset":offset,"limit":(count-offset).min(512)}))?;

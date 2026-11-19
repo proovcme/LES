@@ -58,6 +58,65 @@ pub(crate) fn activate(db: &Connection, request: &Value, name: &str) -> Result<(
     }
     Ok(())
 }
+/// Resolve the published table for one exact document revision.
+pub fn active(
+    database: &Path,
+    content_root: &Path,
+    dataset: &str,
+    file: &str,
+    source: &str,
+) -> Result<Option<(std::path::PathBuf, String)>> {
+    if !relative(dataset) || dataset.contains(['/', '\\']) || !hash(source) {
+        return Err(INVALID);
+    }
+    let Some(db) = crate::workspace::connection(database, false).map_err(|_| CATALOG)? else {
+        return Ok(None);
+    };
+    let exists: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='les_table_artifacts')",
+        [], |row| row.get(0),
+    ).map_err(|_| CATALOG)?;
+    if !exists {
+        return Ok(None);
+    }
+    let mut statement = db
+        .prepare(
+            "SELECT path,sha256 FROM les_table_artifacts WHERE dataset_id=?1 AND file_name=?2
+        AND source_sha256=?3 ORDER BY path LIMIT 2",
+        )
+        .map_err(|_| CATALOG)?;
+    let mut rows = statement
+        .query(params![dataset, file, source])
+        .map_err(|_| CATALOG)?;
+    let Some(row) = rows.next().map_err(|_| CATALOG)? else {
+        return Ok(None);
+    };
+    let path: String = row.get(0).map_err(|_| CATALOG)?;
+    let checksum: String = row.get(1).map_err(|_| CATALOG)?;
+    if rows.next().map_err(|_| CATALOG)?.is_some()
+        || !relative(&path)
+        || !path.starts_with("_parquet/.les-versions/")
+        || !hash(&checksum)
+    {
+        return Err(INVALID);
+    }
+    let root = content_root
+        .canonicalize()
+        .map_err(|_| "PARQUET_SOURCE_UNAVAILABLE")?;
+    let base = root
+        .join(dataset)
+        .canonicalize()
+        .map_err(|_| "PARQUET_SOURCE_UNAVAILABLE")?;
+    let path = base
+        .join(path)
+        .canonicalize()
+        .map_err(|_| "PARQUET_SOURCE_UNAVAILABLE")?;
+    if !base.starts_with(&root) || !path.starts_with(&base) {
+        return Err("PARQUET_PATH_INVALID");
+    }
+    Ok(Some((path, checksum)))
+}
+
 pub fn verify(request: &Value, content_root: &Path) -> Result<()> {
     if !request["rows"]
         .as_array()

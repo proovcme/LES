@@ -43,6 +43,9 @@ pub(crate) struct Builder {
     tokenizer: Option<Arc<tokenizer::Local>>,
     nodes: Vec<Value>,
     bytes: usize,
+    source_name: String,
+    overlap: usize,
+    structural: bool,
 }
 impl Builder {
     pub(crate) fn new(config: &Value) -> Result<Self> {
@@ -78,6 +81,12 @@ impl Builder {
             tokenizer,
             nodes: Vec::new(),
             bytes: 0,
+            source_name: config["source_name"].as_str().unwrap_or("").to_owned(),
+            structural: config["structural"] == true,
+            overlap: config["overlap"]
+                .as_u64()
+                .unwrap_or(if config["unit"] == "tokens" { 64 } else { 0 })
+                as usize,
         })
     }
     pub(crate) fn push(&mut self, mut node: Value, ordinal: usize) -> Result<()> {
@@ -99,7 +108,41 @@ impl Builder {
         } else {
             self.minimum
         };
-        let request = json!({"text":text,"size":self.budget,"minimum":minimum});
+        let mut search_prefix = String::new();
+        if self.structural && !self.source_name.is_empty() {
+            // Repeated ancestor folders are catalog scope, not document text.
+            // The full path remains in citation identity, outside embedding input.
+            let label = self
+                .source_name
+                .rsplit(['/', '\\'])
+                .next()
+                .unwrap_or(&self.source_name);
+            search_prefix.push_str(&format!("Документ: {label}\n"));
+        }
+        for (key, label) in [("page", "Страница"), ("sheet_name", "Лист")] {
+            if !self.structural {
+                break;
+            }
+            if present(&node["payload"][key]) {
+                search_prefix.push_str(&format!("{label}: {}\n", string(&node["payload"][key])));
+            }
+        }
+        let reading_unit = node["payload"]
+            .get("word_reading_view")
+            .or_else(|| node["payload"].get("source_reading_unit"));
+        let literal = if self.structural {
+            reading_unit
+                .map(super::canonical::search_unit)
+                .transpose()?
+                .flatten()
+        } else {
+            None
+        };
+        let search_text = literal
+            .as_ref()
+            .and_then(|u| u["text"].as_str())
+            .unwrap_or(text);
+        let request = json!({"text":search_text,"size":self.budget,"minimum":minimum,"structural":self.structural,"overlap":self.overlap,"search_prefix":search_prefix,"reading_unit":literal.as_ref().or(reading_unit)});
         let local = self.tokenizer.as_ref();
         let measure = |value: &str| local.unwrap().count(value);
         let prepared = embedding_chunks::execute(
@@ -131,17 +174,25 @@ impl Builder {
                 value["payload"] = json!({});
             }
             let payload = value["payload"].as_object_mut().unwrap();
+            payload.remove("source_reading_unit");
+            if self.structural {
+                payload.insert(
+                    "search_context_schema".into(),
+                    json!("les.search-context.v1"),
+                );
+                payload.insert("search_context_prefix".into(), json!(search_prefix));
+                payload.insert(
+                    "embedding_content_hash".into(),
+                    json!(sha1(&format!("{search_prefix}{text}"))),
+                );
+            }
+            if part["requires_source_read"] == true {
+                payload.insert("source_read_required".into(), json!(true));
+            }
             // A physical-page reading view belongs to one live indexed anchor,
             // not to every embedding slice of that anchor.
             if child > 0 {
-                for field in [
-                    "pdf_page_view",
-                    "pdf_page_view_sha256",
-                    "pdf_page_view_schema",
-                    "word_reading_view",
-                    "word_reading_sha256",
-                    "word_reading_schema",
-                ] {
+                for field in ["pdf_page_view", "word_reading_view"] {
                     payload.remove(field);
                 }
             }
@@ -196,7 +247,9 @@ impl Builder {
 }
 
 pub(crate) fn execute(request: &Value) -> Result<Value> {
-    let mut builder = Builder::new(&request["config"])?;
+    let mut config = request["config"].clone();
+    config["source_name"] = request["file_name"].clone();
+    let mut builder = Builder::new(&config)?;
     for (index, node) in request["nodes"]
         .as_array()
         .ok_or(INVALID)?

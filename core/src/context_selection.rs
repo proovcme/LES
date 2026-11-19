@@ -3,7 +3,7 @@
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 mod discovery;
-pub use discovery::catalog;
+pub use discovery::{catalog, catalog_title};
 // Source volume, not the number of short Word paragraphs, is the primary
 // memory bound. Kept below the original 2048 * 100000-character worst case.
 pub const MAX_SOURCE_UNITS: usize = 16384;
@@ -25,7 +25,7 @@ fn tokens(texts: &[String]) -> Result<Vec<BTreeSet<String>>, &'static str> {
     for batch in texts.chunks(256) {
         // Context-only morphology; the persisted lexical analyzer, postings
         // and dense vectors are unchanged. Codes/digits keep exact tokens.
-        let prepared = crate::lexical::versioned(batch, crate::lexical::SNOWBALL)?;
+        let prepared = crate::lexical::reading(batch)?;
         for row in prepared["documents"]
             .as_array()
             .ok_or("CONTEXT_SELECTION_INVALID")?
@@ -54,11 +54,31 @@ fn cost(unit: &Value, identity_reserve: usize) -> usize {
         });
     unit["text"].as_str().unwrap_or("").chars().count() + header.max(identity_reserve)
 }
+fn content_key(unit: &Value) -> String {
+    format!(
+        "{}\0{}",
+        if unit["self_contained"] == true {
+            String::new()
+        } else {
+            normalized(unit["heading"].as_str().unwrap_or(""))
+        },
+        normalized(unit["text"].as_str().unwrap_or(""))
+    )
+}
 
 /// Input units have text, source, unit_id, optional group (physical document),
 /// optional rank (retrieved rank; hydrated units inherit their parent's rank).
 /// All supplied origins must already have passed scope/revision checks.
 pub fn select(request: &Value) -> Result<Value, &'static str> {
+    select_units(request, false)
+}
+
+/// Rank candidates for the model packer, which owns the context budget.
+pub fn rank_for_model(request: &Value) -> Result<Value, &'static str> {
+    select_units(request, true)
+}
+
+fn select_units(request: &Value, model_pack: bool) -> Result<Value, &'static str> {
     let query = request["question"]
         .as_str()
         .filter(|s| s.len() <= 80000)
@@ -87,6 +107,7 @@ pub fn select(request: &Value) -> Result<Value, &'static str> {
         .unwrap_or(0)
         .min(16384) as usize;
     let mut units: Vec<Value> = Vec::new();
+    let originals_pending = request["originals_pending"] == true;
     let mut keys = HashMap::new();
     let mut identities = BTreeSet::new();
     for unit in input {
@@ -109,17 +130,27 @@ pub fn select(request: &Value) -> Result<Value, &'static str> {
         if body_key.is_empty() {
             continue;
         }
-        let key = format!(
-            "{}\0{}",
-            if unit["self_contained"] == true {
-                String::new()
-            } else {
-                normalized(unit["heading"].as_str().unwrap_or(""))
-            },
-            body_key
-        );
+        // An equal search excerpt cannot establish equality of unread parents.
+        // After original reading, complete equal units can share their text.
+        let key = if originals_pending {
+            format!(
+                "{}\0{}",
+                unit.get("read_identity").unwrap_or(&unit["source"]),
+                content_key(unit)
+            )
+        } else {
+            content_key(unit)
+        };
         if let Some(&index) = keys.get(&key) {
             let previous: &mut Value = &mut units[index];
+            if let Some(rank) = unit["source_rank"].as_u64() {
+                if previous["source_rank"]
+                    .as_u64()
+                    .is_none_or(|old| rank < old)
+                {
+                    previous["source_rank"] = json!(rank);
+                }
+            }
             if let Some(rank) = unit["rank"].as_u64() {
                 if previous["rank"].as_u64().is_none_or(|old| rank < old) {
                     previous["rank"] = json!(rank);
@@ -138,6 +169,28 @@ pub fn select(request: &Value) -> Result<Value, &'static str> {
             units.push(unit);
         }
     }
+    // The copy-only RRF control shares the exact same identity/content
+    // normalization, but has no lexical vote or length-based reranking.
+    // Ready-JSON admission at the caller owns its budgets, not this ordering.
+    match request["policy"].as_str() {
+        Some("rrf-order-v1") => {
+            units.sort_by_key(|u| {
+                let rank = u["rank"].as_u64();
+                (
+                    rank.is_none(),
+                    rank.or_else(|| u["source_rank"].as_u64())
+                        .unwrap_or(u64::MAX),
+                )
+            });
+            return Ok(
+                json!({"units":units,"selection":{"schema":"les.context-selection.v1",
+                "policy":"rrf-order-v1","input_units":input.len(),"complete_corpus":false,
+                "budget_owner":"ready_envelope","semantic_selection":false}}),
+            );
+        }
+        None | Some("coverage-mmr-v1" | "document-coverage-v1") => {}
+        _ => return Err("CONTEXT_SELECTION_INVALID"),
+    }
     // Vocabulary statistics use unique content, so copies do not outvote an
     // independent source. Names/paths cannot manufacture textual relevance.
     let mut texts = vec![query.to_owned()];
@@ -151,13 +204,21 @@ pub fn select(request: &Value) -> Result<Value, &'static str> {
     let terms = tokens(&texts)?;
     let q = &terms[0];
     let body = &terms[1..];
+    // Keep exploratory origins separate without letting copied text inflate IDF.
+    let mut unique_content = BTreeSet::new();
+    let statistics = (0..units.len())
+        .filter(|&i| unique_content.insert(content_key(&units[i])))
+        .collect::<Vec<_>>();
     let mut weights = BTreeMap::new();
     for term in q {
-        let df = body.iter().filter(|t| t.contains(term)).count();
+        let df = statistics
+            .iter()
+            .filter(|&&i| body[i].contains(term))
+            .count();
         if df > 0 {
             weights.insert(
                 term.clone(),
-                (1.0 + (units.len() as f64 - df as f64 + 0.5) / (df as f64 + 0.5)).ln(),
+                (1.0 + (statistics.len() as f64 - df as f64 + 0.5) / (df as f64 + 0.5)).ln(),
             );
         }
     }
@@ -210,7 +271,12 @@ pub fn select(request: &Value) -> Result<Value, &'static str> {
                 }
             } else {
                 let prior = if u.get("rank") == Some(&Value::Null) {
-                    0.0
+                    // A document-level hit is weaker than an exact unit hit:
+                    // it contributes only where this original unit matches the
+                    // question. Source membership alone never admits a unit.
+                    u["source_rank"]
+                        .as_u64()
+                        .map_or(0.0, |rank| 10.0 / (10.0 + rank as f64) * coverage(&body[i]))
                 } else {
                     10.0 / (10.0 + rank)
                 };
@@ -218,7 +284,90 @@ pub fn select(request: &Value) -> Result<Value, &'static str> {
             }
         })
         .collect();
+    if request["policy"] == "document-coverage-v1" {
+        // An explicit overview spends its ready-envelope budget once. Rank
+        // documents by their fused retrieval prior, then choose useful units
+        // within each document. Lexical coverage cannot evict another document.
+        let mut groups = BTreeMap::<String, Vec<usize>>::new();
+        for (i, unit) in units.iter().enumerate() {
+            let group = unit["group"]
+                .as_str()
+                .map(str::to_owned)
+                .unwrap_or_else(|| unit["source"].to_string());
+            groups.entry(group).or_default().push(i);
+        }
+        let prior = |i: usize| {
+            units[i]["rank"]
+                .as_u64()
+                .or_else(|| units[i]["source_rank"].as_u64())
+                .unwrap_or(u64::MAX)
+        };
+        let mut groups = groups.into_values().collect::<Vec<_>>();
+        groups.sort_by_key(|g| g.iter().map(|&i| prior(i)).min().unwrap_or(u64::MAX));
+        for group in &mut groups {
+            group.sort_by(|&a, &b| {
+                relevance[b]
+                    .total_cmp(&relevance[a])
+                    .then_with(|| prior(a).cmp(&prior(b)))
+                    .then_with(|| {
+                        units[a]["unit_id"]
+                            .as_str()
+                            .cmp(&units[b]["unit_id"].as_str())
+                    })
+            });
+        }
+        let mut ordered = Vec::with_capacity(units.len());
+        for position in 0..groups.iter().map(Vec::len).max().unwrap_or(0) {
+            for group in &groups {
+                if let Some(&i) = group.get(position) {
+                    ordered.push(units[i].clone());
+                }
+            }
+        }
+        return Ok(json!({"units":ordered,"selection":{
+            "schema":"les.context-selection.v1","policy":"document-coverage-v1",
+            "input_units":input.len(),"candidate_documents":groups.len(),
+            "complete_corpus":false,"budget_owner":"ready_envelope"}}));
+    }
     let mut chosen: Vec<usize> = Vec::new();
+    let source_limit = request["max_sources"].as_u64().unwrap_or(64).min(64) as usize;
+    let groups = units
+        .iter()
+        .map(|u| {
+            u["group"]
+                .as_str()
+                .map(str::to_owned)
+                .unwrap_or_else(|| u["source"].to_string())
+        })
+        .collect::<Vec<_>>();
+    let peers = if model_pack {
+        let mut best = BTreeMap::<&str, (f64, Vec<&str>)>::new();
+        for (group, terms) in groups.iter().zip(body) {
+            let matched = coverage(terms);
+            let entry = best.entry(group).or_default();
+            if matched > entry.0 {
+                *entry = (
+                    matched,
+                    weights
+                        .keys()
+                        .filter(|term| terms.contains(*term))
+                        .map(String::as_str)
+                        .collect(),
+                );
+            }
+        }
+        let mut counts = BTreeMap::<&[&str], usize>::new();
+        for (_, terms) in best.values() {
+            *counts.entry(terms).or_default() += 1;
+        }
+        groups
+            .iter()
+            .map(|group| counts[best[group.as_str()].1.as_slice()] > 1)
+            .collect::<Vec<_>>()
+    } else {
+        vec![false; units.len()]
+    };
+    let mut selected_sources = BTreeSet::new();
     let mut covered = BTreeSet::new();
     let mut used = 0;
     let mut text_used = 0;
@@ -230,6 +379,9 @@ pub fn select(request: &Value) -> Result<Value, &'static str> {
         .iter()
         .map(|u| u["text"].as_str().unwrap().chars().count())
         .collect::<Vec<_>>();
+    let fits = |i: usize, used: usize, text_used: usize| {
+        model_pack || (used + costs[i] <= budget && text_used + lengths[i] <= text_budget)
+    };
     // A selected unit never changes. Update maximum redundancy once per new
     // selection instead of comparing every old pair again on every round.
     let mut redundant = vec![0.0_f64; units.len()];
@@ -237,10 +389,10 @@ pub fn select(request: &Value) -> Result<Value, &'static str> {
         let mut best: Option<(usize, f64)> = None;
         for i in 0..units.len() {
             if chosen.contains(&i)
+                || (!selected_sources.contains(&groups[i])
+                    && selected_sources.len() >= source_limit)
                 || relevance[i] == 0.0
-                || (group_selection && relevance[i] == 0.0)
-                || used + costs[i] > budget
-                || text_used + lengths[i] > text_budget
+                || !fits(i, used, text_used)
             {
                 continue;
             }
@@ -258,15 +410,20 @@ pub fn select(request: &Value) -> Result<Value, &'static str> {
             };
             // Weighted coverage + maximal marginal relevance. No topic rules,
             // file-name boosts, hidden model, or answer-dependent thresholds.
-            // Budgeted MMR uses marginal value per sqrt(cost): a long parent
-            // cannot consume the window merely by containing more query words.
+            // Normalize both resource costs by the actual request windows. Absolute
+            // inverse length rewarded fragmentation without bound. Every
+            // fitting unit now has a bounded length penalty (1..sqrt(2)),
+            // while compact complete evidence still leaves room for other facts.
             let score = if total_weight == 0.0 {
                 // No lexical signal: keep retrieval order, rather than
                 // pretending text dissimilarity established relevance.
                 relevance[i]
             } else {
                 (0.7 * relevance[i] + 0.3 * novel_coverage - 0.3 * redundant[i])
-                    / (costs[i].max(1) as f64).sqrt()
+                    / (1.0
+                        + (costs[i] as f64 / budget.max(1) as f64)
+                            .max(lengths[i] as f64 / text_budget.max(1) as f64))
+                    .sqrt()
             };
             if best.is_none_or(|(_, s)| score > s) {
                 best = Some((i, score));
@@ -279,12 +436,23 @@ pub fn select(request: &Value) -> Result<Value, &'static str> {
         text_used += lengths[index];
         covered.extend(body[index].iter().cloned());
         chosen.push(index);
+        selected_sources.insert(groups[index].clone());
         for i in 0..units.len() {
-            if relevance[i] == 0.0
-                || chosen.contains(&i)
-                || used + costs[i] > budget
-                || text_used + lengths[i] > text_budget
+            if originals_pending
+                && units[i].get("read_identity").unwrap_or(&units[i]["source"])
+                    != units[index]
+                        .get("read_identity")
+                        .unwrap_or(&units[index]["source"])
             {
+                continue;
+            }
+            if relevance[i] == 0.0 || chosen.contains(&i) || !fits(i, used, text_used) {
+                continue;
+            }
+            // Diversify among documents that cover the same query terms.
+            // A document with a distinct match keeps its normal priority.
+            if peers[i] && groups[i] == groups[index] {
+                redundant[i] = 1.0;
                 continue;
             }
             let intersection = body[i].intersection(&body[index]).count();
@@ -292,19 +460,241 @@ pub fn select(request: &Value) -> Result<Value, &'static str> {
             redundant[i] = redundant[i].max(intersection as f64 / union as f64);
         }
     }
-    Ok(
-        json!({"units":chosen.iter().map(|&i|units[i].clone()).collect::<Vec<_>>(),
+    Ok(json!({"units":chosen.iter().map(|&i| {
+            let mut unit = units[i].clone();
+            if peers[i] {
+                unit["prefer_fragments"] = json!(true);
+            }
+            unit
+        }).collect::<Vec<_>>(),
         "selection":{"schema":"les.context-selection.v1","input_units":input.len(),
             "unique_units":units.len(),"selected_units":chosen.len(),"used_chars":used,
             "max_chars":budget,"semantic_selection":group_selection,"used_text_chars":text_used,"query_term_coverage":coverage(&covered),
             "provenance_chars":chosen.iter().map(|&i|units[i]["equivalent_sources"].to_string().chars().count()).sum::<usize>(),
-            "complete_corpus":false}}),
-    )
+            "complete_corpus":false}}))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn overview_orders_documents_before_extra_units_without_spending_a_second_budget() {
+        let mut repeated = (0..40)
+            .map(|i| {
+                let mut u = unit(
+                    &format!("a-{i}"),
+                    &format!("query detailed paragraph {i}"),
+                    i,
+                );
+                u["group"] = json!("dataset-a/file/revision-1");
+                u
+            })
+            .collect::<Vec<_>>();
+        let mut second = unit("b", "Semantically retrieved independent source", 50);
+        second["group"] = json!("dataset-b/file/revision-2");
+        repeated.push(second);
+        let result = select(&json!({"question":"query","units":repeated,
+            "policy":"document-coverage-v1","max_chars":1,"text_budget":1,"max_items":1}))
+        .unwrap();
+        let rows = result["units"].as_array().unwrap();
+        assert_eq!(rows.len(), 41);
+        assert_eq!(rows[0]["group"], "dataset-a/file/revision-1");
+        assert_eq!(rows[1]["unit_id"], "b");
+        assert_eq!(result["selection"]["budget_owner"], "ready_envelope");
+        assert_eq!(result["selection"]["complete_corpus"], false);
+    }
+    #[test]
+    fn rrf_control_neither_lexically_reranks_nor_spends_the_callers_budget() {
+        let mut parent = unit("parent", "query query short", 0);
+        parent["rank"] = Value::Null;
+        parent["source_rank"] = json!(0);
+        let result=select(&json!({"question":"query", "policy":"rrf-order-v1",
+            "units":[unit("lexical","query query",8),parent,unit("dense","A semantically related paraphrase without the query term",0)],
+            "max_chars":1,"text_budget":1,"max_items":1})).unwrap();
+        assert_eq!(
+            result["units"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|u| u["unit_id"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["dense", "lexical", "parent"]
+        );
+        assert_eq!(result["selection"]["budget_owner"], "ready_envelope");
+        assert_eq!(result["selection"]["semantic_selection"], false);
+    }
+    #[test]
+    fn rrf_control_shares_duplicate_provenance_without_merging_changed_numbers() {
+        let first = unit("copy-a", "Pressure 17.25", 5);
+        let copy = unit("copy-b", "Pressure 17.25", 0);
+        let changed = unit("different", "Pressure 117.250", 1);
+        let request = json!({"question":"Pressure", "policy":"rrf-order-v1",
+            "units":[first,copy,changed],"max_chars":5000});
+        let result = select(&request).unwrap();
+        let units = result["units"].as_array().unwrap();
+        assert_eq!(units.len(), 2);
+        assert_eq!(units[0]["rank"], 0);
+        assert_eq!(units[0]["equivalent_sources"][0]["unit_id"], "copy-b");
+        assert_eq!(units[1]["text"], "Pressure 117.250");
+    }
+    #[test]
+    fn an_independent_text_quota_is_not_hidden_by_a_large_envelope_ceiling() {
+        let page = unit(
+            "page",
+            &format!(
+                "Pump pressure and flow. {}",
+                "Detailed technical explanation. ".repeat(100)
+            ),
+            0,
+        );
+        let row = unit(
+            "row",
+            "Pump pressure and flow\n|Item|Pressure|Flow|\n|A|17.25 bar|8 l/s|",
+            10,
+        );
+        let text_budget = page["text"].as_str().unwrap().chars().count();
+        let result = select(
+            &json!({"question":"Pump pressure and flow","units":[page,row],
+            "max_chars":1000000,"text_budget":text_budget}),
+        )
+        .unwrap();
+        assert!(result["units"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|u| u["unit_id"] == "row"));
+        assert!(result["selection"]["used_text_chars"].as_u64().unwrap() <= text_budget as u64);
+    }
+    #[test]
+    fn tiny_partial_references_cannot_evict_the_best_complete_unit_by_size_bonus() {
+        let complete = unit(
+            "complete",
+            &format!(
+                "Flow 17.25; pressure 2.5; power 60; temperature 20. {}",
+                "Additional source information. ".repeat(210)
+            ),
+            0,
+        );
+        let mut units = vec![complete];
+        for i in 0..12 {
+            units.push(unit(
+                &format!("fragment-{i}"),
+                &format!(
+                    "{} drawing reference {i}",
+                    ["Flow", "Pressure", "Power", "Temperature"][i % 4]
+                ),
+                i + 1,
+            ));
+        }
+        let result = select(
+            &json!({"question":"Flow pressure power temperature","units":units,
+            "max_chars":8000,"max_items":8,"identity_reserve_chars":1024}),
+        )
+        .unwrap();
+        assert!(result["units"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|u| u["unit_id"] == "complete"));
+        assert!(result["selection"]["used_chars"].as_u64().unwrap() <= 8000);
+    }
+    #[test]
+    fn equal_original_units_keep_the_best_document_prior_without_a_unit_vote() {
+        let mut low = unit("copy-a", "Pump pressure 17", 0);
+        low["rank"] = Value::Null;
+        low["source_rank"] = json!(70);
+        let mut high = unit("copy-b", "Pump pressure 17", 0);
+        high["rank"] = Value::Null;
+        high["source_rank"] = json!(0);
+        for units in [json!([low.clone(), high.clone()]), json!([high, low])] {
+            let result =
+                select(&json!({"question":"Pump pressure","units":units,"max_chars":4000}))
+                    .unwrap();
+            assert_eq!(result["units"].as_array().unwrap().len(), 1);
+            assert_eq!(result["units"][0]["source_rank"], 0);
+            assert!(result["units"][0]["rank"].is_null());
+            assert_eq!(
+                result["units"][0]["equivalent_sources"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                1
+            );
+        }
+    }
+    #[test]
+    fn legacy_document_prior_requires_content_and_never_invents_unit_rank() {
+        let mut hit = unit("located", "Pump pressure rating", 0);
+        hit["rank"] = Value::Null;
+        hit["source_rank"] = json!(0);
+        let mut unrelated = unit("other", "Architectural finishes", 0);
+        unrelated["rank"] = Value::Null;
+        unrelated["source_rank"] = json!(0);
+        let result =
+            select(&json!({"question":"Pump pressure", "units":[hit,unrelated],"max_chars":4000}))
+                .unwrap();
+        let rows = result["units"].as_array().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["unit_id"], "located");
+        assert!(rows[0]["rank"].is_null());
+    }
+    #[test]
+    fn equal_search_excerpts_do_not_collapse_unread_originals() {
+        let a = unit("a", "Pump pressure rating 17.25", 0);
+        let b = unit("b", "Pump pressure rating 17.25", 1);
+        let r = select(
+            &json!({"question":"Pump pressure rating","units":[a.clone(),b.clone()],
+            "max_chars":4000,"max_items":2,"max_sources":2,"originals_pending":true}),
+        )
+        .unwrap();
+        assert_eq!(r["units"].as_array().unwrap().len(), 2);
+        assert!(r["units"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|u| u["equivalent_sources"].as_array().unwrap().is_empty()));
+        let final_read =
+            select(&json!({"question":"Pump pressure rating","units":[a,b],"max_chars":4000}))
+                .unwrap();
+        assert_eq!(final_read["units"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            final_read["units"][0]["equivalent_sources"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+    #[test]
+    fn source_limit_is_a_budget_constraint_not_a_rank_truncation() {
+        let mut input = (0..12)
+            .map(|i| {
+                unit(
+                    &format!("source-{i}"),
+                    &format!(
+                        "General equipment catalogue {i}. {}",
+                        "Ordinary description. ".repeat(40)
+                    ),
+                    i,
+                )
+            })
+            .collect::<Vec<_>>();
+        input.push(unit("late", "Pump pressure 17.25 bar; flow 8 litres", 60));
+        let result = select(&json!({"question":"Pump pressure and flow","units":input,
+            "max_chars":10000,"max_sources":2}))
+        .unwrap();
+        let rows = result["units"].as_array().unwrap();
+        assert!(rows
+            .iter()
+            .any(|u| u["unit_id"] == "late" && u["rank"] == 60));
+        assert!(
+            rows.iter()
+                .map(|u| u["source"].to_string())
+                .collect::<BTreeSet<_>>()
+                .len()
+                <= 2
+        );
+    }
     fn unit(id: &str, text: &str, rank: usize) -> Value {
         json!({"unit_id":id,"text":text,"source":{"doc_id":id,"sha":"revision"},"rank":rank})
     }
@@ -389,6 +779,33 @@ mod tests {
             .iter()
             .any(|u| u["unit_id"] == "rating"));
         assert!(r["selection"]["used_chars"].as_u64().unwrap() <= 650);
+    }
+    #[test]
+    fn a_long_parent_cannot_spend_the_whole_budget_before_a_compact_table_row() {
+        let page = unit(
+            "page",
+            &format!(
+                "Pump pressure and flow. {}",
+                "Detailed technical explanation. ".repeat(100)
+            ),
+            0,
+        );
+        let row = unit(
+            "row",
+            "Pump pressure and flow\n|Item|Pressure|Flow|\n|A|17.25 bar|8 l/s|",
+            10,
+        );
+        let budget = cost(&page, 0);
+        let r = select(
+            &json!({"question":"Pump pressure and flow", "units":[page,row],"max_chars":budget}),
+        )
+        .unwrap();
+        assert!(r["units"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|u| u["unit_id"] == "row"));
+        assert!(r["selection"]["used_chars"].as_u64().unwrap() <= budget as u64);
     }
     #[test]
     fn atomic_budget_never_turns_a_partial_unit_into_complete_text() {

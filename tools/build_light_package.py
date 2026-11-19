@@ -212,8 +212,8 @@ def stage_skill_dependencies(destination, source=None):
                 archive.extractall(destination)
             uv = bundled / "uv.exe"
             requirements = scratch / "locked-requirements.txt"
-            subprocess.run([str(uv), "export", "--frozen", "--extra", "mcp", "--no-dev",
-                "--no-emit-project", "--no-emit-package", "nicegui", "--format", "requirements-txt",
+            subprocess.run([str(uv), "export", "--frozen", "--only-group", "skill-runtime",
+                "--no-emit-project", "--format", "requirements-txt",
                 "--output-file", str(requirements)], cwd=ROOT, check=True, stdout=subprocess.DEVNULL)
             subprocess.run([str(uv), "pip", "sync", str(requirements), "--python", str(destination / "python.exe"),
                 "--target", str(destination / "Lib/site-packages"), "--no-python-downloads", "--require-hashes",

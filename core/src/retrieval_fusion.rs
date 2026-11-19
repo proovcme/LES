@@ -185,7 +185,20 @@ pub fn retrieve(
     // If there are fewer slots than leaders, preserve relevance order and
     // explicitly report insufficient capacity instead of favoring one channel.
     if covered {
-        ranked.sort_by_key(|p| !leader(p));
+        // Reserve membership, never a top relevance position. Promoting every
+        // channel head after fusion made an isolated lexical hit look stronger
+        // than joint evidence, and also corrupted the downstream rank prior.
+        let mut others = limit - ranked.iter().filter(|p| leader(p)).count();
+        ranked.retain(|p| {
+            if leader(p) {
+                true
+            } else if others > 0 {
+                others -= 1;
+                true
+            } else {
+                false
+            }
+        });
     }
     ranked.truncate(limit);
     for (i, p) in ranked.iter_mut().enumerate() {
@@ -275,8 +288,19 @@ mod tests {
             let channels = vec![dense, lexical];
             let baseline = merge(&channels, n + 2, 60.0, "rrf").unwrap();
             let selected = retrieve(&channels, 4, 60.0, "rrf", true).unwrap();
-            assert!(selected[..2].iter().any(|p| p["id"] == 0));
-            assert!(selected[..2].iter().any(|p| p["id"] == n + 1));
+            assert!(selected.iter().any(|p| p["id"] == 0));
+            assert!(selected.iter().any(|p| p["id"] == n + 1));
+            assert!(selected.windows(2).all(
+                |pair| pair[0]["score"].as_f64().unwrap() >= pair[1]["score"].as_f64().unwrap()
+            ));
+            let lexical_head = selected.iter().find(|p| p["id"] == n + 1).unwrap();
+            assert!(
+                lexical_head["retrieval_fusion"]["fusion_rank"]
+                    .as_u64()
+                    .unwrap()
+                    > 4
+            );
+            assert_eq!(selected.last().unwrap()["id"], n + 1);
             for p in &selected {
                 assert_eq!(
                     p["score"],

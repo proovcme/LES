@@ -1,11 +1,21 @@
 //! Exact prose spans in mixed table/text evidence. Addresses use original lines.
 pub(super) fn spans(text: &str, body_offset: usize) -> Vec<(u64, String)> {
+    if text
+        .get(body_offset..)
+        .is_none_or(|body| super::table_rows(body).is_empty())
+    {
+        return vec![];
+    }
+    addresses(text, body_offset)
+}
+
+// Paragraph addresses do not depend on whether a neighboring reading unit
+// contains the table. Structured chunking deliberately separates those units.
+pub(super) fn addresses(text: &str, body_offset: usize) -> Vec<(u64, String)> {
     let Some(body) = text.get(body_offset..) else {
         return vec![];
     };
-    if (body_offset > 0 && text.as_bytes()[body_offset - 1] != b'\n')
-        || super::table_rows(body).is_empty()
-    {
+    if body_offset > 0 && text.as_bytes()[body_offset - 1] != b'\n' {
         return vec![];
     }
     let prefix_lines = text[..body_offset].bytes().filter(|b| *b == b'\n').count();
@@ -62,5 +72,9 @@ mod tests {
         assert!(spans(&text, 1).is_empty());
         assert!(spans(&text, usize::MAX).is_empty());
         assert!(spans("Просто текст 99", 0).is_empty());
+        assert_eq!(
+            addresses("Просто текст 99", 0),
+            vec![(1, "Просто текст 99".into())]
+        );
     }
 }

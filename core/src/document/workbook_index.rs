@@ -39,64 +39,56 @@ fn trim(text: &str) -> &str {
     text.trim_matches(|c: char| c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c))
 }
 
-fn header_score(values: &[Value]) -> usize {
-    values
-        .iter()
-        .map(|value| {
-            let text = as_text(value);
-            let text = trim(&text);
-            if text.is_empty() {
-                0
-            } else if value.is_string() && text.chars().count() > 1 {
-                3
-            } else {
-                1
-            }
-        })
-        .sum()
-}
-
-pub(super) fn to_table(name: &str, rows: BTreeMap<u32, Vec<Value>>) -> Option<Value> {
-    let mut best_score = 0;
-    let mut header = 0;
-    for (&row, values) in rows.range(..20) {
-        let score = header_score(values);
-        if score > best_score {
-            header = row;
-            best_score = score;
-        }
-    }
-    if best_score == 0 {
-        return None;
-    }
-    let headers: Vec<String> = rows[&header]
-        .iter()
-        .enumerate()
-        .map(|(index, value)| {
-            let text = as_text(value);
-            let text = trim(&text);
-            if text.is_empty() {
-                format!("col_{}", index + 1)
-            } else {
-                text.to_owned()
-            }
+pub(super) fn to_table(name: &str, mut rows: BTreeMap<u32, Vec<Value>>) -> Option<Value> {
+    rows.retain(|_, row| row.iter().any(|cell| !trim(&as_text(cell)).is_empty()));
+    let width = rows.values().map(Vec::len).max()?;
+    // Scan the first populated rows so blank space before a header does not
+    // affect recognition. A generic text header can precede typed data.
+    let header =
+        rows.iter()
+            .zip(rows.values().skip(1))
+            .take(20)
+            .find_map(|((&row, values), next)| {
+                let labels: Vec<_> = values
+                    .iter()
+                    .map(|v| trim(&as_text(v)).to_owned())
+                    .collect();
+                let populated = values
+                    .iter()
+                    .zip(&labels)
+                    .filter(|(_, label)| !label.is_empty());
+                let text_count = populated
+                    .clone()
+                    .filter(|(value, _)| value.is_string())
+                    .count();
+                let typed_data = next
+                    .iter()
+                    .any(|value| value.is_number() || value.is_boolean());
+                (crate::tables::has_column_labels(&labels)
+                    || text_count >= 2 && text_count == populated.count() && typed_data)
+                    .then_some(row)
+            });
+    let header_values = header.and_then(|row| rows.remove(&row));
+    let headers: Vec<_> = (0..width)
+        .map(|i| {
+            header_values
+                .as_ref()
+                .and_then(|values| values.get(i))
+                .map(as_text)
+                .map(|text| trim(&text).to_owned())
+                .filter(|text| !text.is_empty())
+                .unwrap_or_else(|| format!("col_{}", i + 1))
         })
         .collect();
     let (row_numbers, data): (Vec<_>, Vec<_>) = rows
         .into_iter()
-        .filter_map(|(row, values)| {
-            if row <= header || header_score(&values) == 0 {
-                return None;
-            }
-            Some((row + 1, values))
+        .map(|(row, mut values)| {
+            values.resize(width, Value::Null);
+            (row + 1, values)
         })
         .unzip();
-    if data.is_empty() {
-        return None;
-    }
-    Some(
-        json!({"sheet_name":name,"headers":headers,"rows":data,"header_row":header+1,"row_numbers":row_numbers}),
-    )
+    Some(json!({"sheet_name":name,"headers":headers,"rows":data,
+        "header_row":header.map(|row|row+1),"header_values":header_values,"row_numbers":row_numbers}))
 }
 
 fn extract(bytes: &[u8], probe: bool) -> Result<Value> {
@@ -150,15 +142,13 @@ fn extract(bytes: &[u8], probe: bool) -> Result<Value> {
                     |values| values.iter().map(as_text).collect::<Vec<_>>().join(" | "),
                 ));
             }
-        } else if last_row > 0 {
-            if let Some(table) = to_table(&sheet.name, rows) {
-                let bytes = serde_json::to_vec(&table).map_err(|_| COMPAT)?.len();
-                estimated_bytes += bytes;
-                if estimated_bytes > MAX_OUTPUT {
-                    return Err(COMPAT);
-                }
-                tables.push(table);
+        } else if let Some(table) = to_table(&sheet.name, rows) {
+            let bytes = serde_json::to_vec(&table).map_err(|_| COMPAT)?.len();
+            estimated_bytes += bytes;
+            if estimated_bytes > MAX_OUTPUT {
+                return Err(COMPAT);
             }
+            tables.push(table);
         }
     }
     if probe {

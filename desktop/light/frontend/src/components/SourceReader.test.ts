@@ -1,9 +1,25 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import SourceReader from './SourceReader.svelte';
+import { sourceReadStart } from '../lib/contracts';
+it('uses the saved stream position while retaining the canonical original ordinal', () => {
+  const source = { index: 1, evidence_kind: 'physical_word_section', ordinal: 7, read_offset: 5, view_sha256: 'a'.repeat(64) };
+  expect(sourceReadStart(source)).toBe(5);
+  expect(sourceReadStart({ ...source, read_offset: undefined })).toBe(7);
+  expect(sourceReadStart({ ...source, view_sha256: undefined })).toBe(0);
+});
 let component: ReturnType<typeof mount> | undefined;
 afterEach(async () => { if (component) await unmount(component); document.body.replaceChildren(); vi.unstubAllGlobals(); });
 const button = (name: string) => [...document.querySelectorAll('button')].find(b => b.textContent?.trim() === name)!;
+it('keeps the verified page visible alongside the same warning returned through MCP', async () => {
+  const warning = 'Текст страницы прочитан. Расположение ячеек таблицы не подтверждено.';
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ warnings: [warning],
+    result: { text: 'Original quantity 117.25 kg', next_offset: null, view_sha256: 'a'.repeat(64) } }))));
+  component = mount(SourceReader, { target: document.body, props: { docId: 'found', page: 2, pdf: true } });
+  await vi.waitFor(() => expect(document.querySelector('.notice')?.textContent).toBe(warning));
+  expect(document.querySelector('.answer-text')?.textContent).toContain('117.25');
+  expect(button('Читать дальше').disabled).toBe(true);
+});
 it('reads the same source API as MCP, pins continuations and keeps errors visible', async () => {
   const calls: { tool: string; args: Record<string, unknown> }[] = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {

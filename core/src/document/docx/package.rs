@@ -2,10 +2,19 @@
 use super::*;
 use rich::Node;
 mod docling;
+mod section_headers;
 type Result<T> = std::result::Result<T, &'static str>;
 const BAD: &str = "DOCX_PART_INVALID";
 const LIMIT: &str = "DOCX_PART_LIMIT";
 const MAX_PART: u64 = 32 * 1024 * 1024;
+
+// These stories are owned by the native special-content reader, not Docling.
+// Detect their existing presentation once, then retain the resulting units.
+fn native_block(text: &str, id: &str) -> Result<Value> {
+    Ok(
+        json!({"id":id,"kind":"native_reading_units","units":super::super::structure::units(text,4000)?}),
+    )
+}
 
 pub(in crate::document) fn convert(
     bytes: &[u8],
@@ -35,6 +44,8 @@ pub(in crate::document) fn convert(
         unread_visual: 0,
         pictures: BTreeMap::new(),
         floating: Vec::new(),
+        header_bindings: Vec::new(),
+        structure: Value::Null,
     };
     package.relationships = package.rels("word/_rels/document.xml.rels")?;
     let mut text = if request["word_parser"] == "docling" {
@@ -50,7 +61,18 @@ pub(in crate::document) fn convert(
         if content.trim().is_empty() {
             continue;
         }
-        text.push_str(&format!("\n\n## Отдельный плавающий объект {}\n\nТекст объекта оригинала; не продолжение абзаца и не ячейка таблицы.\n\n{}",index+1,content));
+        let story=format!("\n\n## Отдельный плавающий объект {}\n\nТекст объекта оригинала; не продолжение абзаца и не ячейка таблицы.\n\n{}",index+1,content);
+        text.push_str(&story);
+        if let Some(blocks) = package
+            .structure
+            .get_mut("blocks")
+            .and_then(Value::as_array_mut)
+        {
+            blocks.push(native_block(&story, &format!("native:floating:{index}"))?);
+        }
+    }
+    if package.structure.is_object() {
+        text = super::super::canonical::render(&package.structure)?;
     }
     if text.len() > MAX_TEXT {
         return Err("DOCUMENT_TEXT_LIMIT");
@@ -71,6 +93,8 @@ pub(in crate::document) fn convert(
         "visual_content":package.visual,"docx_parts_count":package.assets.len(),
         "floating_objects":package.floating.iter().map(|(id,_)|json!({"part_sha256":id,"placement":"separate_story"})).collect::<Vec<_>>(),
         "unread_visual_count":package.unread_visual,"visual_coverage":"originals_and_structure_preserved_not_semantically_verified",
+        "docx_table_headers":package.header_bindings,
+        "docling_structure":package.structure,
         "docx_parts_source_sha256":manifest["source_sha256"]}}),
     )
 }
@@ -91,6 +115,8 @@ struct Package<'a, F: Fn(&Value, Option<&[u8]>) -> Result<Value>> {
     unread_visual: usize,
     pictures: BTreeMap<String, (String, Value)>,
     floating: Vec<(String, String)>,
+    header_bindings: Vec<Value>,
+    structure: Value,
 }
 
 impl<F: Fn(&Value, Option<&[u8]>) -> Result<Value>> Package<'_, F> {

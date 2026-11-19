@@ -1,5 +1,11 @@
 # Rust HTTP API
 
+912: карточка источника читает страницу PDF, сохранённую позицию Word и
+физическую строку Excel через нативный API. Word использует адрес и хеш
+представления, Excel проверяет хеш оригинала и активный Parquet. Маршрут
+`POST /api/documents/by-id/{id}/open-native` открывает оригинал локальным
+приложением после проверки прав и редакции файла.
+
 836: `GET /api/commands` и `POST /api/workspace/memory/context/{session_id}/summarize`
 обслуживает Rust. [Исполнитель сводки](native-conversation-memory.md) владеет
 моделью, durable очередью и восстановлением; Python callbacks не используются.

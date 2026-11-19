@@ -1,4 +1,5 @@
 //! Product-owned embedded vector storage. No Python and no background database service.
+mod bm25_trial;
 pub mod initialize;
 pub mod migration;
 pub mod operations;
