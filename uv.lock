@@ -1408,6 +1408,7 @@ windows-reranker = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "markdown-it-py" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-subtests" },
@@ -1477,6 +1478,7 @@ provides-extras = ["mac-mlx", "windows-reranker", "parsers", "desktop", "mail-ps
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "markdown-it-py", specifier = ">=4.0" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-asyncio", specifier = ">=1.0" },
     { name = "pytest-subtests", specifier = ">=0.14" },
