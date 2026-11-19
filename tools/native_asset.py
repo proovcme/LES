@@ -22,7 +22,7 @@ def source_digest(component,root=ROOT):
         'model-connection-templates.json','table-row-schema.json','extraction-errors.json','unicode/15.1.0.json') if (root/'config'/name).is_file())
     if component == 'api':
         paths.extend(root/'qdrant_visualizer'/name for name in (
-            'index.html', 'forest.css', 'forest.js', 'forest-model.js', 'forest-scene.js',
+            'index.html', 'forest.css', 'app-nav.css', 'forest.js', 'forest-model.js', 'forest-scene.js',
             'navigation.js', 'forest-mist.svg', 'search.html', 'search.js',
         ) if (root/'qdrant_visualizer'/name).is_file())
     for folder in ('core',component, *(['vector'] if component == 'api' else [])):

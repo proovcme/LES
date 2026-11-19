@@ -241,6 +241,7 @@ pub fn forest(request: &Request) -> Option<Response> {
             ));
         }
         "forest.css" => include_bytes!("../../qdrant_visualizer/forest.css"),
+        "app-nav.css" => include_bytes!("../../qdrant_visualizer/app-nav.css"),
         "forest.js" => include_bytes!("../../qdrant_visualizer/forest.js"),
         "search.js" => include_bytes!("../../qdrant_visualizer/search.js"),
         "forest-model.js" => include_bytes!("../../qdrant_visualizer/forest-model.js"),

@@ -82,6 +82,7 @@ pub(crate) async fn queue_attachment(
     name: String,
     caller: String,
     key: Option<String>,
+    project_id: Option<i64>,
 ) -> Result<Value, String> {
     let owner = context.clone();
     let value = tokio::task::spawn_blocking(move || {
@@ -93,6 +94,7 @@ pub(crate) async fn queue_attachment(
             &temp.0,
             &name,
             &claim,
+            project_id,
         );
         drop(temp);
         value

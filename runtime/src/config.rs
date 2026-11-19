@@ -187,12 +187,6 @@ impl Config {
             python.as_deref().unwrap_or(std::path::Path::new("")),
             values.remove("--skill-python").map(PathBuf::from),
         )?;
-        if native_only && !skill_python.is_file() {
-            return Err(Failure::new(
-                "SKILL_RUNTIME_MISSING",
-                "Не найден отдельный исполнитель внешних навыков.",
-            ));
-        }
         Ok(Self {
             root,
             state,

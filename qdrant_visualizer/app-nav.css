@@ -1,0 +1,36 @@
+/* Shared by chat, the map, and search diagnostics. */
+:root { --les-nav-width: 218px; }
+.app-nav {
+  display: flex; flex-direction: column; gap: 24px; padding: 24px 18px 20px;
+  border-right: 1px solid var(--forest-line); background: var(--forest-paper);
+  min-height: 0; overflow-y: auto;
+}
+.app-nav .brand {
+  display: flex; gap: 10px; align-items: center; min-height: 48px; padding: 0 10px;
+  color: var(--forest-ink); text-decoration: none; font-size: 27px; letter-spacing: .035em;
+  line-height: 1.1; font-weight: 800;
+}
+.app-nav .brand small {
+  display: inline; margin-left: 8px; color: var(--forest-muted);
+  font-size: 10px; font-weight: 500; letter-spacing: .12em;
+}
+.app-nav .nav-links { display: grid; gap: 8px; }
+.app-nav .nav-item {
+  display: flex; align-items: center; gap: 9px; min-height: 46px; width: 100%; padding: 10px 12px;
+  background: transparent; color: var(--forest-ink); border: 0; border-radius: 12px;
+  text-align: left; text-decoration: none; font-size: 13px; font-weight: 600; line-height: 1.55;
+}
+.app-nav .nav-item[aria-current="page"] { background: var(--forest-selected); }
+.app-nav .nav-item:not(:disabled):hover { filter: none; background: var(--forest-selected); }
+.app-nav svg { flex: none; }
+.app-nav .nav-footer { margin-top: auto; border-top: 1px solid var(--forest-line); padding-top: 16px; }
+.app-nav .nav-footer p { padding: 18px 12px 0; margin-bottom: 0; color: var(--forest-muted); font-size: 11px; line-height: 1.8; }
+.mobile-menu { display: none; }
+@media (max-width: 850px) {
+  .app-nav { display: none; }
+  .app-nav.mobile-open {
+    display: flex; position: fixed; inset: 78px auto 0 0; width: min(300px, 100%);
+    z-index: 4; box-shadow: 16px 0 40px #143b2a16;
+  }
+  .mobile-menu { display: inline-flex; }
+}

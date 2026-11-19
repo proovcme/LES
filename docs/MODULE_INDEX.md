@@ -1,5 +1,11 @@
 # Модули LES RAG
 
+913: `api/src/engineering.rs` и `core/src/catalog/projects.rs` синхронизируют
+проекты Увязки. Штатная очередь сохраняет снимки в набор связанного проекта.
+Просмотр закреплён за оригиналом и передан
+[вьюверу Увязки](modules/uvyazka-bridge.md).
+`qdrant_visualizer/app-nav.css` используется чатом, картой и проверкой поиска.
+
 893: `vector/bm25_trial` — явный опыт на помеченной копии, TextQuery,
 контроль прежних токенов и нативного анализа; штатный путь остаётся SQLite.
 `.github/workflows/edge-bm25-trial.yml` собирает только код на GitHub,

@@ -44,6 +44,7 @@ pub fn queue_indexed_attachment(
     temporary: &Path,
     name: &str,
     claim: &UploadClaim,
+    project_id: Option<i64>,
 ) -> std::result::Result<Value, &'static str> {
     if !database.is_absolute()
         || !state.is_absolute()
@@ -95,36 +96,62 @@ pub fn queue_indexed_attachment(
         }
         return serde_json::from_str(old["response"].as_str().ok_or(STORE)?).map_err(|_| STORE);
     }
-    let mut datasets = rows(
-        &tx,
-        "SELECT id,coalesce(sensitivity,'') AS sensitivity FROM datasets
-         WHERE name=?1 AND coalesce(dataset_scope,'user')='user' LIMIT 2",
-        [NAME],
-    )
-    .map_err(|_| STORE)?;
-    let dataset = match datasets.len() {
-        0 => {
-            let id = "861a7a66-65af-4cd9-8df3-2cd4db6bca70";
-            tx.execute(
-                "INSERT INTO datasets(id,name,status,sensitivity,dataset_scope)
-                VALUES(?1,?2,'IDLE','P0','user')",
-                params![id, NAME],
+    let (dataset, dataset_name) = if let Some(project) = project_id {
+        let title: String = tx
+            .query_row(
+                "SELECT name FROM les_projects WHERE id=?1",
+                [project],
+                |row| row.get(0),
             )
             .map_err(|_| STORE)?;
-            json!({"id":id})
-        }
-        1 if datasets[0]["sensitivity"] == "P0" => datasets.remove(0),
-        _ => return Err("ATTACHMENT_INDEX_DATASET_CONFLICT"),
+        let id = format!("uvyazka-{project}");
+        let title = format!("Увязка · {title}");
+        tx.execute(
+            "INSERT INTO datasets(id,name,status,sensitivity,dataset_scope)
+            VALUES(?1,?2,'IDLE','P0','user') ON CONFLICT(id) DO UPDATE SET name=excluded.name",
+            params![id, title],
+        )
+        .map_err(|_| STORE)?;
+        tx.execute(
+            "INSERT OR IGNORE INTO les_project_links(project_id,kind,ref,created_at)
+            VALUES(?1,'dataset',?2,datetime('now','localtime'))",
+            params![project, id],
+        )
+        .map_err(|_| STORE)?;
+        (id, title)
+    } else {
+        let mut datasets = rows(
+            &tx,
+            "SELECT id,coalesce(sensitivity,'') AS sensitivity FROM datasets
+         WHERE name=?1 AND coalesce(dataset_scope,'user')='user' LIMIT 2",
+            [NAME],
+        )
+        .map_err(|_| STORE)?;
+        let dataset = match datasets.len() {
+            0 => {
+                let id = "861a7a66-65af-4cd9-8df3-2cd4db6bca70";
+                tx.execute(
+                    "INSERT INTO datasets(id,name,status,sensitivity,dataset_scope)
+                VALUES(?1,?2,'IDLE','P0','user')",
+                    params![id, NAME],
+                )
+                .map_err(|_| STORE)?;
+                json!({"id":id})
+            }
+            1 if datasets[0]["sensitivity"] == "P0" => datasets.remove(0),
+            _ => return Err("ATTACHMENT_INDEX_DATASET_CONFLICT"),
+        };
+        let dataset = dataset["id"]
+            .as_str()
+            .filter(|v| {
+                !matches!(*v, "" | "." | "..")
+                    && v.len() <= 160
+                    && v.bytes()
+                        .all(|c| c.is_ascii_alphanumeric() || b"_.-".contains(&c))
+            })
+            .ok_or("ATTACHMENT_PATH_UNSAFE")?;
+        (dataset.to_owned(), NAME.to_owned())
     };
-    let dataset = dataset["id"]
-        .as_str()
-        .filter(|v| {
-            !matches!(*v, "" | "." | "..")
-                && v.len() <= 160
-                && v.bytes()
-                    .all(|c| c.is_ascii_alphanumeric() || b"_.-".contains(&c))
-        })
-        .ok_or("ATTACHMENT_PATH_UNSAFE")?;
     let active: bool = tx
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM native_intakes WHERE dataset_id=?1 AND finished_at IS NULL
@@ -138,7 +165,7 @@ pub fn queue_indexed_attachment(
     }
     let root = state.canonicalize().map_err(|_| STORE)?;
     let storage = directory(&root, "storage")?;
-    let root = directory(&directory(&storage, "datasets")?, dataset)?;
+    let root = directory(&directory(&storage, "datasets")?, &dataset)?;
     let subdir = format!("native-{}", claim.ident);
     let folder = directory(&root, &subdir)?;
     let path = folder.join(name);
@@ -197,7 +224,7 @@ pub fn queue_indexed_attachment(
         "INSERT INTO native_intakes(id,dataset_id,dataset_name,root,parse_limit,status,phase,
         total,processed,index_pending,message,started_at,updated_at)
         VALUES(?1,?2,?3,?4,1,'queued','index',1,1,1,'Вложение в очереди на индексацию',?5,?5)",
-        params![job, dataset, NAME, INDEXED_ATTACHMENT_ROOT, now],
+        params![job, dataset, dataset_name, INDEXED_ATTACHMENT_ROOT, now],
     )
     .map_err(|_| STORE)?;
     tx.execute(
@@ -205,7 +232,7 @@ pub fn queue_indexed_attachment(
         params![job, key],
     )
     .map_err(|_| STORE)?;
-    let response = json!({"attachment_id":dataset,"dataset_id":dataset,"dataset_name":NAME,
+    let response = json!({"attachment_id":dataset,"dataset_id":dataset,"dataset_name":dataset_name,
         "mode":"index","name":name,"doc_id":doc,"intake_job_id":job,"status":"queued"});
     tx.execute("INSERT INTO les_indexed_attachments(id,owner,key_hash,fingerprint,dataset_id,doc_id,job_id,sha256,response)
         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",

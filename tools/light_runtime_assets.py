@@ -12,7 +12,7 @@ import shutil
 import sys
 import tempfile
 import time
-import httpx
+from urllib.request import urlopen
 from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -78,9 +78,8 @@ def stage(destination: Path, *, target: str = "x86_64-pc-windows-msvc") -> Path:
     with tempfile.TemporaryDirectory(dir=destination) as temporary:
         archive = Path(temporary) / ("qdrant.zip" if target.endswith("msvc") else "qdrant.tar.gz")
         started = time.monotonic()
-        with httpx.stream("GET", contract["url"], follow_redirects=True, timeout=20) as source, archive.open("wb") as output:
-            source.raise_for_status()
-            for chunk in source.iter_bytes(chunk_size=65536):
+        with urlopen(contract["url"], timeout=20) as source, archive.open("wb") as output:
+            while chunk := source.read(65536):
                 if time.monotonic() - started > 180:
                     raise TimeoutError("Загрузка Qdrant превысила 3 минуты. Повторите загрузку; неполный файл не устанавливается.")
                 output.write(chunk)

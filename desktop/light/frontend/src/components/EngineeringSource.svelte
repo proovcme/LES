@@ -1,10 +1,18 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { ApiError, errorMessage } from '../lib/api';
   import UvyazkaInstall from './UvyazkaInstall.svelte';
-  import { companionAddress, engineering, rememberCompanion } from '../lib/engineering';
+  import { companionAddress, engineering, rememberCompanion, savedCompanion } from '../lib/engineering';
   import type { ModelLocator } from '../lib/engineering';
   let { target }: { target: ModelLocator } = $props();
   let url = $state(companionAddress()); let link = $state(''); let busy = $state(false); let failure = $state(''); let reason = $state('');
+  onMount(() => {
+    if (savedCompanion()) return;
+    const initial = url;
+    void engineering<{ url: string | null }>('', 'connection').then((saved) => {
+      if (saved.url && url === initial && !busy && !link) url = saved.url;
+    }).catch(() => undefined);
+  });
   async function resolve() {
     if (busy) return; busy = true; failure = ''; reason = ''; link = '';
     try {

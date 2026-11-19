@@ -63,8 +63,12 @@ app=FastAPI()
 @app.get('/api/light/instance')
 def instance():return {'instance_id':os.environ['LES_LIGHT_INSTANCE_ID']}
 @app.get('/environment')
-def environment():return {'foreign_present':any(os.getenv(key) for key in ('OPENAI_API_KEY','LLM_MODEL','OLLAMA_API_KEY','PYTHONHOME')),
-                          'mutations':os.environ['LES_STARTUP_BACKGROUND_MUTATIONS']}
+def environment():
+    python_home=os.getenv('PYTHONHOME')
+    # The Windows venv redirector can set PYTHONHOME to its own base interpreter.
+    foreign_home=bool(python_home and Path(python_home).resolve()!=Path(sys.base_prefix).resolve())
+    return {'foreign_present':foreign_home or any(os.getenv(key) for key in ('OPENAI_API_KEY','LLM_MODEL','OLLAMA_API_KEY')),
+            'mutations':os.environ['LES_STARTUP_BACKGROUND_MUTATIONS']}
 @app.get('/skill-runtime')
 def skill_runtime():
     program=os.environ['LES_SKILL_PYTHON']
@@ -103,17 +107,17 @@ def command(executable,root,state,qdrant):
             '--qdrant',str(qdrant),'--parent-pipe','--read-only']
 
 
-def test_contract_admits_remaining_python_core(executable):
+def test_contract_distinguishes_python_paths(executable):
     result=subprocess.run([str(executable),'--contract'],check=True,capture_output=True,text=True,timeout=5)
     contract=json.loads(result.stdout)
-    assert contract['engine']=='rust' and contract['python_core_remaining'] is True
+    assert contract['engine'] == 'rust'
+    assert contract['python'] == {'native_application': False, 'external_skills': True, 'compatibility_host': True}
 
 
-def test_native_only_start_uses_rust_ui_without_application_python(executable,tmp_path):
+def test_native_only_start_uses_rust_ui_without_python(executable,tmp_path):
     api=os.getenv('LES_TEST_EDGE_API')
-    skills=os.getenv('LES_TEST_SKILL_PYTHON')
-    if not api or not skills:
-        pytest.skip('Build the Edge API and the separate external-skill Python')
+    if not api:
+        pytest.skip('Build the Edge API')
     root=tmp_path/'application'
     frontend=root/'desktop/light/frontend/dist'
     frontend.mkdir(parents=True)
@@ -133,7 +137,7 @@ def test_native_only_start_uses_rust_ui_without_application_python(executable,tm
     (state/'.env').write_text('MAIL_IMAP_POLL_SEC=0\n',encoding='utf-8')
     args=[str(executable),'--root',str(root),'--state',str(state),
           '--qdrant',str(tmp_path/'unused-qdrant.exe'),'--edge-storage',str(state/'edge'),
-          '--native-only','--skill-python',str(Path(skills).resolve()),'--parent-pipe']
+          '--native-only','--parent-pipe']
     owner=subprocess.Popen(args,stdin=subprocess.PIPE,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
                            creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
     try:
@@ -185,7 +189,7 @@ def running(executable,fixture_root,tmp_path):
     log=(tmp_path/'owner.log').open('wb')
     process=subprocess.Popen(command(executable,fixture_root,state,Path(qdrant).resolve()),
         stdin=subprocess.PIPE,stdout=log,stderr=subprocess.STDOUT,
-        env={**os.environ,'OPENAI_API_KEY':'foreign-fixture','LLM_MODEL':'foreign-fixture'},
+        env={**os.environ,'OPENAI_API_KEY':'foreign-fixture','LLM_MODEL':'foreign-fixture','PYTHONHOME':'foreign-fixture'},
         creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
     target=state/'launcher-status.json'
     try:

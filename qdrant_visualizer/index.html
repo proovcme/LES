@@ -1,14 +1,21 @@
 <!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Лес знаний · LES RAG</title><link rel="stylesheet" href="forest.css?v=800.3"></head>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Лес знаний · LES RAG</title><link rel="stylesheet" href="app-nav.css"><link rel="stylesheet" href="forest.css?v=913"></head>
 <body>
 <a class="skip-link" href="#les-main">Перейти к содержимому</a>
-<nav class="app-nav" aria-label="Главное меню">
-<a class="brand" href="/classic?tab=chat"><svg viewBox="0 0 32 40" aria-hidden="true"><path d="M16 2 5 17h6L3 28h10v10h6V28h10l-8-11h6Z"/></svg><span>ЛЕС <small>RAG</small><em>Ваши знания. Живой лес.</em></span></a>
-<div class="nav-links"><a href="/qdrant-visualizer/index.html" aria-current="page"><span aria-hidden="true">♧</span>Лес знаний</a><a href="/classic?tab=chat"><span aria-hidden="true">◯</span>Чат</a><a href="/classic?tab=data"><span aria-hidden="true">▤</span>Данные</a></div>
-<div class="nav-bottom"><a href="/les/classic?tab=state"><span aria-hidden="true">∿</span>Состояние</a><a href="/les/classic?tab=models"><span aria-hidden="true">⚙</span>Настройки</a><p>LES RAG · Ваши знания рядом</p></div>
+<nav id="forest-menu" class="app-nav" aria-label="Основная навигация">
+  <a class="brand" href="/classic?tab=chat" aria-label="Лес — главный экран"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3-6 8h3l-5 7h7v3h2v-3h7l-5-7h3l-6-8Z"/></svg><span>ЛЕС<small>RAG</small></span></a>
+  <div class="nav-links">
+    <a class="nav-item" href="/classic?tab=chat" id="lab-chat"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h16v12H8l-4 4V4Z"/></svg>Чат</a>
+    <a class="nav-item" href="/classic?tab=data"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7V5h6l2 2h10v13H3V7Z"/></svg>Данные</a>
+    <a class="nav-item" href="/qdrant-visualizer/index.html" aria-current="page"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3-6 8h3l-5 7h7v3h2v-3h7l-5-7h3l-6-8Z"/></svg>Лес знаний</a>
+  </div>
+  <div class="nav-footer">
+    <a class="nav-item" href="/les/classic?tab=state"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h5l3-7 3 14 3-7h4"/></svg>Состояние</a>
+    <a class="nav-item" href="/les/classic?tab=models"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 17h16M8 4v6M16 14v6"/></svg>Модели</a>
+  </div>
 </nav>
 <div class="workspace">
-<header><nav class="return-controls" aria-label="Возврат"><button class="quiet" data-les-back>Назад</button></nav><form id="search-form"><label class="sr-only" for="search">Найти в лесу</label><div class="search-row"><span class="search-icon" aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Найти в лесу… документы или вопрос" maxlength="4000" autocomplete="off"><button type="submit" aria-label="Искать по содержимому">→</button></div></form><nav class="return-controls" aria-label="Действия"><a class="quiet" href="search.html">Проверить поиск</a><button id="reload" class="quiet">Обновить</button></nav></header>
+<header><button class="mobile-menu quiet" type="button" data-les-menu aria-label="Открыть меню" aria-expanded="false" aria-controls="forest-menu"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button><nav class="return-controls" aria-label="Возврат"><button class="quiet" data-les-back>Назад</button></nav><form id="search-form"><label class="sr-only" for="search">Найти в лесу</label><div class="search-row"><span class="search-icon" aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Найти в лесу… документы или вопрос" maxlength="4000" autocomplete="off"><button type="submit" aria-label="Искать по содержимому">→</button></div></form><nav class="return-controls" aria-label="Действия"><a class="quiet" href="search.html">Проверить поиск</a><button id="reload" class="quiet">Обновить</button></nav></header>
 <main id="les-main" tabindex="-1">
 <details class="knowledge-architecture" id="architecture">
   <summary>

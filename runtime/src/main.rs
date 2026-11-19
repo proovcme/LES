@@ -184,7 +184,8 @@ fn main() {
     if args == ["--contract"] {
         println!(
             "{}",
-            json!({"schema":"les.native-runtime.v1","engine":"rust","python_core_remaining":true,
+            json!({"schema":"les.native-runtime.v1","engine":"rust",
+            "python":{"native_application":false,"external_skills":true,"compatibility_host":true},
             "services":["qdrant","api","ui"],"parent_pipe":true,"state_lock":"file-exclusive",
             "native_cli":true,"native_mcp_stdio":true})
         );
