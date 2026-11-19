@@ -210,7 +210,10 @@ def test_cold_native_intake_model_guard_pdf_and_owner_death(tmp_path,storage,fre
     text=folder/'Общее описание.txt';text.write_text('Project source evidence. '*40,encoding='utf-8')
     pdf=write_pdf(folder/'Две страницы.pdf',['First physical page with source evidence. '*20,'Second physical page with independent evidence. '*20])
     baseline={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in folder.iterdir()}
-    (state/'.env').write_text('\n'.join(f"{key}='{value}'" for key,value in settings().items())+
+    configured = settings()
+    if fresh:
+        configured.pop('RAG_CHUNK_UNIT')
+    (state/'.env').write_text('\n'.join(f"{key}='{value}'" for key,value in configured.items())+
         f'\nLES_EXTERNAL_ALLOW_ANY=false\nLES_EXTERNAL_SOURCE_ROOTS="{folder}"\nRAG_UPLOAD_SUFFIXES=.TXT,.PDF\n',encoding='utf-8')
     if not fresh:database.with_name(database.name+'.docs.index-contract.json').write_text(json.dumps(signed_contract()),encoding='utf-8')
     auth=tmp_path/'policy.json';auth.write_text(json.dumps({'schema':'les.native-auth-policy.v1','compatible':True,
@@ -267,6 +270,8 @@ def test_cold_native_intake_model_guard_pdf_and_owner_death(tmp_path,storage,fre
             retry = client.post('/api/light/intake', json={'id': job}).raise_for_status().json()
             assert retry['id'] == job
             wait_for(lambda:progress(job)['status']=='completed',timeout=40)
+            contract = json.loads(database.with_name(database.name+'.docs.index-contract.json').read_text(encoding='utf-8'))
+            assert contract['chunk_unit'] == 'chars'
             with sqlite3.connect(database) as db:
                 assert db.execute("SELECT max(expires_at) FROM les_model_capability_snapshots WHERE connection_revision_id=?", [revision]).fetchone()[0] > '2000-01-01'
             with closing(QdrantClient(url=url,api_key=key,check_compatibility=False)) as vectors:
