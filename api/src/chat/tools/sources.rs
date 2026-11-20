@@ -276,6 +276,9 @@ pub(crate) async fn run_scoped(
         if let Some(result) = workbook::read(context.clone(), turn, &args).await? {
             return Ok(result);
         }
+        if args["view_sha256"].is_string() {
+            return Err("PARQUET_SOURCE_CHANGED".into());
+        }
         let mut result = retrieval::read(context, turn, args).await?;
         result["tool"] = json!(name);
         result["warnings"]=json!(["Прочитаны проверенные индексированные разделы книги; это не полная выгрузка всех ячеек."]);

@@ -9155,7 +9155,7 @@
         "tests/test_light_user_guide.py",
         "tools/light_public_docs.py"
       ],
-      "lines": 75,
+      "lines": 76,
       "module": "sovushka.components.light_guide",
       "outbound": [
         "sovushka/__init__.py",
@@ -9206,7 +9206,7 @@
         "sovushka/pages/model_connections.py",
         "tests/test_sovushka_model_connections.py"
       ],
-      "lines": 52,
+      "lines": 63,
       "module": "sovushka.components.model_connection_help",
       "outbound": [
         "sovushka/__init__.py",
@@ -11236,6 +11236,7 @@
         "tests/test_light_native_numeric_evidence.py",
         "tests/test_light_native_overview.py",
         "tests/test_light_native_pdf_layout.py",
+        "tests/test_light_native_pinned_sources.py",
         "tests/test_light_native_public_upload.py",
         "tests/test_light_native_publication.py",
         "tests/test_light_native_retrieval_modes.py",
@@ -11367,6 +11368,7 @@
         "tests/test_light_native_numeric_evidence.py",
         "tests/test_light_native_overview.py",
         "tests/test_light_native_pdf_layout.py",
+        "tests/test_light_native_pinned_sources.py",
         "tests/test_light_native_public_chat.py",
         "tests/test_light_native_public_upload.py",
         "tests/test_light_native_retrieval_modes.py",
@@ -11927,6 +11929,18 @@
         "tests/test_light_native_chat_turn.py"
       ],
       "path": "tests/test_light_native_pdf_layout.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
+      "lines": 101,
+      "module": "tests.test_light_native_pinned_sources",
+      "outbound": [
+        "tests/test_light_native_api.py",
+        "tests/test_light_native_chat_turn.py"
+      ],
+      "path": "tests/test_light_native_pinned_sources.py",
       "status": "TEST_OR_TOOL_ONLY",
       "windows_runtime_explicit": false
     },
@@ -15957,9 +15971,9 @@
     "product_reachable": 417,
     "registered_api_routes": 298,
     "runtime_support": 5,
-    "test_or_tool_only": 286,
-    "tracked_python_files": 715,
-    "tracked_python_lines": 171805
+    "test_or_tool_only": 287,
+    "tracked_python_files": 716,
+    "tracked_python_lines": 171918
   },
   "warnings": []
 }

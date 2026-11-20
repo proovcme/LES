@@ -395,8 +395,21 @@ async fn search_view(
     } else {
         Default::default()
     };
+    let (datasets, pinned_file) = if args["doc_id"].as_str().is_some_and(|id| !id.is_empty()) {
+        let doc = document(&context, &args).await?;
+        scoped_document(turn, &doc)?;
+        if !datasets.contains(&doc["dataset_id"]) {
+            return Err("TOOL_SCOPE_VIOLATION".into());
+        }
+        (
+            vec![doc["dataset_id"].clone()],
+            Some(doc["file_name"].clone()),
+        )
+    } else {
+        (datasets, None)
+    };
     if args["view"] == "documents" {
-        return super::catalog::search(context, turn, &args, &datasets).await;
+        return super::catalog::search(context, turn, &args, &datasets, pinned_file).await;
     }
     let remote_scope = Some(turn.scope["resolved_dataset_ids"].clone());
     let cached = query_cache::load(context.clone(), query.to_owned()).await?;
@@ -433,10 +446,8 @@ async fn search_view(
     if vector.iter().any(|v| !v.is_finite()) {
         return Err("UPSTREAM_EMBEDDING_RESPONSE_INVALID".into());
     }
-    let files = if args["doc_id"].as_str().is_some_and(|s| !s.is_empty()) {
-        let doc = document(&context, &args).await?;
-        scoped_document(turn, &doc)?;
-        vec![doc["file_name"].clone()]
+    let files = if let Some(file) = pinned_file {
+        vec![file]
     } else if let Some(name) = args["doc_name"].as_str().filter(|s| !s.is_empty()) {
         vec![json!(name)]
     } else {

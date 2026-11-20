@@ -93,11 +93,20 @@ export function sourceReadStart(source: Source): number {
 }
 export function sourcePlace(source: Source): string {
   if (source.model_locator) return ` · ID ${source.model_locator.native_id}`;
-  const { sheet = source.sheet_name, row = source.row, cell, anchor } = source.locator ?? {};
-  if (sheet && row) return ` · ${sheet} · ${cell || `строка ${row}`}`;
+  const { cell, anchor } = source.locator ?? {};
+  const workbook = sourceWorkbookRow(source);
+  if (workbook) return ` · ${workbook.sheet} · ${cell || `строка ${workbook.row}`}`;
   const paragraph = anchor?.match(/^para(\d+)$/);
   if (paragraph) return ` · абзац ${Number(paragraph[1]) + 1}`;
   const wordRow = anchor?.match(/^t(\d+)r(\d+)$/);
   if (wordRow) return ` · таблица ${Number(wordRow[1]) + 1}, строка ${Number(wordRow[2]) + 1}`;
   return source.source_page || source.page || source.page_number ? ` · стр. ${sourcePage(source)}` : '';
+}
+
+export function sourceWorkbookRow(source: Source): { sheet: string; row: number } | undefined {
+  const sheet = source.locator?.sheet ?? source.sheet_name;
+  const row = source.locator?.row ?? source.row;
+  if (!source.model_locator && sheet && typeof row === 'number' && Number.isSafeInteger(row) && row > 0) {
+    return { sheet, row };
+  }
 }

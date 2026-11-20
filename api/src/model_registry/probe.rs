@@ -44,7 +44,16 @@ async fn exchange(
         format!("{base}/v1/{path}")
     };
     url.set_path(&path);
-    let timeout = Duration::from_secs(25);
+    exchange_url(endpoint, auth, url, body, Duration::from_secs(25)).await
+}
+
+async fn exchange_url(
+    endpoint: &crate::model_runtime::Endpoint,
+    auth: &Option<String>,
+    url: reqwest::Url,
+    body: Option<Value>,
+    timeout: Duration,
+) -> Result<(u16, Vec<u8>), &'static str> {
     tokio::time::timeout(timeout, async {
         let reply = match body {
             Some(body) => {
@@ -130,6 +139,65 @@ fn vector(value: &Value) -> bool {
             && v.iter().any(|n| n.as_f64().is_some_and(|v| v != 0.0))
     })
 }
+
+fn freetoken_catalogue_context(data: &[u8], model: &Value) -> Option<u64> {
+    let catalogue: Value = serde_json::from_slice(data).ok()?;
+    let card = catalogue["data"]
+        .as_array()?
+        .iter()
+        .find(|entry| entry["id"] == *model)?;
+    ["context_length", "max_model_len"]
+        .into_iter()
+        .filter_map(|key| card[key].as_u64().filter(|n| *n > 0))
+        .min()
+}
+
+fn freetoken_context(catalogue: Option<u64>, stats: &Value, model: &Value) -> Option<u64> {
+    if stats["model"]["id"].as_str().is_none() || stats["model"]["id"] != *model {
+        return catalogue;
+    }
+    let reported = stats["model"]["ctx"].as_u64().filter(|n| *n > 0);
+    let kv = stats["kv"]["total_pages"]
+        .as_u64()
+        .zip(stats["kv"]["page_size"].as_u64())
+        .and_then(|(pages, size)| pages.checked_mul(size))
+        .filter(|n| *n > 0);
+    catalogue.into_iter().chain(reported).chain(kv).min()
+}
+
+pub(super) async fn llama_cpp_props(
+    endpoint: &crate::model_runtime::Endpoint,
+    auth: &Option<String>,
+    model: Option<&str>,
+) -> Option<Value> {
+    let mut url = endpoint.url.clone();
+    let base = url.path().trim_end_matches('/');
+    let path = format!("{}/props", base.strip_suffix("/v1").unwrap_or(base));
+    url.set_path(&path);
+    if let Some(model) = model {
+        url.query_pairs_mut().append_pair("model", model);
+    }
+    let (200, raw) = exchange_url(endpoint, auth, url, None, Duration::from_secs(2))
+        .await
+        .ok()?
+    else {
+        return None;
+    };
+    let props: Value = serde_json::from_slice(&raw).ok()?;
+    (props["default_generation_settings"]["n_ctx"].is_u64()
+        && (props["model_alias"].is_string() || props["model_path"].is_string()))
+    .then_some(props)
+}
+
+fn llama_cpp_context(props: &Value, model: &Value) -> Option<u64> {
+    if props["model_alias"] != *model && props["model_path"] != *model {
+        return None;
+    }
+    props["default_generation_settings"]["n_ctx"]
+        .as_u64()
+        .filter(|n| *n > 0)
+}
+
 fn verified(capability: &str, data: &[u8]) -> bool {
     if capability == "streaming" {
         let Ok(body) = std::str::from_utf8(data) else {
@@ -164,7 +232,11 @@ fn verified(capability: &str, data: &[u8]) -> bool {
     match capability {
         "models" => value["data"].is_array(),
         "chat_completions" => {
-            message["content"].is_string() || message["reasoning_content"].is_string()
+            message["content"].is_string()
+                || message["reasoning_content"].is_string()
+                || message["reasoning"]
+                    .as_str()
+                    .is_some_and(|text| !text.trim().is_empty())
         }
         "tools" => message["tool_calls"].as_array().is_some_and(|items| {
             items
@@ -288,19 +360,29 @@ pub(crate) async fn run(
     .map_err(|_| "MODEL_SETTINGS_UNAVAILABLE")??;
     let models_only = selected.iter().all(|v| v == "models");
     if !models_only
-        && endpoint.locality != "remote"
+        && endpoint.locality == "loopback"
         && les_core::system_memory::available().unwrap_or(0) < 4 * 1024 * 1024 * 1024
     {
         return Err("MODEL_MEMORY_GUARD");
     }
     let model = &row["model_id"];
+    let freetoken = row["extension_type"] == "freetoken" && endpoint.locality == "loopback";
+    let mut catalogue_context = None;
     let mut observations = Vec::new();
     let mut options = json!({"max_output_field":"max_tokens"});
+    let supported = |observations: &[Value], name: &str| {
+        observations
+            .iter()
+            .any(|v| v["capability"] == name && v["state"] == "supported")
+    };
     for cap in CAPABILITIES.iter().copied() {
         let (state, evidence, detail) = if selected.iter().any(|v| v == cap) {
             let (path, body) = request(cap, model);
             match exchange(&endpoint, &auth, path, body, false).await {
                 Ok((status, bytes)) if (200..300).contains(&status) && verified(cap, &bytes) => {
+                    if freetoken && cap == "models" {
+                        catalogue_context = freetoken_catalogue_context(&bytes, model);
+                    }
                     ("supported", "probe", format!("http_{status}"))
                 }
                 Ok((404 | 405 | 501, _)) => ("unsupported", "probe", "endpoint_unavailable".into()),
@@ -314,12 +396,31 @@ pub(crate) async fn run(
             json!({"capability":cap,"state":state,"evidence_source":evidence,"detail":detail}),
         );
     }
-    if row["extension_type"] == "ollama" && endpoint.locality != "remote" {
-        let supported = |observations: &[Value], name: &str| {
-            observations
-                .iter()
-                .any(|v| v["capability"] == name && v["state"] == "supported")
+    if freetoken {
+        let stats = if supported(&observations, "chat_completions") {
+            match exchange(&endpoint, &auth, "stats", None, false).await {
+                Ok((200, raw)) => serde_json::from_slice(&raw).unwrap_or(Value::Null),
+                _ => Value::Null,
+            }
+        } else {
+            Value::Null
         };
+        if let Some(tokens) = freetoken_context(catalogue_context, &stats, model) {
+            options["observed_context_tokens"] = json!(tokens.to_string());
+        }
+    }
+    if row["extension_type"] == "llama_cpp"
+        && endpoint.locality == "loopback"
+        && supported(&observations, "chat_completions")
+    {
+        if let Some(tokens) = llama_cpp_props(&endpoint, &auth, model.as_str())
+            .await
+            .and_then(|props| llama_cpp_context(&props, model))
+        {
+            options["observed_context_tokens"] = json!(tokens.to_string());
+        }
+    }
+    if row["extension_type"] == "ollama" && endpoint.locality != "remote" {
         let context_tokens = row["requested_context_tokens"].as_u64().unwrap_or(8192);
         if supported(&observations, "chat_completions") {
             let mut chat_options = json!({"num_predict":1});
@@ -469,4 +570,44 @@ pub(crate) async fn run(
         json!({"revision_id":snapshot["connection_revision_id"],"snapshot_id":snapshot["snapshot_id"],
         "observed_at":snapshot["observed_at"],"expires_at":snapshot["expires_at"],"capabilities":capabilities}),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chat_probe_accepts_nonempty_mlx_reasoning() {
+        let reply = |reasoning: &str| {
+            json!({"choices":[{"finish_reason":"length","message":{"role":"assistant","content":null,"reasoning":reasoning}}]})
+                .to_string()
+        };
+        assert!(verified("chat_completions", reply("Checking.").as_bytes()));
+        assert!(!verified("chat_completions", reply(" ").as_bytes()));
+    }
+
+    #[test]
+    fn freetoken_context_respects_the_served_model_and_allocated_pool() {
+        let model = json!("served-model");
+        let catalogue = br#"{"data":[{"id":"other","context_length":1024},{"id":"served-model","context_length":131072,"max_model_len":65536}]}"#;
+        let ceiling = freetoken_catalogue_context(catalogue, &model);
+        assert_eq!(ceiling, Some(65536));
+        let stats = json!({"model":{"id":"served-model","ctx":131072},"kv":{"total_pages":256,"used_pages":230,"page_size":64}});
+        assert_eq!(freetoken_context(ceiling, &stats, &model), Some(16384));
+        let mut outdated = stats;
+        outdated["model"]["id"] = json!("other");
+        assert_eq!(freetoken_context(ceiling, &outdated, &model), ceiling);
+        assert_eq!(freetoken_context(ceiling, &Value::Null, &model), ceiling);
+    }
+
+    #[test]
+    fn llama_cpp_context_uses_the_selected_slot_window() {
+        let model = json!("served-model");
+        let props = json!({"model_alias":"served-model","default_generation_settings":{"n_ctx":4096},"total_slots":4});
+        assert_eq!(llama_cpp_context(&props, &model), Some(4096));
+        assert_eq!(llama_cpp_context(&props, &json!("other")), None);
+        let mut router = props;
+        router["default_generation_settings"]["n_ctx"] = json!(0);
+        assert_eq!(llama_cpp_context(&router, &model), None);
+    }
 }

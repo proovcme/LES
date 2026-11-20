@@ -2,6 +2,97 @@
 //! Evidence owns reading and delivery state.
 use serde_json::{json, Value};
 
+/// Compare whole segments of document designations. Engineering filenames
+/// often spell the same designation in Latin and Cyrillic.
+pub(super) fn document_name_key(name: &str) -> String {
+    let mut key = String::from("_");
+    for ch in name.to_lowercase().chars() {
+        let letters = match ch {
+            'а' => "a",
+            'б' => "b",
+            'в' => "v",
+            'г' => "g",
+            'д' => "d",
+            'е' => "e",
+            'ё' => "yo",
+            'ж' => "zh",
+            'з' => "z",
+            'и' => "i",
+            'й' => "y",
+            'к' => "k",
+            'л' => "l",
+            'м' => "m",
+            'н' => "n",
+            'о' => "o",
+            'п' => "p",
+            'р' => "r",
+            'с' => "s",
+            'т' => "t",
+            'у' => "u",
+            'ф' => "f",
+            'х' => "kh",
+            'ц' => "ts",
+            'ч' => "ch",
+            'ш' => "sh",
+            'щ' => "shch",
+            'ъ' | 'ь' => "",
+            'ы' => "y",
+            'э' => "e",
+            'ю' => "yu",
+            'я' => "ya",
+            _ => {
+                if ch.is_alphanumeric() {
+                    key.push(ch);
+                } else if !key.ends_with('_') {
+                    key.push('_');
+                }
+                continue;
+            }
+        };
+        key.push_str(letters);
+    }
+    if !key.ends_with('_') {
+        key.push('_');
+    }
+    key
+}
+
+fn document_references(question: &str) -> std::collections::BTreeSet<String> {
+    let separator = |ch: char| matches!(ch, '.' | '_' | '-');
+    question
+        .split(|ch: char| !ch.is_alphanumeric() && !separator(ch))
+        .map(|token| token.trim_matches(separator))
+        .filter(|token| {
+            token.contains(separator)
+                && token.chars().any(char::is_alphabetic)
+                && token.bytes().any(|byte| byte.is_ascii_digit())
+        })
+        .map(document_name_key)
+        .collect()
+}
+
+/// Match names against the retrieved catalog before any evidence is shortened.
+pub(super) fn named_documents(
+    question: &str,
+    candidates: &Value,
+) -> std::collections::BTreeSet<String> {
+    let question_key = document_name_key(question);
+    let designations = document_references(question);
+    candidates
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|doc| {
+            let name = document_name_key(doc["file_name"].as_str()?);
+            (name.len() > 1
+                && (question_key.contains(&name)
+                    || designations.iter().any(|key| name.contains(key))))
+            .then(|| doc["doc_id"].as_str().map(str::to_owned))
+            .flatten()
+        })
+        .collect()
+}
+
 /// A file explicitly named in the question can have its own reading task.
 /// Keep the whole question when the text does not separate the tasks.
 pub(super) fn read_question<'a>(

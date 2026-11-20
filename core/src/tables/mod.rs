@@ -73,9 +73,8 @@ fn sum_rows(request: &Value) -> Result<Value> {
 pub(super) fn present(value: &Value) -> bool {
     match value {
         Value::Null => false,
-        Value::Bool(v) => *v,
+        Value::Bool(_) | Value::Number(_) => true,
         Value::String(v) => !v.is_empty(),
-        Value::Number(v) => v.as_f64() != Some(0.0),
         Value::Array(v) => !v.is_empty(),
         Value::Object(v) => !v.is_empty(),
     }

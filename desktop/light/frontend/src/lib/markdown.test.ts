@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { answerHTML } from './markdown';
+import { answerHTML, citations } from './markdown';
 
 it('makes only backend-mapped citations clickable and leaves code untouched', () => {
   const div = document.createElement('div');
@@ -24,4 +24,39 @@ it('repairs only exact supplied source headers in saved answers, outside code an
   expect([...div.querySelectorAll('button')].map((b) => b.dataset.citation)).toEqual(['1','1']);
   expect(div.querySelector('code')?.textContent).toContain('файл 87.pdf');
   expect(div.textContent).toContain('Источник 1. [999]');
+});
+
+it('preserves a quoted row number and shows the verified address on the citation', () => {
+  const div = document.createElement('div');
+  div.innerHTML = answerHTML('- Сигнализатор (лист **«ПБ»**, строка **8**, позиция 13) [Источник 21].\n- Блок (лист СО_ДИС, строка 8) [Источник 18].', [
+    { index: 21, row: 99, sheet_name: 'старый', locator: { sheet: 'ПБ', row: 18 } },
+    { index: 18, sheet_name: 'СО_ДИС', row: 8 },
+  ]);
+  expect(div.querySelector('li')?.textContent).toContain('лист «ПБ», строка 8, позиция 13');
+  expect(div.querySelector('[data-citation="21"]')?.getAttribute('aria-label')).toContain('ПБ · строка 18');
+  expect(div.querySelectorAll('li')[1].textContent).toContain('СО_ДИС, строка 8');
+});
+
+it('leaves ambiguous, unmatched, uncited, range and code references alone', () => {
+  const div = document.createElement('div');
+  div.innerHTML = answerHTML('- лист ПБ, строка 8 [1] [2]\n- лист ПБ, строка 8 [999]\n- лист ПБ, строка 8–10 [1]\n- лист другой, строка 9 [1]\n- `лист ПБ, строка 8` [1]', [
+    { index: 1, sheet_name: 'ПБ', row: 18 }, { index: 2, sheet_name: 'другой', row: 20 },
+  ]);
+  expect(div.textContent).not.toContain('строка 18');
+  expect(div.querySelector('code')?.textContent).toBe('лист ПБ, строка 8');
+});
+
+it('opens the cited row while preserving the statement about a different empty row', () => {
+  const div = document.createElement('div');
+  const opened: number[] = [];
+  const handler = citations(div, index => opened.push(index));
+  div.innerHTML = answerHTML('Запрошенный адрес (лист Register, строка 8) пуст. Значение найдено ниже [Источник 1].', [
+    { index: 1, locator: { sheet: 'Register', row: 18 } },
+  ]);
+  const button = div.querySelector('button')!;
+  expect(div.textContent).toContain('(лист Register, строка 8) пуст.');
+  expect(button.title).toContain('Register · строка 18');
+  button.click();
+  expect(opened).toEqual([1]);
+  handler.destroy();
 });

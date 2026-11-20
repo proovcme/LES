@@ -164,7 +164,7 @@ fn resolve_answer(context: &Context, execution: &Value) -> Result<model_runtime:
         return Err("CLOUD_CONSENT_REQUIRED".into());
     }
     let connection = model_runtime::resolve(execution, "answer", &env)?;
-    if connection.endpoint.locality != "remote"
+    if connection.endpoint.locality == "loopback"
         && les_core::system_memory::available()? < 4 * 1024 * 1024 * 1024
     {
         return Err("CHAT_MEMORY_GUARD".into());

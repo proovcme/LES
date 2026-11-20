@@ -59,7 +59,8 @@ async fn list(
     context: &Context,
     input: Input,
     timeout: Duration,
-) -> std::result::Result<Value, &'static str> {
+    detect_llama_cpp: bool,
+) -> std::result::Result<(Value, bool), &'static str> {
     let permit = context
         .workspace_slots
         .clone()
@@ -72,7 +73,7 @@ async fn list(
     })
     .await
     .map_err(|_| "DISCOVERY_BUSY")??;
-    let (mut endpoint, secret) = endpoint;
+    let (endpoint, secret) = endpoint;
     let port = endpoint.url.port_or_known_default();
     if endpoint.locality == "loopback"
         && (port == Some(context.listen_port) || port == context.upstream_port())
@@ -85,10 +86,11 @@ async fn list(
     } else {
         format!("{base}/v1/models")
     };
-    endpoint.url.set_path(&path);
+    let mut url = endpoint.url.clone();
+    url.set_path(&path);
     let reply = crate::model_http::get_authorized(
-        endpoint.url,
-        endpoint.addresses,
+        url,
+        endpoint.addresses.clone(),
         secret
             .filter(|v| !v.is_empty())
             .map(|v| format!("Bearer {v}")),
@@ -121,8 +123,16 @@ async fn list(
         .filter_map(|row| row["id"].as_str())
         .filter(|v| !v.is_empty() && v.chars().count() <= 300 && !v.chars().any(char::is_control))
         .collect::<BTreeSet<_>>();
-    Ok(json!({"status":"ok","truncated":names.len()>1000,
-        "models":names.iter().take(1000).collect::<Vec<_>>()}))
+    let llama_cpp = detect_llama_cpp
+        && !names.is_empty()
+        && super::probe::llama_cpp_props(&endpoint, &None, None)
+            .await
+            .is_some();
+    Ok((
+        json!({"status":"ok","truncated":names.len()>1000,
+        "models":names.iter().take(1000).collect::<Vec<_>>()}),
+        llama_cpp,
+    ))
 }
 
 fn failure(code: &str) -> Value {
@@ -157,28 +167,32 @@ pub(super) async fn handle(context: Arc<Context>, request: Request) -> Response 
             ),
             ("local_api", "Локальный API · порт 8080", 8080, "/v1", None),
             (
+                "local_api_9931",
+                "Локальный API · порт 9931",
+                9931,
+                "/v1",
+                None,
+            ),
+            (
                 "lemonade",
                 "Lemonade / совместимый сервер",
                 13305,
                 "/api/v1",
                 Some("lemonade"),
             ),
-            (
-                "freetoken",
-                "FreeToken / совместимый сервер",
-                1919,
-                "/v1",
-                Some("freetoken"),
-            ),
+            ("freetoken", "FreeToken", 1919, "/v1", Some("freetoken")),
         ];
         let found = join_all(engines.map(|(id,name,port,path,extension)| {
             let owner = context.clone();
             async move {
                 let base_url = format!("http://127.0.0.1:{port}{path}");
                 let timeout = Duration::from_secs(3);
-                let result = tokio::time::timeout(timeout, list(&owner, Input {
+                let detect_llama_cpp = matches!(port, 8080 | 9931);
+                let deadline = timeout + if detect_llama_cpp { Duration::from_secs(2) } else { Duration::ZERO };
+                let (result, llama_cpp) = tokio::time::timeout(deadline, list(&owner, Input {
                     base_url:base_url.clone(), locality:loopback(), secret_value:None,
-                }, timeout)).await.ok()?.ok()?;
+                }, timeout, detect_llama_cpp)).await.ok()?.ok()?;
+                let (name, extension) = if llama_cpp { ("llama.cpp", Some("llama_cpp")) } else { (name, extension) };
                 Some(json!({"id":id,"name":name,"base_url":base_url,"extension_type":extension,"models":result["models"]}))
             }
         })).await.into_iter().flatten().collect::<Vec<_>>();
@@ -204,8 +218,9 @@ pub(super) async fn handle(context: Arc<Context>, request: Request) -> Response 
                 "Проверьте адрес и расположение сервиса.",
             );
         };
-        let value = match tokio::time::timeout(timeout, list(&context, input, timeout)).await {
-            Ok(Ok(value)) => value,
+        let value = match tokio::time::timeout(timeout, list(&context, input, timeout, false)).await
+        {
+            Ok(Ok((value, _))) => value,
             Ok(Err(code)) => failure(code),
             Err(_) => failure("UPSTREAM_TIMEOUT"),
         };

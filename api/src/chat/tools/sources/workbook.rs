@@ -274,7 +274,14 @@ pub(super) async fn read(
     if let Some(next) = reply["result"]["next_offset"].as_u64() {
         let mut continuation = json!({"doc_id":doc["id"],"source_sha256":doc["file_hash"],
             "view_sha256":page["source_sha256"],"offset":next});
-        for key in ["q", "sheet_name", "row_start", "row_end"] {
+        for key in [
+            "q",
+            "sheet_name",
+            "row_start",
+            "row_end",
+            "limit",
+            "max_chars",
+        ] {
             if !args[key].is_null() {
                 continuation[key] = args[key].clone();
             }

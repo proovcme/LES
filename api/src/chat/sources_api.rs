@@ -48,7 +48,8 @@ fn prepare(context: &Context, input: &Value) -> Result<(String, Value, SourceCon
         && args["view"] != "documents"
         && args["view"] != "parts"
         && args["index_revision"].as_str().is_none_or(str::is_empty)
-        && !(name == "read_source" && args["view_sha256"].as_str().is_some_and(|s| !s.is_empty()))
+        && !(matches!(name, "read_source" | "read_excel_source")
+            && args["view_sha256"].as_str().is_some_and(|s| !s.is_empty()))
     {
         return Err("SOURCE_CONTINUATION_REVISION_REQUIRED".into());
     }

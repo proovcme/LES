@@ -109,21 +109,13 @@ it('shows why indexing is waiting and retries the original job from the status p
   }
 });
 
-it('selects a retrieval strategy in answer options and restores the preference', async () => {
-  await settle(() => !!document.querySelector('#question'));
-  document.querySelector<HTMLButtonElement>('button[aria-label="Параметры ответа"]')!.click();
-  await settle(() => !!document.querySelector('dialog select'));
-  const modes = document.querySelector<HTMLSelectElement>('dialog select')!;
-  expect([...modes.options].map(item => item.value)).toEqual(['pull', 'push', 'hybrid']);
-  modes.value = 'hybrid';
-  modes.dispatchEvent(new Event('change', { bubbles: true }));
-  flushSync();
-  try {
-    expect(workspace.retrievalMode).toBe('hybrid');
-    expect(new Workspace().retrievalMode).toBe('hybrid');
-  } finally {
-    localStorage.removeItem('les.retrieval-mode');
-  }
+it('offers document scope as the search control in the composer', async () => {
+  const scope = () => document.querySelector<HTMLButtonElement>('.composer-actions .scope-button');
+  await settle(() => scope()?.disabled === false);
+  expect(document.querySelector('.composer-actions [aria-label="Параметры ответа"]')).toBeNull();
+  scope()!.click();
+  await settle(() => !!document.querySelector('dialog input[value="all"]'));
+  expect(document.querySelector('dialog')?.textContent).toContain('Где искать ответ');
 });
 
 it('uses the paperclip to index a file, waits for publication and preserves the draft', async () => {

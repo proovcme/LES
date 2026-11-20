@@ -5,7 +5,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::sync::LazyLock;
 
 static MARKER: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\[(?:Источники?\s+([0-9][0-9,;\s–—\-]*)(?:,[ \t]*(?:страница|стр\.?|page)[ \t]+[0-9]+)?|([0-9][0-9,;\s–—\-]*))(?:\|([^\]\n]*))?\]").unwrap()
+    Regex::new(r"(?i)\[(?:Источники?\s+([0-9][0-9,;\s–—\-]*)(?:,[ \t]*(?:страница|стр\.?|page)[ \t]+[0-9]+)?|([0-9]+))(?:\|([^\]\n]*))?\]").unwrap()
 });
 static NAMED_PARENTHETICAL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\(Источники?[ \t]+([0-9][0-9,; \t–—\-]*)(?:,[ \t]*(?:страница|стр\.?|page)[ \t]+[0-9]+)?\)").unwrap()

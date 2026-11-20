@@ -104,6 +104,7 @@ pub async fn run(
     let mut evidence = Evidence::new(reading_required);
     let mut prefetch = Value::Null;
     let mut candidate_documents = Value::Null;
+    let mut named_documents = std::collections::BTreeSet::new();
     if matches!(retrieval_mode.as_str(), "push" | "hybrid") {
         // Hybrid retains the same initial evidence breadth as Push. Enabling
         // tools must not silently discard half the candidate documents.
@@ -119,6 +120,10 @@ pub async fn run(
             tools.observe_sources(&result);
         }
         evidence.add(&result);
+        named_documents = super::inspection::named_documents(
+            turn.request["question"].as_str().unwrap_or(""),
+            &found_documents,
+        );
         candidate_documents = result["result"]["candidate_documents"].clone();
         prefetch = json!({"coverage":result["result"]["coverage"],
             "index_revision":result["result"]["index_revision"],"read_receipt":result["result"]["read_receipt"],"candidates":evidence.sources.len(),"selection_policy":result["result"]["selection_policy"],"candidate_documents":found_documents,
@@ -227,6 +232,32 @@ pub async fn run(
                     && numeric_grounded
                     && turn.profile["mode"] == "search"
                     && evidence.has_reads();
+                let hybrid_search = retrieval_mode == "hybrid"
+                    && turn.profile["mode"] == "search"
+                    && source_reading
+                    && tools.table.is_none()
+                    && !review_active;
+                let mut prefetch_focused = false;
+                let repair_focused_citations = citation_retry
+                    && !answer_window_retry
+                    && contexts
+                        .last()
+                        .is_some_and(|c: &Value| c["prefetch_complete"] == true);
+                if native
+                    && hybrid_search
+                    && (!final_answer || repair_focused_citations)
+                    && exchanges.is_empty()
+                    && required.is_empty()
+                {
+                    if let Some(blocks) = evidence.prefetch_blocks(
+                        turn.request["question"].as_str().unwrap_or(""),
+                        &initial,
+                        &named_documents,
+                    ) {
+                        initial = blocks;
+                        prefetch_focused = true;
+                    }
+                }
                 let mut focused_citations = false;
                 if final_answer
                     && answer_window_retry
@@ -299,16 +330,22 @@ pub async fn run(
                     vec![]
                 } else {
                     tools.disclosed_schemas(
-                        tools.schema_limit(
-                            turn.connection.profile["normal_tool_count"]
-                                .as_u64()
-                                .unwrap_or(3) as usize,
-                            turn.connection.profile["max_tools"].as_u64().unwrap_or(3) as usize,
-                            turn.scope["document_grounding_enabled"] == true
-                                && disclosed.is_empty()
-                                && !review_active
-                                && tools.table.is_none(),
-                        ),
+                        if native && hybrid_search {
+                            // Search and extension access suffice until the
+                            // model asks for a specific reader.
+                            2 + disclosed.len().min(3)
+                        } else {
+                            tools.schema_limit(
+                                turn.connection.profile["normal_tool_count"]
+                                    .as_u64()
+                                    .unwrap_or(3) as usize,
+                                turn.connection.profile["max_tools"].as_u64().unwrap_or(3) as usize,
+                                turn.scope["document_grounding_enabled"] == true
+                                    && disclosed.is_empty()
+                                    && !review_active
+                                    && tools.table.is_none(),
+                            )
+                        },
                         turn.scope["document_grounding_enabled"] == true,
                         &disclosed,
                     )
@@ -343,6 +380,7 @@ pub async fn run(
                 }
                 let navigation = if candidate_documents.is_array()
                     && exchanges.is_empty()
+                    && !prefetch_focused
                     && !final_answer
                     && !direct
                 {
@@ -375,8 +413,8 @@ pub async fn run(
                 if final_answer {
                     question["final_answer"]=json!("Ответь по прочитанным данным. Новые вызовы инструментов недоступны. Если сведений недостаточно, обозначь это.");
                 }
-                if citation_retry {
-                    question["citation_format_required"] = json!("Свяжи каждый подтверждённый факт с видимым источником в формате [Источник N]. Если подтверждённых фактов нет, начни ответ с [[NO_EVIDENCE]], причину сформулируй своими словами и не перечисляй ссылки.");
+                if citation_retry || prefetch_focused {
+                    question["citation_format_required"] = json!("Свяжи каждый подтверждённый факт с видимым источником в формате [Источник N]. Бери номер из заголовка выдержки: номера могут идти с пропусками. Если подтверждённых фактов нет, начни ответ с [[NO_EVIDENCE]], причину сформулируй своими словами и не перечисляй ссылки.");
                 }
                 // Search may answer from a verified prefetch while keeping
                 // refinement tools available. Do not force a redundant action
@@ -466,6 +504,23 @@ pub async fn run(
                 let visible = les_core::chat_context::execute(
                     &json!({"action":"visible","packet":packed["packet"],"source_map":evidence.sources}),
                 )?;
+                let missing_named_document = hybrid_search
+                    && named_documents.iter().any(|id| {
+                        !visible
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .any(|s| s["doc_id"].as_str() == Some(id.as_str()))
+                    });
+                let prefetch_complete = prefetch_focused
+                    && !missing_named_document
+                    && initial.iter().all(|block| {
+                        visible
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .any(|source| source["index"] == block["source_index"])
+                    });
                 table_rows = if numeric_grounded {
                     super::table_facts::Rows::new(&packed["packet"], &visible)
                 } else {
@@ -481,7 +536,7 @@ pub async fn run(
                         .await?;
                     published_sources = visible.clone();
                 }
-                contexts.push(json!({"delivery":"prepared","context":trace,"sources":visible,"schema_reserved_tokens":reserve,"focused_citations":focused_citations}));
+                contexts.push(json!({"delivery":"prepared","context":trace,"sources":visible,"schema_reserved_tokens":reserve,"focused_citations":focused_citations,"prefetch_complete":prefetch_complete,"missing_named_document":missing_named_document}));
                 sink.emit("sources", json!({"source_map":visible,"sources":visible}))
                     .await?;
                 sink.progress("generation", "Модель читает контекст и отвечает")
@@ -661,7 +716,17 @@ pub async fn run(
                     false
                 };
                 let omitted_reads = evidence.omitted_explicit_reads(&visible);
-                let read_window = evidence.read_omitted(&visible);
+                let focused_answer = contexts
+                    .last()
+                    .is_some_and(|c| c["prefetch_complete"] == true)
+                    && !super::inspection::answer_text(
+                        terminal["text"].as_str().unwrap_or(""),
+                        true,
+                    )
+                    .1;
+                // Deliberately sending a preview is distinct from losing an
+                // admitted reading to the tool schemas during packing.
+                let read_window = !focused_answer && evidence.read_omitted(&visible);
                 let omitted_document = omitted_reads.iter().any(|read| {
                     read["doc_id"].as_str().is_some_and(|doc_id| {
                         !visible
@@ -679,7 +744,11 @@ pub async fn run(
                     && contexts.last().is_some_and(|c| {
                         c["schema_reserved_tokens"].as_u64().is_some_and(|n| n > 1)
                     })
-                    && (read_window || omitted_document)
+                    && (read_window
+                        || omitted_document
+                        || contexts
+                            .last()
+                            .is_some_and(|c| c["missing_named_document"] == true))
                 {
                     answer_window_retry = true;
                     journal

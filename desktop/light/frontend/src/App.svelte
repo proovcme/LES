@@ -21,7 +21,7 @@
   import EngineeringModels from './components/EngineeringModels.svelte';
 
   let { workspace = new Workspace() }: { workspace?: Workspace } = $props();
-  let modal = $state<'sessions' | 'scope' | 'options' | 'attachment' | 'models' | 'mail' | 'data' | 'profiles' | 'mcp' | 'update' | 'engineering' | null>(null);
+  let modal = $state<'sessions' | 'scope' | 'attachment' | 'models' | 'mail' | 'data' | 'profiles' | 'mcp' | 'update' | 'engineering' | null>(null);
   let source = $state<Source | null>(null); let mobileNav = $state(false);
   let actionBusy = $state(false); let sessionQuery = $state('');
   let memoryOpen = $state(false); let memoryDirty = $state(false); let memoryEditor: AgentMemory;
@@ -190,7 +190,7 @@
           <div class="composer-actions">
             <input class="sr-only" type="file" bind:this={fileInput} tabindex="-1" aria-label="Выбрать файл" onchange={() => { const file = fileInput.files?.[0]; if (file) void workspace.attach(file, indexFile); fileInput.value = ''; }} />
             <button type="button" class="icon-button quiet" aria-label={workspace.indexedAttachments ? 'Прикрепить файл' : 'Прикрепить файл для чтения'} aria-haspopup={workspace.indexedAttachments ? 'dialog' : undefined} disabled={disabled || !workspace.session} onclick={() => workspace.indexedAttachments ? modal = 'attachment' : chooseFile(false)}><Icon name="paperclip" /></button>
-            <button type="button" class="scope-button quiet" disabled={disabled || !workspace.session} onclick={() => modal = 'scope'} title={scopeLabel}><Icon name="folder" /><span>{scopeLabel}</span></button><button type="button" class="icon-button quiet options-button" aria-label="Параметры ответа" aria-haspopup="dialog" data-active={workspace.retrievalMode !== 'pull'} disabled={disabled} onclick={() => modal = 'options'}><Icon name="settings" /></button>
+            <button type="button" class="scope-button quiet" aria-haspopup="dialog" disabled={disabled || !workspace.session} onclick={() => modal = 'scope'} title={scopeLabel}><Icon name="folder" /><span>{scopeLabel}</span></button>
             {#if workspace.busy}<button type="button" class="stop-button" aria-label="Остановить ответ" onclick={() => workspace.stop()}><Icon name="stop" /><span class="send-label">Остановить</span></button>{:else}<button type="submit" class="send-button" disabled={disabled || !workspace.session || !workspace.text.trim()} aria-label="Отправить вопрос"><Icon name="arrow" /><span class="send-label">Отправить</span></button>{/if}
           </div>
         </form>
@@ -236,17 +236,6 @@
       <button type="button" class="quiet" onclick={() => chooseFile(false)}>Прочитать в чате</button>
       <button type="button" disabled={workspace.indexWatching} onclick={() => chooseFile(true)}>Добавить в поиск</button>
     </div>
-  </Modal>
-{:else if modal === 'options'}
-  <Modal title="Параметры ответа" close={() => modal = null}>
-    <label class="field retrieval-option">Поиск в выбранных документах
-      <select value={workspace.retrievalMode} onchange={(event) => workspace.setRetrievalMode(event.currentTarget.value)}>
-        <option value="pull">По запросу модели</option>
-        <option value="push">Лес ищет перед ответом</option>
-        <option value="hybrid">Лес ищет, модель может дочитать</option>
-      </select>
-    </label>
-    <div class="modal-footer"><button onclick={() => modal = null}>Готово</button></div>
   </Modal>
 {/if}
 {#if source}{#key `${source.index}:${source.doc_id}:${source.source_sha256}:${source.view_sha256}:${sourceReadStart(source)}:${sourcePage(source)}`}

@@ -2,16 +2,7 @@ import { ApiError, errorMessage, request, streamChat } from './api';
 import type { Attachment, ChatPayload, ContextExclusion, Dataset, Draft, IndexedAttachment, Message, ModelRole, Scope, Session } from './contracts';
 import { contextPath, sourcesFor } from './contracts';
 import { DraftWriter } from './drafts';
-
-type RetrievalMode = 'push' | 'pull' | 'hybrid';
-const RETRIEVAL_PREFERENCE = 'les.retrieval-mode';
-function retrievalPreference(): RetrievalMode {
-  try {
-    const saved = localStorage.getItem(RETRIEVAL_PREFERENCE);
-    if (saved === 'push' || saved === 'pull' || saved === 'hybrid') return saved;
-  } catch { /* Browser storage is optional. */ }
-  return 'pull';
-}
+import { serviceLabel } from './model-service';
 
 export class Workspace {
   session = $state<Session | null>(null);
@@ -44,7 +35,6 @@ export class Workspace {
   draftStatus = $state('');
   draftConflict = $state<Draft | null>(null);
   elapsed = $state(0);
-  retrievalMode = $state<RetrievalMode>(retrievalPreference());
   private writer?: DraftWriter;
   private timer?: ReturnType<typeof setTimeout>;
   private controller?: AbortController;
@@ -54,12 +44,6 @@ export class Workspace {
   private initializing = false;
   private generationFinished?: Promise<void>;
   private finishGeneration?: () => void;
-
-  setRetrievalMode(mode: string) {
-    if (mode !== 'push' && mode !== 'pull' && mode !== 'hybrid') return;
-    this.retrievalMode = mode;
-    try { localStorage.setItem(RETRIEVAL_PREFERENCE, mode); } catch { /* Current selection remains usable. */ }
-  }
 
   async initialize(): Promise<void> {
     if (this.initializing) return;
@@ -310,8 +294,9 @@ export class Workspace {
       this.messages.push({ role: 'user', text: question }, { role: 'ai', text: '', meta: {} });
       reply = this.messages.length - 1;
       await streamChat({ question, session_id: session.session_id, project_id: session.project_id,
-        scope: session.scope, mode: session.role, attachment_id: attachment?.attachment_id,
-        retrieval_mode: this.retrievalMode,
+        scope: session.scope, mode: session.role === 'agent' && session.scope.scope_type !== 'none' ? 'search' : session.role,
+        attachment_id: attachment?.attachment_id,
+        retrieval_mode: 'hybrid',
       }, this.controller.signal, (item) => {
         if (!this.alive) return;
         if (!acknowledged) {
@@ -386,11 +371,6 @@ export class Workspace {
 }
 
 const INDEX_RECEIPT = 'les.indexed-attachment.receipt.v1';
-function serviceLabel(extension: string | null): string {
-  const names: Record<string, string> = { ollama: 'Ollama', mlx: 'MLX', lm_studio: 'LM Studio',
-    llama_cpp: 'llama.cpp', lemonade: 'Lemonade', freetoken: 'FreeToken' };
-  return names[extension || ''] || 'Совместимый API';
-}
 function validReceipt(value: unknown): value is IndexedAttachment {
   if (!value || typeof value !== 'object') return false;
   const receipt = value as Partial<IndexedAttachment>;

@@ -40,8 +40,11 @@ pub async fn complete(
         message["content"] =
             json!([{"type":"text","text":text},{"type":"image_url","image_url":{"url":url}}]);
     }
+    // MLX has a server-wide generation default. Use this round's remaining
+    // context there, so the output budget follows the actual packed request.
+    let provider_output_default = turn.connection.revision["extension_type"] != "mlx";
     let request = json!({"messages":messages,"tools":tools,"max_output_tokens":max_output,"reasoning_enabled":profile["reasoning_enabled"].as_bool().unwrap_or(false),
-        "temperature":temperature,"response_format":response_format,"provider_output_default":true});
+        "temperature":temperature,"response_format":response_format,"provider_output_default":provider_output_default});
     let native = turn.connection.snapshot["transport_options"]["chat_protocol"] == "native_chat_v1";
     let streamable = native
         || les_core::model_capabilities::require(
