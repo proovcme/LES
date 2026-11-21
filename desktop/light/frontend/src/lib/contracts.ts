@@ -1,6 +1,7 @@
 export interface Scope {
   scope_type: 'none' | 'all' | 'dataset' | 'datasets' | 'project' | 'projects' | 'mixed';
   project_ids: number[]; dataset_ids: string[]; selected_sources_only: boolean;
+  document_ids?: string[];
 }
 export interface Session {
   session_id: string; title: string; project_id: number | null;

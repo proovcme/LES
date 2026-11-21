@@ -1,0 +1,462 @@
+{
+  "candidate": {
+    "schema": "les.native-api-asset.v1",
+    "file": "les-api.exe",
+    "build_number": 932,
+    "sha256": "0a1c254544b7605f3d542020747cf62f9b6d2017731138c1e5bde027a60d33c3",
+    "source_sha256": "55d448327dfb2f706c483bb55c4e28bbc2a3af7b394750213110293564154ae1",
+    "remapped_paths": true
+  },
+  "corpus": {
+    "file_type": "txt",
+    "documents": 60,
+    "scope": "dataset",
+    "retrieval": "hybrid",
+    "embedding_model": "bge-m3",
+    "live_model": "qwen3.5:2b",
+    "local_provider": "Ollama",
+    "input_token_limit": 8192
+  },
+  "baseline_931": {
+    "question": "При каком давлении испытывают насосы на северном и южном участках и при каком условии можно начинать эти испытания?",
+    "http": 503,
+    "answer": null,
+    "successful_contexts": [],
+    "public_error": {
+      "code": "UPSTREAM_RESPONSE_TOO_LARGE",
+      "detail": "Не удалось завершить запрос. Подробности сохранены в журнале. Проверьте подключение модели и повторите действие."
+    },
+    "prepared_in_history": null,
+    "log": [
+      {
+        "checkpoint": [
+          "generation",
+          2
+        ],
+        "code": "UPSTREAM_RESPONSE_TOO_LARGE",
+        "event": "chat_request_failed",
+        "history_id": 1
+      }
+    ]
+  },
+  "initial_932_live": {
+    "positive": {
+      "content_bytes": 0,
+      "elapsed_ms": 127751,
+      "first_decoded_event_ms": 5379,
+      "limit": {
+        "maximum": 24632,
+        "name": "sse_lines",
+        "observed": 24633
+      },
+      "lines_processed": 24633,
+      "protocol": "openai_sse",
+      "separate_reasoning_bytes": 65441,
+      "tool_bytes": 0,
+      "wire_bytes_received": 2776386
+    },
+    "missing": {
+      "content_bytes": 0,
+      "elapsed_ms": 120104,
+      "first_decoded_event_ms": 4606,
+      "limit": {
+        "maximum": 24768,
+        "name": "sse_lines",
+        "observed": 24769
+      },
+      "lines_processed": 24769,
+      "protocol": "openai_sse",
+      "separate_reasoning_bytes": 77499,
+      "tool_bytes": 0,
+      "wire_bytes_received": 2803237
+    }
+  },
+  "final_932_live": {
+    "positive": {
+      "question": "При каком давлении испытывают насосы на северном и южном участках и при каком условии можно начинать эти испытания?",
+      "http": 503,
+      "answer": null,
+      "successful_contexts": [],
+      "public_error": {
+        "code": "UPSTREAM_RESPONSE_TOO_LARGE",
+        "detail": "Количество строк потока — 24633, допустимо 24632. Номер запроса в журнале — 1.",
+        "history_id": 1,
+        "model_call": 1,
+        "stage": "generation",
+        "stream_metrics": {
+          "content_bytes": 0,
+          "elapsed_ms": 120838,
+          "first_decoded_event_ms": 4682,
+          "limit": {
+            "maximum": 24632,
+            "name": "sse_lines",
+            "observed": 24633
+          },
+          "lines_processed": 24633,
+          "protocol": "openai_sse",
+          "separate_reasoning_bytes": 65036,
+          "tool_bytes": 0,
+          "wire_bytes_received": 2776054
+        }
+      },
+      "prepared_in_history": {
+        "available_output_tokens": 3079,
+        "candidate_document_count": 60,
+        "estimated_input_tokens": 4600,
+        "input_budget_tokens": 6479,
+        "model_call": 1,
+        "omissions": [
+          {
+            "kind": "evidence",
+            "omitted": 60,
+            "reason": "budget_exhausted",
+            "total": 60
+          }
+        ],
+        "retrieval_mode": "hybrid",
+        "sections": [
+          {
+            "items": 1,
+            "kind": "profile_prefix",
+            "tokens": 727
+          },
+          {
+            "items": 2,
+            "kind": "request",
+            "tokens": 3872
+          }
+        ],
+        "source_indices": []
+      },
+      "log": [
+        {
+          "dataset_count": 1,
+          "event": "chat_retrieval_started",
+          "history_id": 1,
+          "mode": "hybrid"
+        },
+        {
+          "candidate_document_count": 60,
+          "elapsed_ms": 4118,
+          "event": "chat_retrieval_finished",
+          "history_id": 1,
+          "mode": "hybrid",
+          "read_failures": 0,
+          "required_document_count": null,
+          "source_count": 60
+        },
+        {
+          "event": "chat_model_prepared",
+          "history_id": 1,
+          "request": {
+            "available_output_tokens": 3079,
+            "candidate_document_count": 60,
+            "estimated_input_tokens": 4600,
+            "input_budget_tokens": 6479,
+            "model_call": 1,
+            "omissions": [
+              {
+                "kind": "evidence",
+                "omitted": 60,
+                "reason": "budget_exhausted",
+                "total": 60
+              }
+            ],
+            "retrieval_mode": "hybrid",
+            "sections": [
+              {
+                "items": 1,
+                "kind": "profile_prefix",
+                "tokens": 727
+              },
+              {
+                "items": 2,
+                "kind": "request",
+                "tokens": 3872
+              }
+            ],
+            "source_indices": []
+          }
+        },
+        {
+          "available_output_tokens": 3079,
+          "event": "chat_provider_request",
+          "history_id": 1,
+          "input_token_limit": 8192,
+          "line_bytes_limit": 8388608,
+          "lines_limit": 24632,
+          "messages": 2,
+          "model": "qwen3.5:2b",
+          "model_call": 1,
+          "payload_bytes_limit": 1048576,
+          "protocol": "openai_sse",
+          "request_bytes": 11772,
+          "request_sha256": "9ad51f9eb363be79185cebc2b137107371cfd0b67bee42607e362e8103a52bea",
+          "sent_output_limit": null
+        },
+        {
+          "checkpoint": [
+            "generation",
+            1
+          ],
+          "code": "UPSTREAM_RESPONSE_TOO_LARGE",
+          "event": "chat_request_failed",
+          "history_id": 1,
+          "stream_metrics": {
+            "content_bytes": 0,
+            "elapsed_ms": 120838,
+            "first_decoded_event_ms": 4682,
+            "limit": {
+              "maximum": 24632,
+              "name": "sse_lines",
+              "observed": 24633
+            },
+            "lines_processed": 24633,
+            "protocol": "openai_sse",
+            "separate_reasoning_bytes": 65036,
+            "tool_bytes": 0,
+            "wire_bytes_received": 2776054
+          }
+        }
+      ]
+    },
+    "missing": {
+      "question": "Какой установлен срок гарантии на насосы северного и южного участков в месяцах?",
+      "http": 200,
+      "answer": "В предоставленных данных содержится только метаданные о источниках (индексы 1-58) и схема доступа к файлам, но отсутствует само текстовое содержание фрагментов для проверки. Без доступного текста невозможно подтвердить установленный срок гарантии на насосы северного и южного участков в месяцах. Информация не подтверждена ни одной частью предоставленного корпуса данных.",
+      "successful_contexts": [
+        {
+          "content_bytes": 702,
+          "elapsed_ms": 38219,
+          "first_decoded_event_ms": 5562,
+          "limit": null,
+          "lines_processed": 7088,
+          "protocol": "openai_sse",
+          "separate_reasoning_bytes": 18121,
+          "tool_bytes": 0,
+          "wire_bytes_received": 797378
+        }
+      ],
+      "public_error": null,
+      "prepared_in_history": null,
+      "log": [
+        {
+          "dataset_count": 1,
+          "event": "chat_retrieval_started",
+          "history_id": 2,
+          "mode": "hybrid"
+        },
+        {
+          "candidate_document_count": 60,
+          "elapsed_ms": 4389,
+          "event": "chat_retrieval_finished",
+          "history_id": 2,
+          "mode": "hybrid",
+          "read_failures": 0,
+          "required_document_count": null,
+          "source_count": 60
+        },
+        {
+          "event": "chat_model_prepared",
+          "history_id": 2,
+          "request": {
+            "available_output_tokens": 3096,
+            "candidate_document_count": 60,
+            "estimated_input_tokens": 4583,
+            "input_budget_tokens": 6479,
+            "model_call": 1,
+            "omissions": [
+              {
+                "kind": "evidence",
+                "omitted": 60,
+                "reason": "budget_exhausted",
+                "total": 60
+              }
+            ],
+            "retrieval_mode": "hybrid",
+            "sections": [
+              {
+                "items": 1,
+                "kind": "profile_prefix",
+                "tokens": 727
+              },
+              {
+                "items": 2,
+                "kind": "request",
+                "tokens": 3855
+              }
+            ],
+            "source_indices": []
+          }
+        },
+        {
+          "available_output_tokens": 3096,
+          "event": "chat_provider_request",
+          "history_id": 2,
+          "input_token_limit": 8192,
+          "line_bytes_limit": 8388608,
+          "lines_limit": 24768,
+          "messages": 2,
+          "model": "qwen3.5:2b",
+          "model_call": 1,
+          "payload_bytes_limit": 1048576,
+          "protocol": "openai_sse",
+          "request_bytes": 11707,
+          "request_sha256": "da4a5f92b125c094bffbd02f6cbe64099c34c28469d6ccf96555e102b22a51ae",
+          "sent_output_limit": null
+        },
+        {
+          "event": "chat_provider_finished",
+          "finish_reason": "stop",
+          "history_id": 2,
+          "model_call": 1,
+          "stream_metrics": {
+            "content_bytes": 702,
+            "elapsed_ms": 38219,
+            "first_decoded_event_ms": 5562,
+            "limit": null,
+            "lines_processed": 7088,
+            "protocol": "openai_sse",
+            "separate_reasoning_bytes": 18121,
+            "tool_bytes": 0,
+            "wire_bytes_received": 797378
+          }
+        }
+      ]
+    }
+  },
+  "controlled_receiver_by_input_token_limit": {
+    "8192": {
+      "omissions": [
+        {
+          "kind": "evidence",
+          "omitted": 60,
+          "reason": "budget_exhausted",
+          "total": 60
+        }
+      ],
+      "sections": [
+        {
+          "items": 1,
+          "kind": "profile_prefix",
+          "tokens": 727
+        },
+        {
+          "items": 2,
+          "kind": "request",
+          "tokens": 3872
+        }
+      ],
+      "found_documents": 60,
+      "prepared_source_indices": [],
+      "first_request_received_bytes": 11772,
+      "sha256_confirmed_by_receiver": true,
+      "wire_source_markers": {
+        "при давлении 184 кПа": false,
+        "при давлении 273 кПа": false,
+        "после охлаждения теплоносителя до 26 °C": false
+      },
+      "sent_output_limit": null,
+      "input_token_limit": 8192,
+      "total_calls": 1
+    },
+    "24000": {
+      "omissions": [],
+      "sections": [
+        {
+          "items": 1,
+          "kind": "profile_prefix",
+          "tokens": 727
+        },
+        {
+          "items": 2,
+          "kind": "request",
+          "tokens": 4054
+        },
+        {
+          "items": 60,
+          "kind": "evidence",
+          "tokens": 5368
+        },
+        {
+          "items": 1,
+          "kind": "checkpoint",
+          "tokens": 2482
+        }
+      ],
+      "found_documents": 60,
+      "prepared_source_indices": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60
+      ],
+      "first_request_received_bytes": 38323,
+      "sha256_confirmed_by_receiver": true,
+      "wire_source_markers": {
+        "при давлении 184 кПа": true,
+        "при давлении 273 кПа": true,
+        "после охлаждения теплоносителя до 26 °C": true
+      },
+      "sent_output_limit": null,
+      "input_token_limit": 24000,
+      "total_calls": 2
+    }
+  }
+}

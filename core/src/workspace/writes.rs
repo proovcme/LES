@@ -38,10 +38,20 @@ fn scope(value: &Value) -> Result<Value> {
         .ok_or_else(|| Failure::invalid("Invalid session scope"))?;
     let mut result = records::empty_scope();
     let allowed = result.as_object().unwrap();
-    if values.keys().any(|key| !allowed.contains_key(key)) {
+    if values
+        .keys()
+        .any(|key| key != "document_ids" && !allowed.contains_key(key))
+    {
         return Err(Failure::invalid("Invalid session scope"));
     }
     result.as_object_mut().unwrap().extend(values.clone());
+    if let Some(ids) = values.get("document_ids") {
+        if !crate::chat_request::valid_document_ids(ids)
+            || (result["scope_type"] == "none" && ids.as_array().is_some_and(|ids| !ids.is_empty()))
+        {
+            return Err(Failure::invalid("Invalid document_ids"));
+        }
+    }
     if !matches!(
         result["scope_type"].as_str(),
         Some("none" | "all" | "project" | "projects" | "dataset" | "datasets" | "mixed")

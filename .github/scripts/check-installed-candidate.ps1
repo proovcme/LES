@@ -88,7 +88,17 @@ $sessionId = Invoke-InstalledLes {
 }
 
 if ($Scenario -eq 'upgrade') { Install-Les $Candidate $expected.build_number }
-Invoke-InstalledLes { param($base) Read-SmokeSession $base $sessionId }
+Invoke-InstalledLes {
+    param($base)
+    Read-SmokeSession $base $sessionId
+    $headers = @{Origin=$base; 'Idempotency-Key'=[Guid]::NewGuid().ToString()}
+    $body = @{session_id=$sessionId; question='/help'} | ConvertTo-Json
+    $first = Invoke-RestMethod -Uri "$base/api/chat" -Method Post -Headers $headers -ContentType 'application/json' -Body $body
+    $again = Invoke-RestMethod -Uri "$base/api/chat" -Method Post -Headers $headers -ContentType 'application/json' -Body $body
+    if (-not $first.history_id -or $first.history_id -ne $again.history_id -or $first.answer -ne $again.answer) {
+        throw 'Installed chat did not replay the committed answer.'
+    }
+}
 
 if ($Scenario -eq 'upgrade') {
     & installers/windows/light/package.ps1 -Mode Rollback

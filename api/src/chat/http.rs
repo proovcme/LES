@@ -102,10 +102,11 @@ async fn execute(
     match result {
         Ok(value) => Ok(value),
         Err(mut error) => {
+            error.history_id = Some(journal.history);
             error.checkpoint = sink.checkpoint.lock().ok().map(|state| state.clone());
             eprintln!(
                 "{}",
-                json!({"event":"chat_request_failed","history_id":journal.history,"code":error.code,"checkpoint":error.checkpoint})
+                json!({"event":"chat_request_failed","history_id":journal.history,"code":error.code,"checkpoint":error.checkpoint,"stream_metrics":error.stream_metrics})
             );
             if let Err(storage) = journal.fail(&error.payload()).await {
                 eprintln!(
@@ -223,7 +224,9 @@ async fn handle_turn(context: Arc<Context>, request: Request, caller: Option<Str
                 let _ = sink.emit("final", value).await;
             }
             Err(error) => {
-                let _=sink.emit("error",json!({"status":error.status.as_u16(),"code":error.code,"detail":error.payload()["detail"],"message":error.payload()["message"]})).await;
+                let mut payload = error.payload();
+                payload["status"] = json!(error.status.as_u16());
+                let _ = sink.emit("error", payload).await;
             }
         }
     });

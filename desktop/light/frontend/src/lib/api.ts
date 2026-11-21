@@ -60,10 +60,10 @@ export class SSEDecoder {
   }
 }
 
-export async function streamChat(body: object, signal: AbortSignal, receive: (event: StreamEvent) => void): Promise<void> {
+export async function streamChat(body: object, signal: AbortSignal, receive: (event: StreamEvent) => void, requestKey: string = crypto.randomUUID()): Promise<void> {
   const response = await check(await fetch('/api/chat/stream', {
     method: 'POST', credentials: 'same-origin', signal,
-    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' }, body: JSON.stringify(body),
+    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', 'Idempotency-Key': requestKey }, body: JSON.stringify(body),
   }));
   if (!response.headers.get('content-type')?.includes('text/event-stream') || !response.body) {
     throw new ApiError('Сервис чата не прислал поток ответа. Проверьте подключение и повторите запрос.');

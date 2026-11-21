@@ -176,13 +176,12 @@ async fn scoped_configuration(
         Ok((frozen,revision,prefix,consent))
     }).await.map_err(|_|"INDEX_SETTINGS_INVALID")?
 }
-/// The coordinator and recovery use the same initial read policy as tools.
-pub(in crate::chat) async fn initial(context: Arc<Context>, turn: &Prepared) -> Result<Value> {
+pub(in crate::chat) fn initial_budget(turn: &Prepared) -> Result<u64> {
     // This is only an IO ceiling. The shared model packer owns final admission
     // with the actual prompt, schemas and dialogue. A fixed 6000-char pre-cut
     // discarded continuation pages before that packer could consider them.
     let profile = &turn.connection.profile;
-    let chars = profile["input_token_limit"]
+    Ok(profile["input_token_limit"]
         .as_u64()
         .ok_or("CHAT_CONTEXT_INVALID")?
         .saturating_sub(
@@ -196,7 +195,11 @@ pub(in crate::chat) async fn initial(context: Arc<Context>, turn: &Prepared) -> 
                 .ok_or("CHAT_CONTEXT_INVALID")?,
         )
         .saturating_mul(2)
-        .clamp(1, 16000);
+        .clamp(1, 16000))
+}
+/// The coordinator and recovery use the same initial read policy as tools.
+pub(in crate::chat) async fn initial(context: Arc<Context>, turn: &Prepared) -> Result<Value> {
+    let chars = initial_budget(turn)?;
     let focus_pdf = turn.profile["mode"] == "search"
         && matches!(
             turn.request["retrieval_mode"].as_str().unwrap_or("pull"),
@@ -238,21 +241,7 @@ pub(in crate::chat) async fn initial(context: Arc<Context>, turn: &Prepared) -> 
         let budget = (chars / 3).clamp(1, 4000);
         let mut args = json!({"doc_id":source["doc_id"],"source_sha256":source["source_sha256"],
             "q":query,"limit":4,"max_chars":budget});
-        let coordinates = les_core::chat_request::sheet_rows(query);
-        if let Some((sheet, rows)) = coordinates
-            .first_key_value()
-            .filter(|_| coordinates.len() == 1)
-        {
-            let (Some(first), Some(last)) = (rows.first(), rows.last()) else {
-                continue;
-            };
-            if (*last - *first + 1) == rows.len() as u64 {
-                args["sheet_name"] = json!(sheet);
-                args["row_start"] = json!(first);
-                args["row_end"] = json!(last);
-                args["limit"] = json!(rows.len().clamp(1, 16));
-            }
-        }
+        super::workbook::addressed_range(query, &mut args);
         let rows = match super::workbook::read(context.clone(), &scope, &args).await {
             Ok(Some(read))
                 if read["result"]["passages"]
@@ -1247,6 +1236,9 @@ async fn passages(
         }
         if p["reading_representation"].is_string() {
             source["reading_representation"] = p["reading_representation"].clone();
+        }
+        if p["verified_cells"] == true {
+            source["verified_cells"] = json!(true);
         }
         if p["pdf_excerpt_line"].is_u64() {
             source["pdf_excerpt_line"] = p["pdf_excerpt_line"].clone();

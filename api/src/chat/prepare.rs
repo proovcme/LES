@@ -205,12 +205,12 @@ pub(super) fn admit(request: &Value) -> Result<()> {
     }
     Ok(())
 }
-fn prepare_sync(context: &Context, request: Value, caller: Option<&str>) -> Result<Prepared> {
+fn prepare_sync(context: &Context, mut request: Value, caller: Option<&str>) -> Result<Prepared> {
     let database = &context.database;
     let execution = answer_execution(context)?;
     let connection = resolve_answer(context, &execution)?;
     let attachment_owner = caller.map(|v| les_core::sha256_hex(v.as_bytes()));
-    let sid = request["session_id"].as_str().unwrap_or("");
+    let sid = request["session_id"].as_str().unwrap_or("").to_owned();
     let session = if sid.is_empty() {
         Value::Null
     } else {
@@ -218,6 +218,16 @@ fn prepare_sync(context: &Context, request: Value, caller: Option<&str>) -> Resu
             &json!({"schema":"les.workspace.v1","database":database,"action":"get","arguments":{"session_id":sid}}),
         ))?
     };
+    if request["scope"].is_null()
+        && request["dataset_ids"].is_null()
+        && request["dataset_filter"].is_null()
+        && request["project_id"].is_null()
+        && session["scope"]["document_ids"]
+            .as_array()
+            .is_some_and(|ids| !ids.is_empty())
+    {
+        request["scope"] = session["scope"].clone();
+    }
     let profile = unwrap(les_core::chat_profiles::execute(
         &json!({"schema":"les.chat-profiles.v1","database":database,"action":"resolve",
         "arguments":{"session_id":request["session_id"],"requested_mode":request["mode"],"requested_revision_id":request["profile_revision_id"],"apply_revision":request["apply_profile_revision"]==true}}),
@@ -302,7 +312,7 @@ fn prepare_sync(context: &Context, request: Value, caller: Option<&str>) -> Resu
         json!([])
     };
     if let Some(tag) = &egress_tag {
-        les_core::chat_request::egress::history(database, sid, &history, tag)?;
+        les_core::chat_request::egress::history(database, &sid, &history, tag)?;
     }
     let mut dialogue = Vec::new();
     for row in history.as_array().into_iter().flatten() {

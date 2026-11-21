@@ -57,6 +57,25 @@ def test_prepared_skill_asset_can_be_staged_again(tmp_path):
     assert (second/'python313._pth').read_text()=='python313.zip\n.\nLib/site-packages\n'
 
 
+def test_package_checks_the_lock_and_files_of_an_existing_skill_receipt(tmp_path):
+    from tools.build_light_package import ROOT, hash_file, stage_skill_dependencies
+    pinned = hash_file(ROOT/'uv.lock')
+    old = tmp_path/'old'
+    raw = source(tmp_path/'source')
+    stage(old, raw, lock_sha256='different')
+    target = tmp_path/'package/skill-python'
+    with pytest.raises(ValueError, match='different lock'):
+        stage_skill_dependencies(target, old)
+    assert not target.exists()
+    sealed = tmp_path/'sealed'
+    stage(sealed, raw, lock_sha256=pinned)
+    assert stage_skill_dependencies(tmp_path/'good', sealed)['source_uv_lock_sha256'] == pinned
+    (sealed/'python313.dll').write_bytes(b'changed')
+    with pytest.raises(ValueError, match='sealed files'):
+        stage_skill_dependencies(target, sealed)
+    assert not target.exists()
+
+
 def test_safe_dependency_paths_are_declared_without_executing_startup_hooks(tmp_path):
     original=source(tmp_path/'source');library=original/'Lib/site-packages'
     (library/'win32/lib').mkdir(parents=True);(library/'win32/lib/helper.py').write_text('value=1')

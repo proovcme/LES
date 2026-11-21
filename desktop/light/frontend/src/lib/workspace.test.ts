@@ -66,6 +66,27 @@ it('does not label a blocked final response as a successful answer', async () =>
   expect(workspace.messages.at(-1)?.meta?.blocker?.action).toBe('Восстановите индекс');
 });
 
+it('replays one lost final with the same key and starts a new turn after receipt', async () => {
+  const keys: (string | null)[] = [];
+  stream = (init) => {
+    keys.push(new Headers(init.headers).get('Idempotency-Key'));
+    const frame = keys.length === 1 ? 'event: progress\ndata: {}\n\n'
+      : 'event: final\ndata: {"answer":"Готово","history_id":' + (keys.length - 1) + '}\n\n';
+    return new Response(frame, { headers: { 'Content-Type': 'text/event-stream' } });
+  };
+  await workspace.initialize();
+  workspace.text = 'Тот же вопрос';
+  await workspace.send();
+  await workspace.send();
+  expect(keys[0]).toBeTruthy();
+  expect(keys[1]).toBe(keys[0]);
+  expect(workspace.messages).toHaveLength(2);
+  workspace.text = 'Тот же вопрос';
+  await workspace.send();
+  expect(keys[2]).not.toBe(keys[0]);
+  expect(workspace.messages).toHaveLength(4);
+});
+
 it('keeps a new draft typed while the previous question is being answered', async () => {
   stream = () => { workspace.text = 'Следующий вопрос'; return new Response('event: final\ndata: {"answer":"Ответ"}\n\n', { headers: { 'Content-Type': 'text/event-stream' } }); };
   await workspace.initialize(); workspace.text = 'Первый вопрос'; await workspace.send();

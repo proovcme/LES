@@ -771,6 +771,11 @@ impl Evidence {
         block["body_offset"] = json!(block["text"].as_str().unwrap().len() - text.len());
         if source["table_projection_warning"].is_string() {
             block["table_geometry_unverified"] = json!(true);
+        } else if source["verified_cells"] == true
+            || (source["reading_representation"] == "pdf_cells"
+                && !les_core::chat_context::table_rows(text).is_empty())
+        {
+            block["verified_cells"] = json!(true);
         }
         if canonical["schema"] == "les.document-structure.v1" {
             block["canonical"] = canonical.clone();

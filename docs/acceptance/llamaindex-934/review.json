@@ -1,0 +1,480 @@
+{
+  "rubric": {
+    "measurement": "One fully correct answer per question and frozen window. The answer must associate every available requested fact with the correct object and cite its numbered original. An unknown component must be explicit. A source expressly identified as irrelevant is recorded separately. Attributing its procedure or value to the object fails. Extra explicit irrelevant supporting links fail the strict citation set. Source metadata returned by an engine alone earns no credit.",
+    "pump": {
+      "017": "North pump 184 kPa",
+      "056": "South pump 273 kPa",
+      "032": "Only after cooling the fluid to 26 C, applies to both sites"
+    },
+    "cart": {
+      "070": "315 kPa and monthly"
+    },
+    "warranty": {
+      "required": "no warranty term established in this window; no positive claim or asserted supporting citation for a guarantee term"
+    },
+    "main_gate": [
+      "pump/without_056",
+      "pump-rephrased/without_056"
+    ],
+    "decision": "Consider replacing the default only if both gates pass and the candidate preserves the confirmed baseline controls. Treat the nine synthetic comparisons as an engineering screen, not a production success rate.",
+    "scope": "No gold labels are passed to either model path."
+  },
+  "results": {
+    "native": {
+      "strict_pass": 4,
+      "total": 9,
+      "calls": 11,
+      "median_s": 13.11,
+      "judgments": [
+        {
+          "case": "pump",
+          "variant": "without_056",
+          "pass": true,
+          "reason": null
+        },
+        {
+          "case": "pump-rephrased",
+          "variant": "without_056",
+          "pass": false,
+          "reason": "Давление Юга пропущено корректно, но ответ противоречит сам себе об общем условии и не привёл ссылок."
+        },
+        {
+          "case": "pump",
+          "variant": "original",
+          "pass": true,
+          "reason": null
+        },
+        {
+          "case": "pump-rephrased",
+          "variant": "original",
+          "pass": false,
+          "reason": "Все запрошенные значения верны, добавлен паспорт смесителя со ссылкой 236."
+        },
+        {
+          "case": "pump",
+          "variant": "without_032",
+          "pass": false,
+          "reason": "Оба давления верны, к сообщению об отсутствии условия добавлена ссылка 144 на сигнал начала работ."
+        },
+        {
+          "case": "pump",
+          "variant": "without_017",
+          "pass": false,
+          "reason": "Верно обозначен пробел, добавлена ссылка 119 о передаче экземпляров протокола."
+        },
+        {
+          "case": "pump",
+          "variant": "all_support_removed",
+          "pass": false,
+          "reason": "Пользователь получил SOURCE_CITATION_MISSING после двух обращений."
+        },
+        {
+          "case": "cart",
+          "variant": "original",
+          "pass": true,
+          "reason": null
+        },
+        {
+          "case": "warranty",
+          "variant": "original",
+          "pass": true,
+          "reason": null
+        }
+      ]
+    },
+    "citations": {
+      "strict_pass": 6,
+      "total": 9,
+      "calls": 9,
+      "median_s": 3.4,
+      "judgments": [
+        {
+          "case": "pump",
+          "variant": "without_056",
+          "pass": true,
+          "reason": null
+        },
+        {
+          "case": "pump-rephrased",
+          "variant": "without_056",
+          "pass": true,
+          "reason": null
+        },
+        {
+          "case": "pump",
+          "variant": "original",
+          "pass": true,
+          "reason": null
+        },
+        {
+          "case": "pump-rephrased",
+          "variant": "original",
+          "pass": true,
+          "reason": null
+        },
+        {
+          "case": "pump",
+          "variant": "without_032",
+          "pass": false,
+          "reason": "Давления верны, пропуск условия допуска не обозначен, приведён факт о сигнале начала работ."
+        },
+        {
+          "case": "pump",
+          "variant": "without_017",
+          "pass": true,
+          "reason": null
+        },
+        {
+          "case": "pump",
+          "variant": "all_support_removed",
+          "pass": false,
+          "reason": "Отсутствие сведений о насосах отмечено, добавлены ссылки на давление шин и сигнал. "
+        },
+        {
+          "case": "cart",
+          "variant": "original",
+          "pass": true,
+          "reason": null
+        },
+        {
+          "case": "warranty",
+          "variant": "original",
+          "pass": false,
+          "reason": "Срок не придуман, но перечислены все шесть источников о других свойствах."
+        }
+      ]
+    },
+    "subquestions": {
+      "strict_pass": 3,
+      "total": 9,
+      "calls": 44,
+      "median_s": 15.19,
+      "judgments": [
+        {
+          "case": "pump",
+          "variant": "without_056",
+          "pass": false,
+          "reason": "Все запрошенные части обработаны, добавлена ссылка на сигнал начала работ."
+        },
+        {
+          "case": "pump-rephrased",
+          "variant": "without_056",
+          "pass": true,
+          "reason": null
+        },
+        {
+          "case": "pump",
+          "variant": "original",
+          "pass": false,
+          "reason": "Все три факта верны, добавлена ссылка на сигнал начала работ."
+        },
+        {
+          "case": "pump-rephrased",
+          "variant": "original",
+          "pass": true,
+          "reason": null
+        },
+        {
+          "case": "pump",
+          "variant": "without_032",
+          "pass": false,
+          "reason": "Сигнал начала работ выдан за условие допуска."
+        },
+        {
+          "case": "pump",
+          "variant": "without_017",
+          "pass": false,
+          "reason": "Давление Юга и общее условие верны, добавлены шины и сигнал."
+        },
+        {
+          "case": "pump",
+          "variant": "all_support_removed",
+          "pass": false,
+          "reason": "Сигнал из документа без привязки к участку выдан за условие для Севера."
+        },
+        {
+          "case": "cart",
+          "variant": "original",
+          "pass": true,
+          "reason": null
+        },
+        {
+          "case": "warranty",
+          "variant": "original",
+          "pass": false,
+          "reason": "Срок не придуман, к отказу добавлены шесть ссылок."
+        }
+      ]
+    },
+    "les-citations": {
+      "strict_pass": 8,
+      "total": 9,
+      "calls": 9,
+      "median_s": 2.75,
+      "judgments": [
+        {
+          "case": "pump",
+          "variant": "without_056",
+          "pass": true,
+          "reason": null
+        },
+        {
+          "case": "pump-rephrased",
+          "variant": "without_056",
+          "pass": true,
+          "reason": null
+        },
+        {
+          "case": "pump",
+          "variant": "original",
+          "pass": true,
+          "reason": null
+        },
+        {
+          "case": "pump-rephrased",
+          "variant": "original",
+          "pass": true,
+          "reason": null
+        },
+        {
+          "case": "pump",
+          "variant": "without_032",
+          "pass": false,
+          "reason": "Давления указаны верно. После удаления условия допуска вместо сообщения о пробеле приведён сигнал начала работ."
+        },
+        {
+          "case": "pump",
+          "variant": "without_017",
+          "pass": true,
+          "reason": null
+        },
+        {
+          "case": "pump",
+          "variant": "all_support_removed",
+          "pass": true,
+          "reason": null
+        },
+        {
+          "case": "cart",
+          "variant": "original",
+          "pass": true,
+          "reason": null
+        },
+        {
+          "case": "warranty",
+          "variant": "original",
+          "pass": true,
+          "reason": null
+        }
+      ]
+    }
+  },
+  "transfer": [
+    {
+      "case": "delivery-refund",
+      "variant": "full",
+      "route": "citations",
+      "requested_facts_and_gaps_correct": true,
+      "linked_originals": [
+        "delivery-new",
+        "delivery-old",
+        "refund-new"
+      ],
+      "exact_support_set": false,
+      "strict_pass": false,
+      "reason": "Действующие сроки 7 рабочих и 30 календарных дней верны. Дополнительно процитированы прежние редакции."
+    },
+    {
+      "case": "delivery-refund",
+      "variant": "full",
+      "route": "les-citations",
+      "requested_facts_and_gaps_correct": true,
+      "linked_originals": [
+        "refund-old",
+        "delivery-new",
+        "delivery-old",
+        "refund-new"
+      ],
+      "exact_support_set": false,
+      "strict_pass": false,
+      "reason": "Действующие сроки 7 рабочих и 30 календарных дней верны. Дополнительно процитированы прежние редакции."
+    },
+    {
+      "case": "delivery-refund",
+      "variant": "current-refund-removed",
+      "route": "citations",
+      "requested_facts_and_gaps_correct": false,
+      "linked_originals": [
+        "refund-old",
+        "delivery-new",
+        "delivery-old"
+      ],
+      "exact_support_set": false,
+      "strict_pass": false,
+      "reason": "Отменённый срок возврата 14 дней выдан за действующий. В видимой редакции срок прямо назван отменённым."
+    },
+    {
+      "case": "delivery-refund",
+      "variant": "current-refund-removed",
+      "route": "les-citations",
+      "requested_facts_and_gaps_correct": false,
+      "linked_originals": [
+        "refund-old",
+        "delivery-new",
+        "shipping"
+      ],
+      "exact_support_set": false,
+      "strict_pass": false,
+      "reason": "Отменённый срок возврата 14 дней выдан за действующий. В видимой редакции срок прямо назван отменённым."
+    },
+    {
+      "case": "islands",
+      "variant": "exception",
+      "route": "citations",
+      "requested_facts_and_gaps_correct": true,
+      "linked_originals": [
+        "shipping"
+      ],
+      "exact_support_set": true,
+      "strict_pass": true,
+      "reason": null
+    },
+    {
+      "case": "islands",
+      "variant": "exception",
+      "route": "les-citations",
+      "requested_facts_and_gaps_correct": true,
+      "linked_originals": [
+        "shipping"
+      ],
+      "exact_support_set": true,
+      "strict_pass": true,
+      "reason": null
+    },
+    {
+      "case": "launch",
+      "variant": "conflict",
+      "route": "citations",
+      "requested_facts_and_gaps_correct": true,
+      "linked_originals": [
+        "launch-a",
+        "launch-b"
+      ],
+      "exact_support_set": true,
+      "strict_pass": true,
+      "reason": null
+    },
+    {
+      "case": "launch",
+      "variant": "conflict",
+      "route": "les-citations",
+      "requested_facts_and_gaps_correct": true,
+      "linked_originals": [
+        "launch-a",
+        "launch-b"
+      ],
+      "exact_support_set": true,
+      "strict_pass": true,
+      "reason": null
+    },
+    {
+      "case": "director",
+      "variant": "missing",
+      "route": "citations",
+      "requested_facts_and_gaps_correct": true,
+      "linked_originals": [],
+      "exact_support_set": true,
+      "strict_pass": true,
+      "reason": null
+    },
+    {
+      "case": "director",
+      "variant": "missing",
+      "route": "les-citations",
+      "requested_facts_and_gaps_correct": true,
+      "linked_originals": [],
+      "exact_support_set": true,
+      "strict_pass": true,
+      "reason": null
+    },
+    {
+      "case": "library",
+      "variant": "editions",
+      "route": "citations",
+      "requested_facts_and_gaps_correct": true,
+      "linked_originals": [
+        "hours-old",
+        "hours-new"
+      ],
+      "exact_support_set": false,
+      "strict_pass": false,
+      "reason": "Время 19:00 указано верно. Вариант библиотеки со штатным шаблоном также цитирует прежний график."
+    },
+    {
+      "case": "library",
+      "variant": "editions",
+      "route": "les-citations",
+      "requested_facts_and_gaps_correct": true,
+      "linked_originals": [
+        "hours-new"
+      ],
+      "exact_support_set": true,
+      "strict_pass": true,
+      "reason": "Время 19:00 указано верно. Вариант библиотеки со штатным шаблоном также цитирует прежний график."
+    }
+  ],
+  "cross": [
+    {
+      "case": "pump-rephrased",
+      "variant": "folder-stock",
+      "route": "citations",
+      "requested_facts_and_gaps_correct": true,
+      "linked_originals": [
+        "017",
+        "032"
+      ],
+      "exact_support_set": true,
+      "strict_pass": true,
+      "reason": null
+    },
+    {
+      "case": "pump-rephrased",
+      "variant": "folder-stock",
+      "route": "les-citations",
+      "requested_facts_and_gaps_correct": false,
+      "linked_originals": [
+        "017",
+        "032"
+      ],
+      "exact_support_set": true,
+      "strict_pass": false,
+      "reason": "Верные числа и источники есть, но фраза об отсутствии подтверждённых сведений о давлении противоречит ответу про Север."
+    },
+    {
+      "case": "pump-rephrased",
+      "variant": "folder-contract",
+      "route": "citations",
+      "requested_facts_and_gaps_correct": true,
+      "linked_originals": [
+        "017",
+        "032"
+      ],
+      "exact_support_set": true,
+      "strict_pass": true,
+      "reason": null
+    },
+    {
+      "case": "pump-rephrased",
+      "variant": "folder-contract",
+      "route": "les-citations",
+      "requested_facts_and_gaps_correct": true,
+      "linked_originals": [
+        "017",
+        "032"
+      ],
+      "exact_support_set": true,
+      "strict_pass": true,
+      "reason": null
+    }
+  ]
+}

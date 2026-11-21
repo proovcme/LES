@@ -187,6 +187,34 @@ pub(super) fn execute(conn: &Connection, action: &str, args: &Args) -> Result<Va
     })?;
     match action {
         "library_datasets" => Ok(json!({"datasets":datasets(conn)?})),
+        "library_selection" => {
+            let selectors = args
+                .get("selectors")
+                .and_then(Value::as_array)
+                .ok_or_else(|| Failure::invalid("Document selection required"))?;
+            let datasets = args
+                .get("dataset_ids")
+                .and_then(Value::as_array)
+                .ok_or_else(|| Failure::invalid("Dataset scope required"))?;
+            conn.create_scalar_function("les_file_leaf", 1, flags, |ctx| {
+                let path: String = ctx.get(0)?;
+                Ok(path.rsplit(['/', '\\']).next().unwrap_or("").to_owned())
+            })?;
+            // All bindings belong to the same SQLite statement snapshot. Return only
+            // catalog identity, never the host path or the contents of a document.
+            rows(conn, "WITH permitted AS NOT MATERIALIZED (
+                SELECT doc.id,doc.dataset_id,doc.file_name,doc.file_hash FROM documents doc
+                JOIN datasets d ON d.id=doc.dataset_id WHERE COALESCE(d.dataset_scope,'user') <> 'system'
+                AND doc.dataset_id IN (SELECT value FROM json_each(?1)) AND les_visible_document(doc.file_name)
+            ), selectors AS (
+                SELECT key AS position,json_extract(value,'$.id') AS id,
+                json_extract(value,'$.path') AS path,json_extract(value,'$.short_name') AS leaf FROM json_each(?2)
+            ) SELECT s.position,p.* FROM selectors s JOIN permitted p ON p.id=s.id WHERE s.id IS NOT NULL
+              UNION ALL SELECT s.position,p.* FROM selectors s JOIN permitted p ON p.file_name=s.path WHERE s.path IS NOT NULL
+              UNION ALL SELECT s.position,p.* FROM selectors s JOIN permitted p ON les_file_leaf(p.file_name)=s.leaf WHERE s.leaf IS NOT NULL
+              ORDER BY position,dataset_id,file_name,id",
+                params![json!(datasets).to_string(),json!(selectors).to_string()]).map(Value::Array)
+        }
         "library_document" => {
             let id = args.get("doc_id").and_then(Value::as_str).unwrap_or("");
             let dataset = args.get("dataset_id").and_then(Value::as_str).unwrap_or("");

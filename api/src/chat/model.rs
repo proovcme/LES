@@ -11,6 +11,7 @@ pub async fn complete(
     tools: Vec<Value>,
     max_output: u64,
     journal: &Journal,
+    model_call: usize,
     sink: &Sink,
     publish_text: bool,
     response_format: Value,
@@ -40,11 +41,8 @@ pub async fn complete(
         message["content"] =
             json!([{"type":"text","text":text},{"type":"image_url","image_url":{"url":url}}]);
     }
-    // MLX has a server-wide generation default. Use this round's remaining
-    // context there, so the output budget follows the actual packed request.
-    let provider_output_default = turn.connection.revision["extension_type"] != "mlx";
     let request = json!({"messages":messages,"tools":tools,"max_output_tokens":max_output,"reasoning_enabled":profile["reasoning_enabled"].as_bool().unwrap_or(false),
-        "temperature":temperature,"response_format":response_format,"provider_output_default":provider_output_default});
+        "temperature":temperature,"response_format":response_format});
     let native = turn.connection.snapshot["transport_options"]["chat_protocol"] == "native_chat_v1";
     let streamable = native
         || les_core::model_capabilities::require(
@@ -53,6 +51,8 @@ pub async fn complete(
             None,
         )
         .is_ok();
+    sink.model_call(model_call);
+    let started = Instant::now();
     let upstream_port = context.upstream_port().unwrap_or(0);
     let body = turn
         .connection
@@ -61,16 +61,19 @@ pub async fn complete(
             streamable,
             super::budget::remaining(deadline)?,
             [context.listen_port, upstream_port],
+            Some((journal.history,model_call)),
         )
         .await?;
     let mut stream = body.into_data_stream();
     let mut pending = Vec::new();
     let mut text = String::new();
     let mut finish = None;
+    let mut metrics = Value::Null;
+    let mut first_event_ms = None;
     while let Some(bytes) = stream.next().await {
         let bytes = bytes.map_err(|_| "UPSTREAM_STREAM_INTERRUPTED")?;
         if pending.len() + bytes.len() > 4 * 1024 * 1024 {
-            return Err("UPSTREAM_RESPONSE_TOO_LARGE".into());
+            return Err(local_limit("normalized_buffer_bytes",pending.len()+bytes.len()));
         }
         pending.extend_from_slice(&bytes);
         while let Some(end) = pending.iter().position(|c| *c == b'\n') {
@@ -80,13 +83,21 @@ pub async fn complete(
             }
             let event: Value =
                 serde_json::from_slice(&line).map_err(|_| "UPSTREAM_RESPONSE_INVALID")?;
+            first_event_ms.get_or_insert_with(|| started.elapsed().as_millis());
+            if let Some(value) = event.get("stream_metrics") {
+                metrics = value.clone();
+                metrics["first_decoded_event_ms"] = json!(first_event_ms);
+                metrics["elapsed_ms"] = json!(started.elapsed().as_millis());
+            }
             if let Some(code) = event["error"].as_str() {
-                return Err(code.into());
+                let mut error = super::error::Failure::new(code);
+                error.stream_metrics = metrics.is_object().then_some(metrics);
+                return Err(error);
             }
             if let Some(part) = event["text"].as_str() {
                 text.push_str(part);
                 if text.len() > 4 * 1024 * 1024 {
-                    return Err("UPSTREAM_RESPONSE_TOO_LARGE".into());
+                    return Err(local_limit("visible_answer_bytes",text.len()));
                 }
                 if publish_text {
                     journal.checkpoint("token", json!(part)).await?;
@@ -109,6 +120,10 @@ pub async fn complete(
     }
     let mut response = finish.ok_or("UPSTREAM_STREAM_INTERRUPTED")?;
     response["text"] = json!(text);
+    if metrics.is_object() {
+        eprintln!("{}",json!({"event":"chat_provider_finished","history_id":journal.history,"model_call":model_call,"stream_metrics":metrics,"finish_reason":response["finish_reason"]}));
+        response["stream_metrics"] = metrics;
+    }
     if response["tool_calls"]
         .as_array()
         .is_some_and(|v| !v.is_empty())
@@ -118,4 +133,12 @@ pub async fn complete(
     }
     Ok(response)
     }).await
+}
+
+fn local_limit(name: &str, observed: usize) -> super::error::Failure {
+    let mut error = super::error::Failure::new("UPSTREAM_RESPONSE_TOO_LARGE");
+    error.stream_metrics = Some(
+        json!({"protocol":"normalized_chat","limit":{"name":name,"observed":observed,"maximum":4*1024*1024}}),
+    );
+    error
 }

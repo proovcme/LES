@@ -232,6 +232,7 @@ fn dispatch(request: &Value) -> Result<Value> {
         | "intake_has_work"
         | "library_dataset"
         | "library_document"
+        | "library_selection"
         | "library_documents"
         | "library_forest"
         | "project_list"

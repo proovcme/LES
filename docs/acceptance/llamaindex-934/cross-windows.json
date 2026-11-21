@@ -1,0 +1,57 @@
+{
+  "schema": "les.llamaindex.handoff-cross.v1",
+  "fixture_sha256": "e4ca7042b65edb9d3d47cdde312d70ee2fd2ca5a4365dc6384eb9e3d634b6860",
+  "model": "qwen3.5:9b",
+  "cases": [
+    {
+      "case": "pump-rephrased",
+      "variant": "folder-stock",
+      "question": "Что нужно сделать до приёмочных испытаний насосов на участках Север и Юг? Укажи общее условие и отдельно давление для каждого участка.",
+      "expected": [
+        "017",
+        "032"
+      ],
+      "calls": [
+        {
+          "model": "qwen3.5:9b",
+          "temperature": 0.1,
+          "max_tokens": 4462,
+          "reasoning_effort": "none",
+          "visible": [
+            "017",
+            "119",
+            "083",
+            "032",
+            "201",
+            "144"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "pump-rephrased",
+      "variant": "folder-contract",
+      "question": "Что нужно сделать до приёмочных испытаний насосов на участках Север и Юг? Укажи общее условие и отдельно давление для каждого участка.",
+      "expected": [
+        "017",
+        "032"
+      ],
+      "calls": [
+        {
+          "model": "qwen3.5:9b",
+          "temperature": 0.1,
+          "max_tokens": 4462,
+          "reasoning_effort": "none",
+          "visible": [
+            "017",
+            "119",
+            "083",
+            "032",
+            "213",
+            "144"
+          ]
+        }
+      ]
+    }
+  ]
+}

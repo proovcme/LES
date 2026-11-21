@@ -1,0 +1,382 @@
+{
+  "model": "qwen3.5:9b",
+  "fixture_sha256": "e4ca7042b65edb9d3d47cdde312d70ee2fd2ca5a4365dc6384eb9e3d634b6860",
+  "shuffle_seed": 29,
+  "measurement": "exact set of selected document IDs on frozen passages",
+  "attempts": [
+    {
+      "case": "pump",
+      "variant": "original",
+      "visible": [
+        "017",
+        "056",
+        "119",
+        "032",
+        "070",
+        "144"
+      ],
+      "expected": [
+        "017",
+        "056",
+        "032"
+      ],
+      "selected": [
+        "017",
+        "056",
+        "032"
+      ],
+      "passed": true
+    },
+    {
+      "case": "pump",
+      "variant": "shuffled",
+      "visible": [
+        "144",
+        "056",
+        "032",
+        "119",
+        "017",
+        "070"
+      ],
+      "expected": [
+        "017",
+        "056",
+        "032"
+      ],
+      "selected": [
+        "056",
+        "032",
+        "017"
+      ],
+      "passed": true
+    },
+    {
+      "case": "pump",
+      "variant": "gold_only",
+      "visible": [
+        "017",
+        "056",
+        "032"
+      ],
+      "expected": [
+        "017",
+        "056",
+        "032"
+      ],
+      "selected": [
+        "017",
+        "056",
+        "032"
+      ],
+      "passed": true
+    },
+    {
+      "case": "pump",
+      "variant": "all_support_removed",
+      "visible": [
+        "119",
+        "070",
+        "144"
+      ],
+      "expected": [],
+      "selected": [],
+      "passed": true
+    },
+    {
+      "case": "pump",
+      "variant": "without_017",
+      "visible": [
+        "056",
+        "119",
+        "032",
+        "070",
+        "144"
+      ],
+      "expected": [
+        "056",
+        "032"
+      ],
+      "selected": [
+        "056",
+        "032"
+      ],
+      "passed": true
+    },
+    {
+      "case": "pump",
+      "variant": "without_056",
+      "visible": [
+        "017",
+        "119",
+        "032",
+        "070",
+        "144"
+      ],
+      "expected": [
+        "017",
+        "032"
+      ],
+      "selected": [
+        "032"
+      ],
+      "passed": false
+    },
+    {
+      "case": "pump",
+      "variant": "without_032",
+      "visible": [
+        "017",
+        "056",
+        "119",
+        "070",
+        "144"
+      ],
+      "expected": [
+        "017",
+        "056"
+      ],
+      "selected": [
+        "017",
+        "056",
+        "144"
+      ],
+      "passed": false
+    },
+    {
+      "case": "pump-rephrased",
+      "variant": "original",
+      "visible": [
+        "017",
+        "056",
+        "119",
+        "083",
+        "032",
+        "236"
+      ],
+      "expected": [
+        "017",
+        "056",
+        "032"
+      ],
+      "selected": [
+        "032",
+        "017",
+        "056"
+      ],
+      "passed": true
+    },
+    {
+      "case": "pump-rephrased",
+      "variant": "shuffled",
+      "visible": [
+        "236",
+        "083",
+        "056",
+        "119",
+        "032",
+        "017"
+      ],
+      "expected": [
+        "017",
+        "056",
+        "032"
+      ],
+      "selected": [
+        "032",
+        "056",
+        "017"
+      ],
+      "passed": true
+    },
+    {
+      "case": "pump-rephrased",
+      "variant": "gold_only",
+      "visible": [
+        "017",
+        "056",
+        "032"
+      ],
+      "expected": [
+        "017",
+        "056",
+        "032"
+      ],
+      "selected": [
+        "017",
+        "056",
+        "032"
+      ],
+      "passed": true
+    },
+    {
+      "case": "pump-rephrased",
+      "variant": "all_support_removed",
+      "visible": [
+        "119",
+        "083",
+        "236"
+      ],
+      "expected": [],
+      "selected": [],
+      "passed": true
+    },
+    {
+      "case": "pump-rephrased",
+      "variant": "without_017",
+      "visible": [
+        "056",
+        "119",
+        "083",
+        "032",
+        "236"
+      ],
+      "expected": [
+        "056",
+        "032"
+      ],
+      "selected": [
+        "032",
+        "236"
+      ],
+      "passed": false
+    },
+    {
+      "case": "pump-rephrased",
+      "variant": "without_056",
+      "visible": [
+        "017",
+        "119",
+        "083",
+        "032",
+        "236"
+      ],
+      "expected": [
+        "017",
+        "032"
+      ],
+      "selected": [
+        "032"
+      ],
+      "passed": false
+    },
+    {
+      "case": "pump-rephrased",
+      "variant": "without_032",
+      "visible": [
+        "017",
+        "056",
+        "119",
+        "083",
+        "236"
+      ],
+      "expected": [
+        "017",
+        "056"
+      ],
+      "selected": [
+        "236",
+        "017",
+        "056"
+      ],
+      "passed": false
+    },
+    {
+      "case": "cart",
+      "variant": "original",
+      "visible": [
+        "070",
+        "094",
+        "017",
+        "231",
+        "056",
+        "158"
+      ],
+      "expected": [
+        "070"
+      ],
+      "selected": [
+        "070"
+      ],
+      "passed": true
+    },
+    {
+      "case": "cart",
+      "variant": "shuffled",
+      "visible": [
+        "017",
+        "231",
+        "094",
+        "056",
+        "158",
+        "070"
+      ],
+      "expected": [
+        "070"
+      ],
+      "selected": [
+        "070"
+      ],
+      "passed": true
+    },
+    {
+      "case": "cart",
+      "variant": "gold_only",
+      "visible": [
+        "070"
+      ],
+      "expected": [
+        "070"
+      ],
+      "selected": [
+        "070"
+      ],
+      "passed": true
+    },
+    {
+      "case": "cart",
+      "variant": "all_support_removed",
+      "visible": [
+        "094",
+        "017",
+        "231",
+        "056",
+        "158"
+      ],
+      "expected": [],
+      "selected": [],
+      "passed": true
+    },
+    {
+      "case": "warranty",
+      "variant": "original",
+      "visible": [
+        "094",
+        "032",
+        "119",
+        "017",
+        "144",
+        "056"
+      ],
+      "expected": [],
+      "selected": [],
+      "passed": true
+    },
+    {
+      "case": "warranty",
+      "variant": "shuffled",
+      "visible": [
+        "144",
+        "056",
+        "032",
+        "017",
+        "094",
+        "119"
+      ],
+      "expected": [],
+      "selected": [],
+      "passed": true
+    }
+  ],
+  "passed": 15,
+  "total": 20
+}

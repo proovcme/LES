@@ -34,12 +34,14 @@ impl Sink {
             .await
             .map_err(|_| "CHAT_CANCELLED".into())
     }
+    fn model_call(&self, number: usize) {
+        if let Ok(mut current) = self.checkpoint.lock() {
+            current.1 = number;
+        }
+    }
     pub async fn progress(&self, stage: &str, label: &str) -> Result<()> {
         if let Ok(mut current) = self.checkpoint.lock() {
             current.0 = stage.to_owned();
-            if stage == "generation" {
-                current.1 += 1;
-            }
         }
         self.emit("progress", serde_json::json!({"stage":stage,"label":label}))
             .await

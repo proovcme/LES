@@ -152,14 +152,14 @@ pub fn prepare(
             return Err("INVALID_OUTPUT_FIELD");
         }
         body = json!({"model":model,"messages":system});
-        if request["provider_output_default"] != true {
-            body[field] = json!(output);
-        }
+        body[field] = json!(output);
         let local = connection["locality"] != "remote";
         if reasoning && !local {
             return Err("REASONING_MODE_UNSUPPORTED");
         }
-        if local {
+        if local && !reasoning && connection["reasoning_control"] == "reasoning_effort_none" {
+            body["reasoning_effort"] = json!("none");
+        } else if local {
             body["chat_template_kwargs"] = json!({"enable_thinking":reasoning});
         }
         if !request["temperature"].is_null() {

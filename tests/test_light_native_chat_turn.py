@@ -32,11 +32,13 @@ def native_turn(tmp_path, request):
         pytest.skip('Provide the native Qdrant binary for the RAG turn')
     import pypdfium2_raw
     state=tmp_path/'Состояние 日本語';state.mkdir();database=state/'meta.db'
-    seen=[];scripts=[];blocked=Event();release=Event()
+    seen=[];wire_receipts=[];scripts=[];blocked=Event();release=Event()
     class Model(BaseHTTPRequestHandler):
         def log_message(self,*args):pass
         def do_POST(self):
-            body=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+            wire=self.rfile.read(int(self.headers['Content-Length']))
+            wire_receipts.append((len(wire), hashlib.sha256(wire).hexdigest()))
+            body=json.loads(wire)
             seen.append(body);script=scripts.pop(0) if scripts else {'text':'Ответ 日本語'}
             if callable(script):script=script(body)
             self.send_response(200);self.send_header('Content-Type','text/event-stream');self.end_headers()
@@ -86,7 +88,7 @@ def native_turn(tmp_path, request):
             env.update(LES_LIGHT_QDRANT_URL=storage.url, LES_LIGHT_QDRANT_API_KEY=storage.api_key,
                        LES_INTERNAL_INGEST_TOKEN='d'*64, LES_STARTUP_BACKGROUND_MUTATIONS='true')
         start()
-        yield SimpleNamespace(client=client,database=database,state=state,seen=seen,scripts=scripts,children=children,start=start,registry=registry,revision=revision,blocked=blocked,release=release,env=env,embeddings=embeddings)
+        yield SimpleNamespace(client=client,database=database,state=state,seen=seen,wire_receipts=wire_receipts,scripts=scripts,children=children,start=start,registry=registry,revision=revision,blocked=blocked,release=release,env=env,embeddings=embeddings)
     finally:
         release.set();client.close()
         for child in children:
@@ -103,6 +105,9 @@ def test_json_and_stream_share_native_turn_and_repeated_key_never_calls_model(na
     response=t.client.post(PATH,json=request,headers=headers).raise_for_status()
     assert response.headers['x-les-handler']=='rust.chat'
     result=response.json();assert result['answer']=='Ответ 日本語';assert len(t.seen)==1
+    metrics=result['retrieval_trace']['contexts'][-1]['stream_metrics']
+    assert metrics['content_bytes']==len(result['answer'].encode('utf-8'))
+    assert metrics['wire_bytes_received']>metrics['content_bytes'] and metrics['limit'] is None
     assert request['question'] not in json.dumps(result['retrieval_trace'],ensure_ascii=False)
     assert t.client.post(PATH,json=request,headers=headers).raise_for_status().json()==result
     assert len(t.seen)==1
@@ -112,6 +117,44 @@ def test_json_and_stream_share_native_turn_and_repeated_key_never_calls_model(na
     with sqlite3.connect(t.database) as db:
         rows=db.execute('SELECT answer,crag_status,success FROM chat_history ORDER BY id').fetchall()
     assert rows==[('Ответ 日本語','UNVALIDATED',1)]*2
+
+@pytest.mark.parametrize('native_turn', ['public'], indirect=True)
+def test_public_chat_reports_exact_stream_limit_and_keeps_it_in_history(native_turn):
+    t = native_turn
+    limit = 1024 * 1024
+    for route in ('/api/chat', '/api/chat/stream'):
+        t.scripts.append({'text': 'x' * (limit + 1)})
+        session = 'diagnostics-' + route.rsplit('/', 1)[1]
+        response = t.client.post(route, json={'question': 'Диагностика лимита', 'session_id': session})
+        if route.endswith('/stream'):
+            frames = response.raise_for_status().text.split('\n\n')
+            error = next(json.loads(line[6:]) for frame in frames if 'event: error' in frame
+                         for line in frame.splitlines() if line.startswith('data: '))
+        else:
+            assert response.status_code == 503
+            error = response.json()
+        assert error['code'] == 'UPSTREAM_RESPONSE_TOO_LARGE'
+        assert error['model_call'] == 1
+        metrics = error['stream_metrics']
+        assert metrics['protocol'] == 'openai_sse'
+        assert metrics['limit'] == {'name': 'response_payload_bytes', 'observed': limit + 1, 'maximum': limit}
+        assert metrics['content_bytes'] == limit + 1 and metrics['separate_reasoning_bytes'] == 0
+        history = t.client.get('/api/chat/history', params={'session_id': session}).raise_for_status().json()
+        meta = history[-1]['meta']
+        assert history[-1]['history_id'] == error['history_id']
+        assert meta['artifact']['error']['stream_metrics'] == metrics
+        prepared = meta['retrieval_trace']['last_model_request']
+        assert prepared['model_call'] == 1 and isinstance(prepared['omissions'], list)
+        assert any(row['kind'] == 'request' and row['tokens'] > 0 for row in prepared['sections'])
+        events = [json.loads(line) for line in (t.state/'api.log').read_text(encoding='utf-8').splitlines()
+                  if line.startswith('{')]
+        correlated = [row for row in events if row.get('history_id') == error['history_id']]
+        request, = [row for row in correlated if row['event'] == 'chat_provider_request']
+        assert request['model_call'] == 1
+        assert t.seen[-1]['max_tokens'] == request['sent_output_limit'] == prepared['available_output_tokens']
+        assert (request['request_bytes'], request['request_sha256']) == t.wire_receipts[-1]
+        assert not any('Диагностика лимита' in str(row) or 'x' * 100 in str(row) for row in correlated)
+
 
 def test_broken_provider_preserves_exact_cause_and_partial_text_without_final(native_turn):
     t=native_turn;t.scripts.append({'text':'Полученная часть 日本語','broken':True})

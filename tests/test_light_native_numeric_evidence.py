@@ -43,3 +43,9 @@ def test_numeric_record_cannot_bypass_binding_by_using_field_text_or_prose(nativ
     if kind=='spreadsheet':assert source['sheet_name']=='Data' and source['row']==2
     else:assert source['page']==1
     assert len(t.seen)==2
+    if kind=='prose':
+        t.scripts.append({'text':'Alpha fixture: 17.25 m [Источник 1]'})
+        unchanged=t.client.post('/api/chat',json={'question':'How much Alpha fixture is specified?',
+            'mode':mode,'retrieval_mode':retrieval_mode,'scope':{'scope_type':'dataset','dataset_ids':[dataset]}}).raise_for_status().json()
+        assert unchanged['answer']=='Alpha fixture: 17.25 m [Источник 1]'
+        assert unchanged['artifact']['validation']=='not_performed' and len(t.seen)==3

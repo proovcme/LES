@@ -39,7 +39,8 @@ def build(output: Path, *, offline=False):
     environment['CARGO_ENCODED_RUSTFLAGS'] = '\x1f'.join(flags)
     subprocess.run(command, check=True, env=environment)
     name = 'les_core.dll' if sys.platform == 'win32' else ('libles_core.dylib' if sys.platform == 'darwin' else 'libles_core.so')
-    source = ROOT/'core/target/release'/name
+    target_dir = Path(environment.get('CARGO_TARGET_DIR', ROOT/'core/target'))
+    source = target_dir/'release'/name
     if not source.is_file():
         raise FileNotFoundError('Native core build did not produce a library for this host')
     output.mkdir(parents=True)

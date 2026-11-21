@@ -105,7 +105,60 @@ pub async fn run(
     let mut prefetch = Value::Null;
     let mut candidate_documents = Value::Null;
     let mut named_documents = std::collections::BTreeSet::new();
-    if matches!(retrieval_mode.as_str(), "push" | "hybrid") {
+    let prefetch_enabled = matches!(retrieval_mode.as_str(), "push" | "hybrid");
+    let retrieval_started = std::time::Instant::now();
+    if prefetch_enabled {
+        eprintln!(
+            "{}",
+            json!({"event":"chat_retrieval_started","history_id":journal.history,"mode":retrieval_mode,
+            "dataset_count":turn.scope["resolved_dataset_ids"].as_array().map(Vec::len)})
+        );
+    }
+    let explicit_comparison = turn.request["scope"]["document_ids"]
+        .as_array()
+        .is_some_and(|ids| !ids.is_empty())
+        || tools::sources::selected_files(&turn).len() > 1;
+    let selection = if prefetch_enabled || (explicit_comparison && retrieval_mode != "none") {
+        Some(
+            super::budget::until(
+                deadline,
+                tools::sources::selection::Selection::resolve(
+                    &context,
+                    &tools::sources::SourceContext::from(&turn),
+                ),
+            )
+            .await?,
+        )
+    } else {
+        None
+    };
+    let selected = selection
+        .as_ref()
+        .filter(|selection| !selection.documents().is_empty());
+    if let Some(selected) = selected {
+        sink.progress("retrieval", "Читаю выбранные документы")
+            .await?;
+        turn.request["target_files"] = json!(selected
+            .documents()
+            .iter()
+            .map(|doc| &doc["file_name"])
+            .collect::<Vec<_>>());
+        turn.request["target_file"] = Value::Null;
+        let reads = super::budget::until(
+            deadline,
+            selected.read(
+                context.clone(),
+                &tools::sources::SourceContext::from(&turn),
+                tools::sources::retrieval::initial_budget(&turn)?,
+                |read| evidence.add(read),
+            ),
+        )
+        .await?;
+        prefetch = json!({"selection_policy":"required_documents","required_documents":reads});
+        journal
+            .checkpoint("retrieval_prefetch", json!(prefetch.to_string()))
+            .await?;
+    } else if prefetch_enabled {
         // Hybrid retains the same initial evidence breadth as Push. Enabling
         // tools must not silently discard half the candidate documents.
         sink.progress("retrieval", "Ищу в выбранных документах")
@@ -138,6 +191,15 @@ pub async fn run(
                 .to_string()),
             )
             .await?;
+    }
+    if !prefetch.is_null() {
+        eprintln!(
+            "{}",
+            json!({"event":"chat_retrieval_finished","history_id":journal.history,
+            "mode":retrieval_mode,"elapsed_ms":retrieval_started.elapsed().as_millis(),"source_count":evidence.sources.len(),
+            "candidate_document_count":candidate_documents.as_array().map(Vec::len),"required_document_count":selected.map(|s|s.documents().len()),
+            "read_failures":evidence.read_failures.len()})
+        );
     }
     let mut contexts = Vec::new();
     let base = les_core::chat_context::execute(
@@ -190,6 +252,8 @@ pub async fn run(
     let mut citation_retry = false;
     let mut answer_window_retry = false;
     let mut table_rows = super::table_facts::Rows::default();
+    let mut require_cells = false;
+    let mut cell_retry = false;
     loop {
         super::budget::remaining(deadline)?;
         match agent.next().await? {
@@ -238,6 +302,24 @@ pub async fn run(
                     && tools.table.is_none()
                     && !review_active;
                 let mut prefetch_focused = false;
+                // The search pool remains available to tools. A topical question
+                // starts with the profile's ranked evidence allowance. Explicit
+                // document reads and later tool results retain their own scope.
+                let ranked_prefetch = (direct || hybrid_search)
+                    && selected.is_none()
+                    && turn.profile["mode"] == "search"
+                    && named_documents.is_empty()
+                    && candidate_documents
+                        .as_array()
+                        .is_some_and(|docs| docs.len() > 1)
+                    && agent.results().is_empty()
+                    && required.is_empty()
+                    && !initial.is_empty();
+                let evidence_limit = ranked_prefetch.then(|| {
+                    les_core::chat_profiles::retrieval_policy(&turn.profile)["model_evidence_k"]
+                        .as_u64()
+                        .unwrap_or(6)
+                });
                 let repair_focused_citations = citation_retry
                     && !answer_window_retry
                     && contexts
@@ -284,6 +366,9 @@ pub async fn run(
                     for block in initial.iter_mut().chain(&mut required) {
                         Evidence::terminal_block(block);
                     }
+                }
+                if let Some(selected) = selected {
+                    selected.reserve(&evidence.sources, &mut initial, &mut required);
                 }
                 let proof_blocks = required.len();
                 let mut native_groups = Vec::new();
@@ -358,7 +443,27 @@ pub async fn run(
                     }
                 }
                 let schema_text = json!(advertised).to_string();
-                let reserve = schema_text.chars().count().div_ceil(2) as u64;
+                require_cells = numeric_grounded
+                    && (cell_retry || super::table_facts::cell_window(&initial, &required));
+                let row_format = if require_cells
+                    && advertised.is_empty()
+                    && les_core::model_capabilities::require(
+                        &turn.connection.snapshot,
+                        &["structured_output".into()],
+                        None,
+                    )
+                    .is_ok()
+                {
+                    super::table_facts::selection_format()
+                } else {
+                    Value::Null
+                };
+                let format_chars = if row_format.is_null() {
+                    0
+                } else {
+                    row_format.to_string().chars().count()
+                };
+                let reserve = (schema_text.chars().count() + format_chars).div_ceil(2) as u64;
                 let profile = &turn.connection.profile;
                 let input = profile["input_token_limit"]
                     .as_u64()
@@ -366,6 +471,9 @@ pub async fn run(
                     .checked_sub(reserve)
                     .ok_or("CONTEXT_REQUIRED_SECTION_OVERFLOW")?;
                 let mut question = json!({"question":turn.request["question"],"attachment_context":turn.request["attachment_context"],"output_directive":turn.request["output_directive"],"response_length":turn.request["response_length"],"source_scope":turn.scope,"target_file":turn.request["target_file"],"target_files":turn.request["target_files"]});
+                if selected.is_some() {
+                    question["required_document_reads"] = prefetch["required_documents"].clone();
+                }
                 if turn.scope["document_grounding_enabled"] == true {
                     if terminal_sources {
                         question["source_coverage_note"] =
@@ -381,6 +489,7 @@ pub async fn run(
                 let navigation = if candidate_documents.is_array()
                     && exchanges.is_empty()
                     && !prefetch_focused
+                    && !ranked_prefetch
                     && !final_answer
                     && !direct
                 {
@@ -413,7 +522,7 @@ pub async fn run(
                 if final_answer {
                     question["final_answer"]=json!("Ответь по прочитанным данным. Новые вызовы инструментов недоступны. Если сведений недостаточно, обозначь это.");
                 }
-                if citation_retry || prefetch_focused {
+                if citation_retry || prefetch_focused || ranked_prefetch {
                     question["citation_format_required"] = json!("Свяжи каждый подтверждённый факт с видимым источником в формате [Источник N]. Бери номер из заголовка выдержки: номера могут идти с пропусками. Если подтверждённых фактов нет, начни ответ с [[NO_EVIDENCE]], причину сформулируй своими словами и не перечисляй ссылки.");
                 }
                 // Search may answer from a verified prefetch while keeping
@@ -438,10 +547,18 @@ pub async fn run(
                 } else {
                     round_base.clone()
                 };
-                if numeric_grounded && super::table_facts::Rows::supported(&initial) {
+                if require_cells {
+                    question["table_selection"] = json!(super::table_facts::ROW_CONTRACT);
+                    if cell_retry {
+                        question["table_retry"] =
+                            json!("TABLE_FACTS_REQUIRED. Выбери адреса в текущих источниках.");
+                    }
+                } else if numeric_grounded && super::table_facts::Rows::supported(&initial) {
                     question["exact_sum"] = json!(super::table_facts::SUM_CONTRACT);
+                    question["table_reading_note"] = json!("Проверяй заголовок группы, строку и единицу измерения. C1, C2… обозначают адреса столбцов. Пропущенная при чтении ячейка имеет неизвестное значение.");
                 }
                 let mut context_request = json!({"action":"assemble","preset":{"preset_id":profile["preset_id"],"input_limit":input,"generation_reserve":profile["generation_reserve_tokens"],"safety_reserve":profile["safety_reserve_tokens"]},
+                    "optional_evidence_limit":evidence_limit,
                     "profile_prefix":round_prompt,"request_payload":question,"shortlist":if native{json!([])}else{json!(advertised)},
                     "checkpoint":navigation,"working_memory":turn.memory,"dialogue":turn.dialogue,"evidence":initial,"source_map":evidence.sources,"compact_source_evidence":compact_sources,
                     "required_evidence":required,"tool_exchange":if native{json!([])}else{json!(exchanges)},"native_tool_exchange":native_groups,"native_tool_history":native_history});
@@ -504,6 +621,9 @@ pub async fn run(
                 let visible = les_core::chat_context::execute(
                     &json!({"action":"visible","packet":packed["packet"],"source_map":evidence.sources}),
                 )?;
+                if let Some(selected) = selected {
+                    selected.check_delivery(&visible)?;
+                }
                 let missing_named_document = hybrid_search
                     && named_documents.iter().any(|id| {
                         !visible
@@ -512,15 +632,19 @@ pub async fn run(
                             .flatten()
                             .any(|s| s["doc_id"].as_str() == Some(id.as_str()))
                     });
-                let prefetch_complete = prefetch_focused
-                    && !missing_named_document
-                    && initial.iter().all(|block| {
-                        visible
-                            .as_array()
-                            .into_iter()
-                            .flatten()
-                            .any(|source| source["index"] == block["source_index"])
-                    });
+                let ranked_window_full = evidence_limit.is_some_and(|limit| {
+                    visible.as_array().is_some_and(|s| s.len() as u64 >= limit)
+                });
+                let prefetch_complete = ranked_window_full
+                    || (prefetch_focused
+                        && !missing_named_document
+                        && initial.iter().all(|block| {
+                            visible
+                                .as_array()
+                                .into_iter()
+                                .flatten()
+                                .any(|source| source["index"] == block["source_index"])
+                        }));
                 table_rows = if numeric_grounded {
                     super::table_facts::Rows::new(&packed["packet"], &visible)
                 } else {
@@ -536,10 +660,8 @@ pub async fn run(
                         .await?;
                     published_sources = visible.clone();
                 }
-                contexts.push(json!({"delivery":"prepared","context":trace,"sources":visible,"schema_reserved_tokens":reserve,"focused_citations":focused_citations,"prefetch_complete":prefetch_complete,"missing_named_document":missing_named_document}));
+                contexts.push(json!({"delivery":"prepared","context":trace,"sources":visible,"table_selection":require_cells,"schema_reserved_tokens":reserve,"focused_citations":focused_citations,"prefetch_complete":prefetch_complete,"ranked_window_full":ranked_window_full,"missing_named_document":missing_named_document}));
                 sink.emit("sources", json!({"source_map":visible,"sources":visible}))
-                    .await?;
-                sink.progress("generation", "Модель читает контекст и отвечает")
                     .await?;
                 let packet = &packed["packet"];
                 let available_output = packet["generation_reserve_tokens"]
@@ -553,6 +675,36 @@ pub async fn run(
                                 .as_u64()
                                 .ok_or("CHAT_CONTEXT_INVALID")?,
                         );
+                let call = contexts.len();
+                let omissions: Vec<_> = packet["omissions"].as_array().into_iter().flatten()
+                    .map(|row| json!({"kind":row["kind"],"reason":row["reason"],"omitted":row["omitted"],"total":row["total"]}))
+                    .collect();
+                let sections: Vec<_> = trace["sections"].as_array().into_iter().flatten()
+                    .map(|row| json!({"kind":row["kind"],"items":row["items"],"tokens":row["tokens"]}))
+                    .collect();
+                let prepared = json!({"model_call":call,"input_budget_tokens":packet["input_budget_tokens"],
+                    "estimated_input_tokens":packet["included_tokens"],"available_output_tokens":available_output,
+                    "sections":sections,"omissions":omissions,
+                    "model_evidence_limit":evidence_limit,
+                    "candidate_document_count":candidate_documents.as_array().map(Vec::len),"retrieval_mode":retrieval_mode,
+                    "source_indices":visible.as_array().into_iter().flatten().map(|s|&s["index"]).collect::<Vec<_>>()});
+                journal
+                    .checkpoint("model_prepared", json!(prepared.to_string()))
+                    .await?;
+                eprintln!(
+                    "{}",
+                    json!({"event":"chat_model_prepared","history_id":journal.history,"request":prepared})
+                );
+                if contexts.len() == 1
+                    && (direct || hybrid_search)
+                    && turn.scope["document_grounding_enabled"] == true
+                    && !initial.is_empty()
+                    && visible.as_array().is_none_or(Vec::is_empty)
+                {
+                    return Err("SOURCE_CONTEXT_WINDOW_EMPTY".into());
+                }
+                sink.progress("generation", "Модель читает контекст и отвечает")
+                    .await?;
                 let mut response = model::complete(
                     &context,
                     &turn,
@@ -560,12 +712,19 @@ pub async fn run(
                     if native { advertised } else { vec![] },
                     available_output,
                     journal,
+                    call,
                     sink,
                     turn.scope["document_grounding_enabled"] != true,
-                    Value::Null,
+                    row_format,
                     deadline,
                 )
                 .await?;
+                if let Some(metrics) = response
+                    .as_object_mut()
+                    .and_then(|r| r.remove("stream_metrics"))
+                {
+                    contexts[call - 1]["stream_metrics"] = metrics;
+                }
                 if let Some(review) = &tools.review {
                     review.acknowledge(packed["messages"].clone()).await?;
                     agent.capability_revision("document_review", review.revision().await)?;
@@ -726,7 +885,11 @@ pub async fn run(
                     .1;
                 // Deliberately sending a preview is distinct from losing an
                 // admitted reading to the tool schemas during packing.
-                let read_window = !focused_answer && evidence.read_omitted(&visible);
+                let ranked_window_full = contexts
+                    .last()
+                    .is_some_and(|c| c["ranked_window_full"] == true);
+                let read_window =
+                    !ranked_window_full && !focused_answer && evidence.read_omitted(&visible);
                 let omitted_document = omitted_reads.iter().any(|read| {
                     read["doc_id"].as_str().is_some_and(|doc_id| {
                         !visible
@@ -783,29 +946,52 @@ pub async fn run(
                 if selected_evidence && visible.as_array().is_none_or(Vec::is_empty) {
                     return Err("SOURCE_EVIDENCE_MISSING".into());
                 }
-                if visible.as_array().is_some_and(|v| {
-                    v.iter().any(|s| {
-                        matches!(
-                            s["evidence_kind"].as_str(),
-                            Some(
-                                "physical_pdf_page"
-                                    | "physical_pdf_unit"
-                                    | "physical_word_section"
-                                    | "physical_workbook_row"
+                if selected.is_some()
+                    || visible.as_array().is_some_and(|v| {
+                        v.iter().any(|s| {
+                            matches!(
+                                s["evidence_kind"].as_str(),
+                                Some(
+                                    "physical_pdf_page"
+                                        | "physical_pdf_unit"
+                                        | "physical_word_section"
+                                        | "physical_workbook_row"
+                                )
                             )
-                        )
+                        })
                     })
-                }) {
+                {
                     sink.progress("verification", "Проверяю источники ответа")
                         .await?;
-                    tools::sources::verify_physical(context.clone(), &visible).await?;
+                    tools::sources::verify_originals(
+                        context.clone(),
+                        &visible,
+                        selected.map_or(&[], |s| s.documents()),
+                    )
+                    .await?;
                 }
                 let (text, unconfirmed) = super::inspection::answer_text(
                     terminal["text"].as_str().unwrap_or(""),
                     turn.scope["document_grounding_enabled"] == true,
                 );
                 let text = text.as_ref();
-                let calculation = if table_rows.present() {
+                let calculation = if require_cells || table_rows.needs_selection(text, &visible)? {
+                    if !table_rows.present() {
+                        return Err("SOURCE_CONTEXT_WINDOW_EMPTY".into());
+                    }
+                    match table_rows.finish_checked(text, true) {
+                        Err("TABLE_FACTS_REQUIRED" | "TABLE_ROW_NOT_VISIBLE") if !cell_retry => {
+                            cell_retry = true;
+                            journal.checkpoint("reset", json!("")).await?;
+                            sink.emit("reset", json!("")).await?;
+                            sink.progress("verification", "Связываю ответ со строками источника")
+                                .await?;
+                            agent.revise_completion()?;
+                            continue;
+                        }
+                        result => result?,
+                    }
+                } else if table_rows.present() {
                     table_rows.finish_sum(text)?
                 } else {
                     None
@@ -836,7 +1022,10 @@ pub async fn run(
                             .is_some_and(|sources| !sources.is_empty()));
                 if (unconfirmed && has_citations)
                     || (turn.scope["document_grounding_enabled"] == true && unresolved)
-                    || (must_cite && !unconfirmed && !has_citations)
+                    || (must_cite
+                        && !unconfirmed
+                        && !has_citations
+                        && table_facts["status"] != "insufficient")
                 {
                     if citation_retry {
                         journal.checkpoint("reset", json!("")).await?;
@@ -914,7 +1103,7 @@ pub async fn run(
                 let completed = json!({"answer":answer,"response":answer,"sources":names,"source_map":visible,"citation_map":visible,
                     "history_id":journal.history,"latency_sec":started.elapsed().as_secs_f64(),"tokens":terminal["usage"]["completion_tokens"].as_u64().unwrap_or(0),"crag_status":"UNVALIDATED","success":true,
                     "source_scope":{"resolved":turn.scope["resolved_dataset_ids"],"used":visible.as_array().into_iter().flatten().map(|s|s["dataset_id"].clone()).collect::<Vec<_>>()},
-                    "query_route":{"channel":"generic","reason":"native_chat"},"retrieval_trace":{"engine":"rust.chat","status":if evidence.read_failures.is_empty(){"ok"}else{"degraded"},"read_failures":evidence.read_failures,"omitted_reads":omitted_reads,"rounds":agent.rounds,"mode":retrieval_mode,"prefetch":prefetch,"contexts":contexts,"citation_syntax":citations,"grounding_retry":grounding_retry,"citation_retry":citation_retry,"answer_window_retry":answer_window_retry,"source_inspection":evidence.reading_trace()},
+                    "query_route":{"channel":"generic","reason":"native_chat"},"retrieval_trace":{"engine":"rust.chat","status":if evidence.read_failures.is_empty(){"ok"}else{"degraded"},"read_failures":evidence.read_failures,"omitted_reads":omitted_reads,"rounds":agent.rounds,"mode":retrieval_mode,"prefetch":prefetch,"contexts":contexts,"citation_syntax":citations,"grounding_retry":grounding_retry,"citation_retry":citation_retry,"cell_selection_retry":cell_retry,"answer_window_retry":answer_window_retry,"source_inspection":evidence.reading_trace()},
                     "artifact":{"completion_status":if !summary.is_null()&&summary["status"]!="recorded"{"incomplete"}else{"completed"},"execution_receipt":receipt,"execution_summary":summary,"validation":if table_facts.is_null(){"not_performed"}else if table_facts["status"]=="insufficient"{"insufficient_evidence"}else{"source_rows_verified"},"table_facts":table_facts,"tool_results":agent.results(),"egress_tag":turn.egress_tag,"attachment":{
                         "attachment_id":turn.attachment["attachment_id"],"name":turn.attachment["name"],"source_sha256":turn.attachment["source_sha256"],"media_type":turn.attachment["media_type"],"truncated":turn.attachment["truncated"]}},"model":turn.connection.public()});
                 agent.accept_completed(json!({"text":answer})).await?;

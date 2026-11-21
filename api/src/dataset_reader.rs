@@ -318,6 +318,7 @@ async fn execute(context: &Arc<Context>, job: &Value) -> Result<(), String> {
                 false,
                 Duration::from_secs(180),
                 [context.listen_port, upstream],
+                None,
             )
             .await?;
         let output = tokio::time::timeout(

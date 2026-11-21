@@ -29,7 +29,8 @@
   let indexFile = false;
   let sourceTrigger: HTMLElement | null = null; let followAnswer = $state(true);
   const disabled = $derived(workspace.busy || workspace.contextChanging || workspace.uploading || workspace.closing || actionBusy || workspace.loading);
-  const scopeLabel = $derived(workspace.session?.scope.scope_type === 'mixed' ? 'Проект и наборы'
+  const scopeLabel = $derived(workspace.session?.scope.document_ids?.length ? `Выбрано документов: ${workspace.session.scope.document_ids.length}`
+    : workspace.session?.scope.scope_type === 'mixed' ? 'Проект и наборы'
     : workspace.session?.scope.project_ids.length ? 'Документы проекта'
     : workspace.session?.scope.dataset_ids.length
     ? workspace.session.scope.dataset_ids.map((id) => workspace.datasets.find((item) => item.id === id)?.name || 'Набор недоступен').join(', ')

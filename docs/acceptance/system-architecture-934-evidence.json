@@ -1,0 +1,539 @@
+{
+  "candidate": {
+    "build": 934,
+    "head": "27b7eac",
+    "api_sha256": "66dadc41ab58774524bb292ccba93fbdb8027a4b3d3bd6099ffc7cd3ed1199a2",
+    "source_digest": "a5025f0e384a44dfdbfe5362c1a75c6c2685820eb2056bfc7fbe758ffd2e83b6",
+    "api_digest_matches_tree": true
+  },
+  "scope": "Windows native candidate, synthetic datasets and isolated services. Controlled chat responses in the PDF and retry experiments. No installation or live user data.",
+  "test_groups": {
+    "native_and_core": {
+      "counts": {
+        "passed": 35
+      },
+      "cases": [
+        {
+          "test": "tests.test_light_native_api::test_native_cold_start_and_restart_without_any_python_server",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_native_api::test_native_projects_keep_admin_boundary_and_project_links",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_native_api::test_native_context_edit_forget_keeps_history_and_cas",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_native_api::test_native_agent_state_persists_plain_markdown_and_undo",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_native_api::test_native_deleted_file_is_discoverable_and_export_keeps_utf8_bytes",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_native_api::test_many_native_http_writers_keep_one_draft_revision",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_native_intake_execution::test_intake_retries_only_due_failures_in_its_own_manifest",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_native_intake_execution::test_manual_attach_keeps_the_receipt_of_an_existing_automatic_watch_job",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_native_intake_execution::test_explicit_folder_index_retries_exhausted_errors_without_reindexing_ready_files[False]",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_native_intake_execution::test_explicit_folder_index_retries_exhausted_errors_without_reindexing_ready_files[True]",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_native_chat_turn::test_json_and_stream_share_native_turn_and_repeated_key_never_calls_model",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_native_chat_turn::test_hard_process_stop_recovers_partial_text_without_replaying_model",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_native_chat_turn::test_physical_pdf_changed_during_generation_never_commits_a_confident_final",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_native_chat_turn::test_agent_write_uses_native_revisions_and_retry_never_repeats_the_effect",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_native_mcp::test_native_settings_and_cached_tool_revocation_without_backend",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_native_mcp::test_stateful_sse_preserves_ids_and_utf8_denies_changed_schema_and_ignores_server_instructions",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_native_skills::test_killed_native_host_resumes_without_repeating_confirmed_rows",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_index_recovery::test_process_exit_recovers_one_generation_and_fts[staging]",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_index_recovery::test_process_exit_recovers_one_generation_and_fts[partial]",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_index_recovery::test_process_exit_recovers_one_generation_and_fts[commit]",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_index_recovery::test_process_exit_recovers_one_generation_and_fts[retired]",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_index_recovery::test_process_exit_recovers_one_generation_and_fts[lexical]",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_index_recovery::test_missing_committed_points_preserves_journal_and_old_evidence",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_index_recovery::test_writer_lease_and_search_revision",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_index_recovery::test_native_journal_keeps_legacy_revision_and_publishes_exactly_one_writer",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_index_recovery::test_startup_recovery_closes_qdrant_without_context_manager",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_index_recovery::test_lexical_replace_rolls_back_both_delete_and_partial_insert",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_index_recovery::test_embedding_binding_frozen_for_file_and_checked_before_network",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_index_recovery::test_hierarchy_embeds_once_and_retains_all_three_search_passes",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_index_recovery::test_citation_number_without_available_source_is_invalid",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_index_recovery::test_replacement_during_rerank_never_returns_mixed_evidence[False]",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_index_recovery::test_replacement_during_rerank_never_returns_mixed_evidence[True]",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_index_recovery::test_search_model_failure_is_actionable_and_never_falls_back[ROLE_BINDING_MISSING: embeddings-ROLE_BINDING_MISSING]",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_index_recovery::test_search_model_failure_is_actionable_and_never_falls_back[UPSTREAM_REQUEST_FAILED: ReadTimeout-UPSTREAM_TIMEOUT]",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_index_recovery::test_search_model_failure_is_actionable_and_never_falls_back[UPSTREAM_HTTP_ERROR: 404-UPSTREAM_MODEL_NOT_FOUND]",
+          "result": "passed"
+        }
+      ]
+    },
+    "intake_extensions_and_pdf": {
+      "counts": {
+        "passed": 35,
+        "failed": 4
+      },
+      "cases": [
+        {
+          "test": "tests.test_light_native_folder_watch::test_native_folder_watch_resume_unavailability_and_publication_crash[local]",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_native_dataset_reader::test_reader_rejects_same_count_changed_document_and_preserves_pending_generation",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_native_dataset_reader::test_reader_invalid_output_never_publishes_success[bad0-READER_UNKNOWN_SOURCE]",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_native_dataset_reader::test_reader_invalid_output_never_publishes_success[bad1-READER_OUTPUT_INVALID]",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_native_dataset_reader::test_reader_invalid_output_never_publishes_success[broken json-READER_OUTPUT_INVALID]",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_native_dataset_reader::test_reader_bounded_input_remains_valid_json_with_unicode_and_omissions",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_native_dataset_reader::test_reader_reconciliation_closes_crash_gap_and_disable_pauses_auto_jobs",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_native_dataset_reader::test_reader_large_name_inventory_has_bounded_memory_projection",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_native_dataset_reader::test_reader_does_not_recreate_deleted_dataset",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_native_dataset_reader::test_intake_completion_emits_event_when_last_document_already_committed",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_native_dataset_reader::test_reader_retains_repair_cause_and_attempt_budget_after_restart",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_native_dataset_reader::test_reader_corrupt_snapshot_fails_without_panicking",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_native_dataset_reader::test_legacy_projection_cannot_keep_unverified_reader_answer",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_native_dataset_reader::test_native_reader_http_repair_failure_disconnect_and_crash_resume",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_engineering_snapshots::test_original_ids_survive_real_chunking_preparation_and_parent_expansion",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_engineering_snapshots::test_invalid_count_is_not_indexed_as_ordinary_json",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_mail_unicode::test_unicode_mailboxes_display_human_names_but_select_exact_wire_id[\\u041e\\u0442\\u043f\\u0440\\u0430\\u0432\\u043b\\u0435\\u043d\\u043d\\u044b\\u0435 \\u043f\\u0438\\u0441\\u044c\\u043c\\u0430]",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_mail_unicode::test_unicode_mailboxes_display_human_names_but_select_exact_wire_id[\\u041f\\u0440\\u043e\\u0435\\u043a\\u0442 & \\u0410\\u0440\\u0445\\u0438\\u0432]",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_mail_unicode::test_unicode_mailboxes_display_human_names_but_select_exact_wire_id[\\u65e5\\u672c\\u8a9e/\\u4e2d\\u6587]",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_mail_unicode::test_unicode_mailboxes_display_human_names_but_select_exact_wire_id[Caf\\xe9 \\U0001f332]",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_mail_unicode::test_unicode_mailboxes_display_human_names_but_select_exact_wire_id[INBOX]",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_mail_unicode::test_rfc_example_and_literal_ampersand",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_mail_isolation::test_light_uses_bundled_collector_after_install_and_keeps_state_separate",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_mail_isolation::test_light_collector_has_own_binary_and_state",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_mail_isolation::test_light_mail_follows_actual_api_port",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_mail_isolation::test_full_collector_cannot_be_selected_in_light",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_native_pdf_layout::test_visual_grid_keeps_description_unit_and_decimal_in_the_same_row[False]",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_native_pdf_layout::test_visual_grid_keeps_description_unit_and_decimal_in_the_same_row[True]",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_native_pdf_layout::test_ordinary_prose_without_a_confirmed_grid_keeps_its_existing_text",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_native_pdf_layout::test_thick_rules_and_wrapped_description_do_not_create_columns_or_change_values[-17.25]",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_native_pdf_layout::test_thick_rules_and_wrapped_description_do_not_create_columns_or_change_values[0]",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_native_pdf_layout::test_thick_rules_and_wrapped_description_do_not_create_columns_or_change_values[1000.05]",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_native_pdf_layout::test_thick_rules_and_wrapped_description_do_not_create_columns_or_change_values[]",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_native_pdf_layout::test_chat_reads_cells_while_the_index_keeps_its_search_representation[search-False-rag-small]",
+          "result": "failed"
+        },
+        {
+          "test": "tests.test_light_native_pdf_layout::test_chat_reads_cells_while_the_index_keeps_its_search_representation[search-True-rag-small]",
+          "result": "failed"
+        },
+        {
+          "test": "tests.test_light_native_pdf_layout::test_chat_reads_cells_while_the_index_keeps_its_search_representation[agent-False-rag-small]",
+          "result": "failed"
+        },
+        {
+          "test": "tests.test_light_native_pdf_layout::test_chat_reads_cells_while_the_index_keeps_its_search_representation[agent-True-rag-small]",
+          "result": "failed"
+        },
+        {
+          "test": "tests.test_light_installer::test_recovery_after_interruption_between_renames",
+          "result": "passed"
+        },
+        {
+          "test": "tests.test_light_installer::test_rollback_restores_old_application_and_keeps_new_user_data",
+          "result": "passed"
+        }
+      ]
+    },
+    "svelte_vitest": {
+      "numTotalTests": 67,
+      "numPassedTests": 67,
+      "numFailedTests": 0,
+      "numPendingTests": 0
+    }
+  },
+  "same_chat_action_replay": {
+    "same_request_without_key": [
+      1,
+      2
+    ],
+    "same_request_with_key": [
+      3,
+      3
+    ],
+    "model_calls": 0
+  },
+  "pdf_grid_source_and_substitution": [
+    {
+      "source_value": "17.25",
+      "scripted_value": "17.25",
+      "http": 200,
+      "code": null,
+      "answer": "Alpha item: 17.25 pcs [Источник 1].",
+      "validation": "not_performed",
+      "linked": [
+        1
+      ],
+      "calls": 1,
+      "received_original_value": true,
+      "response_format": false
+    },
+    {
+      "source_value": "17.25",
+      "scripted_value": "999",
+      "http": 200,
+      "code": null,
+      "answer": "Alpha item: 999 pcs [Источник 1].",
+      "validation": "not_performed",
+      "linked": [
+        1
+      ],
+      "calls": 1,
+      "received_original_value": true,
+      "response_format": false
+    }
+  ],
+  "pdf_failure_replay": {
+    "test_chat_reads_cells_while_the_index_keeps_its_search_representation[search-False-rag-small]": {
+      "http_error_codes": [
+        "SOURCE_CITATION_MISSING"
+      ],
+      "provider_calls": [
+        {
+          "structured_format": false,
+          "offered_tools": [],
+          "contains_value": true
+        },
+        {
+          "structured_format": false,
+          "offered_tools": [],
+          "contains_value": true
+        }
+      ]
+    },
+    "test_chat_reads_cells_while_the_index_keeps_its_search_representation[search-True-rag-small]": {
+      "http_error_codes": [
+        "UPSTREAM_UNREACHABLE"
+      ],
+      "provider_calls": [
+        {
+          "structured_format": false,
+          "offered_tools": [],
+          "contains_value": true
+        }
+      ]
+    },
+    "test_chat_reads_cells_while_the_index_keeps_its_search_representation[agent-False-rag-small]": {
+      "http_error_codes": [
+        "SOURCE_CITATION_MISSING"
+      ],
+      "provider_calls": [
+        {
+          "structured_format": false,
+          "offered_tools": [],
+          "contains_value": true
+        },
+        {
+          "structured_format": false,
+          "offered_tools": [],
+          "contains_value": true
+        }
+      ]
+    },
+    "test_chat_reads_cells_while_the_index_keeps_its_search_representation[agent-True-rag-small]": {
+      "http_error_codes": [
+        "UPSTREAM_UNREACHABLE"
+      ],
+      "provider_calls": [
+        {
+          "structured_format": false,
+          "offered_tools": [],
+          "contains_value": true
+        }
+      ]
+    }
+  },
+  "embedded_config_digest_probe": {
+    "config/builtin-tools.json": {
+      "included_in_digest": true,
+      "rust_consumers": [
+        "core/src/tool_registry.rs:15"
+      ]
+    },
+    "config/chat-commands.json": {
+      "included_in_digest": false,
+      "rust_consumers": [
+        "core/src/chat_commands.rs:5"
+      ]
+    },
+    "config/chat-profile-defaults.json": {
+      "included_in_digest": true,
+      "rust_consumers": [
+        "core/src/chat_profiles/mod.rs:11"
+      ]
+    },
+    "config/dataset-reader-schema.json": {
+      "included_in_digest": false,
+      "rust_consumers": [
+        "core/src/catalog/dataset_reader/mod.rs:150",
+        "core/src/catalog/dataset_reader/mod.rs:317"
+      ]
+    },
+    "config/document-review-tool.json": {
+      "included_in_digest": false,
+      "rust_consumers": [
+        "core/src/document_review/mod.rs:19",
+        "api/src/chat/document_review.rs:33"
+      ]
+    },
+    "config/execution-presets.json": {
+      "included_in_digest": true,
+      "rust_consumers": [
+        "core/src/model_profile.rs:71"
+      ]
+    },
+    "config/extraction-errors.json": {
+      "included_in_digest": true,
+      "rust_consumers": [
+        "core/src/index_batch/policy.rs:5"
+      ]
+    },
+    "config/lexical-v2.json": {
+      "included_in_digest": true,
+      "rust_consumers": [
+        "core/src/lexical.rs:257"
+      ]
+    },
+    "config/model-connection-templates.json": {
+      "included_in_digest": true,
+      "rust_consumers": [
+        "api/src/model_registry.rs:136"
+      ]
+    },
+    "config/table-document-tool.json": {
+      "included_in_digest": false,
+      "rust_consumers": [
+        "core/src/document_tasks/mod.rs:9"
+      ]
+    },
+    "config/table-row-schema.json": {
+      "included_in_digest": true,
+      "rust_consumers": [
+        "core/src/tables/mod.rs:16"
+      ]
+    },
+    "config/unicode/15.1.0.json": {
+      "included_in_digest": true,
+      "rust_consumers": [
+        "core/src/unicode.rs:18"
+      ]
+    },
+    "config/version.json": {
+      "included_in_digest": true,
+      "rust_consumers": [
+        "api/src/document_cache.rs:58"
+      ]
+    }
+  },
+  "model_profile_oracle": {
+    "profiles_total": 250,
+    "profiles_mismatching": 11,
+    "by_field": {
+      "input_token_limit": 11
+    },
+    "example": [
+      {
+        "case": 1,
+        "fields": {
+          "input_token_limit": [
+            32768,
+            131072
+          ]
+        }
+      },
+      {
+        "case": 40,
+        "fields": {
+          "input_token_limit": [
+            32768,
+            131072
+          ]
+        }
+      }
+    ]
+  }
+}

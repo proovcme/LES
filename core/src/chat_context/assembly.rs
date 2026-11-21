@@ -60,6 +60,7 @@ fn pack(request: &Value, candidates: &[Value]) -> Result<Value> {
     let preset = &request["preset"];
     let result = crate::context::execute(
         &json!({"action":"pack","input_limit":preset["input_limit"],
+        "optional_evidence_limit":request["optional_evidence_limit"],
         "generation_reserve":preset["generation_reserve"],"safety_reserve":preset["safety_reserve"],"candidates":rows}),
     )?;
     if result["overflow"] == true {
@@ -212,49 +213,39 @@ pub(super) fn assemble(request: &Value) -> Result<Value> {
         candidate("dialogue", recent_dialogue, true),
         candidate("dialogue", prior_dialogue, false),
     ];
-    // Old search candidates are not a mandatory report about every section ever
-    // encountered. Reserve coverage only for sources that can reach this round.
-    let preliminary = pack(request, &candidates)?;
-    if preliminary["overflow"] == true {
-        return Ok(preliminary);
+    if !sources.is_empty() {
+        // Admit mandatory turns and evidence before spending any space on its
+        // description. Optional tool schemas precede evidence in the pack order.
+        let proof_candidates = candidates
+            .iter()
+            .filter(|c| {
+                c["required"] == true || c["kind"] == "tool_shortlist" || c["kind"] == "evidence"
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let proof = pack(request, &proof_candidates)?;
+        if proof["overflow"] == true {
+            return Ok(proof);
+        }
+        let admitted = visible(&proof, sources);
+        let spare = proof["input_budget_tokens"].as_i64().ok_or(ERROR)?
+            - proof["included_tokens"].as_i64().ok_or(ERROR)?;
+        if let Some(item) = coverage::for_window(sources, &admitted, spare) {
+            candidates.push(candidate("request", vec![item], true));
+        }
+        for section in candidates.iter_mut().filter(|c| c["kind"] == "source_map") {
+            section["objects"]
+                .as_array_mut()
+                .ok_or(ERROR)?
+                .retain(|item| {
+                    let id = &item["payload"]["index"];
+                    !truth(id) || admitted.iter().any(|s| s["index"] == *id)
+                });
+        }
     }
-    let coverage_sources = visible(&preliminary, sources);
-    let reservation = coverage::reservation(&coverage_sources);
-    let packet = if let Some(item) = &reservation {
-        candidates.push(candidate("request", vec![item.clone()], true));
-        pack(request, &candidates)?
-    } else {
-        preliminary
-    };
+    let packet = pack(request, &candidates)?;
     if packet["overflow"] == true {
         return Ok(packet);
-    }
-    let indexes: Vec<_> = visible(&packet, sources)
-        .iter()
-        .filter(|s| s.is_object())
-        .map(|s| s["index"].clone())
-        .collect();
-    let mut removed_sources = false;
-    for candidate in candidates.iter_mut().filter(|c| c["kind"] == "source_map") {
-        let objects = candidate["objects"].as_array_mut().ok_or(ERROR)?;
-        let before = objects.len();
-        objects.retain(|item| {
-            let payload = &item["payload"];
-            !payload.is_object() || !truth(&payload["index"]) || indexes.contains(&payload["index"])
-        });
-        removed_sources |= objects.len() != before;
-    }
-    let mut packet = if removed_sources {
-        pack(request, &candidates)?
-    } else {
-        packet
-    };
-    if packet["overflow"] == true {
-        return Ok(packet);
-    }
-    if reservation.is_some() {
-        let visible = visible(&packet, sources);
-        packet = coverage::finalize(packet, &coverage_sources, &visible)?;
     }
     Ok(json!({"messages":messages(&packet,true)?,"packet":packet}))
 }

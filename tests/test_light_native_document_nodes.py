@@ -6,6 +6,7 @@ from pathlib import Path
 import sqlite3
 import subprocess
 import sys
+import sysconfig
 import time
 
 import pytest
@@ -199,7 +200,7 @@ def test_native_preparation_survives_owner_death_without_repeating_committed_fil
     root = Path(__file__).resolve().parents[1]
     with (tmp_path/'child.log').open('wb') as log:
         child = subprocess.Popen([getattr(sys,'_base_executable',sys.executable),'-I','-S','-c',script,
-            str(root),str(root/'.venv/Lib/site-packages'),str(file)], stdout=log,stderr=log,
+            str(root),sysconfig.get_path('purelib'),str(file)], stdout=log,stderr=log,
             creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
         try:
             deadline = time.monotonic()+15

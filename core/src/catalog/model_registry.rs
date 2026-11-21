@@ -189,6 +189,7 @@ fn validate_snapshot(value: &Value) -> Result<()> {
             &["max_tokens", "max_completion_tokens"][..],
         ),
         ("chat_protocol", &["openai_chat_v1", "native_chat_v1"][..]),
+        ("reasoning_control", &["reasoning_effort_none"][..]),
     ] {
         if options
             .get(key)
@@ -380,6 +381,7 @@ pub fn record_probe(
                 let keys: &[&str] = match row["capability"].as_str() {
                     Some("chat_completions") => &[
                         "chat_protocol",
+                        "reasoning_control",
                         "observed_context_tokens",
                         "max_output_field",
                     ],

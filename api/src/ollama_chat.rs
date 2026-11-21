@@ -1,4 +1,5 @@
 //! Bounded Ollama NDJSON decoder for the private model bridge.
+use crate::chat_stream_metrics::StreamMetrics;
 use axum::body::{Body, Bytes};
 use futures_util::{stream, StreamExt};
 use serde_json::{json, Value};
@@ -9,7 +10,6 @@ pub const LIMITS_HEADER: &str = "x-les-chat-limits";
 pub const PROTOCOL_HEADER: &str = "x-les-model-protocol";
 
 const INVALID: &str = "UPSTREAM_RESPONSE_INVALID";
-const TOO_LARGE: &str = "UPSTREAM_RESPONSE_TOO_LARGE";
 const INTERRUPTED: &str = "UPSTREAM_STREAM_INTERRUPTED";
 const REASONING_EXHAUSTED: &str = "REASONING_BUDGET_EXHAUSTED";
 
@@ -18,6 +18,7 @@ pub struct Limits {
     pub(crate) events: usize,
     pub(crate) line: usize,
     pub(crate) reasoning: bool,
+    pub(crate) report: bool,
 }
 
 impl Limits {
@@ -41,6 +42,7 @@ impl Limits {
             events: (tokens * 8).max(256),
             line: (bytes * 8).max(1024),
             reasoning,
+            report: false,
         })
     }
 }
@@ -121,8 +123,7 @@ struct Chat {
     limits: Limits,
     reasoning: Reasoning,
     thinking_reported: bool,
-    consumed: usize,
-    events: usize,
+    metrics: StreamMetrics,
     saw_message: bool,
     pending: VecDeque<Value>,
     tools: Vec<Value>,
@@ -143,8 +144,7 @@ impl Chat {
             thinking_reported: limits.reasoning,
             limits,
             reasoning,
-            consumed: 0,
-            events: 0,
+            metrics: StreamMetrics::default(),
             saw_message: false,
             pending,
             tools: Vec::new(),
@@ -155,14 +155,6 @@ impl Chat {
         }
     }
 
-    fn charge(&mut self, size: usize) -> Result<(), &'static str> {
-        self.consumed += size;
-        if self.consumed > self.limits.bytes {
-            return Err(TOO_LARGE);
-        }
-        Ok(())
-    }
-
     fn text(&mut self, text: String) {
         if !text.is_empty() {
             self.pending.push_back(json!({"text":text}));
@@ -170,9 +162,13 @@ impl Chat {
     }
 
     fn line(&mut self, line: &[u8]) -> Result<bool, &'static str> {
-        self.events += 1;
-        if self.events > self.limits.events {
-            return Err(TOO_LARGE);
+        self.metrics.lines += 1;
+        if self.metrics.lines > self.limits.events {
+            return Err(self.metrics.exceeded(
+                "ndjson_lines",
+                self.metrics.lines,
+                self.limits.events,
+            ));
         }
         let line = std::str::from_utf8(line).map_err(|_| INVALID)?;
         if line.trim().is_empty() {
@@ -194,7 +190,8 @@ impl Chat {
                     .filter(|value| truthy(value))
             });
         if let Some(thought) = thought {
-            self.charge(rendered_size(thought))?;
+            self.metrics.reasoning_bytes += rendered_size(thought);
+            self.metrics.check_payload(self.limits.bytes)?;
             self.reasoning.separate();
             if !self.thinking_reported {
                 self.pending.push_back(json!({"thinking":true}));
@@ -202,14 +199,16 @@ impl Chat {
             }
         }
         if let Some(text) = message.get("content").and_then(Value::as_str) {
-            self.charge(text.len())?;
+            self.metrics.content_bytes += text.len();
+            self.metrics.check_payload(self.limits.bytes)?;
             let text = self.reasoning.feed(text);
             self.text(text);
         }
         if let Some(tools) = message.remove("tool_calls").filter(truthy) {
             let calls = tools.as_array().ok_or("UPSTREAM_TOOL_CALLS_INVALID")?;
             // Keep the legacy semantic budget including JSON separator spaces.
-            self.charge(rendered_size(&tools))?;
+            self.metrics.tool_bytes += rendered_size(&tools);
+            self.metrics.check_payload(self.limits.bytes)?;
             self.tools
                 .extend(calls.iter().filter(|value| value.is_object()).cloned());
         }
@@ -303,7 +302,10 @@ impl Stream {
         loop {
             if self.chunk.is_empty() {
                 match self.response.as_mut().unwrap().next().await {
-                    Some(Ok(chunk)) => self.chunk = chunk,
+                    Some(Ok(chunk)) => {
+                        self.chat.metrics.wire_bytes += chunk.len();
+                        self.chunk = chunk;
+                    }
                     None => {
                         return Ok((!self.line.is_empty()).then(|| std::mem::take(&mut self.line)))
                     }
@@ -313,7 +315,11 @@ impl Stream {
             let newline = self.chunk.iter().position(|byte| *byte == b'\n');
             let count = newline.unwrap_or(self.chunk.len());
             if self.line.len() + count > self.chat.limits.line {
-                return Err(TOO_LARGE);
+                return Err(self.chat.metrics.exceeded(
+                    "ndjson_line_bytes",
+                    self.line.len() + count,
+                    self.chat.limits.line,
+                ));
             }
             self.line.extend_from_slice(&self.chunk.split_to(count));
             if newline.is_some() {
@@ -336,7 +342,12 @@ pub fn from_source(source: crate::model_http::Source, limits: Limits) -> Body {
     };
     Body::from_stream(stream::unfold(state, |mut state| async move {
         loop {
-            if let Some(event) = state.chat.pending.pop_front() {
+            if let Some(mut event) = state.chat.pending.pop_front() {
+                if state.chat.limits.report
+                    && (event.get("finish").is_some() || event.get("error").is_some())
+                {
+                    event["stream_metrics"] = state.chat.metrics.snapshot("ollama_ndjson");
+                }
                 let mut bytes = event.to_string().into_bytes();
                 bytes.push(b'\n');
                 return Some((Ok::<_, Infallible>(bytes), state));

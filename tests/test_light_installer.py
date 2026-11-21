@@ -199,6 +199,31 @@ def test_recovery_after_interruption_between_renames(tmp_path):
     assert not (state / "install-transaction.json").exists()
 
 
+@pytest.mark.parametrize("rename_count", [0, 1, 2])
+def test_explicit_rollback_resumes_from_each_rename(tmp_path, rename_count):
+    source = package(tmp_path, b"original")
+    assert invoke(tmp_path, "Install", "-Source", source).returncode == 0
+    package(tmp_path, b"candidate")
+    assert invoke(tmp_path, "Install", "-Source", source).returncode == 0
+    state = tmp_path / "profile/LES Light"
+    root = tmp_path / "profile/Programs/LES Light"
+    identity = state / "light-install.json"
+    backup = Path(json.loads(identity.read_text(encoding="utf-8-sig"))["rollback_directory"])
+    staging = root.with_name("LES Light.staging-interrupted")
+    journal = state / "install-transaction.json"
+    journal.write_text(json.dumps(dict(application_id="me.ovc.les-light", operation="rollback",
+                                       backup=str(backup), staging=str(staging))))
+    if rename_count >= 1:
+        root.rename(staging)
+    if rename_count == 2:
+        backup.rename(root)
+    result = invoke(tmp_path, "Rollback")
+    assert result.returncode == 0, result.stderr.decode(errors="replace")
+    assert (root/"les-light.exe").read_bytes() == b"original"
+    assert not staging.exists() and not journal.exists()
+    assert "rollback_directory" not in json.loads(identity.read_text(encoding="utf-8-sig"))
+
+
 def test_parallel_installer_is_rejected_before_mutation(tmp_path):
     source = package(tmp_path)
     holder = tmp_path / "hold-mutex.ps1"

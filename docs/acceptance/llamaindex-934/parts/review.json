@@ -1,0 +1,194 @@
+{
+  "nine": [
+    {
+      "case": "pump",
+      "variant": "without_056",
+      "strict_pass": true,
+      "reason": "",
+      "model_calls": 5
+    },
+    {
+      "case": "pump-rephrased",
+      "variant": "without_056",
+      "strict_pass": false,
+      "reason": "Условие для обоих участков также объявлено неизвестным для Юга.",
+      "model_calls": 6
+    },
+    {
+      "case": "pump",
+      "variant": "original",
+      "strict_pass": false,
+      "reason": "В строку про давление Севера попали давление Юга и условие допуска.",
+      "model_calls": 5
+    },
+    {
+      "case": "pump-rephrased",
+      "variant": "original",
+      "strict_pass": true,
+      "reason": "",
+      "model_calls": 6
+    },
+    {
+      "case": "pump",
+      "variant": "without_032",
+      "strict_pass": false,
+      "reason": "Давление Юга включено в строку про давление Севера.",
+      "model_calls": 5
+    },
+    {
+      "case": "pump",
+      "variant": "without_017",
+      "strict_pass": false,
+      "reason": "Для Севера приведено давление Юга вместо сообщения о пробеле.",
+      "model_calls": 5
+    },
+    {
+      "case": "pump",
+      "variant": "all_support_removed",
+      "strict_pass": true,
+      "reason": "",
+      "model_calls": 4
+    },
+    {
+      "case": "cart",
+      "variant": "original",
+      "strict_pass": true,
+      "reason": "",
+      "model_calls": 4
+    },
+    {
+      "case": "warranty",
+      "variant": "original",
+      "strict_pass": true,
+      "reason": "",
+      "model_calls": 3
+    }
+  ],
+  "transfer": [
+    {
+      "case": "delivery-refund",
+      "variant": "full",
+      "strict_pass": false,
+      "reason": "Модель исключила действующий документ о доставке, посчитав его отменённым.",
+      "model_calls": 5
+    },
+    {
+      "case": "delivery-refund",
+      "variant": "current-refund-removed",
+      "strict_pass": true,
+      "reason": "",
+      "model_calls": 5
+    },
+    {
+      "case": "islands",
+      "variant": "exception",
+      "strict_pass": true,
+      "reason": "",
+      "model_calls": 3
+    },
+    {
+      "case": "launch",
+      "variant": "conflict",
+      "strict_pass": false,
+      "reason": "Два переданных противоречащих протокола сочтены отсутствием сведений.",
+      "model_calls": 2
+    },
+    {
+      "case": "director",
+      "variant": "missing",
+      "strict_pass": true,
+      "reason": "",
+      "model_calls": 2
+    },
+    {
+      "case": "library",
+      "variant": "editions",
+      "strict_pass": true,
+      "reason": "",
+      "model_calls": 3
+    }
+  ],
+  "cross": [
+    {
+      "case": "pump-rephrased",
+      "variant": "folder-stock",
+      "strict_pass": true,
+      "reason": "",
+      "model_calls": 6
+    },
+    {
+      "case": "pump-rephrased",
+      "variant": "folder-contract",
+      "strict_pass": false,
+      "reason": "Для Юга одновременно дано общее условие и объявлено его отсутствие.",
+      "model_calls": 6
+    }
+  ],
+  "public_chat": [
+    {
+      "folder": "pump-without-south",
+      "case": "pump",
+      "strict_pass": true,
+      "expected_files": [
+        "017.txt",
+        "032.txt"
+      ],
+      "linked_files": [
+        "017.txt",
+        "032.txt"
+      ]
+    },
+    {
+      "folder": "pump-without-south",
+      "case": "pump-rephrased",
+      "strict_pass": true,
+      "expected_files": [
+        "017.txt",
+        "032.txt"
+      ],
+      "linked_files": [
+        "017.txt",
+        "032.txt"
+      ]
+    },
+    {
+      "folder": "pump-without-south",
+      "case": "warranty",
+      "strict_pass": true,
+      "expected_files": [],
+      "linked_files": []
+    },
+    {
+      "folder": "editions-full",
+      "case": "current",
+      "strict_pass": false,
+      "expected_files": [
+        "delivery-new.txt",
+        "refund-new.txt"
+      ],
+      "linked_files": [
+        "delivery-new.txt"
+      ]
+    },
+    {
+      "folder": "editions-without-current-refund",
+      "case": "current",
+      "strict_pass": true,
+      "expected_files": [
+        "delivery-new.txt"
+      ],
+      "linked_files": [
+        "delivery-new.txt"
+      ]
+    },
+    {
+      "folder": "editions-without-current-refund",
+      "case": "historical",
+      "strict_pass": false,
+      "expected_files": [
+        "refund-old.txt"
+      ],
+      "linked_files": []
+    }
+  ]
+}

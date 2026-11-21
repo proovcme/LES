@@ -21,6 +21,118 @@ from proxy.services.saferag_service import build_context, source_map_for_context
 from tools.evaluate_light_chat import coverage, materialize, stream_final
 
 
+def test_llamaindex_trial_preserves_the_received_source_order_and_transport():
+    from unittest.mock import patch
+
+    import httpx
+    from llama_index.core import Settings
+    from llama_index.core.schema import NodeWithScore, TextNode
+    from tools.evaluate_llamaindex_folder import original_sources, render
+
+    documents = {'b': 'Blue record 27.', 'a': 'Amber record 14.', 'z': 'Not delivered.'}
+    wire = {'visible': ['b', 'a'], 'model': 'fixture', 'max_tokens': 512,
+            'temperature': 0.1, 'reasoning_effort': 'none'}
+    row = {'case': 'inspection', 'variant': 'missing', 'question': 'What is the amber value?', 'calls': [wire]}
+
+    def respond(request):
+        body = json.loads(request.content)
+        prompt = body['messages'][-1]['content']
+        assert 'Source 1:\nBlue record 27.' in prompt and 'Source 2:\nAmber record 14.' in prompt
+        assert row['question'] in prompt and documents['z'] not in prompt
+        assert body['model'] == 'fixture' and body['max_tokens'] == 512 and body['temperature'] == 0.1
+        assert body['reasoning_effort'] == 'none'
+        prompts.append(prompt)
+        return httpx.Response(200, json={'choices': [{'message': {'content': '14 [2].'}, 'finish_reason': 'stop'}]})
+
+    prompts = []
+    with patch.object(Settings, '_tokenizer', str.split), httpx.Client(
+        base_url='http://127.0.0.1/v1', transport=httpx.MockTransport(respond)
+    ) as client:
+        for mode in ('citations', 'les-citations'):
+            result = render(row, documents, client, mode)
+            assert result['answer'] == '14 [2].' and result['source_ids_by_number'] == {1: 'b', 2: 'a'}
+            assert result['complete_source_map'] and len(result['calls']) == 1
+    assert '[[NO_EVIDENCE]]' not in prompts[0] and '[[NO_EVIDENCE]]' in prompts[1]
+    wrong = NodeWithScore(node=TextNode(text='Source 1:\nAmber record 14.', metadata={'original_id': 'a'}))
+    with pytest.raises(ValueError, match='Conflicting citation numbers'):
+        original_sources([wrong], wire['visible'], documents)
+
+
+@pytest.mark.parametrize('fault', [None, 'unavailable', 'unknown_basis', 'altered_review', 'false_conflict'])
+def test_part_reader_checks_scope_editions_and_exact_quotes(fault):
+    from unittest.mock import patch
+    import httpx
+    from llama_index.core import Settings
+    from tools.evaluate_llamaindex_folder import render
+
+    documents = {'old': 'Archived. Cyan lasts 27 days.', 'new': 'Amber lasts 14 working days.'}
+    wire = {'visible': ['old', 'new'], 'model': 'fixture', 'max_tokens': 512,
+            'temperature': 0.1, 'reasoning_effort': 'none'}
+    row = {'case': 'term', 'variant': 'missing', 'question': 'What are the current amber and cyan terms?',
+           'calls': [wire]}
+
+    def respond(request):
+        body = json.loads(request.content)
+        inputs = json.loads(body['messages'][-1]['content'])
+        structured = body['response_format']['json_schema']
+        stage = structured['name']
+        if stage == 'parts':
+            assert inputs == {'question': row['question']}
+            output = {'properties': [{'subject_property': 'Term', 'scopes': ['Amber', 'Cyan'], 'period': 'current'}]}
+        elif stage == 'editions':
+            output = {'exclude': [{'source': 1, 'basis': '9.1' if fault == 'unknown_basis' else '1.1'}]}
+        elif stage == 'read':
+            assert inputs['sources'] == {'2.1': documents['new']}
+            assert structured['schema']['properties']['excerpts']['items']['enum'] == ['2.1']
+            if inputs['target']['scope'] == 'Cyan':
+                output = {'status': 'missing', 'excerpts': []}
+            else:
+                output = {'status': 'conflict' if fault == 'false_conflict' else 'supported',
+                          'excerpts': ['1.2' if fault == 'unavailable' else '2.1']}
+        else:
+            assert stage == 'review' and set(inputs['pairs']) == {'1/2.1'}
+            output = {'accepted': ['2/1.2' if fault == 'altered_review' else '1/2.1']}
+        return httpx.Response(200, json={'choices': [{'message': {'content': json.dumps(output)}, 'finish_reason': 'stop'}]})
+
+    with patch.object(Settings, '_tokenizer', str.split), httpx.Client(
+        base_url='http://127.0.0.1/v1', transport=httpx.MockTransport(respond)
+    ) as client:
+        result = render(row, documents, client, 'parts')
+    if fault:
+        assert 'error' in result and 'answer' not in result
+    else:
+        assert result['complete_source_map'] and result['source_ids_by_number'] == {1: 'old', 2: 'new'}
+        assert 'Amber lasts 14 working days. [2]' in result['answer'] and '27' not in result['answer']
+        assert 'Cyan — В предоставленных материалах сведений нет.' in result['answer']
+        assert [c['stage'] for c in result['calls']] == ['parts', 'editions', 'read', 'read', 'review']
+
+
+def test_folder_replay_keeps_qualifications_and_rebinds_numbered_sources():
+    from tools.evaluate_folder_evidence import read_selection, variants
+    import random
+
+    fixture = json.loads((Path(__file__).parent/'fixtures/rag/folder-chat-v1.json').read_text(encoding='utf-8'))
+    docs = {doc['id']: doc for doc in fixture['documents']}
+    assert len(docs) == 60
+    assert materialize(docs['032']) == ('032.txt', docs['032']['text'].encode('utf-8'))
+    case = fixture['cases'][0]
+    controls = {label: (visible, gold) for label, visible, gold in variants(case, random.Random(29))}
+    assert controls['original'][1] == ['017', '056', '032']
+    visible, expected = controls['without_032']
+    assert '032' not in visible and expected == ['017', '056']
+    assert set(controls['all_support_removed'][0]).isdisjoint(case['gold_documents'])
+    assert controls['all_support_removed'][1] == []
+    for label in ('original', 'shuffled'):
+        addresses = {f'S{i}P1': doc for i, doc in enumerate(controls[label][0], 1)}
+        refs = [key for key, doc in addresses.items() if doc in case['gold_documents']]
+        reply = {'finish_reason': 'stop', 'message': {'content': json.dumps({'rows': refs})}}
+        assert set(read_selection(reply, addresses)) == set(case['gold_documents'])
+        with pytest.raises(ValueError):
+            read_selection({**reply, 'finish_reason': 'length'}, addresses)
+        with pytest.raises(ValueError):
+            read_selection(reply, {})
+
+
 def test_native_trial_does_not_score_a_matching_number_with_the_wrong_source_as_correct():
     from tools.evaluate_light_chat import native_stages
     expected={'index':1,'doc_name':'approved.md','page':3}

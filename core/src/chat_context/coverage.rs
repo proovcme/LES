@@ -58,41 +58,35 @@ pub(super) fn report(sources: &[Value], visible: &[Value], compact: bool) -> Val
     json!({"schema":"les.model-section-coverage.v1","sections":rows,
         "scope":"indexed fragments only; completeness of the original, OCR and answerability are not established"})
 }
-pub(super) fn reservation(sources: &[Value]) -> Option<Value> {
-    let report = report(sources, &[], true);
-    let count = list(&report, "sections").len();
-    if count == 0 {
+/// Coverage can use the space left by real readings. Its cost includes the
+/// separator that the common packer charges for an additional object.
+pub(super) fn for_window(sources: &[Value], visible: &[Value], spare: i64) -> Option<Value> {
+    let groups: BTreeSet<_> = visible
+        .iter()
+        .filter(|s| s.is_object() && truth(&s["parent_id"]))
+        .map(key)
+        .collect();
+    if groups.is_empty() || spare <= 1 {
         return None;
     }
-    let max = render(&report).chars().count().max(
-        render(&self::report(sources, sources, true))
-            .chars()
-            .count(),
-    );
-    Some(object(COVERAGE_ID, json!(" ".repeat(max + 64 * count))))
-}
-pub(super) fn finalize(mut packet: Value, sources: &[Value], visible: &[Value]) -> Result<Value> {
-    let replacement = object(COVERAGE_ID, report(sources, visible, true));
-    let mut delta = 0;
-    for section in packet["sections"].as_array_mut().ok_or(ERROR)? {
-        if section["kind"] != "request" {
-            continue;
-        }
-        let mut change = 0;
-        for item in section["objects"].as_array_mut().ok_or(ERROR)? {
-            if item["object_id"] == COVERAGE_ID {
-                let difference =
-                    tokens(&object_render(&replacement)) - tokens(&object_render(item));
-                if difference > 0 {
-                    return Err("SECTION_COVERAGE_RESERVATION_EXCEEDED");
-                }
-                change += difference;
-                *item = replacement.clone();
-            }
-        }
-        section["token_count"] = json!(section["token_count"].as_i64().ok_or(ERROR)? + change);
-        delta += change;
+    let relevant: Vec<_> = sources
+        .iter()
+        .filter(|s| groups.contains(&key(s)))
+        .cloned()
+        .collect();
+    let mut detail = report(&relevant, visible, true);
+    let rows = detail["sections"].as_array_mut()?;
+    for row in rows.iter_mut() {
+        row["source_indexes"]
+            .as_array_mut()?
+            .retain(|id| visible.iter().any(|s| s["index"] == *id));
     }
-    packet["included_tokens"] = json!(packet["included_tokens"].as_i64().ok_or(ERROR)? + delta);
-    Ok(packet)
+    let summary = json!({"schema":"les.model-coverage-summary.v1","sections":rows.len(),
+        "partial":rows.iter().filter(|r|r["status"]=="partial").count(),
+        "unknown":rows.iter().filter(|r|r["status"]=="unknown").count(),
+        "scope":detail["scope"]});
+    [detail, summary]
+        .into_iter()
+        .map(|v| object(COVERAGE_ID, v))
+        .find(|item| tokens(&object_render(item)) < spare)
 }

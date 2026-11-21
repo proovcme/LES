@@ -6488,7 +6488,8 @@
         "tests/test_model_connection_resolver_service.py",
         "tests/test_model_connection_security_service.py",
         "tests/test_model_connections_router.py",
-        "tests/test_openai_compatible_transport_service.py"
+        "tests/test_openai_compatible_transport_service.py",
+        "tools/evaluate_part_reader_chat.py"
       ],
       "lines": 175,
       "module": "proxy.services.model_connection_contracts",
@@ -6918,7 +6919,7 @@
         "tests/test_model_connection_embeddings_integration.py",
         "tests/test_openai_compatible_transport_service.py"
       ],
-      "lines": 783,
+      "lines": 784,
       "module": "proxy.services.openai_compatible_transport_service",
       "outbound": [
         "backend/native_core.py",
@@ -10156,6 +10157,7 @@
         "tests/test_light_native_overview.py",
         "tests/test_light_native_parser_pipeline.py",
         "tests/test_light_native_pdf_layout.py",
+        "tests/test_light_native_pinned_sources.py",
         "tests/test_light_native_preparation.py",
         "tests/test_light_native_retrieval_modes.py",
         "tests/test_light_native_source_presentation.py",
@@ -10928,7 +10930,7 @@
     },
     {
       "inbound": [],
-      "lines": 157,
+      "lines": 269,
       "module": "tests.test_light_grounding_760",
       "outbound": [
         "backend/converter.py",
@@ -10946,7 +10948,9 @@
         "proxy/services/runtime_admission.py",
         "proxy/services/saferag_service.py",
         "sovushka/components/chat_presentation.py",
-        "tools/evaluate_light_chat.py"
+        "tools/evaluate_folder_evidence.py",
+        "tools/evaluate_light_chat.py",
+        "tools/evaluate_llamaindex_folder.py"
       ],
       "path": "tests/test_light_grounding_760.py",
       "status": "TEST_OR_TOOL_ONLY",
@@ -11031,7 +11035,7 @@
     },
     {
       "inbound": [],
-      "lines": 264,
+      "lines": 289,
       "module": "tests.test_light_installer",
       "outbound": [],
       "path": "tests/test_light_installer.py",
@@ -11335,7 +11339,7 @@
     },
     {
       "inbound": [],
-      "lines": 213,
+      "lines": 246,
       "module": "tests.test_light_native_chat_context",
       "outbound": [
         "backend/native_core.py",
@@ -11373,9 +11377,10 @@
         "tests/test_light_native_public_upload.py",
         "tests/test_light_native_retrieval_modes.py",
         "tests/test_light_native_source_presentation.py",
-        "tests/test_light_native_word_window.py"
+        "tests/test_light_native_word_window.py",
+        "tools/evaluate_part_reader_chat.py"
       ],
-      "lines": 386,
+      "lines": 429,
       "module": "tests.test_light_native_chat_turn",
       "outbound": [
         "backend/light_qdrant_runtime.py",
@@ -11497,7 +11502,7 @@
     },
     {
       "inbound": [],
-      "lines": 223,
+      "lines": 224,
       "module": "tests.test_light_native_document_nodes",
       "outbound": [
         "backend/extraction_errors.py",
@@ -11696,7 +11701,7 @@
         "tests/test_light_native_json_documents.py",
         "tests/test_light_native_table_publication.py"
       ],
-      "lines": 362,
+      "lines": 363,
       "module": "tests.test_light_native_index_batch",
       "outbound": [
         "backend/document_catalog.py",
@@ -11752,7 +11757,8 @@
         "tests/test_light_native_folder_watch.py",
         "tests/test_light_native_indexed_attachment.py",
         "tests/test_light_native_mail.py",
-        "tests/test_light_native_retrieval_modes.py"
+        "tests/test_light_native_retrieval_modes.py",
+        "tools/evaluate_part_reader_chat.py"
       ],
       "lines": 325,
       "module": "tests.test_light_native_intake_execution",
@@ -11858,7 +11864,7 @@
     },
     {
       "inbound": [],
-      "lines": 65,
+      "lines": 72,
       "module": "tests.test_light_native_model_settings",
       "outbound": [
         "tests/test_light_native_chat_turn.py"
@@ -11869,7 +11875,7 @@
     },
     {
       "inbound": [],
-      "lines": 45,
+      "lines": 51,
       "module": "tests.test_light_native_numeric_evidence",
       "outbound": [
         "tests/pdf_fixtures.py",
@@ -11895,7 +11901,7 @@
     },
     {
       "inbound": [],
-      "lines": 16,
+      "lines": 51,
       "module": "tests.test_light_native_parser_package",
       "outbound": [
         "tools/native_asset.py"
@@ -11920,13 +11926,14 @@
       "inbound": [
         "tests/test_light_native_parser_pipeline.py"
       ],
-      "lines": 130,
+      "lines": 186,
       "module": "tests.test_light_native_pdf_layout",
       "outbound": [
         "proxy/services/model_connection_contracts.py",
         "tests/pdf_fixtures.py",
         "tests/test_light_native_api.py",
-        "tests/test_light_native_chat_turn.py"
+        "tests/test_light_native_chat_turn.py",
+        "tools/inspect_chat_turn.py"
       ],
       "path": "tests/test_light_native_pdf_layout.py",
       "status": "TEST_OR_TOOL_ONLY",
@@ -11934,9 +11941,10 @@
     },
     {
       "inbound": [],
-      "lines": 101,
+      "lines": 199,
       "module": "tests.test_light_native_pinned_sources",
       "outbound": [
+        "tests/pdf_fixtures.py",
         "tests/test_light_native_api.py",
         "tests/test_light_native_chat_turn.py"
       ],
@@ -12607,10 +12615,11 @@
     },
     {
       "inbound": [],
-      "lines": 83,
+      "lines": 102,
       "module": "tests.test_light_skill_python_asset",
       "outbound": [
         "proxy/services/skill_compute_service.py",
+        "tools/build_light_package.py",
         "tools/skill_python_asset.py"
       ],
       "path": "tests/test_light_skill_python_asset.py",
@@ -13316,14 +13325,19 @@
         "tools/code_runtime_map.py",
         "tools/documentation_contract.py",
         "tools/evaluate_claim_judge.py",
+        "tools/evaluate_folder_evidence.py",
+        "tools/evaluate_folder_transfer.py",
         "tools/evaluate_light_chat.py",
         "tools/evaluate_light_semantics.py",
+        "tools/evaluate_llamaindex_folder.py",
+        "tools/evaluate_part_reader_chat.py",
         "tools/evaluate_pdf_structure.py",
         "tools/evaluate_rag_pipeline.py",
         "tools/evaluate_rag_trial_answers.py",
         "tools/evaluate_retrieval_candidate.py",
         "tools/ezhik_imap_smoke.py",
         "tools/generate_native_unicode.py",
+        "tools/inspect_chat_turn.py",
         "tools/install_les.py",
         "tools/install_light_macos.py",
         "tools/les_doctor.py",
@@ -13341,6 +13355,7 @@
         "tools/light_runtime_assets.py",
         "tools/light_state_journey.py",
         "tools/live_workbook_acceptance.py",
+        "tools/llamaindex_part_reader.py",
         "tools/native_api_contract.py",
         "tools/native_asset.py",
         "tools/prepare_rag_trial_fixture.py",
@@ -13434,9 +13449,10 @@
     {
       "inbound": [
         "tests/test_light_package.py",
+        "tests/test_light_skill_python_asset.py",
         "tools/install_light_macos.py"
       ],
-      "lines": 334,
+      "lines": 347,
       "module": "tools.build_light_package",
       "outbound": [
         "tools/__init__.py",
@@ -13502,7 +13518,7 @@
         "tests/test_light_core_package.py",
         "tools/install_light_macos.py"
       ],
-      "lines": 60,
+      "lines": 61,
       "module": "tools.build_native_core",
       "outbound": [
         "tools/__init__.py"
@@ -13624,6 +13640,33 @@
       "inbound": [
         "tests/test_light_grounding_760.py"
       ],
+      "lines": 110,
+      "module": "tools.evaluate_folder_evidence",
+      "outbound": [
+        "tools/__init__.py",
+        "tools/prepare_rag_trial_fixture.py"
+      ],
+      "path": "tools/evaluate_folder_evidence.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
+      "lines": 96,
+      "module": "tools.evaluate_folder_transfer",
+      "outbound": [
+        "tools/__init__.py",
+        "tools/evaluate_llamaindex_folder.py",
+        "tools/evaluate_part_reader_chat.py"
+      ],
+      "path": "tools/evaluate_folder_transfer.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "tests/test_light_grounding_760.py"
+      ],
       "lines": 244,
       "module": "tools.evaluate_light_chat",
       "outbound": [
@@ -13649,6 +13692,41 @@
         "tools/__init__.py"
       ],
       "path": "tools/evaluate_light_semantics.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "tests/test_light_grounding_760.py",
+        "tools/evaluate_folder_transfer.py",
+        "tools/evaluate_part_reader_chat.py"
+      ],
+      "lines": 201,
+      "module": "tools.evaluate_llamaindex_folder",
+      "outbound": [
+        "tools/__init__.py",
+        "tools/llamaindex_part_reader.py",
+        "tools/prepare_rag_trial_fixture.py"
+      ],
+      "path": "tools/evaluate_llamaindex_folder.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "tools/evaluate_folder_transfer.py"
+      ],
+      "lines": 199,
+      "module": "tools.evaluate_part_reader_chat",
+      "outbound": [
+        "proxy/services/model_connection_contracts.py",
+        "tests/test_light_native_chat_turn.py",
+        "tests/test_light_native_intake_execution.py",
+        "tools/__init__.py",
+        "tools/evaluate_llamaindex_folder.py",
+        "tools/prepare_rag_trial_fixture.py"
+      ],
+      "path": "tools/evaluate_part_reader_chat.py",
       "status": "TEST_OR_TOOL_ONLY",
       "windows_runtime_explicit": false
     },
@@ -13738,6 +13816,19 @@
         "tools/__init__.py"
       ],
       "path": "tools/generate_native_unicode.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "tests/test_light_native_pdf_layout.py"
+      ],
+      "lines": 59,
+      "module": "tools.inspect_chat_turn",
+      "outbound": [
+        "tools/__init__.py"
+      ],
+      "path": "tools/inspect_chat_turn.py",
       "status": "TEST_OR_TOOL_ONLY",
       "windows_runtime_explicit": false
     },
@@ -13989,6 +14080,19 @@
     },
     {
       "inbound": [
+        "tools/evaluate_llamaindex_folder.py"
+      ],
+      "lines": 185,
+      "module": "tools.llamaindex_part_reader",
+      "outbound": [
+        "tools/__init__.py"
+      ],
+      "path": "tools/llamaindex_part_reader.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
         "tests/test_light_native_api_contract.py"
       ],
       "lines": 68,
@@ -14008,7 +14112,7 @@
         "tools/build_native_api.py",
         "tools/build_native_runtime.py"
       ],
-      "lines": 98,
+      "lines": 110,
       "module": "tools.native_asset",
       "outbound": [
         "tools/__init__.py"
@@ -14020,6 +14124,9 @@
     {
       "inbound": [
         "tests/test_light_claim_judge_trial.py",
+        "tools/evaluate_folder_evidence.py",
+        "tools/evaluate_llamaindex_folder.py",
+        "tools/evaluate_part_reader_chat.py",
         "tools/rag_trial_model.py"
       ],
       "lines": 94,
@@ -15971,9 +16078,9 @@
     "product_reachable": 417,
     "registered_api_routes": 298,
     "runtime_support": 5,
-    "test_or_tool_only": 287,
-    "tracked_python_files": 716,
-    "tracked_python_lines": 171918
+    "test_or_tool_only": 293,
+    "tracked_python_files": 722,
+    "tracked_python_lines": 173231
   },
   "warnings": []
 }

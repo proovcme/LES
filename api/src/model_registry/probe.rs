@@ -377,9 +377,43 @@ pub(crate) async fn run(
     };
     for cap in CAPABILITIES.iter().copied() {
         let (state, evidence, detail) = if selected.iter().any(|v| v == cap) {
-            let (path, body) = request(cap, model);
+            let (path, mut body) = request(cap, model);
+            if path == "chat/completions" && options["reasoning_control"] == "reasoning_effort_none"
+            {
+                if let Some(body) = &mut body {
+                    body["reasoning_effort"] = json!("none");
+                }
+            }
             match exchange(&endpoint, &auth, path, body, false).await {
                 Ok((status, bytes)) if (200..300).contains(&status) && verified(cap, &bytes) => {
+                    if cap == "chat_completions" && endpoint.locality == "loopback" {
+                        let response: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+                        let message = &response["choices"][0]["message"];
+                        let has_reasoning = ["reasoning", "reasoning_content"]
+                            .iter()
+                            .any(|key| message[*key].as_str().is_some_and(|s| !s.is_empty()));
+                        if has_reasoning || response["system_fingerprint"] == "fp_ollama" {
+                            let sample = json!({"model":model,"messages":[{"role":"user","content":"Reply with OK."}],
+                                "temperature":0,"max_tokens":32,"reasoning_effort":"none"});
+                            if let Ok((200, raw)) =
+                                exchange(&endpoint, &auth, path, Some(sample), false).await
+                            {
+                                if serde_json::from_slice::<Value>(&raw).is_ok_and(|v| {
+                                    let choice = &v["choices"][0];
+                                    let msg = &choice["message"];
+                                    choice["finish_reason"] == "stop"
+                                        && msg["content"].as_str().is_some_and(|s| {
+                                            !s.trim().is_empty() && !s.contains("<think>")
+                                        })
+                                        && ["reasoning", "reasoning_content"]
+                                            .iter()
+                                            .all(|key| msg[*key].as_str().unwrap_or("").is_empty())
+                                }) {
+                                    options["reasoning_control"] = json!("reasoning_effort_none");
+                                }
+                            }
+                        }
+                    }
                     if freetoken && cap == "models" {
                         catalogue_context = freetoken_catalogue_context(&bytes, model);
                     }

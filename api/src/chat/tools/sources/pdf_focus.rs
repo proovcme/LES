@@ -221,10 +221,11 @@ pub(super) fn index_excerpts(
             result.push(point);
             continue;
         }
-        let text = if let Some(view) = payload["pdf_page_view"]
+        let checked_view = payload["pdf_page_view"]
             .as_str()
-            .filter(|_| payload["physical_pdf_read"].is_null())
-        {
+            .filter(|_| payload["physical_pdf_read"].is_null());
+        let from_table_view = checked_view.is_some() || payload["physical_pdf_read"].is_object();
+        let text = if let Some(view) = checked_view {
             if payload["pdf_page_view_schema"] != "les.pdf-page-view.v1"
                 || view.chars().count() > 16000
                 || payload["pdf_page_view_sha256"] != les_core::sha256_hex(view.as_bytes())
@@ -269,6 +270,9 @@ pub(super) fn index_excerpts(
             excerpt["id"] = json!(format!("pdf-excerpt:{id}:{line}"));
             let body = &mut excerpt["payload"];
             body["canonical"] = canonical(&text);
+            if from_table_view && !les_core::chat_context::table_rows(&text).is_empty() {
+                body["verified_cells"] = json!(true);
+            }
             body["reading_unit_sha256"] = json!(les_core::sha256_hex(text.as_bytes()));
             body["text"] = json!(text);
             body["retrieval_anchor_id"] = anchor.clone();

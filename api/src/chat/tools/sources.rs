@@ -4,6 +4,7 @@ pub(crate) mod packet;
 mod parts;
 pub(super) mod pdf_focus;
 pub(crate) mod retrieval;
+pub(in crate::chat) mod selection;
 mod verification;
 mod word;
 mod workbook;
@@ -33,7 +34,7 @@ impl From<&Prepared> for SourceContext {
         }
     }
 }
-pub(crate) use verification::physical as verify_physical;
+pub(crate) use verification::originals as verify_originals;
 pub(crate) fn selected_files(turn: &Prepared) -> Vec<Value> {
     selected_request(&turn.request)
 }

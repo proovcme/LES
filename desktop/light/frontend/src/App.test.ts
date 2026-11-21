@@ -118,6 +118,29 @@ it('offers document scope as the search control in the composer', async () => {
   expect(document.querySelector('dialog')?.textContent).toContain('Где искать ответ');
 });
 
+it('saves the exact catalog IDs of two documents from the composer', async () => {
+  await settle(() => !!document.querySelector('#question'));
+  workspace.datasets = [{ id: 'one', name: 'Документы' }];
+  const docs = ['current/Notes.pdf', 'archive/Notes.pdf', 'B.pdf'].map((file_name, i) => ({
+    id: String(i), dataset_id: 'one', file_name,
+  }));
+  const save = vi.spyOn(workspace, 'setScope').mockResolvedValue();
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+    expect(path).toContain('/api/light/library?dataset_id=one');
+    return json({ documents: docs, total: 3 });
+  }));
+  document.querySelector<HTMLButtonElement>('.composer-actions .scope-button')!.click();
+  await settle(() => !!document.querySelector('input[value="documents"]'));
+  document.querySelector<HTMLInputElement>('input[value="documents"]')!.click();
+  await settle(() => document.querySelectorAll('dialog input[type="checkbox"]').length === 3);
+  const boxes = document.querySelectorAll<HTMLInputElement>('dialog input[type="checkbox"]');
+  boxes[0].click(); boxes[2].click();
+  document.querySelector<HTMLButtonElement>('dialog .modal-footer button:last-child')!.click();
+  await settle(() => save.mock.calls.length === 1);
+  expect(save.mock.calls[0][0]).toEqual({ scope_type: 'datasets', dataset_ids: ['one'], project_ids: [],
+    selected_sources_only: false, document_ids: ['0', '2'] });
+});
+
 it('uses the paperclip to index a file, waits for publication and preserves the draft', async () => {
   await settle(() => !!document.querySelector('#question'));
   workspace.indexedAttachments = true;

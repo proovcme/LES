@@ -48,6 +48,19 @@ jobs:
         run: uv run --no-project python -m tools.build_light_package --output dist/payload --desktop-exe desktop/light/src-tauri/target/release/les-light.exe --native-runtime native/runtime/les-runtime.exe --native-api native/api/les-api.exe
       - name: Validate packaged files
         run: pwsh -NoProfile -File installers/windows/light/package.ps1 -Mode Validate -Source dist/payload
+      - name: Read a PDF table with the API and Qdrant from the candidate payload
+        shell: pwsh
+        run: |
+          uv sync --frozen
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $env:LES_TEST_NATIVE_API = (Resolve-Path dist/payload/native/api/les-api.exe).Path
+          $env:LES_TEST_NATIVE_QDRANT = (Resolve-Path dist/payload/native/qdrant/qdrant.exe).Path
+          $env:LES_TEST_SKILL_PYTHON = (Resolve-Path dist/payload/native/skill-python/python.exe).Path
+          uv run python tools/build_native_core.py --output native/core
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $env:LES_CORE_LIBRARY = (Resolve-Path native/core/les_core.dll).Path
+          $env:LES_CORE_MODE = 'native'
+          uv run python -m pytest -q tests/test_light_native_pdf_layout.py
       - name: Build offline and web installers
         shell: pwsh
         run: |

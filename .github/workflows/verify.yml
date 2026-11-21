@@ -123,12 +123,15 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           uv run python tools/build_native_runtime.py --output native/runtime
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          uv run python tools/build_native_api.py --output native/api --edge
+          uv run python tools/build_native_api.py --output native/api
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          uv run python tools/build_native_api.py --output native/edge-api --edge
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           uv run python tools/light_runtime_assets.py --destination native/qdrant
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           "LES_TEST_NATIVE_RUNTIME=$((Resolve-Path native/runtime/les-runtime.exe).Path)" >> $env:GITHUB_ENV
           "LES_TEST_NATIVE_API=$((Resolve-Path native/api/les-api.exe).Path)" >> $env:GITHUB_ENV
+          "LES_TEST_EDGE_API=$((Resolve-Path native/edge-api/les-api.exe).Path)" >> $env:GITHUB_ENV
           "LES_TEST_NATIVE_QDRANT=$((Resolve-Path native/qdrant/qdrant.exe).Path)" >> $env:GITHUB_ENV
       - name: Retain native candidates for isolated acceptance
         uses: actions/upload-artifact@v4

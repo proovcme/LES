@@ -202,6 +202,18 @@ impl Session {
             result = Err(mpsc::RecvTimeoutError::Timeout);
         }
         if result.is_err() || matches!(result, Ok(Err(_))) {
+            // On Windows stdout can reach EOF just before the process exit code
+            // is available. Closing its job at that point masks a real crash.
+            if matches!(
+                result,
+                Ok(Err("WORKER_EXITED" | "WORKER_RESPONSE_INCOMPLETE"))
+            ) && !cancelled
+            {
+                let grace = deadline.min(Instant::now() + Duration::from_millis(200));
+                while Instant::now() < grace && matches!(self.child.try_wait(), Ok(None)) {
+                    thread::sleep(Duration::from_millis(5));
+                }
+            }
             drop(self.guard.take());
             let _ = self.child.kill();
             let _ = self.child.wait();

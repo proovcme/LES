@@ -139,9 +139,10 @@ pub fn checkpoint(database: &Path, id: &str, history: i64, event: &str, text: &s
         "token"=>db.execute("UPDATE chat_history SET answer=COALESCE(answer,'')||?,tokens=COALESCE(tokens,0)+1 WHERE id=? AND crag_status='IN_PROGRESS' AND EXISTS(SELECT 1 FROM les_chat_runs WHERE id=? AND history_id=chat_history.id AND status='running')",params![text,history,id]),
         "reset"=>db.execute("UPDATE chat_history SET answer='',tokens=0 WHERE id=? AND crag_status='IN_PROGRESS' AND EXISTS(SELECT 1 FROM les_chat_runs WHERE id=? AND history_id=chat_history.id AND status='running')",params![history,id]),
         "attachment_context"=>db.execute("UPDATE chat_history SET attachment_context=? WHERE id=? AND crag_status='IN_PROGRESS' AND EXISTS(SELECT 1 FROM les_chat_runs WHERE id=? AND history_id=chat_history.id AND status='running')",params![text,history,id]),
-        "sources"|"retrieval_prefetch"=>{
+        "sources"|"retrieval_prefetch"|"model_prepared"=>{
             let value:Value=serde_json::from_str(text).map_err(|_|"CHAT_REQUEST_INVALID")?;
             let patch=match event {
+                "model_prepared" if value.is_object()=>json!({"last_model_request":value}),
                 "sources" if value.is_array()=>json!({"engine":"rust.chat","source_map":value}),
                 "retrieval_prefetch" if value.is_object()=>value,
                 _=>return Err("CHAT_REQUEST_INVALID"),
@@ -253,8 +254,13 @@ pub fn interrupt(database: &Path, id: &str, history: i64, error: Option<&Value>)
                 .as_str()
                 .filter(|v| v.chars().count() <= 2048)
                 .ok_or("CHAT_REQUEST_INVALID")?;
-            let artifact =
+            let mut artifact =
                 json!({"error":{"code":code,"detail":detail},"completion_status":"failed"});
+            for key in ["history_id", "stage", "model_call", "stream_metrics"] {
+                if let Some(value) = error.get(key) {
+                    artifact["error"][key] = value.clone();
+                }
+            }
             tx.execute("UPDATE chat_history SET crag_status='FAILED',success=0,validation_enabled=0,artifact_json=json_patch(CASE WHEN json_valid(artifact_json) THEN artifact_json ELSE '{}' END,?) WHERE id=? AND crag_status='IN_PROGRESS'",params![artifact.to_string(),history]).map_err(|_|"CHAT_STORAGE_UNAVAILABLE")?;
         } else {
             tx.execute("UPDATE chat_history SET crag_status='INTERRUPTED',success=0,validation_enabled=0 WHERE id=? AND crag_status='IN_PROGRESS'",[history]).map_err(|_|"CHAT_STORAGE_UNAVAILABLE")?;

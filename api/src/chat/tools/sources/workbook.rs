@@ -2,6 +2,23 @@
 use super::*;
 use std::collections::{BTreeMap, HashMap};
 
+pub(super) fn addressed_range(query: &str, args: &mut Value) {
+    let coordinates = les_core::chat_request::sheet_rows(query);
+    if let Some((sheet, rows)) = coordinates
+        .first_key_value()
+        .filter(|_| coordinates.len() == 1)
+    {
+        if let (Some(first), Some(last)) = (rows.first(), rows.last()) {
+            if (*last - *first + 1) == rows.len() as u64 {
+                args["sheet_name"] = json!(sheet);
+                args["row_start"] = json!(first);
+                args["row_end"] = json!(last);
+                args["limit"] = json!(rows.len().clamp(1, 16));
+            }
+        }
+    }
+}
+
 pub(super) async fn group_evidence(
     context: Arc<Context>,
     turn: &SourceContext,

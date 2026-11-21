@@ -1,3 +1,4 @@
+import hashlib
 import json
 import sqlite3
 from contextlib import closing
@@ -7,6 +8,66 @@ from openpyxl import Workbook
 
 from tests.test_light_native_api import wait_for
 from tests.test_light_native_chat_turn import native_turn
+from tests.pdf_fixtures import write_pdf
+
+
+@pytest.mark.parametrize('native_turn', ['public'], indirect=True)
+def test_selected_originals_reach_chat_without_a_search_index(native_turn, tmp_path):
+    turn = native_turn
+    dataset = turn.client.post('/api/rag/datasets', json={'name': 'Drawings'}).raise_for_status().json()['id']
+    originals = {}
+    for key, path, fact in [('a', 'A.pdf', 'ALPHA 100'), ('b', 'B.pdf', 'BETA 200'),
+                            ('c', 'current/Notes.pdf', 'GAMMA only after inspection'),
+                            ('x', 'archive/Notes.pdf', 'OBSOLETE 999')]:
+        file = write_pdf(tmp_path / f'{key}.pdf', [fact])
+        digest = hashlib.sha256(file.read_bytes()).hexdigest()
+        with closing(sqlite3.connect(turn.database)) as db, db:
+            db.execute('INSERT INTO documents (id,dataset_id,file_name,file_hash,source_path,status) VALUES (?,?,?,?,?,?)',
+                       (key, dataset, path, digest, str(file), 'INDEXED'))
+        originals[key] = (path, digest, file, fact)
+    request = {'question': 'Compare the three specified records and their qualification.', 'mode': 'search',
+               'retrieval_mode': 'hybrid', 'scope': {'scope_type': 'dataset', 'dataset_ids': [dataset]},
+               'target_files': ['A.pdf', 'B.pdf', 'current/Notes.pdf']}
+    pinned_scope = {**request['scope'], 'document_ids': ['a', 'b', 'c']}
+    session = turn.client.post('/api/workspace/sessions', json={}).raise_for_status().json()['session_id']
+    for targets in ({'target_files': request['target_files']},
+                    {'target_files': [], 'scope': pinned_scope},
+                    {'target_files': [], 'scope': None, 'session_id': session}):
+        if targets.get('session_id'):
+            saved = turn.client.patch(f'/api/workspace/sessions/{session}', json={
+                'scope': {**pinned_scope, 'project_ids': [], 'selected_sources_only': False}}).raise_for_status().json()
+            assert saved['scope']['document_ids'] == ['a', 'b', 'c']
+        turn.scripts.append({'text': 'ALPHA 100 [1]. BETA 200 [2]. GAMMA only after inspection [3].'})
+        before = len(turn.seen)
+        response = turn.client.post('/api/chat', json={**request, **targets})
+        assert response.status_code == 200, response.text
+        assert len(turn.seen) == before + 1
+        messages = json.dumps(turn.seen[-1]['messages'], ensure_ascii=False)
+        assert all(originals[key][3] in messages for key in 'abc')
+        assert 'OBSOLETE 999' not in messages
+        sources = response.json()['source_map']
+        assert [(s['doc_id'], s['source_sha256'], s['source_page']) for s in sources] == [
+            (key, originals[key][1], 1) for key in 'abc']
+        for source in sources:
+            raw = turn.client.get(source['url'].split('#')[0]).raise_for_status()
+            assert hashlib.sha256(raw.content).hexdigest() == source['source_sha256']
+    before = len(turn.seen)
+    outside = turn.client.post('/api/rag/datasets', json={'name': 'Another folder'}).raise_for_status().json()['id']
+    denied = turn.client.post('/api/chat', json={**request, 'target_files': [], 'scope': {
+        **pinned_scope, 'dataset_ids': [outside]}})
+    assert denied.json()['code'] == 'SOURCE_DOCUMENT_NOT_FOUND'
+    for path, code in [('Notes.pdf', 'SOURCE_IDENTITY_AMBIGUOUS'), ('missing.pdf', 'SOURCE_DOCUMENT_NOT_FOUND')]:
+        response = turn.client.post('/api/chat', json={**request, 'target_files': ['A.pdf', path]})
+        assert response.json()['code'] == code and path in response.json()['detail']
+    write_pdf(originals['c'][2], ['Replaced original'])
+    response = turn.client.post('/api/chat', json=request)
+    assert response.json()['code'] == 'PDF_REVISION_CHANGED'
+    with closing(sqlite3.connect(turn.database)) as db, db:
+        db.execute("DELETE FROM documents WHERE id='c'")
+    removed = turn.client.post('/api/chat', json=request)
+    assert removed.json()['code'] == 'SOURCE_DOCUMENT_NOT_FOUND'
+    assert 'current/Notes.pdf' in removed.json()['detail']
+    assert len(turn.seen) == before
 
 
 def index_folder(turn, folder, name):
@@ -18,6 +79,27 @@ def index_folder(turn, folder, name):
     with closing(sqlite3.connect(turn.database)) as db:
         path, doc_id = db.execute("SELECT file_name,id FROM documents WHERE dataset_id=? AND status='INDEXED'", (dataset,)).fetchone()
     return dataset, path, doc_id
+
+
+@pytest.mark.parametrize('native_turn', ['rag-small'], indirect=True)
+def test_folder_search_keeps_full_pool_and_sends_profile_allowance(native_turn, tmp_path):
+    folder = tmp_path / 'manuals'
+    folder.mkdir()
+    markers = [f'CALIBRATION_{i:03d}' for i in range(18)]
+    for i, marker in enumerate(markers):
+        (folder/f'{i}.txt').write_text(f'Inspection calibration record. Designation {marker}.', encoding='utf-8')
+    dataset, _, _ = index_folder(native_turn, folder, 'Inspection')
+    native_turn.scripts.append({'text':'Inspection recorded [Источник 1].'})
+    response = native_turn.client.post('/api/chat', json={
+        'question':'What is recorded about calibration?', 'mode':'search', 'retrieval_mode':'hybrid',
+        'scope':{'scope_type':'datasets', 'dataset_ids':[dataset]},
+    }).raise_for_status().json()
+    wire = json.dumps(native_turn.seen[0]['messages'], ensure_ascii=False)
+    trace = response['retrieval_trace']
+    assert len(trace['prefetch']['candidate_documents']) == len(markers)
+    assert sum(marker in wire for marker in markers) == 6
+    assert len(trace['contexts']) == 1 and len(trace['contexts'][0]['sources']) == 6
+    assert any(o['reason'] == 'model_evidence_limit' for o in trace['contexts'][0]['context']['omissions'])
 
 
 @pytest.mark.parametrize('native_turn', ['rag'], indirect=True)
@@ -99,3 +181,19 @@ def test_hybrid_delivers_named_files_and_accepts_an_interval(native_turn, tmp_pa
     assert response.status_code == 200, response.text
     assert response.json()['answer'] == 'Range [0, 10], samples [1, 2, 3]. Records [Источник 1] [Источник 2]. Note [Источник 3].'
     assert len(native_turn.seen) == 1
+
+    native_turn.scripts.append({'text': 'ALPHA_VALUE [1], BETA_VALUE [2], GAMMA_NOTE [3].'})
+    pinned = native_turn.client.post('/api/chat', json={
+        'question': 'Compare the two pressures and state their qualification.',
+        'mode': 'search', 'retrieval_mode': 'hybrid', 'target_files': list(records),
+        'scope': {'scope_type': 'dataset', 'dataset_ids': [dataset]},
+    })
+    assert pinned.status_code == 200, pinned.text
+    assert len(native_turn.seen) == 2
+    messages = json.dumps(native_turn.seen[-1]['messages'], ensure_ascii=False)
+    assert all(body in messages for body in records.values())
+    with closing(sqlite3.connect(native_turn.database)) as db:
+        originals = dict(db.execute('SELECT id,file_hash FROM documents WHERE dataset_id=?', (dataset,)))
+    assert len(originals) == 3
+    assert {s['doc_id']: s['source_sha256'] for s in pinned.json()['source_map']} == originals
+    assert pinned.json()['retrieval_trace']['prefetch']['selection_policy'] == 'required_documents'

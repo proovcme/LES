@@ -16,6 +16,39 @@ def request(**values):
         profile_prefix='private-profile',request_payload='private-question',**values)
 
 
+@pytest.mark.parametrize('window', [1400, 8192, 24000])
+def test_folder_coverage_cannot_displace_ranked_readings(window):
+    sources = [dict(index=i, doc_name=f'{i}.txt', dataset_id='folder', parent_id=f'section-{i}',
+                    section_fragment_count=1, qdrant_point_id=f'point-{i}') for i in range(1, 61)]
+    evidence = [f'[Источник {s["index"]}]\nReading {s["index"]}. ' + 'text ' * (10 + s['index'] % 5)
+                for s in sources]
+    params = request(evidence=evidence)
+    params['preset']['input_limit'] = window
+    def measure(source_map):
+        result = call('assemble', source_map=source_map, **params)
+        packet = result['packet']
+        assert packet['included_tokens'] <= packet['input_budget_tokens']
+        delivered = [s['index'] for s in call('visible', packet=packet, source_map=source_map)]
+        wire = '\n'.join(row['content'] for row in result['messages'])
+        assert delivered == [s['index'] for s in sources if f'Reading {s["index"]}. ' in wire]
+        return delivered
+    ids_without_report = measure([{k:v for k,v in s.items() if k != 'parent_id'} for s in sources])
+    assert ids_without_report and measure(sources) == ids_without_report
+
+
+@pytest.mark.parametrize('limit', [1, 2, 4])
+def test_ranked_allowance_counts_fitting_readings_and_keeps_mandatory_sources(limit):
+    sources = [dict(index=i, doc_name=f'{i}.txt') for i in range(1, 10)]
+    blocks = [f'[Источник {i}]\nReading {i}.' for i in range(1, 10)]
+    blocks[0] += 'too long ' * 2000
+    result = call('assemble', **request(source_map=sources, evidence=blocks[:-1],
+                                       required_evidence=blocks[-1:], optional_evidence_limit=limit))
+    packet = result['packet']
+    assert [s['index'] for s in call('visible', packet=packet, source_map=sources)] == [*range(2, 2+limit), 9]
+    reasons = {o['reason']: o['omitted'] for o in packet['omissions'] if o['kind'] == 'evidence'}
+    assert reasons == {'budget_exhausted': 1, 'model_evidence_limit': 7-limit}
+
+
 def test_a_document_prefers_whole_reading_and_falls_back_to_whole_pages_in_a_smaller_round():
     pages=[dict(schema='les.evidence-block.v1',source_index=i,context_unit='document:revision-A',
                 text=f'[Источник {i}]\nPhysical page {i}. '+('x'*700)) for i in (1,2,3)]

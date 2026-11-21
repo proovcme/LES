@@ -291,6 +291,7 @@ impl Resolved {
         streaming: bool,
         timeout: std::time::Duration,
         ports: [u16; 2],
+        trace: Option<(i64, usize)>,
     ) -> Result<axum::body::Body, String> {
         let mut required = vec!["chat_completions".to_string()];
         if request["tools"].as_array().is_some_and(|v| !v.is_empty()) {
@@ -329,6 +330,7 @@ impl Resolved {
             return Err("MODEL_BRIDGE_TARGET_REJECTED".into());
         }
         let connection = json!({"model_id":self.revision["model_id"],"locality":self.endpoint.locality,
+            "reasoning_control":self.snapshot["transport_options"]["reasoning_control"],
             "input_token_limit":self.profile["input_token_limit"],"max_output_field":self.snapshot["transport_options"].get("max_output_field").cloned().unwrap_or(json!("max_tokens"))});
         let body = les_core::model_request::prepare(&connection, request, native, streaming)?;
         let tokens = request["max_output_tokens"]
@@ -337,14 +339,28 @@ impl Resolved {
         let reasoning = request["reasoning_enabled"]
             .as_bool()
             .ok_or("MODEL_REASONING_INVALID")?;
-        let limits =
+        let mut limits =
             crate::ollama_chat::Limits::parse(&format!("{tokens}/1048576/{}", u8::from(reasoning)))
                 .ok_or("MODEL_OUTPUT_LIMIT_INVALID")?;
+        limits.report = trace.is_some();
+        let wire = serde_json::to_vec(&body).map_err(|_| "MODEL_REQUEST_INVALID")?;
+        if let Some((history, call)) = trace {
+            eprintln!(
+                "{}",
+                json!({"event":"chat_provider_request","history_id":history,"model_call":call,
+                "model":self.revision["model_id"],"protocol":if native{"ollama_ndjson"}else if streaming{"openai_sse"}else{"openai_json"},
+                "request_bytes":wire.len(),"request_sha256":les_core::sha256_hex(&wire),"messages":body["messages"].as_array().map(Vec::len),
+                "input_token_limit":self.profile["input_token_limit"],"available_output_tokens":tokens,
+                "sent_reasoning_effort":body.get("reasoning_effort"),
+                "sent_output_limit":body.get("max_completion_tokens").or(body.get("max_tokens")).or_else(|| body["options"].get("num_predict")),
+                "payload_bytes_limit":limits.bytes,"lines_limit":limits.events,"line_bytes_limit":limits.line})
+            );
+        }
         let reply = crate::model_http::open(
             url,
             self.endpoint.addresses.clone(),
             self.authorization.clone(),
-            body.to_string().into_bytes(),
+            wire,
             timeout,
             false,
         )

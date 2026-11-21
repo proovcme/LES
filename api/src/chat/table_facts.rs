@@ -3,6 +3,7 @@
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 mod addresses;
+mod quantities;
 use addresses::Reference;
 #[derive(Default)]
 pub(super) struct Rows {
@@ -10,8 +11,49 @@ pub(super) struct Rows {
     paragraphs: BTreeMap<(u64, u64), (Vec<String>, Value)>,
     headers: BTreeMap<(u64, u64), Vec<String>>,
     literal_sources: HashSet<u64>,
+    cell_sources: HashSet<u64>,
 }
 pub(super) const SUM_CONTRACT: &str = "Для явно запрошенного сложения видимых табличных ячеек можно передать вычисление Лесу: верни один JSON с answerable=true, rows с адресами S…R… всех слагаемых и sums с объектами column (номер C) и unit_column (номер C или null). При обычном вопросе о содержимом таблицы отвечай текстом со ссылками.";
+pub(super) const ROW_CONTRACT: &str = "Для ответа выбери строки и выдержки из текущего окна. Верни один JSON с полями answerable (да/нет как true/false), rows (массив видимых адресов S1R2, S1P3 или S1 из соответствующего фрагмента), sums (пустой массив либо запрошенные суммы с column и unit_column) и missing (чего не хватает). Если сведений нет, верни answerable=false и rows=[]. Значения и единицы по выбранным адресам выведет Лес.";
+
+pub(super) fn cell_window(initial: &[Value], required: &[Value]) -> bool {
+    let mut seen = false;
+    for block in initial.iter().chain(required) {
+        if matches!(
+            block["schema"].as_str(),
+            Some("les.evidence-unit.v1" | "les.evidence-block.v1")
+        ) {
+            if !cell_block(block) {
+                return false;
+            }
+            seen = true;
+        }
+    }
+    seen
+}
+fn cell_block(block: &Value) -> bool {
+    if block["schema"] == "les.evidence-unit.v1" {
+        return block["blocks"]
+            .as_array()
+            .is_some_and(|items| !items.is_empty() && items.iter().all(cell_block));
+    }
+    block["verified_cells"] == true
+        || block["record_kind"] == "spreadsheet_row"
+        || block["canonical"]["kind"] == "table"
+}
+
+/// The fixed wire schema fits the budget before the evidence packet is assembled.
+/// Actual address membership, numeric columns and units are checked against that packet.
+pub(super) fn selection_format() -> Value {
+    json!({"type":"json_schema","json_schema":{"name":"les_source_rows","strict":true,"schema":{
+    "type":"object","additionalProperties":false,"required":["answerable","rows","sums","missing"],"properties":{
+        "answerable":{"type":"boolean"},"rows":{"type":"array","items":{"type":"string"},"maxItems":128},
+        "sums":{"type":"array","maxItems":16,"items":{"type":"object","additionalProperties":false,
+            "required":["column","unit_column"],"properties":{"column":{"type":"integer","minimum":1},
+            "unit_column":{"type":["integer","null"],"minimum":1}}}},
+        "missing":{"type":"array","maxItems":8,"items":{"type":"string","maxLength":160}}
+    }}}})
+}
 pub(super) fn quote_sources(sources: &mut Value, receipt: &Value) {
     for source in sources.as_array_mut().into_iter().flatten() {
         let quotes = receipt["rows"]
@@ -121,6 +163,39 @@ impl Rows {
     pub(super) fn present(&self) -> bool {
         !self.data.is_empty() || !self.paragraphs.is_empty()
     }
+    pub(super) fn needs_selection(
+        &self,
+        answer: &str,
+        sources: &Value,
+    ) -> Result<bool, &'static str> {
+        if !self.present() {
+            return Ok(false);
+        }
+        let references = les_core::citations::execute(&json!({"answer":answer,"sources":sources}))?;
+        let mut excerpts = Vec::new();
+        let mut all_pdf = true;
+        for index in references["indexes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_u64)
+        {
+            if self.cell_sources.contains(&index) {
+                return Ok(true);
+            }
+            if let Some((cells, source)) = self.data.get(&(index, 0)) {
+                if source["doc_name"]
+                    .as_str()
+                    .is_some_and(|name| name.to_ascii_lowercase().ends_with(".pdf"))
+                {
+                    excerpts.extend(cells.iter().map(String::as_str));
+                    continue;
+                }
+            }
+            all_pdf = false;
+        }
+        Ok(all_pdf && !excerpts.is_empty() && quantities::contradicts(answer, &excerpts))
+    }
     pub(super) fn new(packet: &Value, sources: &Value) -> Self {
         fn visit(value: &Value, sources: &Value, out: &mut Rows) {
             if value["schema"] == "les.evidence-unit.v1" {
@@ -144,6 +219,9 @@ impl Rows {
                 return;
             };
             let canonical = &value["canonical"];
+            if cell_block(value) {
+                out.cell_sources.insert(index);
+            }
             if value["table_geometry_unverified"] == true {
                 if let Some(body) = value["body_offset"]
                     .as_u64()
@@ -246,10 +324,7 @@ impl Rows {
             Ok(value) => value,
             Err(_) => return Ok(None),
         };
-        if !value["sums"]
-            .as_array()
-            .is_some_and(|sums| !sums.is_empty())
-        {
+        if !value["rows"].is_array() && !value["sums"].is_array() {
             return Ok(None);
         }
         if !self.present() {
@@ -257,7 +332,6 @@ impl Rows {
         }
         self.finish_value(&value, true)
     }
-    #[cfg(test)]
     pub(super) fn finish_checked(
         &self,
         answer: &str,
