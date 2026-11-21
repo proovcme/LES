@@ -1,0 +1,22 @@
+{
+  "build": 935,
+  "installer_sha256": "77dce50730cd484bff0cfda465f8c33c334a440e14061b3d68e700a74d0eeb72",
+  "api_sha256": "4326d43890db7c6984552b5d889a2b0e1b44c7d456469a80c89e036c52665d41",
+  "installed_profile": "isolated Windows profile, packaged install script extracted from NSIS",
+  "baseline_build": 927,
+  "baseline_session_survived": true,
+  "question": "Какое количество Alpha item указано в реестре? Укажи единицу и источник.",
+  "answer_model": "qwen3.5:2b",
+  "embedding_model": "bge-m3",
+  "expected_row": "|1|Alpha item|pcs|17.25|",
+  "confirmed_first_request": {
+    "sources": 4,
+    "row_source_number": 1,
+    "reading_unit_sha256": "2461ecff9edb7ac347ad9f349e0dbba11abc50e382b4e42930797f8dbfee33de"
+  },
+  "answer": "В предоставленных фрагментах не найдено подтверждения факта «количество Alpha item в реестре».\n\n**Объяснение:**\n1.  **Источник 1 (Register.pdf, стр. 1)** содержит запись `S1R1 C2: Alpha item`, но не указывает количество.\n2.  **Источник 2 (Notes.txt)** упоминает, что «Alpha item is checked at the receiving desk», но не дает количественных данных.\n3.  **Источник 4 (Register.pdf, стр. 1)** содержит шаблон таблицы `S4R1` с заголовками `Position`, `Item`, `Unit`, `Quantity`, но в массиве `records` пустой список `{}`.\n\nТаким образом, ни один из доступных источников не содержит числового значения для количества Alpha item.",
+  "linked_originals": [],
+  "passed": false,
+  "replayed_after_restart": true,
+  "rollback_build": 927
+}
