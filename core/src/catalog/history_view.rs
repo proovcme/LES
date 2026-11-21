@@ -62,7 +62,9 @@ pub(super) fn learning(conn: &Connection, args: &Args) -> Result<Value> {
 }
 fn source_map(trace: &Value) -> Value {
     if let Some(direct) = trace["source_map"].as_array() {
-        return json!(direct.iter().filter(|v| v.is_object()).collect::<Vec<_>>());
+        let mut sources = json!(direct.iter().filter(|v| v.is_object()).collect::<Vec<_>>());
+        crate::chat_context::attach_cited_excerpts(&mut sources, trace);
+        return sources;
     }
     let empty = Vec::new();
     let visible = trace["evidence_manifest"]["model_visible"]

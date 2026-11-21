@@ -8,7 +8,9 @@ const json = (value: unknown, status = 200) => new Response(JSON.stringify(value
 let workspace: Workspace; let writes: { text: string; revision: number }[];
 let stream: (init: RequestInit) => Response;
 beforeEach(() => {
-  history.replaceState(null, '', '/app/'); workspace = new Workspace(); writes = [];
+  history.replaceState(null, '', '/app/');
+  localStorage.setItem('les.retrieval-mode', 'pull');
+  workspace = new Workspace(); writes = [];
   stream = () => new Response('event: progress\ndata: {"label":"Ищу"}\n\nevent: token\ndata: "Ответ"\n\nevent: final\ndata: {"answer":"Ответ","source_map":[]}\n\n', { headers: { 'Content-Type': 'text/event-stream' } });
   vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit = {}) => {
     if (path === '/api/light/frontend') return json({ legacy_url: null });
@@ -26,17 +28,28 @@ beforeEach(() => {
     throw new Error(`Unexpected fixture request ${path}`);
   }));
 });
-afterEach(() => { workspace.dispose(); vi.unstubAllGlobals(); });
+afterEach(() => { workspace.dispose(); localStorage.removeItem('les.retrieval-mode'); vi.unstubAllGlobals(); });
 
-it('sends the explicit saved scope through the native chat contract', async () => {
+it('searches and reads within the saved scope even with an old search preference', async () => {
   await workspace.initialize(); workspace.text = 'Вопрос';
   await workspace.send(); await workspace.persist();
   const call = vi.mocked(fetch).mock.calls.find(([path]) => path === '/api/chat/stream')!;
   const body = JSON.parse(String(call[1]!.body));
-  expect(body.scope.dataset_ids).toEqual(['demo']); expect(body).not.toHaveProperty('reranker_enabled');
+  expect(body.scope.dataset_ids).toEqual(['demo']); expect(body.retrieval_mode).toBe('hybrid');
+  expect(body.mode).toBe('search');
+  expect(body).not.toHaveProperty('reranker_enabled');
   expect(body.session_id).toBe(sid); expect(body).not.toHaveProperty('provider_config');
   expect(workspace.messages.at(-1)?.text).toBe('Ответ'); expect(workspace.text).toBe('');
   expect(writes[0].text).toBe('Вопрос'); expect(writes.at(-1)?.text).toBe('');
+});
+
+it('keeps the agent profile for an ordinary question without documents', async () => {
+  await workspace.initialize();
+  workspace.session = { ...session, scope: emptyScope() };
+  workspace.text = 'Вопрос без документов';
+  await workspace.send();
+  const call = vi.mocked(fetch).mock.calls.find(([path]) => path === '/api/chat/stream')!;
+  expect(JSON.parse(String(call[1]!.body)).mode).toBe('agent');
 });
 
 it('retains partial answer and restores the question on a broken connection', async () => {
@@ -53,6 +66,27 @@ it('does not label a blocked final response as a successful answer', async () =>
   expect(workspace.messages.at(-1)?.meta?.blocker?.action).toBe('Восстановите индекс');
 });
 
+it('replays one lost final with the same key and starts a new turn after receipt', async () => {
+  const keys: (string | null)[] = [];
+  stream = (init) => {
+    keys.push(new Headers(init.headers).get('Idempotency-Key'));
+    const frame = keys.length === 1 ? 'event: progress\ndata: {}\n\n'
+      : 'event: final\ndata: {"answer":"Готово","history_id":' + (keys.length - 1) + '}\n\n';
+    return new Response(frame, { headers: { 'Content-Type': 'text/event-stream' } });
+  };
+  await workspace.initialize();
+  workspace.text = 'Тот же вопрос';
+  await workspace.send();
+  await workspace.send();
+  expect(keys[0]).toBeTruthy();
+  expect(keys[1]).toBe(keys[0]);
+  expect(workspace.messages).toHaveLength(2);
+  workspace.text = 'Тот же вопрос';
+  await workspace.send();
+  expect(keys[2]).not.toBe(keys[0]);
+  expect(workspace.messages).toHaveLength(4);
+});
+
 it('keeps a new draft typed while the previous question is being answered', async () => {
   stream = () => { workspace.text = 'Следующий вопрос'; return new Response('event: final\ndata: {"answer":"Ответ"}\n\n', { headers: { 'Content-Type': 'text/event-stream' } }); };
   await workspace.initialize(); workspace.text = 'Первый вопрос'; await workspace.send();
@@ -63,6 +97,16 @@ it('does not send to an unassigned model or change bindings', async () => {
   await workspace.initialize(); workspace.model = null; workspace.text = 'Вопрос'; await workspace.send();
   expect(workspace.error).toContain('не назначена');
   expect(vi.mocked(fetch).mock.calls.some(([path]) => path === '/api/chat/stream' || String(path).includes('/roles/'))).toBe(false);
+});
+
+it('sends the question when the API can refresh the existing local model', async () => {
+  await workspace.initialize();
+  workspace.model = { model_id: 'demo-model', connection_id: 'demo-connection',
+    status: 'blocked', code: 'CAPABILITY_SNAPSHOT_STALE', auto_refresh: true };
+  workspace.text = 'Вопрос';
+  await workspace.send();
+  expect(vi.mocked(fetch).mock.calls.filter(([path]) => path === '/api/chat/stream')).toHaveLength(1);
+  expect(workspace.messages.at(-1)?.text).toBe('Ответ');
 });
 
 it('flushes the latest characters before the 400ms autosave delay on normal close', async () => {

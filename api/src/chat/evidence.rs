@@ -22,6 +22,45 @@ pub(super) struct Evidence {
 mod tests {
     use super::*;
     #[test]
+    fn prefetch_uses_named_originals_and_keeps_the_group_with_its_row() {
+        let evidence = Evidence {
+            sources: vec![
+                json!({"doc_id":"a","doc_name":"05_VK_SO2.xlsx","workbook_group":{"title":"Zone Beta"}}),
+                json!({"doc_id":"a","doc_name":"05_VK_SO2.xlsx","workbook_group":{"title":"Zone Alpha"}}),
+                json!({"doc_id":"b","doc_name":"06_OV_SO3.xlsx"}),
+                json!({"doc_id":"c","doc_name":"nearby.xlsx"}),
+            ],
+            ..Evidence::default()
+        };
+        let blocks = [
+            "pump model",
+            "pump model",
+            "filter model",
+            "pump and filter models",
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(i, text)| json!({"source_index":i+1,"text":text,"body_offset":0}))
+        .collect::<Vec<_>>();
+        assert!(evidence
+            .prefetch_blocks("List all models", &blocks, &Default::default())
+            .is_none());
+        let selected = evidence
+            .prefetch_blocks(
+                "Pump model for Zone Alpha in ВК.СО2 and filter model in ОВ.СО3",
+                &blocks,
+                &["a".to_owned(), "b".to_owned()].into(),
+            )
+            .unwrap();
+        assert_eq!(
+            selected
+                .iter()
+                .map(|block| block["source_index"].as_u64().unwrap())
+                .collect::<Vec<_>>(),
+            [2, 3]
+        );
+    }
+    #[test]
     fn separate_file_questions_focus_terminal_citations_without_renumbering() {
         let files = [json!("Pump record.docx"), json!("Valve model.pdf")];
         let mut evidence = Evidence {
@@ -529,9 +568,6 @@ impl Evidence {
             ..Self::default()
         }
     }
-    pub(super) fn requires_sources(&self) -> bool {
-        self.required
-    }
     pub(super) fn has_reads(&self) -> bool {
         !self.verified_reads.is_empty()
     }
@@ -632,6 +668,16 @@ impl Evidence {
             note.push_str(crate::document_parser::projection_notice(code));
             note.push('\n');
         }
+        let group = &source["workbook_group"];
+        if let (Some(position), Some(row), Some(title)) = (
+            group["position"].as_str(),
+            group["row"].as_u64(),
+            group["title"].as_str(),
+        ) {
+            note.push_str(&format!(
+                "Группа этой строки (позиция {position}, строка {row} того же листа): {title}\n"
+            ));
+        }
         if source["visual_content"] == true {
             note.push_str("Документ содержит рисунки/вложения. Текстовая выдержка не подтверждает геометрию, графики и детали изображений. Оригиналы доступны через read_source view=parts; OCR не гарантирует чтение всех надписей.\n");
         }
@@ -725,6 +771,11 @@ impl Evidence {
         block["body_offset"] = json!(block["text"].as_str().unwrap().len() - text.len());
         if source["table_projection_warning"].is_string() {
             block["table_geometry_unverified"] = json!(true);
+        } else if source["verified_cells"] == true
+            || (source["reading_representation"] == "pdf_cells"
+                && !les_core::chat_context::table_rows(text).is_empty())
+        {
+            block["verified_cells"] = json!(true);
         }
         if canonical["schema"] == "les.document-structure.v1" {
             block["canonical"] = canonical.clone();
@@ -758,6 +809,17 @@ impl Evidence {
         block.as_object_mut().unwrap().remove("document_identity");
     }
     fn key(source: &Value) -> Value {
+        if source["workbook_group"].is_object()
+            && source["sheet_name"].is_string()
+            && source["row"].is_u64()
+        {
+            return json!([
+                source["doc_id"],
+                source["source_sha256"],
+                source["sheet_name"],
+                source["row"]
+            ]);
+        }
         json!([
             source["doc_id"],
             source["source_sha256"],
@@ -886,6 +948,21 @@ impl Evidence {
         first.extend(rest);
         Some(first)
     }
+    pub(super) fn prioritize_workbook_groups(&self, question: &str, blocks: &mut [Value]) {
+        use les_core::tables::group_identifiers as identifiers;
+        let wanted: std::collections::HashSet<_> = identifiers(question).collect();
+        if wanted.is_empty() {
+            return;
+        }
+        blocks.sort_by_cached_key(|block| {
+            let group = block["source_index"]
+                .as_u64()
+                .and_then(|i| i.checked_sub(1))
+                .and_then(|i| self.sources.get(i as usize))
+                .and_then(|source| source["workbook_group"]["title"].as_str());
+            !group.is_some_and(|name| identifiers(name).any(|id| wanted.contains(&id)))
+        });
+    }
     /// A terminal selection for independently named files can use only the
     /// strongest matching reading units from each file. Units which supply
     /// different query terms or tie stay together. The caller can retry with
@@ -987,6 +1064,83 @@ impl Evidence {
             .filter(|(index, _)| !self.required || self.verified_reads.contains(&(*index as u64)))
             .map(|(_, block)| block.clone())
             .collect()
+    }
+
+    pub(super) fn prefetch_blocks(
+        &self,
+        question: &str,
+        blocks: &[Value],
+        named: &std::collections::BTreeSet<String>,
+    ) -> Option<Vec<Value>> {
+        if named.len() < 2 {
+            return None;
+        }
+        let mut groups = std::collections::BTreeMap::<&str, Vec<usize>>::new();
+        let mut texts = vec![question.to_owned()];
+        let mut text_indexes = std::collections::BTreeMap::new();
+        for (i, block) in blocks.iter().enumerate() {
+            let source = self
+                .sources
+                .get(block["source_index"].as_u64()?.checked_sub(1)? as usize)?;
+            let id = source["doc_id"].as_str()?;
+            if named.contains(id) {
+                groups.entry(id).or_default().push(i);
+                let body = Self::text(block).get(block["body_offset"].as_u64()? as usize..)?;
+                let heading = source["workbook_group"]["title"]
+                    .as_str()
+                    .or_else(|| source["section_heading"].as_str())
+                    .unwrap_or("");
+                text_indexes.insert(i, texts.len());
+                texts.push(format!("{heading}\n{body}"));
+            }
+        }
+        if groups.len() != named.len() {
+            return None;
+        }
+        if texts.len() > 256 {
+            return None;
+        }
+        let tokens = les_core::lexical::reading(&texts).ok()?;
+        let query = tokens["documents"][0]["terms"].as_object()?;
+        let mut chosen = std::collections::BTreeSet::new();
+        for positions in groups.values() {
+            let matches = positions
+                .iter()
+                .map(|i| {
+                    let available = &tokens["documents"][text_indexes[i]]["terms"];
+                    (
+                        *i,
+                        query
+                            .keys()
+                            .filter(|term| available.get(*term).is_some())
+                            .collect::<std::collections::BTreeSet<_>>(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            let before = chosen.len();
+            for (index, terms) in &matches {
+                if !terms.is_empty()
+                    && !matches
+                        .iter()
+                        .any(|(_, other)| other.len() > terms.len() && terms.is_subset(other))
+                {
+                    chosen.insert(*index);
+                }
+            }
+            if before == chosen.len() {
+                return None;
+            }
+        }
+        (chosen.len() < blocks.len()).then(|| {
+            chosen
+                .into_iter()
+                .map(|i| {
+                    let mut block = blocks[i].clone();
+                    block.as_object_mut().unwrap().remove("context_unit");
+                    block
+                })
+                .collect()
+        })
     }
     pub(super) fn required_blocks(&self) -> Vec<Value> {
         self.blocks
@@ -1219,6 +1373,7 @@ impl Evidence {
         };
         if let Some(envelope) = value.as_object_mut() {
             envelope.remove("_pull_evidence");
+            envelope.remove("_pull_workbook_evidence");
         }
         if let Some(result) = value["result"].as_object_mut() {
             result.remove("read_receipt");

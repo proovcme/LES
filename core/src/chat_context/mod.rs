@@ -2,6 +2,7 @@
 mod assembly;
 mod coverage;
 mod presentation;
+pub use presentation::attach_cited_excerpts;
 mod prose;
 mod tabular;
 use serde_json::{json, Value};
@@ -313,14 +314,6 @@ pub fn execute(request: &Value) -> Result<Value> {
             list(request, "visible"),
             true,
         )),
-        "coverage_reservation" => {
-            Ok(coverage::reservation(list(request, "sources")).unwrap_or(Value::Null))
-        }
-        "finalize_coverage" => coverage::finalize(
-            request["packet"].clone(),
-            list(request, "sources"),
-            list(request, "visible"),
-        ),
         _ => presentation::execute(request),
     }
 }

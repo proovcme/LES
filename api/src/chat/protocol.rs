@@ -62,6 +62,49 @@ pub(super) fn effective(mut payload: &Value) -> &Value {
     }
     payload
 }
+pub(super) fn compact_source_receipt(value: &mut Value) {
+    if value["operation"] == "call"
+        && value["tool"]
+            .as_str()
+            .is_some_and(|name| name.starts_with("use_extensions_"))
+    {
+        compact_source_receipt(&mut value["result"]);
+        return;
+    }
+    if !matches!(
+        value["tool"].as_str(),
+        Some("search_sources" | "read_source" | "read_excel_source" | "read_pdf_source")
+    ) {
+        return;
+    }
+    let Some(rows) = value["result"]["passages"]
+        .as_array()
+        .filter(|rows| !rows.is_empty())
+    else {
+        return;
+    };
+    let mut documents = std::collections::BTreeMap::<_, Vec<_>>::new();
+    for row in rows {
+        let (Some(doc_id), Some(index)) = (
+            row["source"]["doc_id"].as_str(),
+            row["source"]["index"].as_u64(),
+        ) else {
+            return;
+        };
+        if row.get("text").is_some() || row.get("canonical").is_some() {
+            return;
+        }
+        documents.entry(doc_id).or_default().push(index);
+    }
+    let references = documents
+        .into_iter()
+        .map(|(doc_id, indexes)| json!({"doc_id":doc_id,"source_indexes":indexes}))
+        .collect::<Vec<_>>();
+    let result = value["result"].as_object_mut().unwrap();
+    result.remove("passages");
+    result.remove("read_plan");
+    result.insert("read_sources".into(), json!(references));
+}
 fn is_bound(call: &Value, bound: &str) -> bool {
     if call["function"]["name"] == bound {
         return true;

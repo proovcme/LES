@@ -199,7 +199,27 @@ pub fn validate(input: &Value) -> Result<Value> {
             request.insert("selected_sources_only".into(), selected.clone());
         }
     }
+    if let Some(ids) = request["scope"].get("document_ids") {
+        if !valid_document_ids(ids)
+            || (!ids.as_array().is_some_and(Vec::is_empty)
+                && !matches!(
+                    request["scope"]["scope_type"].as_str(),
+                    Some("dataset" | "datasets" | "project" | "projects" | "mixed" | "all")
+                ))
+        {
+            return Err("CHAT_SCOPE_INVALID");
+        }
+    }
     Ok(Value::Object(request))
+}
+pub(crate) fn valid_document_ids(ids: &Value) -> bool {
+    ids.as_array().is_some_and(|items| {
+        items.len() <= 500
+            && items.iter().all(|v| {
+                v.as_str()
+                    .is_some_and(|s| !s.trim().is_empty() && s.len() <= 1000)
+            })
+    })
 }
 pub fn resolve_scope(request: &Value, datasets: &[Value], projects: &[Value]) -> Result<Value> {
     scope::resolve(request, datasets, projects)

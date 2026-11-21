@@ -90,14 +90,22 @@ fn pack(r: &Value) -> Result<Value> {
         );
     }
     let mut omissions = Vec::new();
+    let evidence_limit = r["optional_evidence_limit"].as_u64().unwrap_or(u64::MAX);
+    let mut admitted_evidence = 0;
     for (rank, c) in &ordered {
         if c["required"] == true {
             continue;
         }
         let mut omitted = Vec::new();
+        let mut outside_limit = Vec::new();
         let mut partial = Vec::new();
         let objects = array(c, "objects")?;
+        let evidence = ORDER[*rank] == "evidence";
         for item in objects {
+            if evidence && admitted_evidence >= evidence_limit {
+                outside_limit.push(item);
+                continue;
+            }
             let tokens = number(item, "tokens")?;
             let cost = tokens
                 .checked_add(i64::from(used > 0))
@@ -106,10 +114,14 @@ fn pack(r: &Value) -> Result<Value> {
                 section_tokens[*rank] += i64::from(!selected[*rank].is_empty()) + tokens;
                 selected[*rank].push(item.clone());
                 used += cost;
+                admitted_evidence += u64::from(evidence);
             } else {
                 omitted.push(item);
                 let mut admitted = false;
                 for block in item["fallback"].as_array().into_iter().flatten() {
+                    if evidence && admitted_evidence >= evidence_limit {
+                        break;
+                    }
                     let tokens = number(block, "tokens")?;
                     let cost = tokens
                         .checked_add(i64::from(used > 0))
@@ -118,6 +130,7 @@ fn pack(r: &Value) -> Result<Value> {
                         section_tokens[*rank] += i64::from(!selected[*rank].is_empty()) + tokens;
                         selected[*rank].push(block.clone());
                         used += cost;
+                        admitted_evidence += u64::from(evidence);
                         admitted = true;
                     }
                 }
@@ -126,10 +139,16 @@ fn pack(r: &Value) -> Result<Value> {
                 }
             }
         }
-        if !omitted.is_empty() {
+        for (excluded, reason) in [
+            (omitted, "budget_exhausted"),
+            (outside_limit, "model_evidence_limit"),
+        ] {
+            if excluded.is_empty() {
+                continue;
+            }
             let mut digest = Sha256::new();
             let mut ids = Vec::new();
-            for item in &omitted {
+            for item in &excluded {
                 let id = text(item, "id")?;
                 ids.push(id);
                 digest.update(id.as_bytes());
@@ -138,8 +157,8 @@ fn pack(r: &Value) -> Result<Value> {
                 digest.update([0]);
             }
             let hash = format!("{:x}", digest.finalize());
-            let mut omission = json!({"kind":ORDER[*rank],"total":objects.len(),"omitted":omitted.len(),"object_ids":ids,"cursor":format!("ctx:{}:{}",ORDER[*rank],&hash[..20]),"reason":"budget_exhausted"});
-            if !partial.is_empty() {
+            let mut omission = json!({"kind":ORDER[*rank],"total":objects.len(),"omitted":excluded.len(),"object_ids":ids,"cursor":format!("ctx:{}:{}",ORDER[*rank],&hash[..20]),"reason":reason});
+            if reason == "budget_exhausted" && !partial.is_empty() {
                 omission["partial_object_ids"] = json!(partial);
             }
             omissions.push(omission);

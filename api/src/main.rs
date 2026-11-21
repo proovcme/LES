@@ -4,6 +4,7 @@ mod auth;
 mod auth_keys;
 mod catalog;
 mod chat;
+mod chat_stream_metrics;
 mod conversation;
 mod dataset_reader;
 mod derived_cache;

@@ -75,7 +75,7 @@ pub async fn handle(context: Arc<Context>, request: Request) -> Response {
             if value["require_stream"]==true && !observed_stream {return Err("CAPABILITY_REQUIRED: streaming".into());}
             let streaming=streaming && (native || observed_stream);
             let upstream_port=context.upstream_port().unwrap_or(0);
-            let body=resolved.chat(&value["request"],streaming,Duration::from_secs(seconds),[context.listen_port,upstream_port]).await?;
+            let body=resolved.chat(&value["request"],streaming,Duration::from_secs(seconds),[context.listen_port,upstream_port],None).await?;
             if !streaming && value["streaming"]==true {
                 let event=format!("{}\n",json!({"progress":{"label":"Модель готовит ответ целиком — поток не поддерживается"}}));
                 return Ok(Body::from_stream(stream::once(async move{Ok::<_,axum::Error>(axum::body::Bytes::from(event))}).chain(body.into_data_stream())));

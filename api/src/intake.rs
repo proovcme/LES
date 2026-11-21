@@ -627,6 +627,11 @@ fn index_stop(code: &str) -> Stop {
         "UPSTREAM_HTTP_ERROR",
         "UPSTREAM_RESPONSE_TOO_LARGE",
         "MODEL_ENDPOINT_UNREACHABLE",
+        "UPSTREAM_TIMEOUT",
+        "CAPABILITY_SNAPSHOT_STALE",
+        "CAPABILITY_SNAPSHOT_MISSING",
+        "CAPABILITY_REQUIRED",
+        "EMBEDDING_MODEL_NOT_READY",
         "MODEL_CONNECTION_FAILED",
         "EMBEDDING_INFERENCE_FAILED",
         "LEXICAL_SCHEMA_UNAVAILABLE",
@@ -651,10 +656,9 @@ fn index_stop(code: &str) -> Stop {
         "FOLDER_WATCH_LOCAL_EMBEDDINGS_REQUIRED" => "FOLDER_WATCH_LOCAL_EMBEDDINGS_REQUIRED",
         "DOCUMENT_TOKENIZER_CHANGED" => "DOCUMENT_TOKENIZER_CHANGED",
         "EMBEDDING_MODEL_NOT_ASSIGNED" => "EMBEDDING_MODEL_NOT_ASSIGNED",
-        "EMBEDDING_MODEL_NOT_READY" => "EMBEDDING_MODEL_NOT_READY",
         "EMBEDDING_INDEX_MODEL_MISMATCH" => "EMBEDDING_INDEX_MODEL_MISMATCH",
         "DOCUMENT_NATIVE_DISPATCH_REQUIRED" => "DOCUMENT_NATIVE_DISPATCH_REQUIRED",
-        "INDEX_MEMORY_GUARD" => "INDEX_MEMORY_GUARD",
+        "INDEX_MEMORY_GUARD" | "MODEL_MEMORY_GUARD" => "INDEX_MEMORY_GUARD",
         "INDEX_NO_PROGRESS" | "INDEX_BATCH_BUSY" => "INDEX_NO_PROGRESS",
         "INDEX_NOT_CONFIGURED" => "INDEX_NOT_CONFIGURED",
         _ => "INDEX_SERVICE_UNAVAILABLE",
@@ -666,12 +670,11 @@ fn index_stop(code: &str) -> Stop {
         "ATTACHMENT_INDEX_LOCAL_MODEL_REQUIRED" => "Для индексации вложения назначьте локальную модель поиска. Вложение не отправлено наружу.",
         "FOLDER_WATCH_LOCAL_EMBEDDINGS_REQUIRED" => "Для автообновления назначьте локальную модель поиска. Изменения папки сохранены.",
         "EMBEDDING_MODEL_NOT_ASSIGNED" => "Файлы зарегистрированы. Назначьте модель поиска в настройках.",
-        "EMBEDDING_MODEL_NOT_READY" => "Файлы зарегистрированы. Проверьте подключение и доступность модели поиска.",
         "DOCUMENT_NATIVE_DISPATCH_REQUIRED" => "В партии есть формат, для которого нативная обработка ещё недоступна. Файлы зарегистрированы, индексация не начата.",
         "INDEX_NOT_CONFIGURED" => "Файлы зарегистрированы. Для индексации проверьте модель поиска в настройках.",
-        "INDEX_MEMORY_GUARD" => "Файлы зарегистрированы. Для индексации освободите оперативную память.",
+        "INDEX_MEMORY_GUARD" => crate::index_bootstrap::message(code),
         "INDEX_NO_PROGRESS" => "Партия индексации пока не продвинулась. Лес повторит попытку через 30 секунд.",
-        _ => "Служба индексации недоступна. Лес повторит попытку через 30 секунд.",
+        _ => "Не удалось запустить индексацию. Откройте «Состояние» и повторите запуск.",
     };
     Stop { code, message }
 }
@@ -732,16 +735,9 @@ async fn start_indexing_inner(context: Arc<Context>, job: &Value) -> Result<(), 
             return Err(index_stop("FOLDER_WATCH_LOCAL_EMBEDDINGS_REQUIRED"));
         }
     }
-    crate::index_bootstrap::ensure(
-        context.clone(),
-        !attachment && !automatic,
-        false,
-        false,
-        None,
-        true,
-    )
-    .await
-    .map_err(|code| index_stop(code.split(':').next().unwrap_or(&code)))?;
+    crate::index_bootstrap::ensure_intake(context.clone(), !attachment && !automatic)
+        .await
+        .map_err(|code| index_stop(code.split(':').next().unwrap_or(&code)))?;
     let input = tokio::task::spawn_blocking(move || {
         crate::index_batch::configuration::intake(&owner, &input_job, selected)
     })
@@ -756,8 +752,10 @@ async fn start_indexing_inner(context: Arc<Context>, job: &Value) -> Result<(), 
     let value: Value =
         serde_json::from_slice(&body).map_err(|_| index_stop("INDEX_SERVICE_UNAVAILABLE"))?;
     if !status.is_success() {
-        let code = value["detail"]
+        let code = value["code"]
             .as_str()
+            .or_else(|| value["error"]["code"].as_str())
+            .or_else(|| value["detail"].as_str())
             .unwrap_or("INDEX_SERVICE_UNAVAILABLE");
         eprintln!(
             "{}",
@@ -768,7 +766,10 @@ async fn start_indexing_inner(context: Arc<Context>, job: &Value) -> Result<(), 
     if value["owner"] != "rust.index-batch" {
         return Err(index_stop("INDEX_SERVICE_UNAVAILABLE"));
     }
-    if let Some(code) = value["error"].as_str() {
+    if let Some(code) = value["error"]
+        .as_str()
+        .or_else(|| value["error"]["code"].as_str())
+    {
         return Err(index_stop(code));
     }
     if !job["watch"].is_null()

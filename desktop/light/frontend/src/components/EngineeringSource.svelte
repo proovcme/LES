@@ -33,5 +33,5 @@
       {#if link}<a class="button" href={link} target="_blank" rel="noopener noreferrer">Показать в Увязке ↗</a>{/if}</div>
   </form>
   {#if failure}<p class="error" role="alert">{failure}</p>{/if}
-  {#if reason === 'ENGINEERING_UNAVAILABLE' || reason === 'ENGINEERING_VIEWER_UPDATE_REQUIRED'}<UvyazkaInstall {reason} />{/if}
+  <UvyazkaInstall {reason} />
 </section>

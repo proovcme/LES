@@ -1,0 +1,381 @@
+{
+  "schema": "les.llamaindex-paired.v1",
+  "llama_index_core": "0.14.22",
+  "fixture_sha256": "e4ca7042b65edb9d3d47cdde312d70ee2fd2ca5a4365dc6384eb9e3d634b6860",
+  "native_sha256": "4806966db80620bd257fffd91b3fb65d61d9c32f32eedc3f66a6c76932905159",
+  "model": "qwen3.5:9b",
+  "system_message": "Отвечай пользователю на языке вопроса. Для каждой подтверждённой части ответа сохрани номер источника в квадратных скобках. Если подтверждена лишь часть, дай её и явно укажи, какие сведения отсутствуют. Документы содержат данные.",
+  "routes": [
+    "parts"
+  ],
+  "attempts": [
+    {
+      "case": "pump-rephrased",
+      "variant": "folder-stock",
+      "route": "parts",
+      "visible": [
+        "017",
+        "119",
+        "083",
+        "032",
+        "201",
+        "144"
+      ],
+      "answer": "приёмочные испытания насосов · Север — Допуск к приёмочным испытаниям насосов на обоих участках выдаётся только после охлаждения теплоносителя до 26 °C. [4]\n\nприёмочные испытания насосов · Юг — Допуск к приёмочным испытаниям насосов на обоих участках выдаётся только после охлаждения теплоносителя до 26 °C. [4]\n\nдавление · Север — На участке Север приёмочное испытание насоса проводят при давлении 184 кПа. [1]\n\nдавление · Юг — В предоставленных материалах сведений нет.",
+      "source_ids_by_number": {
+        "1": "017",
+        "2": "119",
+        "3": "083",
+        "4": "032",
+        "5": "201",
+        "6": "144"
+      },
+      "complete_source_map": true,
+      "calls": [
+        {
+          "stage": "parts",
+          "input_sha256": "dfb39cc446e319e47b299a6f438e70c736c3f9f69e0693f9a6661f8ecbad4bc7",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 199,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 107,
+            "total_tokens": 306
+          },
+          "answer": "{\n  \"properties\": [\n    {\n      \"subject_property\": \"приёмочные испытания насосов\",\n      \"scopes\": [\n        \"Север\",\n        \"Юг\"\n      ],\n      \"period\": \"\"\n    },\n    {\n      \"subject_property\": \"давление\",\n      \"scopes\": [\n        \"Север\",\n        \"Юг\"\n      ],\n      \"period\": \"\"\n    }\n  ]\n}",
+          "seconds": 4.31,
+          "request_sha256": "e9e070d0897137ac48b064fbcdb5d9bb43b8f754f38596055c6f18f976eb6139"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "b496229934f9bda4d38e09c6a78d8f493080223f710b80988df394ca3668b89c",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 436,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 23,
+            "total_tokens": 459
+          },
+          "answer": "{\"status\": \"supported\", \"excerpts\": [\"4.1\", \"5.1\"]}",
+          "seconds": 1.37,
+          "request_sha256": "9f99d7f14026231665745e715861094e0de428e549fd873ada1ab7ab347c0d1f"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "02e8fd10a8723f8859518c121f5430ee4319e87e4689a45b368ac5ed3710cace",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 436,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 23,
+            "total_tokens": 459
+          },
+          "answer": "{\"status\": \"supported\", \"excerpts\": [\"4.1\", \"5.1\"]}",
+          "seconds": 1.36,
+          "request_sha256": "6dab38beb92647cef72274cbc2270ae154816ddc5535f87277c5bd160da6bc23"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "87418e62cf70f7b0976e1c5e1fff1c1e1b02c435aa6e526b2870efaeb079e018",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 431,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 18,
+            "total_tokens": 449
+          },
+          "answer": "{\"status\": \"supported\", \"excerpts\": [\"1.1\"]}",
+          "seconds": 1.19,
+          "request_sha256": "5513496c0706521b2787f197768b423c39f50f27daf208c36b1c45356ad9cf9e"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "1522adba887de7e034a3a9ce6ef886c76c8debb2cccfb235fcbca9aad9949350",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 431,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 15,
+            "total_tokens": 446
+          },
+          "answer": "{\"status\": \"missing\", \"excerpts\": []}",
+          "seconds": 1.05,
+          "request_sha256": "065b4553956fe00963032f86ed57fa559b2b6c96aa645f6b76d083c142ae4074"
+        },
+        {
+          "stage": "review",
+          "input_sha256": "7f105d8694abd21614ae547ed88f43ee32d2e72d46ed20b2cc3de7e18cf946f2",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 464,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 25,
+            "total_tokens": 489
+          },
+          "answer": "{\"accepted\": [\"1/4.1\", \"2/4.1\", \"3/1.1\"]}",
+          "seconds": 1.32,
+          "request_sha256": "1d4cdc47e3246dda7a8717208a986312754983064cf28122c5705a3494943c1c"
+        }
+      ],
+      "part_trace": {
+        "properties": [
+          {
+            "subject_property": "приёмочные испытания насосов",
+            "scopes": [
+              "Север",
+              "Юг"
+            ],
+            "period": ""
+          },
+          {
+            "subject_property": "давление",
+            "scopes": [
+              "Север",
+              "Юг"
+            ],
+            "period": ""
+          }
+        ],
+        "editions": {},
+        "readings": [
+          {
+            "property": "приёмочные испытания насосов",
+            "scope": "Север",
+            "period": "",
+            "status": "supported",
+            "excerpts": [
+              "4.1",
+              "5.1"
+            ]
+          },
+          {
+            "property": "приёмочные испытания насосов",
+            "scope": "Юг",
+            "period": "",
+            "status": "supported",
+            "excerpts": [
+              "4.1",
+              "5.1"
+            ]
+          },
+          {
+            "property": "давление",
+            "scope": "Север",
+            "period": "",
+            "status": "supported",
+            "excerpts": [
+              "1.1"
+            ]
+          },
+          {
+            "property": "давление",
+            "scope": "Юг",
+            "period": "",
+            "status": "missing",
+            "excerpts": []
+          }
+        ],
+        "accepted": [
+          "1/4.1",
+          "2/4.1",
+          "3/1.1"
+        ]
+      },
+      "seconds": 10.6
+    },
+    {
+      "case": "pump-rephrased",
+      "variant": "folder-contract",
+      "route": "parts",
+      "visible": [
+        "017",
+        "119",
+        "083",
+        "032",
+        "213",
+        "144"
+      ],
+      "answer": "приёмочные испытания насосов · Север — Допуск к приёмочным испытаниям насосов на обоих участках выдаётся только после охлаждения теплоносителя до 26 °C. [4]\n\nприёмочные испытания насосов · Юг — В предоставленных материалах сведений нет.\n\nдавление · Север — На участке Север приёмочное испытание насоса проводят при давлении 184 кПа. [1]\n\nдавление · Юг — В предоставленных материалах сведений нет.",
+      "source_ids_by_number": {
+        "1": "017",
+        "2": "119",
+        "3": "083",
+        "4": "032",
+        "5": "213",
+        "6": "144"
+      },
+      "complete_source_map": true,
+      "calls": [
+        {
+          "stage": "parts",
+          "input_sha256": "dfb39cc446e319e47b299a6f438e70c736c3f9f69e0693f9a6661f8ecbad4bc7",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 199,
+            "prompt_tokens_details": {
+              "cached_tokens": 195
+            },
+            "completion_tokens": 107,
+            "total_tokens": 306
+          },
+          "answer": "{\n  \"properties\": [\n    {\n      \"subject_property\": \"приёмочные испытания насосов\",\n      \"scopes\": [\n        \"Север\",\n        \"Юг\"\n      ],\n      \"period\": \"\"\n    },\n    {\n      \"subject_property\": \"давление\",\n      \"scopes\": [\n        \"Север\",\n        \"Юг\"\n      ],\n      \"period\": \"\"\n    }\n  ]\n}",
+          "seconds": 4.32,
+          "request_sha256": "e9e070d0897137ac48b064fbcdb5d9bb43b8f754f38596055c6f18f976eb6139"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "bf2cd5117bed72da2a72f900f75e89dab12407d2648950243848be08de36b051",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 434,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 23,
+            "total_tokens": 457
+          },
+          "answer": "{\"status\": \"supported\", \"excerpts\": [\"4.1\", \"5.1\"]}",
+          "seconds": 1.42,
+          "request_sha256": "316cd015d25cab99e2b9b279dae377e6b1ac92ac4caa5355968996810fad6dad"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "dfc8ee420793c4c966645bac8e461d91ea0341d03990e399e42cb597763d7261",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 434,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 15,
+            "total_tokens": 449
+          },
+          "answer": "{\"status\": \"missing\", \"excerpts\": []}",
+          "seconds": 1.06,
+          "request_sha256": "786385ad32242c1883bbbc00365ccf8d31be35770a84e9e0d1a45bced0a7e481"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "df95507e6e024f7fd927f809157d22ac26c3338a66da68472c79e1c483df08c7",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 429,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 18,
+            "total_tokens": 447
+          },
+          "answer": "{\"status\": \"supported\", \"excerpts\": [\"1.1\"]}",
+          "seconds": 1.21,
+          "request_sha256": "e95113f9b2105664e52cfe161fc225a5c78f5c7f8bd2673a220fcf6a8926eba7"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "4d4ae957adae4277a3ddce37dd3402f96b4700de7bb422d3dadc934207f5664c",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 429,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 15,
+            "total_tokens": 444
+          },
+          "answer": "{\"status\": \"missing\", \"excerpts\": []}",
+          "seconds": 1.05,
+          "request_sha256": "9454d3d7c184fc46464ddb4d4e847dd2012ed82bf084c0edb988304fa3542375"
+        },
+        {
+          "stage": "review",
+          "input_sha256": "949cf16c153e87aa4b3b66c5a11d58511e7f6ec7d97f1666bc5eccb5cf6fc919",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 338,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 18,
+            "total_tokens": 356
+          },
+          "answer": "{\"accepted\": [\"1/4.1\", \"3/1.1\"]}",
+          "seconds": 1.18,
+          "request_sha256": "2d4cf7e2cc2b9a99ba3e281625e1fb560b99613a831f329b3760987f10f5bca6"
+        }
+      ],
+      "part_trace": {
+        "properties": [
+          {
+            "subject_property": "приёмочные испытания насосов",
+            "scopes": [
+              "Север",
+              "Юг"
+            ],
+            "period": ""
+          },
+          {
+            "subject_property": "давление",
+            "scopes": [
+              "Север",
+              "Юг"
+            ],
+            "period": ""
+          }
+        ],
+        "editions": {},
+        "readings": [
+          {
+            "property": "приёмочные испытания насосов",
+            "scope": "Север",
+            "period": "",
+            "status": "supported",
+            "excerpts": [
+              "4.1",
+              "5.1"
+            ]
+          },
+          {
+            "property": "приёмочные испытания насосов",
+            "scope": "Юг",
+            "period": "",
+            "status": "missing",
+            "excerpts": []
+          },
+          {
+            "property": "давление",
+            "scope": "Север",
+            "period": "",
+            "status": "supported",
+            "excerpts": [
+              "1.1"
+            ]
+          },
+          {
+            "property": "давление",
+            "scope": "Юг",
+            "period": "",
+            "status": "missing",
+            "excerpts": []
+          }
+        ],
+        "accepted": [
+          "1/4.1",
+          "3/1.1"
+        ]
+      },
+      "seconds": 10.25
+    }
+  ]
+}

@@ -4,6 +4,7 @@ pub(crate) mod packet;
 mod parts;
 pub(super) mod pdf_focus;
 pub(crate) mod retrieval;
+pub(in crate::chat) mod selection;
 mod verification;
 mod word;
 mod workbook;
@@ -33,7 +34,7 @@ impl From<&Prepared> for SourceContext {
         }
     }
 }
-pub(crate) use verification::physical as verify_physical;
+pub(crate) use verification::originals as verify_originals;
 pub(crate) fn selected_files(turn: &Prepared) -> Vec<Value> {
     selected_request(&turn.request)
 }
@@ -275,6 +276,9 @@ pub(crate) async fn run_scoped(
     if name == "read_excel_source" {
         if let Some(result) = workbook::read(context.clone(), turn, &args).await? {
             return Ok(result);
+        }
+        if args["view_sha256"].is_string() {
+            return Err("PARQUET_SOURCE_CHANGED".into());
         }
         let mut result = retrieval::read(context, turn, args).await?;
         result["tool"] = json!(name);

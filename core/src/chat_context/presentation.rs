@@ -1,4 +1,99 @@
 use super::*;
+
+pub fn attach_cited_excerpts(sources: &mut Value, trace: &Value) -> bool {
+    let Some(sources) = sources.as_array_mut() else {
+        return false;
+    };
+    let cited = list(&trace["citation_syntax"], "indexes");
+    let Some(round) = list(trace, "contexts")
+        .last()
+        .filter(|round| round["delivery"] == "confirmed")
+    else {
+        return false;
+    };
+    if cited.is_empty() {
+        return false;
+    }
+    let mut changed = false;
+    for object in list(&round["context"], "sections")
+        .iter()
+        .filter(|section| section["kind"] == "evidence")
+        .flat_map(|section| list(section, "objects"))
+    {
+        let payload = &object["payload"];
+        let blocks = if payload["schema"] == "les.evidence-unit.v1" {
+            list(payload, "blocks")
+        } else {
+            std::slice::from_ref(payload)
+        };
+        for block in blocks {
+            let index = &block["source_index"];
+            if block["schema"] != "les.evidence-block.v1"
+                || !index.is_u64()
+                || !cited.contains(index)
+            {
+                continue;
+            }
+            let Some(source) = sources.iter_mut().find(|source| source["index"] == *index) else {
+                continue;
+            };
+            if source["quote"]
+                .as_str()
+                .is_some_and(|quote| !quote.trim().is_empty())
+            {
+                continue;
+            }
+            let Some(body) = block["body_offset"]
+                .as_u64()
+                .and_then(|offset| usize::try_from(offset).ok())
+                .and_then(|offset| block["text"].as_str()?.get(offset..))
+                .map(str::trim)
+                .filter(|body| !body.is_empty())
+            else {
+                continue;
+            };
+            // This is a display projection from admitted evidence, not part
+            // of the provider context or a second persisted copy of the row.
+            let mut chars = body.chars();
+            let mut preview: String = chars.by_ref().take(1200).collect();
+            if chars.next().is_some() {
+                preview.push('…');
+            }
+            source["quote"] = json!(preview);
+            changed = true;
+        }
+    }
+    changed
+}
+
+#[cfg(test)]
+mod excerpt_tests {
+    use super::*;
+
+    #[test]
+    fn excerpts_use_only_the_confirmed_final_block_and_keep_existing_quotes() {
+        let block = |index, body: &str| {
+            let prefix = "Служебный заголовок\n";
+            json!({"schema":"les.evidence-block.v1","source_index":index,
+                "body_offset":prefix.len(),"text":format!("{prefix}{body}")})
+        };
+        let mut trace = json!({"citation_syntax":{"indexes":[2,3,4]},"contexts":[
+            {"delivery":"confirmed","context":{"sections":[{"kind":"evidence","objects":[{"payload":block(4,"Старое чтение")}]}]}},
+            {"delivery":"confirmed","context":{"sections":[{"kind":"evidence","objects":[{"payload":
+                {"schema":"les.evidence-unit.v1","blocks":[block(2,"Физическая строка"),block(3,"Длинный текст"),block(5,"Материал без ссылки")]}}]}]}}
+        ]});
+        let mut sources =
+            json!([{"index":2},{"index":3,"quote":"Проверенная ячейка"},{"index":4},{"index":5}]);
+        assert!(attach_cited_excerpts(&mut sources, &trace));
+        assert_eq!(sources[0]["quote"], "Физическая строка");
+        assert_eq!(sources[1]["quote"], "Проверенная ячейка");
+        assert!(sources[2]["quote"].is_null() && sources[3]["quote"].is_null());
+        trace["contexts"][1]["delivery"] = json!("prepared");
+        let mut unconfirmed = json!([{"index":2}]);
+        assert!(!attach_cited_excerpts(&mut unconfirmed, &trace));
+    }
+}
+
 pub(super) fn trace(request: &Value) -> Result<Value> {
     let packet = &request["packet"];
     let mut trace = json!({"purpose":request["purpose"]});

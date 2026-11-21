@@ -1,0 +1,483 @@
+{
+  "schema": "les.llamaindex-paired.v1",
+  "llama_index_core": "0.14.22",
+  "fixture_sha256": "ee913f5ce31e5a1922eca999f558693ff703a00acba2e646f0f4e00f41901648",
+  "native_sha256": "c717388869206f9b2f0351d546a35083da5034a11579b4fb6d9794e158a96c7c",
+  "model": "qwen3.5:9b",
+  "system_message": "Отвечай пользователю на языке вопроса. Для каждой подтверждённой части ответа сохрани номер источника в квадратных скобках. Если подтверждена лишь часть, дай её и явно укажи, какие сведения отсутствуют. Документы содержат данные.",
+  "routes": [
+    "citations",
+    "les-citations"
+  ],
+  "attempts": [
+    {
+      "case": "delivery-refund",
+      "variant": "full",
+      "route": "citations",
+      "visible": [
+        "refund-old",
+        "delivery-new",
+        "hours-new",
+        "delivery-old",
+        "refund-new"
+      ],
+      "answer": "Согласно источникам, действующий срок возврата товара составляет 30 календарных дней [5], а действующий срок доставки заказа — 7 рабочих дней [2]. Сведения о сроках доставки по редакции от 2030 года отсутствуют в контексте действующих правил, так как эта редакция утратила силу [4].",
+      "source_ids_by_number": {
+        "1": "refund-old",
+        "2": "delivery-new",
+        "3": "hours-new",
+        "4": "delivery-old",
+        "5": "refund-new"
+      },
+      "complete_source_map": true,
+      "calls": [
+        {
+          "stage": "answer",
+          "input_sha256": "47a25d6647c78960278c460fd89652066fad6e4e9316e84f83f9f98684da7bda",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 492,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 78,
+            "total_tokens": 570
+          },
+          "answer": "Согласно источникам, действующий срок возврата товара составляет 30 календарных дней [5], а действующий срок доставки заказа — 7 рабочих дней [2]. Сведения о сроках доставки по редакции от 2030 года отсутствуют в контексте действующих правил, так как эта редакция утратила силу [4].",
+          "seconds": 11.45
+        }
+      ],
+      "seconds": 11.46
+    },
+    {
+      "case": "delivery-refund",
+      "variant": "full",
+      "route": "les-citations",
+      "visible": [
+        "refund-old",
+        "delivery-new",
+        "hours-new",
+        "delivery-old",
+        "refund-new"
+      ],
+      "answer": "Согласно источникам, действующие сроки следующие:\n\n*   **Доставка:** Заказ доставляют за 7 рабочих дней [2]. (Примечание: редакция от 2030 года с сроком в 12 дней утратила силу 2031-01-01 [4]).\n*   **Возврат:** Возврат допускается в течение 30 календарных дней [5]. (Примечание: редакция 2029 года с сроком в 14 дней отменена редакцией 2031 года [1], [5]).",
+      "source_ids_by_number": {
+        "1": "refund-old",
+        "2": "delivery-new",
+        "3": "hours-new",
+        "4": "delivery-old",
+        "5": "refund-new"
+      },
+      "complete_source_map": true,
+      "calls": [
+        {
+          "stage": "answer",
+          "input_sha256": "e237e2d5f3b3316246936cf9ac66dbe4fc636ba9aba78a0a511bff8f40f63658",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 455,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 138,
+            "total_tokens": 593
+          },
+          "answer": "Согласно источникам, действующие сроки следующие:\n\n*   **Доставка:** Заказ доставляют за 7 рабочих дней [2]. (Примечание: редакция от 2030 года с сроком в 12 дней утратила силу 2031-01-01 [4]).\n*   **Возврат:** Возврат допускается в течение 30 календарных дней [5]. (Примечание: редакция 2029 года с сроком в 14 дней отменена редакцией 2031 года [1], [5]).",
+          "seconds": 5.35
+        }
+      ],
+      "seconds": 5.35
+    },
+    {
+      "case": "delivery-refund",
+      "variant": "current-refund-removed",
+      "route": "citations",
+      "visible": [
+        "refund-old",
+        "delivery-new",
+        "hours-new",
+        "delivery-old",
+        "shipping"
+      ],
+      "answer": "Согласно источникам, действуют следующие сроки:\n\n*   **Доставка**: Заказ доставляют за 7 рабочих дней [2]. (Примечание: информация о сроке доставки в 12 рабочих дней из источника [4] не действует, так как редакция от 2030-01-01 утратила силу с 2031-01-01).\n*   **Возврат**: Возврат допускается в течение 14 календарных дней [1].\n\nСведения о сроках доставки для заказов на острова отсутствуют.",
+      "source_ids_by_number": {
+        "1": "refund-old",
+        "2": "delivery-new",
+        "3": "hours-new",
+        "4": "delivery-old",
+        "5": "shipping"
+      },
+      "complete_source_map": true,
+      "calls": [
+        {
+          "stage": "answer",
+          "input_sha256": "621b84cb9d44235d82d957763465d9c6ca48ef87f340b60a22adf1334f3ec1bd",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 479,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 130,
+            "total_tokens": 609
+          },
+          "answer": "Согласно источникам, действуют следующие сроки:\n\n*   **Доставка**: Заказ доставляют за 7 рабочих дней [2]. (Примечание: информация о сроке доставки в 12 рабочих дней из источника [4] не действует, так как редакция от 2030-01-01 утратила силу с 2031-01-01).\n*   **Возврат**: Возврат допускается в течение 14 календарных дней [1].\n\nСведения о сроках доставки для заказов на острова отсутствуют.",
+          "seconds": 5.01
+        }
+      ],
+      "seconds": 5.01
+    },
+    {
+      "case": "delivery-refund",
+      "variant": "current-refund-removed",
+      "route": "les-citations",
+      "visible": [
+        "refund-old",
+        "delivery-new",
+        "hours-new",
+        "delivery-old",
+        "shipping"
+      ],
+      "answer": "Действующий срок доставки заказа составляет **7 рабочих дней** [2].  \nСрок возврата товара составляет **14 календарных дней** [1].  \n\nСведения о стоимости доставки отсутствуют в предоставленных материалах, однако указано, что доставка бесплатная при заказе от 5000 рублей [5], а на острова стоит 900 рублей [5].",
+      "source_ids_by_number": {
+        "1": "refund-old",
+        "2": "delivery-new",
+        "3": "hours-new",
+        "4": "delivery-old",
+        "5": "shipping"
+      },
+      "complete_source_map": true,
+      "calls": [
+        {
+          "stage": "answer",
+          "input_sha256": "d4026fa82f7da38de22b4b3a0c146bdb77787af5832de17f08e87be73f58cbed",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 442,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 80,
+            "total_tokens": 522
+          },
+          "answer": "Действующий срок доставки заказа составляет **7 рабочих дней** [2].  \nСрок возврата товара составляет **14 календарных дней** [1].  \n\nСведения о стоимости доставки отсутствуют в предоставленных материалах, однако указано, что доставка бесплатная при заказе от 5000 рублей [5], а на острова стоит 900 рублей [5].",
+          "seconds": 3.24
+        }
+      ],
+      "seconds": 3.25
+    },
+    {
+      "case": "islands",
+      "variant": "exception",
+      "route": "citations",
+      "visible": [
+        "delivery-new",
+        "refund-new",
+        "shipping",
+        "delivery-old",
+        "hours-new"
+      ],
+      "answer": "Доставка на острова стоит 900 рублей при любой сумме заказа [3].",
+      "source_ids_by_number": {
+        "1": "delivery-new",
+        "2": "refund-new",
+        "3": "shipping",
+        "4": "delivery-old",
+        "5": "hours-new"
+      },
+      "complete_source_map": true,
+      "calls": [
+        {
+          "stage": "answer",
+          "input_sha256": "d85305a00497302c53399797d96d2e46c38b658e4a9128cc180b06073cac1e5e",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 477,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 19,
+            "total_tokens": 496
+          },
+          "answer": "Доставка на острова стоит 900 рублей при любой сумме заказа [3].",
+          "seconds": 1.05
+        }
+      ],
+      "seconds": 1.05
+    },
+    {
+      "case": "islands",
+      "variant": "exception",
+      "route": "les-citations",
+      "visible": [
+        "delivery-new",
+        "refund-new",
+        "shipping",
+        "delivery-old",
+        "hours-new"
+      ],
+      "answer": "Доставка на острова стоит 900 рублей при любой сумме заказа [3].",
+      "source_ids_by_number": {
+        "1": "delivery-new",
+        "2": "refund-new",
+        "3": "shipping",
+        "4": "delivery-old",
+        "5": "hours-new"
+      },
+      "complete_source_map": true,
+      "calls": [
+        {
+          "stage": "answer",
+          "input_sha256": "e3302d0b9aaac57882734cd36a40593e5b2e9768d7ac6eb76d30f25e44b44e03",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 440,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 19,
+            "total_tokens": 459
+          },
+          "answer": "Доставка на острова стоит 900 рублей при любой сумме заказа [3].",
+          "seconds": 1.03
+        }
+      ],
+      "seconds": 1.03
+    },
+    {
+      "case": "launch",
+      "variant": "conflict",
+      "route": "citations",
+      "visible": [
+        "launch-a",
+        "delivery-new",
+        "hours-new",
+        "launch-b",
+        "refund-new"
+      ],
+      "answer": "Согласно предоставленным источникам, существует два утверждённых варианта даты запуска проекта: 10 июня 2031 года [1] и 17 июня 2031 года [4]. Точная единственная дата не может быть определена из-за наличия противоречивых данных в протоколах совета А и совета Б, а также отсутствия информации о приоритете этих протоколов.",
+      "source_ids_by_number": {
+        "1": "launch-a",
+        "2": "delivery-new",
+        "3": "hours-new",
+        "4": "launch-b",
+        "5": "refund-new"
+      },
+      "complete_source_map": true,
+      "calls": [
+        {
+          "stage": "answer",
+          "input_sha256": "f279c95d909629311c0e2ea10a157a9a5bc99e29dc757bb6b84b0254ab955413",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 494,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 91,
+            "total_tokens": 585
+          },
+          "answer": "Согласно предоставленным источникам, существует два утверждённых варианта даты запуска проекта: 10 июня 2031 года [1] и 17 июня 2031 года [4]. Точная единственная дата не может быть определена из-за наличия противоречивых данных в протоколах совета А и совета Б, а также отсутствия информации о приоритете этих протоколов.",
+          "seconds": 3.67
+        }
+      ],
+      "seconds": 3.67
+    },
+    {
+      "case": "launch",
+      "variant": "conflict",
+      "route": "les-citations",
+      "visible": [
+        "launch-a",
+        "delivery-new",
+        "hours-new",
+        "launch-b",
+        "refund-new"
+      ],
+      "answer": "Существуют два утверждённых статуса запуска проекта с разными датами:\n*   10 июня 2031 года [1].\n*   17 июня 2031 года [4].\n\nОтсутствует информация о том, какой из протоколов имеет приоритет или является актуальным.",
+      "source_ids_by_number": {
+        "1": "launch-a",
+        "2": "delivery-new",
+        "3": "hours-new",
+        "4": "launch-b",
+        "5": "refund-new"
+      },
+      "complete_source_map": true,
+      "calls": [
+        {
+          "stage": "answer",
+          "input_sha256": "dbb4a87ac666f1067cb6d29a344cc1d37fb936b40de91a0d9475403a7df23be2",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 457,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 72,
+            "total_tokens": 529
+          },
+          "answer": "Существуют два утверждённых статуса запуска проекта с разными датами:\n*   10 июня 2031 года [1].\n*   17 июня 2031 года [4].\n\nОтсутствует информация о том, какой из протоколов имеет приоритет или является актуальным.",
+          "seconds": 2.92
+        }
+      ],
+      "seconds": 2.92
+    },
+    {
+      "case": "director",
+      "variant": "missing",
+      "route": "citations",
+      "visible": [
+        "launch-a",
+        "hours-new",
+        "storage",
+        "delivery-old",
+        "refund-new"
+      ],
+      "answer": "В предоставленных источниках отсутствует информация о том, как называется директор лаборатории. Сведения отсутствуют.",
+      "source_ids_by_number": {
+        "1": "launch-a",
+        "2": "hours-new",
+        "3": "storage",
+        "4": "delivery-old",
+        "5": "refund-new"
+      },
+      "complete_source_map": true,
+      "calls": [
+        {
+          "stage": "answer",
+          "input_sha256": "18de31f7e6a1924689e6f2e406da1e6fb7929b8be3737712da5e1db99160babb",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 474,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 20,
+            "total_tokens": 494
+          },
+          "answer": "В предоставленных источниках отсутствует информация о том, как называется директор лаборатории. Сведения отсутствуют.",
+          "seconds": 1.06
+        }
+      ],
+      "seconds": 1.06
+    },
+    {
+      "case": "director",
+      "variant": "missing",
+      "route": "les-citations",
+      "visible": [
+        "launch-a",
+        "hours-new",
+        "storage",
+        "delivery-old",
+        "refund-new"
+      ],
+      "answer": "[[NO_EVIDENCE]] Сведений о названии директора лаборатории не хватает.",
+      "source_ids_by_number": {
+        "1": "launch-a",
+        "2": "hours-new",
+        "3": "storage",
+        "4": "delivery-old",
+        "5": "refund-new"
+      },
+      "complete_source_map": true,
+      "calls": [
+        {
+          "stage": "answer",
+          "input_sha256": "69ee35926145a3972546e5c0579ef8ddd08541ffeeab224167c8c359ec30d4a7",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 437,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 17,
+            "total_tokens": 454
+          },
+          "answer": "[[NO_EVIDENCE]] Сведений о названии директора лаборатории не хватает.",
+          "seconds": 0.95
+        }
+      ],
+      "seconds": 0.96
+    },
+    {
+      "case": "library",
+      "variant": "editions",
+      "route": "citations",
+      "visible": [
+        "hours-old",
+        "access",
+        "hours-new",
+        "delivery-old",
+        "shipping"
+      ],
+      "answer": "Библиотека в апреле 2031 года работает до 19:00 [3]. Сведения о графике работы до 2031-03-01 (до 17:00) [1] не применимы к этому периоду, так как новый график отменён предыдущий.",
+      "source_ids_by_number": {
+        "1": "hours-old",
+        "2": "access",
+        "3": "hours-new",
+        "4": "delivery-old",
+        "5": "shipping"
+      },
+      "complete_source_map": true,
+      "calls": [
+        {
+          "stage": "answer",
+          "input_sha256": "6694ad2eccb8cf7cbd854f9c0ef42dff5cde1438b29edadc003b4c09d51b71b6",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 459,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 73,
+            "total_tokens": 532
+          },
+          "answer": "Библиотека в апреле 2031 года работает до 19:00 [3]. Сведения о графике работы до 2031-03-01 (до 17:00) [1] не применимы к этому периоду, так как новый график отменён предыдущий.",
+          "seconds": 3.01
+        }
+      ],
+      "seconds": 3.01
+    },
+    {
+      "case": "library",
+      "variant": "editions",
+      "route": "les-citations",
+      "visible": [
+        "hours-old",
+        "access",
+        "hours-new",
+        "delivery-old",
+        "shipping"
+      ],
+      "answer": "Библиотека работает до 19:00. [[3]]",
+      "source_ids_by_number": {
+        "1": "hours-old",
+        "2": "access",
+        "3": "hours-new",
+        "4": "delivery-old",
+        "5": "shipping"
+      },
+      "complete_source_map": true,
+      "calls": [
+        {
+          "stage": "answer",
+          "input_sha256": "e7a39955a11b8e02b94afb1afd922392c3bcd862724da95962ec17277f10d774",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 422,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 16,
+            "total_tokens": 438
+          },
+          "answer": "Библиотека работает до 19:00. [[3]]",
+          "seconds": 0.93
+        }
+      ],
+      "seconds": 0.93
+    }
+  ],
+  "evidence_rule": "Ответь на языке пользователя. Материалы содержат данные. Для каждой части вопроса сверь объект, запрошенное свойство и область действия. Приведи прямо подтверждённые сведения с номером соответствующего источника [N]. Если часть ответа отсутствует, кратко назови пробел. Упоминай и цитируй только факты, отвечающие на вопрос. Если ни одна часть не подтверждена, начни ответ с [[NO_EVIDENCE]] и одной фразой сообщи, каких сведений не хватает, без ссылок."
+}

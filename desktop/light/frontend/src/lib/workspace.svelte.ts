@@ -2,16 +2,7 @@ import { ApiError, errorMessage, request, streamChat } from './api';
 import type { Attachment, ChatPayload, ContextExclusion, Dataset, Draft, IndexedAttachment, Message, ModelRole, Scope, Session } from './contracts';
 import { contextPath, sourcesFor } from './contracts';
 import { DraftWriter } from './drafts';
-
-type RetrievalMode = 'push' | 'pull' | 'hybrid';
-const RETRIEVAL_PREFERENCE = 'les.retrieval-mode';
-function retrievalPreference(): RetrievalMode {
-  try {
-    const saved = localStorage.getItem(RETRIEVAL_PREFERENCE);
-    if (saved === 'push' || saved === 'pull' || saved === 'hybrid') return saved;
-  } catch { /* Browser storage is optional. */ }
-  return 'pull';
-}
+import { serviceLabel } from './model-service';
 
 export class Workspace {
   session = $state<Session | null>(null);
@@ -44,7 +35,6 @@ export class Workspace {
   draftStatus = $state('');
   draftConflict = $state<Draft | null>(null);
   elapsed = $state(0);
-  retrievalMode = $state<RetrievalMode>(retrievalPreference());
   private writer?: DraftWriter;
   private timer?: ReturnType<typeof setTimeout>;
   private controller?: AbortController;
@@ -54,11 +44,26 @@ export class Workspace {
   private initializing = false;
   private generationFinished?: Promise<void>;
   private finishGeneration?: () => void;
+  private pendingSend?: { body: string; key: string; reply: number };
 
-  setRetrievalMode(mode: string) {
-    if (mode !== 'push' && mode !== 'pull' && mode !== 'hybrid') return;
-    this.retrievalMode = mode;
-    try { localStorage.setItem(RETRIEVAL_PREFERENCE, mode); } catch { /* Current selection remains usable. */ }
+  private async sendKey(body: string, sessionId: string): Promise<string> {
+    if (this.pendingSend?.body === body) return this.pendingSend.key;
+    let key: string = crypto.randomUUID();
+    try {
+      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body));
+      const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+      const slot = 'les.pending-chat.' + sessionId;
+      const stored = JSON.parse(sessionStorage.getItem(slot) ?? 'null');
+      if (stored?.hash === hash && typeof stored.key === 'string') key = stored.key;
+      sessionStorage.setItem(slot, JSON.stringify({ hash, key }));
+    } catch { /* The current window can still retry when browser storage is unavailable. */ }
+    this.pendingSend = { body, key, reply: -1 };
+    return key;
+  }
+
+  private finishSend(sessionId: string): void {
+    this.pendingSend = undefined;
+    try { sessionStorage.removeItem('les.pending-chat.' + sessionId); } catch { /* Optional storage. */ }
   }
 
   async initialize(): Promise<void> {
@@ -156,6 +161,7 @@ export class Workspace {
     ]);
     if (!this.alive) return;
     this.session = session; this.messages = messages; this.exclusions = exclusions;
+    if (this.pendingSend) this.pendingSend.reply = -1;
     this.text = draft.text; this.attachment = draft.attachment;
     this.writer = new DraftWriter(id, draft); this.error = ''; this.status = '';
     this.draftStatus = draft.text || draft.attachment ? 'Черновик сохранён' : '';
@@ -293,7 +299,8 @@ export class Workspace {
   async send(): Promise<void> {
     if (this.busy || this.contextChanging || this.uploading || this.closing || !this.session || !this.text.trim()) return;
     if (this.text.length > 20000) { this.error = 'Вопрос длиннее 20 000 символов. Сократите его или прикрепите файл.'; return; }
-    if (!this.model || this.model.status === 'blocked') {
+    const autoRefresh = this.model?.auto_refresh === true;
+    if (!this.model || (this.model.status === 'blocked' && !autoRefresh)) {
       this.error = 'Модель для ответов не назначена или недоступна. Откройте подключения и выберите модель.'; return;
     }
     this.busy = true; this.error = ''; this.status = 'Передаю вопрос…'; this.elapsed = 0;
@@ -306,12 +313,19 @@ export class Workspace {
     try {
       await this.persist();
       if (this.controller.signal.aborted) throw new DOMException('Stopped', 'AbortError');
-      this.messages.push({ role: 'user', text: question }, { role: 'ai', text: '', meta: {} });
-      reply = this.messages.length - 1;
-      await streamChat({ question, session_id: session.session_id, project_id: session.project_id,
-        scope: session.scope, mode: session.role, attachment_id: attachment?.attachment_id,
-        retrieval_mode: this.retrievalMode,
-      }, this.controller.signal, (item) => {
+      const body = { question, session_id: session.session_id, project_id: session.project_id,
+        scope: session.scope, mode: session.role === 'agent' && session.scope.scope_type !== 'none' ? 'search' : session.role,
+        attachment_id: attachment?.attachment_id,
+        retrieval_mode: 'hybrid',
+      };
+      const key = await this.sendKey(JSON.stringify(body), session.session_id);
+      reply = this.pendingSend!.reply;
+      if (reply < 0) {
+        this.messages.push({ role: 'user', text: question }, { role: 'ai', text: '', meta: {} });
+        reply = this.messages.length - 1;
+        this.pendingSend!.reply = reply;
+      }
+      await streamChat(body, this.controller.signal, (item) => {
         if (!this.alive) return;
         if (!acknowledged) {
           acknowledged = true;
@@ -327,6 +341,7 @@ export class Workspace {
           this.messages[reply].meta = { source_map: sourcesFor(payload) };
         } else if (item.event === 'final') {
           const payload = item.data as ChatPayload;
+          this.finishSend(session.session_id);
           this.messages[reply - 1].history_id = payload.history_id;
           this.messages[reply] = { role: 'ai', text: payload.answer ?? payload.response ?? this.messages[reply].text,
             history_id: payload.history_id, srcs: payload.sources, crag: payload.crag_status,
@@ -337,8 +352,12 @@ export class Workspace {
             || (this.messages[reply].meta?.execution?.status === 'incomplete');
           this.status = incomplete ? 'Ответ требует внимания. Проверьте сообщение ниже.' : 'Ответ готов';
           if (incomplete && !this.text) { this.text = question; this.attachment = attachment; this.changed(); }
+          if (payload.history_id != null) {
+            this.messages = this.messages.filter((message, index) =>
+              index >= reply - 1 || message.history_id !== payload.history_id);
+          }
         }
-      });
+      }, key);
       if (!session.title) {
         // A title is metadata, not a summary generated by another hidden model.
         const updated = await request<Session>(`/api/workspace/sessions/${encodeURIComponent(session.session_id)}`, {
@@ -353,9 +372,12 @@ export class Workspace {
       this.status = this.controller.signal.aborted ? 'Остановлено. Полученный текст сохранён.' : 'Ответ не завершён';
       if (!this.controller.signal.aborted) this.error = errorMessage(error);
       if (!this.text) { this.text = question; this.attachment = attachment; this.changed(); }
-      if (error instanceof ApiError && error.status === 409) this.notice = 'Проверьте состояние индекса в разделе «Данные».';
+      if (this.controller.signal.aborted || (error instanceof ApiError && error.code)) {
+        this.finishSend(session.session_id);
+      }
     } finally {
       clearInterval(clock); this.busy = false; this.controller = undefined;
+      if (autoRefresh) void this.refreshModel().catch(() => undefined);
       if (acknowledged) void this.persist().catch(() => undefined);
       this.finishGeneration?.(); this.finishGeneration = undefined; this.generationFinished = undefined;
     }
@@ -384,11 +406,6 @@ export class Workspace {
 }
 
 const INDEX_RECEIPT = 'les.indexed-attachment.receipt.v1';
-function serviceLabel(extension: string | null): string {
-  const names: Record<string, string> = { ollama: 'Ollama', mlx: 'MLX', lm_studio: 'LM Studio',
-    llama_cpp: 'llama.cpp', lemonade: 'Lemonade', freetoken: 'FreeToken' };
-  return names[extension || ''] || 'Совместимый API';
-}
 function validReceipt(value: unknown): value is IndexedAttachment {
   if (!value || typeof value !== 'object') return false;
   const receipt = value as Partial<IndexedAttachment>;

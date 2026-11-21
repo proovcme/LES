@@ -10,7 +10,8 @@ from tests.test_light_native_chat_turn import native_turn
 pytestmark=pytest.mark.parametrize('native_turn',['public'],indirect=True)
 
 
-def test_native_settings_create_probe_assign_rotate_and_disable(native_turn):
+@pytest.mark.parametrize('accepts_reasoning_control', [False, True])
+def test_native_settings_create_probe_assign_rotate_and_disable(native_turn, accepts_reasoning_control):
     seen=[]
 
     class Probe(BaseHTTPRequestHandler):
@@ -21,7 +22,10 @@ def test_native_settings_create_probe_assign_rotate_and_disable(native_turn):
             if self.path.endswith('/embeddings'):
                 payload={'data':[{'embedding':[1.0,0.0]}]}
             else:
-                payload={'choices':[{'message':{'content':'ok'}}]}
+                message = {'content':'ok'}
+                if not (accepts_reasoning_control and data.get('reasoning_effort') == 'none'):
+                    message['reasoning_content'] = 'probe reasoning'
+                payload={'choices':[{'message':message, 'finish_reason':'stop'}]}
             body=json.dumps(payload).encode()
             self.send_response(200);self.send_header('Content-Length',str(len(body)));self.end_headers()
             self.wfile.write(body)
@@ -42,6 +46,9 @@ def test_native_settings_create_probe_assign_rotate_and_disable(native_turn):
         probe=client.post(f'{route}/{ident}/test',json={'revision_id':revision,'capabilities':['embeddings','chat_completions']})
         assert probe.is_success,probe.json()
         assert {r['name'] for r in probe.json()['capabilities'] if r['state']=='supported'}=={'embeddings','chat_completions'}
+        assert any(body.get('reasoning_effort') == 'none' for _, _, body in seen)
+        snapshot = native_turn.registry.latest_capability_snapshot(revision)
+        assert snapshot.transport_options.get('reasoning_control') == ('reasoning_effort_none' if accepts_reasoning_control else None)
         assert seen and all(row[1]=='Bearer fixture-key' for row in seen)
         binding=client.put(route+'/roles/embeddings',json=bind).raise_for_status().json()
         assert binding['connection_revision_id']==revision

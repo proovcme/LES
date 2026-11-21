@@ -1,0 +1,979 @@
+{
+  "model": "qwen3.5:9b",
+  "embedding": "bge-m3",
+  "folders": [
+    {
+      "folder": "pump-without-south",
+      "indexed": 59,
+      "cases": [
+        {
+          "case": "pump",
+          "question": "При каком давлении испытывают насосы на северном и южном участках и при каком условии можно начинать эти испытания?",
+          "http": 200,
+          "error": null,
+          "answer": "давление · насосы на северном участке — На участке Север приёмочное испытание насоса проводят при давлении 184 кПа. [Источник 1]\n\nдавление · насосы на южном участке — В предоставленных материалах сведений нет.\n\nусловие начала испытаний · насосы на северном и южном участках — Допуск к приёмочным испытаниям насосов на обоих участках выдаётся только после охлаждения теплоносителя до 26 °C. [Источник 4]",
+          "linked_originals": {
+            "1": {
+              "file": "files/017.txt",
+              "sha256": "6611237b9bf7f50834bc83a6f45e755ea339ebf7685941cc5def636fcd7078e2"
+            },
+            "4": {
+              "file": "files/032.txt",
+              "sha256": "793acc74fdb7fd2797364f7b9a513ad21be317daf4dca9424e8f2c4f10d6218e"
+            }
+          },
+          "attempts": [
+            {
+              "case": "pump",
+              "variant": "http",
+              "route": "parts",
+              "visible": [
+                "017",
+                "119",
+                "070",
+                "032",
+                "144",
+                "224"
+              ],
+              "answer": "давление · насосы на северном участке — На участке Север приёмочное испытание насоса проводят при давлении 184 кПа. [1]\n\nдавление · насосы на южном участке — В предоставленных материалах сведений нет.\n\nусловие начала испытаний · насосы на северном и южном участках — Допуск к приёмочным испытаниям насосов на обоих участках выдаётся только после охлаждения теплоносителя до 26 °C. [4]",
+              "source_ids_by_number": {
+                "1": "017",
+                "2": "119",
+                "3": "070",
+                "4": "032",
+                "5": "144",
+                "6": "224"
+              },
+              "complete_source_map": true,
+              "calls": [
+                {
+                  "stage": "parts",
+                  "input_sha256": "ea7021d78a738e839448b1db585303b8fc2bc518ca47c07d0e0b912e79d76702",
+                  "finish": "stop",
+                  "usage": {
+                    "prompt_tokens": 194,
+                    "prompt_tokens_details": {
+                      "cached_tokens": 0
+                    },
+                    "completion_tokens": 100,
+                    "total_tokens": 294
+                  },
+                  "answer": "{\n  \"properties\": [\n    {\n      \"subject_property\": \"давление\",\n      \"scopes\": [\"насосы на северном участке\", \"насосы на южном участке\"],\n      \"period\": \"\"\n    },\n    {\n      \"subject_property\": \"условие начала испытаний\",\n      \"scopes\": [\"насосы на северном и южном участках\"],\n      \"period\": \"\"\n    }\n  ]\n}",
+                  "seconds": 13.45,
+                  "request_sha256": "6f5edef64e2ca514f1de2c3472a23d689960f2da7fea9d619274cb838116f360"
+                },
+                {
+                  "stage": "read",
+                  "input_sha256": "f41e021d8fe8f7c170c8ad3b16132cdd337e7197870faaf11f0165e0991029b2",
+                  "finish": "stop",
+                  "usage": {
+                    "prompt_tokens": 447,
+                    "prompt_tokens_details": {
+                      "cached_tokens": 0
+                    },
+                    "completion_tokens": 18,
+                    "total_tokens": 465
+                  },
+                  "answer": "{\"status\": \"supported\", \"excerpts\": [\"1.1\"]}",
+                  "seconds": 1.26,
+                  "request_sha256": "8f7330d1eea9485540763fc0728b9aae3dbef0a8cd48331fac779aae90c719ba"
+                },
+                {
+                  "stage": "read",
+                  "input_sha256": "4b247c1d69aa98cb97fb03202cbf536eeb411ee9f5f5961c03068cf5a9f27cea",
+                  "finish": "stop",
+                  "usage": {
+                    "prompt_tokens": 447,
+                    "prompt_tokens_details": {
+                      "cached_tokens": 0
+                    },
+                    "completion_tokens": 15,
+                    "total_tokens": 462
+                  },
+                  "answer": "{\"status\": \"missing\", \"excerpts\": []}",
+                  "seconds": 1.05,
+                  "request_sha256": "0b156c8accab6af5efd2d9020aea6a3103932b341b3f762538a39dfb1830bd5c"
+                },
+                {
+                  "stage": "read",
+                  "input_sha256": "fabe0e6a4117d29f6410d5fe5453c07b23808a9a5537fc3f88311b5475065a81",
+                  "finish": "stop",
+                  "usage": {
+                    "prompt_tokens": 453,
+                    "prompt_tokens_details": {
+                      "cached_tokens": 0
+                    },
+                    "completion_tokens": 18,
+                    "total_tokens": 471
+                  },
+                  "answer": "{\"status\": \"supported\", \"excerpts\": [\"4.1\"]}",
+                  "seconds": 1.19,
+                  "request_sha256": "169817158a37d3187e54119443034beaf7854f7dd1fde3375853ce500377cfc8"
+                },
+                {
+                  "stage": "review",
+                  "input_sha256": "1ebd5f0b8fa81197e80ad510667d8af27eb0a67035f8bb38c30b3149ce40b331",
+                  "finish": "stop",
+                  "usage": {
+                    "prompt_tokens": 287,
+                    "prompt_tokens_details": {
+                      "cached_tokens": 0
+                    },
+                    "completion_tokens": 18,
+                    "total_tokens": 305
+                  },
+                  "answer": "{\"accepted\": [\"1/1.1\", \"3/4.1\"]}",
+                  "seconds": 0.96,
+                  "request_sha256": "7d716951a9562ee01b46574df020729e59ab6a98b1bc31e76349a9387233d974"
+                }
+              ],
+              "part_trace": {
+                "properties": [
+                  {
+                    "subject_property": "давление",
+                    "scopes": [
+                      "насосы на северном участке",
+                      "насосы на южном участке"
+                    ],
+                    "period": ""
+                  },
+                  {
+                    "subject_property": "условие начала испытаний",
+                    "scopes": [
+                      "насосы на северном и южном участках"
+                    ],
+                    "period": ""
+                  }
+                ],
+                "editions": {},
+                "readings": [
+                  {
+                    "property": "давление",
+                    "scope": "насосы на северном участке",
+                    "period": "",
+                    "status": "supported",
+                    "excerpts": [
+                      "1.1"
+                    ]
+                  },
+                  {
+                    "property": "давление",
+                    "scope": "насосы на южном участке",
+                    "period": "",
+                    "status": "missing",
+                    "excerpts": []
+                  },
+                  {
+                    "property": "условие начала испытаний",
+                    "scope": "насосы на северном и южном участках",
+                    "period": "",
+                    "status": "supported",
+                    "excerpts": [
+                      "4.1"
+                    ]
+                  }
+                ],
+                "accepted": [
+                  "1/1.1",
+                  "3/4.1"
+                ]
+              },
+              "seconds": 17.91
+            }
+          ]
+        },
+        {
+          "case": "pump-rephrased",
+          "question": "Что нужно сделать до приёмочных испытаний насосов на участках Север и Юг? Укажи общее условие и отдельно давление для каждого участка.",
+          "http": 200,
+          "error": null,
+          "answer": "приёмочные испытания насосов · Север — Допуск к приёмочным испытаниям насосов на обоих участках выдаётся только после охлаждения теплоносителя до 26 °C. [Источник 4]\n\nприёмочные испытания насосов · Юг — Допуск к приёмочным испытаниям насосов на обоих участках выдаётся только после охлаждения теплоносителя до 26 °C. [Источник 4]\n\nдавление · Север — На участке Север приёмочное испытание насоса проводят при давлении 184 кПа. [Источник 1]\n\nдавление · Юг — В предоставленных материалах сведений нет.",
+          "linked_originals": {
+            "1": {
+              "file": "files/017.txt",
+              "sha256": "6611237b9bf7f50834bc83a6f45e755ea339ebf7685941cc5def636fcd7078e2"
+            },
+            "4": {
+              "file": "files/032.txt",
+              "sha256": "793acc74fdb7fd2797364f7b9a513ad21be317daf4dca9424e8f2c4f10d6218e"
+            }
+          },
+          "attempts": [
+            {
+              "case": "pump-rephrased",
+              "variant": "http",
+              "route": "parts",
+              "visible": [
+                "017",
+                "119",
+                "083",
+                "032",
+                "201",
+                "144"
+              ],
+              "answer": "приёмочные испытания насосов · Север — Допуск к приёмочным испытаниям насосов на обоих участках выдаётся только после охлаждения теплоносителя до 26 °C. [4]\n\nприёмочные испытания насосов · Юг — Допуск к приёмочным испытаниям насосов на обоих участках выдаётся только после охлаждения теплоносителя до 26 °C. [4]\n\nдавление · Север — На участке Север приёмочное испытание насоса проводят при давлении 184 кПа. [1]\n\nдавление · Юг — В предоставленных материалах сведений нет.",
+              "source_ids_by_number": {
+                "1": "017",
+                "2": "119",
+                "3": "083",
+                "4": "032",
+                "5": "201",
+                "6": "144"
+              },
+              "complete_source_map": true,
+              "calls": [
+                {
+                  "stage": "parts",
+                  "input_sha256": "dfb39cc446e319e47b299a6f438e70c736c3f9f69e0693f9a6661f8ecbad4bc7",
+                  "finish": "stop",
+                  "usage": {
+                    "prompt_tokens": 199,
+                    "prompt_tokens_details": {
+                      "cached_tokens": 0
+                    },
+                    "completion_tokens": 107,
+                    "total_tokens": 306
+                  },
+                  "answer": "{\n  \"properties\": [\n    {\n      \"subject_property\": \"приёмочные испытания насосов\",\n      \"scopes\": [\n        \"Север\",\n        \"Юг\"\n      ],\n      \"period\": \"\"\n    },\n    {\n      \"subject_property\": \"давление\",\n      \"scopes\": [\n        \"Север\",\n        \"Юг\"\n      ],\n      \"period\": \"\"\n    }\n  ]\n}",
+                  "seconds": 13.92,
+                  "request_sha256": "283870178f81d086cfcf9c91d0daa846f12cc404950c7bd5a629db3fea7f4d16"
+                },
+                {
+                  "stage": "read",
+                  "input_sha256": "b496229934f9bda4d38e09c6a78d8f493080223f710b80988df394ca3668b89c",
+                  "finish": "stop",
+                  "usage": {
+                    "prompt_tokens": 436,
+                    "prompt_tokens_details": {
+                      "cached_tokens": 0
+                    },
+                    "completion_tokens": 18,
+                    "total_tokens": 454
+                  },
+                  "answer": "{\"status\": \"supported\", \"excerpts\": [\"4.1\"]}",
+                  "seconds": 1.21,
+                  "request_sha256": "9ac17b93b2dfb16ff737457da0bd8fcdefc1a90b02d87fd90891044d3f45665f"
+                },
+                {
+                  "stage": "read",
+                  "input_sha256": "02e8fd10a8723f8859518c121f5430ee4319e87e4689a45b368ac5ed3710cace",
+                  "finish": "stop",
+                  "usage": {
+                    "prompt_tokens": 436,
+                    "prompt_tokens_details": {
+                      "cached_tokens": 0
+                    },
+                    "completion_tokens": 23,
+                    "total_tokens": 459
+                  },
+                  "answer": "{\"status\": \"supported\", \"excerpts\": [\"4.1\", \"5.1\"]}",
+                  "seconds": 1.37,
+                  "request_sha256": "a5af55973f599b308cf11bb61d8f24204f37a365145d2aa507aade76efadbaca"
+                },
+                {
+                  "stage": "read",
+                  "input_sha256": "87418e62cf70f7b0976e1c5e1fff1c1e1b02c435aa6e526b2870efaeb079e018",
+                  "finish": "stop",
+                  "usage": {
+                    "prompt_tokens": 431,
+                    "prompt_tokens_details": {
+                      "cached_tokens": 0
+                    },
+                    "completion_tokens": 18,
+                    "total_tokens": 449
+                  },
+                  "answer": "{\"status\": \"supported\", \"excerpts\": [\"1.1\"]}",
+                  "seconds": 1.16,
+                  "request_sha256": "19c1c04a0a9881cbf7eb9247c7fffcf093749b44fc3779c0fce93489908b45a6"
+                },
+                {
+                  "stage": "read",
+                  "input_sha256": "1522adba887de7e034a3a9ce6ef886c76c8debb2cccfb235fcbca9aad9949350",
+                  "finish": "stop",
+                  "usage": {
+                    "prompt_tokens": 431,
+                    "prompt_tokens_details": {
+                      "cached_tokens": 0
+                    },
+                    "completion_tokens": 15,
+                    "total_tokens": 446
+                  },
+                  "answer": "{\"status\": \"missing\", \"excerpts\": []}",
+                  "seconds": 1.01,
+                  "request_sha256": "beba409ba01b8ce80eda77307c406d9ce56fa10d29af7afaae6bff345c4c450c"
+                },
+                {
+                  "stage": "review",
+                  "input_sha256": "e2bfefb14f3d51489c5dd5ad26e7732c62f4226f2c9e49ede12208b504c508a0",
+                  "finish": "stop",
+                  "usage": {
+                    "prompt_tokens": 405,
+                    "prompt_tokens_details": {
+                      "cached_tokens": 0
+                    },
+                    "completion_tokens": 25,
+                    "total_tokens": 430
+                  },
+                  "answer": "{\"accepted\": [\"1/4.1\", \"2/4.1\", \"3/1.1\"]}",
+                  "seconds": 1.25,
+                  "request_sha256": "8e9c5266a08b9e82bdb6f8cb2c1704116bf0fb81adaaab89818621bea9bb0bc1"
+                }
+              ],
+              "part_trace": {
+                "properties": [
+                  {
+                    "subject_property": "приёмочные испытания насосов",
+                    "scopes": [
+                      "Север",
+                      "Юг"
+                    ],
+                    "period": ""
+                  },
+                  {
+                    "subject_property": "давление",
+                    "scopes": [
+                      "Север",
+                      "Юг"
+                    ],
+                    "period": ""
+                  }
+                ],
+                "editions": {},
+                "readings": [
+                  {
+                    "property": "приёмочные испытания насосов",
+                    "scope": "Север",
+                    "period": "",
+                    "status": "supported",
+                    "excerpts": [
+                      "4.1"
+                    ]
+                  },
+                  {
+                    "property": "приёмочные испытания насосов",
+                    "scope": "Юг",
+                    "period": "",
+                    "status": "supported",
+                    "excerpts": [
+                      "4.1",
+                      "5.1"
+                    ]
+                  },
+                  {
+                    "property": "давление",
+                    "scope": "Север",
+                    "period": "",
+                    "status": "supported",
+                    "excerpts": [
+                      "1.1"
+                    ]
+                  },
+                  {
+                    "property": "давление",
+                    "scope": "Юг",
+                    "period": "",
+                    "status": "missing",
+                    "excerpts": []
+                  }
+                ],
+                "accepted": [
+                  "1/4.1",
+                  "2/4.1",
+                  "3/1.1"
+                ]
+              },
+              "seconds": 19.92
+            }
+          ]
+        },
+        {
+          "case": "warranty",
+          "question": "Какой установлен срок гарантии на насосы северного и южного участков в месяцах?",
+          "http": 200,
+          "error": null,
+          "answer": "срок гарантии на насосы · северный участок — В предоставленных материалах сведений нет.\n\nсрок гарантии на насосы · южный участок — В предоставленных материалах сведений нет.",
+          "linked_originals": {},
+          "attempts": [
+            {
+              "case": "warranty",
+              "variant": "http",
+              "route": "parts",
+              "visible": [
+                "094",
+                "032",
+                "119",
+                "144",
+                "017",
+                "083"
+              ],
+              "answer": "[[NO_EVIDENCE]] срок гарантии на насосы · северный участок — В предоставленных материалах сведений нет.\n\nсрок гарантии на насосы · южный участок — В предоставленных материалах сведений нет.",
+              "source_ids_by_number": {
+                "1": "094",
+                "2": "032",
+                "3": "119",
+                "4": "144",
+                "5": "017",
+                "6": "083"
+              },
+              "complete_source_map": true,
+              "calls": [
+                {
+                  "stage": "parts",
+                  "input_sha256": "678be55fa858a65742567923e9bea7c6a70cd632b733758ead9cceff2a4549a8",
+                  "finish": "stop",
+                  "usage": {
+                    "prompt_tokens": 188,
+                    "prompt_tokens_details": {
+                      "cached_tokens": 0
+                    },
+                    "completion_tokens": 55,
+                    "total_tokens": 243
+                  },
+                  "answer": "{\n  \"properties\": [\n    {\n      \"subject_property\": \"срок гарантии на насосы\",\n      \"scopes\": [\"северный участок\", \"южный участок\"],\n      \"period\": \"\"\n    }\n  ]\n}",
+                  "seconds": 13.21,
+                  "request_sha256": "5ddbe1995eecc50ce68b02652a75127e9c215883417aac61812550023a85158b"
+                },
+                {
+                  "stage": "read",
+                  "input_sha256": "20c812853bd8a83fe5643bd5b6589baae48cdba44f50f6b900b813f867fa59d5",
+                  "finish": "stop",
+                  "usage": {
+                    "prompt_tokens": 410,
+                    "prompt_tokens_details": {
+                      "cached_tokens": 0
+                    },
+                    "completion_tokens": 15,
+                    "total_tokens": 425
+                  },
+                  "answer": "{\"status\": \"missing\", \"excerpts\": []}",
+                  "seconds": 1.05,
+                  "request_sha256": "65a67dff1a3d0888f80b41c6a88aa5a43b3c3eb8b04c0ced33ca68352c20816b"
+                },
+                {
+                  "stage": "read",
+                  "input_sha256": "d790d8f41de8a6efd091549a005f3327be175523579cfe9f08d3725e6446b8d3",
+                  "finish": "stop",
+                  "usage": {
+                    "prompt_tokens": 409,
+                    "prompt_tokens_details": {
+                      "cached_tokens": 0
+                    },
+                    "completion_tokens": 15,
+                    "total_tokens": 424
+                  },
+                  "answer": "{\"status\": \"missing\", \"excerpts\": []}",
+                  "seconds": 1.03,
+                  "request_sha256": "29c7cf3cc87db42708d65f8e0137bfdf61fd3c9e161656656fb18111c700f766"
+                }
+              ],
+              "part_trace": {
+                "properties": [
+                  {
+                    "subject_property": "срок гарантии на насосы",
+                    "scopes": [
+                      "северный участок",
+                      "южный участок"
+                    ],
+                    "period": ""
+                  }
+                ],
+                "editions": {},
+                "readings": [
+                  {
+                    "property": "срок гарантии на насосы",
+                    "scope": "северный участок",
+                    "period": "",
+                    "status": "missing",
+                    "excerpts": []
+                  },
+                  {
+                    "property": "срок гарантии на насосы",
+                    "scope": "южный участок",
+                    "period": "",
+                    "status": "missing",
+                    "excerpts": []
+                  }
+                ],
+                "accepted": []
+              },
+              "seconds": 15.3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "folder": "editions-full",
+      "indexed": 6,
+      "cases": [
+        {
+          "case": "current",
+          "question": "Каковы действующие сроки доставки заказа и возврата товара? Укажи срок и единицу для каждого.",
+          "http": 200,
+          "error": null,
+          "answer": "сроки доставки заказа · доставка — Заказ доставляют за 7 рабочих дней. [Источник 4]\n\nсроки возврата товара · возврат — В предоставленных материалах сведений нет.",
+          "linked_originals": {
+            "4": {
+              "file": "files/delivery-new.txt",
+              "sha256": "51ba8823617d931846cb3d3a483d2d5f22e2942be4cc06710ef39e648af42c01"
+            }
+          },
+          "attempts": [
+            {
+              "case": "current",
+              "variant": "http",
+              "route": "parts",
+              "visible": [
+                "refund-new",
+                "delivery-old",
+                "shipping",
+                "delivery-new",
+                "hours-new",
+                "refund-old"
+              ],
+              "answer": "сроки доставки заказа · доставка — Заказ доставляют за 7 рабочих дней. [4]\n\nсроки возврата товара · возврат — В предоставленных материалах сведений нет.",
+              "source_ids_by_number": {
+                "1": "refund-new",
+                "2": "delivery-old",
+                "3": "shipping",
+                "4": "delivery-new",
+                "5": "hours-new",
+                "6": "refund-old"
+              },
+              "complete_source_map": true,
+              "calls": [
+                {
+                  "stage": "parts",
+                  "input_sha256": "82ec7a17920e1309047bff3a97743f2adfd513f9cc79496125cc6314387eca3f",
+                  "finish": "stop",
+                  "usage": {
+                    "prompt_tokens": 191,
+                    "prompt_tokens_details": {
+                      "cached_tokens": 0
+                    },
+                    "completion_tokens": 95,
+                    "total_tokens": 286
+                  },
+                  "answer": "{\n  \"properties\": [\n    {\n      \"subject_property\": \"сроки доставки заказа\",\n      \"scopes\": [\"доставка\"],\n      \"period\": \"действующая редакция\"\n    },\n    {\n      \"subject_property\": \"сроки возврата товара\",\n      \"scopes\": [\"возврат\"],\n      \"period\": \"действующая редакция\"\n    }\n  ]\n}",
+                  "seconds": 12.77,
+                  "request_sha256": "df4c24fc9a18804af44cbfaf44bba6c6882bc3f72355dbfc424883ce11eb65f7"
+                },
+                {
+                  "stage": "editions",
+                  "input_sha256": "5256436ae7f14258224279d68e70f618e69dfe7c2e8f09ba88b641f96d4fca6f",
+                  "finish": "stop",
+                  "usage": {
+                    "prompt_tokens": 518,
+                    "prompt_tokens_details": {
+                      "cached_tokens": 0
+                    },
+                    "completion_tokens": 87,
+                    "total_tokens": 605
+                  },
+                  "answer": "{\n  \"exclude\": [\n    {\n      \"source\": 1,\n      \"basis\": \"1.4\"\n    },\n    {\n      \"source\": 2,\n      \"basis\": \"2.2\"\n    },\n    {\n      \"source\": 6,\n      \"basis\": \"6.2\"\n    }\n  ]\n}",
+                  "seconds": 3.84,
+                  "request_sha256": "547b0255dadf93f92f6409fe726e38d9330bcddb8d1c161bc15be6da13f9c9f3"
+                },
+                {
+                  "stage": "read",
+                  "input_sha256": "80c8b6e0a3467b0c4aebbec3200f36b0f5162899345f8a38cf96844941c6d1e4",
+                  "finish": "stop",
+                  "usage": {
+                    "prompt_tokens": 392,
+                    "prompt_tokens_details": {
+                      "cached_tokens": 0
+                    },
+                    "completion_tokens": 18,
+                    "total_tokens": 410
+                  },
+                  "answer": "{\"status\": \"supported\", \"excerpts\": [\"4.3\"]}",
+                  "seconds": 1.14,
+                  "request_sha256": "0afd3980cee439172d67152971ed0951f774933055916def33ec17c10d3565d7"
+                },
+                {
+                  "stage": "read",
+                  "input_sha256": "a8cb57adad22c4202903133b925d1faae5d19f3745e45a6a1b08f37696f06621",
+                  "finish": "stop",
+                  "usage": {
+                    "prompt_tokens": 392,
+                    "prompt_tokens_details": {
+                      "cached_tokens": 0
+                    },
+                    "completion_tokens": 15,
+                    "total_tokens": 407
+                  },
+                  "answer": "{\"status\": \"missing\", \"excerpts\": []}",
+                  "seconds": 1.03,
+                  "request_sha256": "989a0141687c610224adf9fddd348d3ffbe1b8bbbda75a7d9423e24b167dcbeb"
+                },
+                {
+                  "stage": "review",
+                  "input_sha256": "6b244d7c27cdc37df0d98e14bc5b8704fc2423a5b1e13db9196831eb03e37aae",
+                  "finish": "stop",
+                  "usage": {
+                    "prompt_tokens": 206,
+                    "prompt_tokens_details": {
+                      "cached_tokens": 0
+                    },
+                    "completion_tokens": 11,
+                    "total_tokens": 217
+                  },
+                  "answer": "{\"accepted\": [\"1/4.3\"]}",
+                  "seconds": 0.62,
+                  "request_sha256": "b2ab56ec9a38b36887f5d88583ee220b4b9534d66113c365ecbf941b40564c63"
+                }
+              ],
+              "part_trace": {
+                "properties": [
+                  {
+                    "subject_property": "сроки доставки заказа",
+                    "scopes": [
+                      "доставка"
+                    ],
+                    "period": "действующая редакция"
+                  },
+                  {
+                    "subject_property": "сроки возврата товара",
+                    "scopes": [
+                      "возврат"
+                    ],
+                    "period": "действующая редакция"
+                  }
+                ],
+                "editions": {
+                  "действующая редакция": [
+                    {
+                      "source": 1,
+                      "basis": "1.4"
+                    },
+                    {
+                      "source": 2,
+                      "basis": "2.2"
+                    },
+                    {
+                      "source": 6,
+                      "basis": "6.2"
+                    }
+                  ]
+                },
+                "readings": [
+                  {
+                    "property": "сроки доставки заказа",
+                    "scope": "доставка",
+                    "period": "действующая редакция",
+                    "status": "supported",
+                    "excerpts": [
+                      "4.3"
+                    ]
+                  },
+                  {
+                    "property": "сроки возврата товара",
+                    "scope": "возврат",
+                    "period": "действующая редакция",
+                    "status": "missing",
+                    "excerpts": []
+                  }
+                ],
+                "accepted": [
+                  "1/4.3"
+                ]
+              },
+              "seconds": 19.4
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "folder": "editions-without-current-refund",
+      "indexed": 5,
+      "cases": [
+        {
+          "case": "current",
+          "question": "Каковы действующие сроки доставки заказа и возврата товара? Укажи срок и единицу для каждого.",
+          "http": 200,
+          "error": null,
+          "answer": "сроки доставки заказа · доставка — Заказ доставляют за 7 рабочих дней. [Источник 4]\n\nсроки возврата товара · возврат — В предоставленных материалах сведений нет.",
+          "linked_originals": {
+            "4": {
+              "file": "files/delivery-new.txt",
+              "sha256": "51ba8823617d931846cb3d3a483d2d5f22e2942be4cc06710ef39e648af42c01"
+            }
+          },
+          "attempts": [
+            {
+              "case": "current",
+              "variant": "http",
+              "route": "parts",
+              "visible": [
+                "refund-old",
+                "shipping",
+                "delivery-old",
+                "delivery-new",
+                "hours-new"
+              ],
+              "answer": "сроки доставки заказа · доставка — Заказ доставляют за 7 рабочих дней. [4]\n\nсроки возврата товара · возврат — В предоставленных материалах сведений нет.",
+              "source_ids_by_number": {
+                "1": "refund-old",
+                "2": "shipping",
+                "3": "delivery-old",
+                "4": "delivery-new",
+                "5": "hours-new"
+              },
+              "complete_source_map": true,
+              "calls": [
+                {
+                  "stage": "parts",
+                  "input_sha256": "82ec7a17920e1309047bff3a97743f2adfd513f9cc79496125cc6314387eca3f",
+                  "finish": "stop",
+                  "usage": {
+                    "prompt_tokens": 191,
+                    "prompt_tokens_details": {
+                      "cached_tokens": 0
+                    },
+                    "completion_tokens": 95,
+                    "total_tokens": 286
+                  },
+                  "answer": "{\n  \"properties\": [\n    {\n      \"subject_property\": \"сроки доставки заказа\",\n      \"scopes\": [\"доставка\"],\n      \"period\": \"действующая редакция\"\n    },\n    {\n      \"subject_property\": \"сроки возврата товара\",\n      \"scopes\": [\"возврат\"],\n      \"period\": \"действующая редакция\"\n    }\n  ]\n}",
+                  "seconds": 12.98,
+                  "request_sha256": "655bc14eb8532962c8cfb807547bc5f59f60448afac08c4879c2493cf2739bc0"
+                },
+                {
+                  "stage": "editions",
+                  "input_sha256": "f75cef47a8fac141e128751c0dc04ebab8685424e5c316705339e23e838e918c",
+                  "finish": "stop",
+                  "usage": {
+                    "prompt_tokens": 447,
+                    "prompt_tokens_details": {
+                      "cached_tokens": 0
+                    },
+                    "completion_tokens": 63,
+                    "total_tokens": 510
+                  },
+                  "answer": "{\n  \"exclude\": [\n    {\n      \"source\": 1,\n      \"basis\": \"1.2\"\n    },\n    {\n      \"source\": 3,\n      \"basis\": \"3.2\"\n    }\n  ]\n}",
+                  "seconds": 2.94,
+                  "request_sha256": "d40831997c93c63eff85f141c3dbd67b3f6342aeb1ee7d4f8e84fdaeb209ee70"
+                },
+                {
+                  "stage": "read",
+                  "input_sha256": "08298bf5508cc6d78034bbe70d892c4d791910931523f068213b3081b623b00f",
+                  "finish": "stop",
+                  "usage": {
+                    "prompt_tokens": 392,
+                    "prompt_tokens_details": {
+                      "cached_tokens": 0
+                    },
+                    "completion_tokens": 18,
+                    "total_tokens": 410
+                  },
+                  "answer": "{\"status\": \"supported\", \"excerpts\": [\"4.3\"]}",
+                  "seconds": 1.22,
+                  "request_sha256": "899d0a1c6deb5253db29af854e3484349f35d2e6a136a2a227d530097bcb31e5"
+                },
+                {
+                  "stage": "read",
+                  "input_sha256": "85c4d9b2926c2cedb05760304726d5f57e7fe6e4da5b704876a91f50f9879c6e",
+                  "finish": "stop",
+                  "usage": {
+                    "prompt_tokens": 392,
+                    "prompt_tokens_details": {
+                      "cached_tokens": 0
+                    },
+                    "completion_tokens": 15,
+                    "total_tokens": 407
+                  },
+                  "answer": "{\"status\": \"missing\", \"excerpts\": []}",
+                  "seconds": 1.04,
+                  "request_sha256": "86c91b9f9ab21ac3685bc98fafe81bf1e410256b39f33bb49c64fdf6cbf86e78"
+                },
+                {
+                  "stage": "review",
+                  "input_sha256": "6b244d7c27cdc37df0d98e14bc5b8704fc2423a5b1e13db9196831eb03e37aae",
+                  "finish": "stop",
+                  "usage": {
+                    "prompt_tokens": 206,
+                    "prompt_tokens_details": {
+                      "cached_tokens": 0
+                    },
+                    "completion_tokens": 11,
+                    "total_tokens": 217
+                  },
+                  "answer": "{\"accepted\": [\"1/4.3\"]}",
+                  "seconds": 0.63,
+                  "request_sha256": "34e5fb0932246b3a0754a740846893a0949499e7456d9985dbfa8a784a6f9e8b"
+                }
+              ],
+              "part_trace": {
+                "properties": [
+                  {
+                    "subject_property": "сроки доставки заказа",
+                    "scopes": [
+                      "доставка"
+                    ],
+                    "period": "действующая редакция"
+                  },
+                  {
+                    "subject_property": "сроки возврата товара",
+                    "scopes": [
+                      "возврат"
+                    ],
+                    "period": "действующая редакция"
+                  }
+                ],
+                "editions": {
+                  "действующая редакция": [
+                    {
+                      "source": 1,
+                      "basis": "1.2"
+                    },
+                    {
+                      "source": 3,
+                      "basis": "3.2"
+                    }
+                  ]
+                },
+                "readings": [
+                  {
+                    "property": "сроки доставки заказа",
+                    "scope": "доставка",
+                    "period": "действующая редакция",
+                    "status": "supported",
+                    "excerpts": [
+                      "4.3"
+                    ]
+                  },
+                  {
+                    "property": "сроки возврата товара",
+                    "scope": "возврат",
+                    "period": "действующая редакция",
+                    "status": "missing",
+                    "excerpts": []
+                  }
+                ],
+                "accepted": [
+                  "1/4.3"
+                ]
+              },
+              "seconds": 18.81
+            }
+          ]
+        },
+        {
+          "case": "historical",
+          "question": "Какой срок возврата допускала редакция 2029 года?",
+          "http": 200,
+          "error": null,
+          "answer": "срок возврата · редакция 2029 года — В предоставленных материалах сведений нет.",
+          "linked_originals": {},
+          "attempts": [
+            {
+              "case": "historical",
+              "variant": "http",
+              "route": "parts",
+              "visible": [
+                "refund-old",
+                "delivery-new",
+                "hours-new",
+                "shipping",
+                "delivery-old"
+              ],
+              "answer": "[[NO_EVIDENCE]] срок возврата · редакция 2029 года — В предоставленных материалах сведений нет.",
+              "source_ids_by_number": {
+                "1": "refund-old",
+                "2": "delivery-new",
+                "3": "hours-new",
+                "4": "shipping",
+                "5": "delivery-old"
+              },
+              "complete_source_map": true,
+              "calls": [
+                {
+                  "stage": "parts",
+                  "input_sha256": "bb8dd06be42c4bb22db3d563d33a90ca7b7f261a80470bd902811198d45c4132",
+                  "finish": "stop",
+                  "usage": {
+                    "prompt_tokens": 185,
+                    "prompt_tokens_details": {
+                      "cached_tokens": 0
+                    },
+                    "completion_tokens": 42,
+                    "total_tokens": 227
+                  },
+                  "answer": "{\"properties\": [{\"subject_property\": \"срок возврата\", \"scopes\": [\"редакция 2029 года\"], \"period\": \"редакция 2029 года\"}]}",
+                  "seconds": 10.9,
+                  "request_sha256": "09b1bc981a3dbd0881076e0683265e38bcbbafd9ac3f43788d13350da429c12e"
+                },
+                {
+                  "stage": "editions",
+                  "input_sha256": "26e66ce67f6891ba1b50906fb7ea03d885cb92ab03b6387cf77ea776b59a8842",
+                  "finish": "stop",
+                  "usage": {
+                    "prompt_tokens": 451,
+                    "prompt_tokens_details": {
+                      "cached_tokens": 0
+                    },
+                    "completion_tokens": 63,
+                    "total_tokens": 514
+                  },
+                  "answer": "{\n  \"exclude\": [\n    {\n      \"source\": 1,\n      \"basis\": \"1.2\"\n    },\n    {\n      \"source\": 5,\n      \"basis\": \"5.2\"\n    }\n  ]\n}",
+                  "seconds": 2.96,
+                  "request_sha256": "93e1fecff0d7e843566b173f80c3469b16d144e30ce60a30b537f816b0a8b1a7"
+                },
+                {
+                  "stage": "read",
+                  "input_sha256": "1b737e3a93719e38ee6e1d1245f14dff5313eb4afb4f4ca2950bff03c151da97",
+                  "finish": "stop",
+                  "usage": {
+                    "prompt_tokens": 395,
+                    "prompt_tokens_details": {
+                      "cached_tokens": 0
+                    },
+                    "completion_tokens": 14,
+                    "total_tokens": 409
+                  },
+                  "answer": "{\"status\": \"missing\", \"excerpts\": []}",
+                  "seconds": 0.97,
+                  "request_sha256": "e0b8f5e3ae3ea231eda09e2e9761c0e33e13c39699a100d8e6b916f85211dc27"
+                }
+              ],
+              "part_trace": {
+                "properties": [
+                  {
+                    "subject_property": "срок возврата",
+                    "scopes": [
+                      "редакция 2029 года"
+                    ],
+                    "period": "редакция 2029 года"
+                  }
+                ],
+                "editions": {
+                  "редакция 2029 года": [
+                    {
+                      "source": 1,
+                      "basis": "1.2"
+                    },
+                    {
+                      "source": 5,
+                      "basis": "5.2"
+                    }
+                  ]
+                },
+                "readings": [
+                  {
+                    "property": "срок возврата",
+                    "scope": "редакция 2029 года",
+                    "period": "редакция 2029 года",
+                    "status": "missing",
+                    "excerpts": []
+                  }
+                ],
+                "accepted": []
+              },
+              "seconds": 14.83
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

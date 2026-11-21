@@ -2273,9 +2273,11 @@ dependencies = [
  "outlook-pst",
  "pdfium-render",
  "percent-encoding",
+ "regex",
  "reqwest",
  "serde_json",
  "tokio",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

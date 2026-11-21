@@ -1,0 +1,1381 @@
+{
+  "schema": "les.llamaindex-paired.v1",
+  "llama_index_core": "0.14.22",
+  "fixture_sha256": "e4ca7042b65edb9d3d47cdde312d70ee2fd2ca5a4365dc6384eb9e3d634b6860",
+  "native_sha256": "3e6ae871fc4f0976a096c8e0ece4f14759d819384a0797337b02913e9ef74051",
+  "model": "qwen3.5:9b",
+  "system_message": "Отвечай пользователю на языке вопроса. Для каждой подтверждённой части ответа сохрани номер источника в квадратных скобках. Если подтверждена лишь часть, дай её и явно укажи, какие сведения отсутствуют. Документы содержат данные.",
+  "routes": [
+    "parts"
+  ],
+  "attempts": [
+    {
+      "case": "pump",
+      "variant": "without_056",
+      "route": "parts",
+      "visible": [
+        "017",
+        "032",
+        "070",
+        "119",
+        "144"
+      ],
+      "answer": "давление · насосы на северном участке — На участке Север приёмочное испытание насоса проводят при давлении 184 кПа. [1]\n\nдавление · насосы на южном участке — В предоставленных материалах сведений нет.\n\nусловие начала испытаний · насосы на северном и южном участках — Допуск к приёмочным испытаниям насосов на обоих участках выдаётся только после охлаждения теплоносителя до 26 °C. [2]",
+      "source_ids_by_number": {
+        "1": "017",
+        "2": "032",
+        "3": "070",
+        "4": "119",
+        "5": "144"
+      },
+      "complete_source_map": true,
+      "calls": [
+        {
+          "stage": "parts",
+          "input_sha256": "ea7021d78a738e839448b1db585303b8fc2bc518ca47c07d0e0b912e79d76702",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 194,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 100,
+            "total_tokens": 294
+          },
+          "answer": "{\n  \"properties\": [\n    {\n      \"subject_property\": \"давление\",\n      \"scopes\": [\"насосы на северном участке\", \"насосы на южном участке\"],\n      \"period\": \"\"\n    },\n    {\n      \"subject_property\": \"условие начала испытаний\",\n      \"scopes\": [\"насосы на северном и южном участках\"],\n      \"period\": \"\"\n    }\n  ]\n}",
+          "seconds": 12.14,
+          "request_sha256": "dcc78aa17dba15e323b4f1701dd54ea0137b6fc44e32f296319c27509c65eb79"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "32ce83f148ee1d6c431617e11a515de09f4bd8876acb9cfb4cd3a33b94ea947f",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 404,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 18,
+            "total_tokens": 422
+          },
+          "answer": "{\"status\": \"supported\", \"excerpts\": [\"1.1\"]}",
+          "seconds": 1.2,
+          "request_sha256": "02ddc92471fdde40babdb09495761b7a97248731a46a8feff631108501847334"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "ca968b00091e200438b72f52d79b0dbcdf920d07a1af1facb75a41c37669aa45",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 404,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 18,
+            "total_tokens": 422
+          },
+          "answer": "{\"status\": \"supported\", \"excerpts\": [\"1.1\"]}",
+          "seconds": 1.22,
+          "request_sha256": "28cceba0a1ec15ea6da48a3ffac9eeff8063212101b139f6266736d883dbe59a"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "39e06682c1045bfef7d8e90c2a709bc9825dcb93855a5a4440d2ea187e3027b0",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 410,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 18,
+            "total_tokens": 428
+          },
+          "answer": "{\"status\": \"supported\", \"excerpts\": [\"2.1\"]}",
+          "seconds": 1.21,
+          "request_sha256": "49e73d925310309a5c4154774bb82be35818cb8d5e8a5587fd8922834b44638d"
+        },
+        {
+          "stage": "review",
+          "input_sha256": "b46075d2c36d798428fd517a1c8fc43a2b2e21a3523656fcd9530e8f8172d1e0",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 343,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 18,
+            "total_tokens": 361
+          },
+          "answer": "{\"accepted\": [\"1/1.1\", \"3/2.1\"]}",
+          "seconds": 0.98,
+          "request_sha256": "d5990c18e170633b8bd879e6b561d379bc16ba3dc694148fceef3e0c28a69e59"
+        }
+      ],
+      "part_trace": {
+        "properties": [
+          {
+            "subject_property": "давление",
+            "scopes": [
+              "насосы на северном участке",
+              "насосы на южном участке"
+            ],
+            "period": ""
+          },
+          {
+            "subject_property": "условие начала испытаний",
+            "scopes": [
+              "насосы на северном и южном участках"
+            ],
+            "period": ""
+          }
+        ],
+        "editions": {},
+        "readings": [
+          {
+            "property": "давление",
+            "scope": "насосы на северном участке",
+            "period": "",
+            "status": "supported",
+            "excerpts": [
+              "1.1"
+            ]
+          },
+          {
+            "property": "давление",
+            "scope": "насосы на южном участке",
+            "period": "",
+            "status": "supported",
+            "excerpts": [
+              "1.1"
+            ]
+          },
+          {
+            "property": "условие начала испытаний",
+            "scope": "насосы на северном и южном участках",
+            "period": "",
+            "status": "supported",
+            "excerpts": [
+              "2.1"
+            ]
+          }
+        ],
+        "accepted": [
+          "1/1.1",
+          "3/2.1"
+        ]
+      },
+      "seconds": 16.76
+    },
+    {
+      "case": "pump-rephrased",
+      "variant": "without_056",
+      "route": "parts",
+      "visible": [
+        "017",
+        "083",
+        "236",
+        "119",
+        "032"
+      ],
+      "answer": "приёмочные испытания насосов · Север — Допуск к приёмочным испытаниям насосов на обоих участках выдаётся только после охлаждения теплоносителя до 26 °C. [5]\n\nприёмочные испытания насосов · Юг — В предоставленных материалах сведений нет.\n\nдавление · Север — На участке Север приёмочное испытание насоса проводят при давлении 184 кПа. [1]\n\nдавление · Юг — В предоставленных материалах сведений нет.",
+      "source_ids_by_number": {
+        "1": "017",
+        "2": "083",
+        "3": "236",
+        "4": "119",
+        "5": "032"
+      },
+      "complete_source_map": true,
+      "calls": [
+        {
+          "stage": "parts",
+          "input_sha256": "dfb39cc446e319e47b299a6f438e70c736c3f9f69e0693f9a6661f8ecbad4bc7",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 199,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 107,
+            "total_tokens": 306
+          },
+          "answer": "{\n  \"properties\": [\n    {\n      \"subject_property\": \"приёмочные испытания насосов\",\n      \"scopes\": [\n        \"Север\",\n        \"Юг\"\n      ],\n      \"period\": \"\"\n    },\n    {\n      \"subject_property\": \"давление\",\n      \"scopes\": [\n        \"Север\",\n        \"Юг\"\n      ],\n      \"period\": \"\"\n    }\n  ]\n}",
+          "seconds": 4.32,
+          "request_sha256": "e9e070d0897137ac48b064fbcdb5d9bb43b8f754f38596055c6f18f976eb6139"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "0ef4f928467394571fb8635e15edad49754269c970954e67fea68feeed07dc52",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 411,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 18,
+            "total_tokens": 429
+          },
+          "answer": "{\"status\": \"supported\", \"excerpts\": [\"5.1\"]}",
+          "seconds": 1.26,
+          "request_sha256": "acf8adcd3d0e6b304d2a56ae7d0c3de591eb3c6be6deb7d7c998ebd5db4326ec"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "941f294b740e4dfe5a91f9cb1df65881ef2e5f8221cb09d6e868f05b3ae014dc",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 411,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 15,
+            "total_tokens": 426
+          },
+          "answer": "{\"status\": \"missing\", \"excerpts\": []}",
+          "seconds": 1.11,
+          "request_sha256": "148a08b552f51a31d5094e4cbaeb31c99b1318a8ac3c2cf6718129000e13d230"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "484ec29d42e4e1ff707a58b7dfd38392fe3277ecbffa9cfa084882ecc42423af",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 406,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 18,
+            "total_tokens": 424
+          },
+          "answer": "{\"status\": \"supported\", \"excerpts\": [\"1.1\"]}",
+          "seconds": 1.24,
+          "request_sha256": "bc15ecaf30c23f9fc34b87b98705ef1d4d441bd584293023b10d9fa98536d82f"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "42f9495febd9772809b02cb14f11598a76f4ecdb09aca96ae797eea0cdd0bd1b",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 406,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 15,
+            "total_tokens": 421
+          },
+          "answer": "{\"status\": \"missing\", \"excerpts\": []}",
+          "seconds": 1.03,
+          "request_sha256": "ebd7ea849b13acad40f4dbd670cae250b86a0723eb32742f016f32adea385429"
+        },
+        {
+          "stage": "review",
+          "input_sha256": "14ede09c12fc5e422d46f47721bb5dd6e5bf376b5dd6b3cee49bbcdc6a3d08c2",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 281,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 18,
+            "total_tokens": 299
+          },
+          "answer": "{\"accepted\": [\"1/5.1\", \"3/1.1\"]}",
+          "seconds": 0.96,
+          "request_sha256": "0a1e5cd221bb9c8cf0d338ac59a501a4566ed6f36c85f175c221d1d4a636fd9a"
+        }
+      ],
+      "part_trace": {
+        "properties": [
+          {
+            "subject_property": "приёмочные испытания насосов",
+            "scopes": [
+              "Север",
+              "Юг"
+            ],
+            "period": ""
+          },
+          {
+            "subject_property": "давление",
+            "scopes": [
+              "Север",
+              "Юг"
+            ],
+            "period": ""
+          }
+        ],
+        "editions": {},
+        "readings": [
+          {
+            "property": "приёмочные испытания насосов",
+            "scope": "Север",
+            "period": "",
+            "status": "supported",
+            "excerpts": [
+              "5.1"
+            ]
+          },
+          {
+            "property": "приёмочные испытания насосов",
+            "scope": "Юг",
+            "period": "",
+            "status": "missing",
+            "excerpts": []
+          },
+          {
+            "property": "давление",
+            "scope": "Север",
+            "period": "",
+            "status": "supported",
+            "excerpts": [
+              "1.1"
+            ]
+          },
+          {
+            "property": "давление",
+            "scope": "Юг",
+            "period": "",
+            "status": "missing",
+            "excerpts": []
+          }
+        ],
+        "accepted": [
+          "1/5.1",
+          "3/1.1"
+        ]
+      },
+      "seconds": 9.91
+    },
+    {
+      "case": "pump",
+      "variant": "original",
+      "route": "parts",
+      "visible": [
+        "017",
+        "056",
+        "119",
+        "032",
+        "070",
+        "144"
+      ],
+      "answer": "давление · насосы на северном участке — На участке Север приёмочное испытание насоса проводят при давлении 184 кПа. [1] На участке Юг приёмочное испытание насоса проводят при давлении 273 кПа. [2] Допуск к приёмочным испытаниям насосов на обоих участках выдаётся только после охлаждения теплоносителя до 26 °C. [4]\n\nдавление · насосы на южном участке — На участке Юг приёмочное испытание насоса проводят при давлении 273 кПа. [2]\n\nусловие начала испытаний · насосы на северном и южном участках — Допуск к приёмочным испытаниям насосов на обоих участках выдаётся только после охлаждения теплоносителя до 26 °C. [4]",
+      "source_ids_by_number": {
+        "1": "017",
+        "2": "056",
+        "3": "119",
+        "4": "032",
+        "5": "070",
+        "6": "144"
+      },
+      "complete_source_map": true,
+      "calls": [
+        {
+          "stage": "parts",
+          "input_sha256": "ea7021d78a738e839448b1db585303b8fc2bc518ca47c07d0e0b912e79d76702",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 194,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 100,
+            "total_tokens": 294
+          },
+          "answer": "{\n  \"properties\": [\n    {\n      \"subject_property\": \"давление\",\n      \"scopes\": [\"насосы на северном участке\", \"насосы на южном участке\"],\n      \"period\": \"\"\n    },\n    {\n      \"subject_property\": \"условие начала испытаний\",\n      \"scopes\": [\"насосы на северном и южном участках\"],\n      \"period\": \"\"\n    }\n  ]\n}",
+          "seconds": 4.03,
+          "request_sha256": "3c097479f074de5c0ef93893730fc097a3f4ec7f2b68a6bc903f4c4587243a14"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "f094fa6c4e824f83a98899960c0ad65167ce3d0b90f0737aaa07bd5b83060f34",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 449,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 28,
+            "total_tokens": 477
+          },
+          "answer": "{\"status\": \"supported\", \"excerpts\": [\"1.1\", \"2.1\", \"4.1\"]}",
+          "seconds": 1.71,
+          "request_sha256": "756cbf06b03f2e2cd44ca77a071c7215f75b5a5a992236595840deb2b64ddaac"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "2951f11ce9ecdd71bce6bd703f72bdcadb6751d519c78c58401eefa5168fa31b",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 449,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 18,
+            "total_tokens": 467
+          },
+          "answer": "{\"status\": \"supported\", \"excerpts\": [\"2.1\"]}",
+          "seconds": 1.27,
+          "request_sha256": "4955b3529087a8026740253877df2ba831ed0682b628f1807e5759a0c2d6f676"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "04f5de981e31c0aaaca86454f7126b531ca85c9900f9073f2caa114d9867082c",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 455,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 18,
+            "total_tokens": 473
+          },
+          "answer": "{\"status\": \"supported\", \"excerpts\": [\"4.1\"]}",
+          "seconds": 1.22,
+          "request_sha256": "5c74ba9d3027b028284e430fa4098f523f1abd1b451ea0e189e3b6577a962a28"
+        },
+        {
+          "stage": "review",
+          "input_sha256": "1bec48623795d134c116191a2e21e24d1770fcb4a66aa3592616beed87d3f523",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 466,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 39,
+            "total_tokens": 505
+          },
+          "answer": "{\"accepted\": [\"1/1.1\", \"1/2.1\", \"1/4.1\", \"2/2.1\", \"3/4.1\"]}",
+          "seconds": 2.0,
+          "request_sha256": "b42a24675e7ba3022408407fc9bd9e172894d73ead1035ade804d6db72f3087d"
+        }
+      ],
+      "part_trace": {
+        "properties": [
+          {
+            "subject_property": "давление",
+            "scopes": [
+              "насосы на северном участке",
+              "насосы на южном участке"
+            ],
+            "period": ""
+          },
+          {
+            "subject_property": "условие начала испытаний",
+            "scopes": [
+              "насосы на северном и южном участках"
+            ],
+            "period": ""
+          }
+        ],
+        "editions": {},
+        "readings": [
+          {
+            "property": "давление",
+            "scope": "насосы на северном участке",
+            "period": "",
+            "status": "supported",
+            "excerpts": [
+              "1.1",
+              "2.1",
+              "4.1"
+            ]
+          },
+          {
+            "property": "давление",
+            "scope": "насосы на южном участке",
+            "period": "",
+            "status": "supported",
+            "excerpts": [
+              "2.1"
+            ]
+          },
+          {
+            "property": "условие начала испытаний",
+            "scope": "насосы на северном и южном участках",
+            "period": "",
+            "status": "supported",
+            "excerpts": [
+              "4.1"
+            ]
+          }
+        ],
+        "accepted": [
+          "1/1.1",
+          "1/2.1",
+          "1/4.1",
+          "2/2.1",
+          "3/4.1"
+        ]
+      },
+      "seconds": 10.23
+    },
+    {
+      "case": "pump-rephrased",
+      "variant": "original",
+      "route": "parts",
+      "visible": [
+        "056",
+        "083",
+        "017",
+        "119",
+        "236",
+        "032"
+      ],
+      "answer": "приёмочные испытания насосов · Север — Допуск к приёмочным испытаниям насосов на обоих участках выдаётся только после охлаждения теплоносителя до 26 °C. [6]\n\nприёмочные испытания насосов · Юг — Допуск к приёмочным испытаниям насосов на обоих участках выдаётся только после охлаждения теплоносителя до 26 °C. [6]\n\nдавление · Север — На участке Север приёмочное испытание насоса проводят при давлении 184 кПа. [3]\n\nдавление · Юг — На участке Юг приёмочное испытание насоса проводят при давлении 273 кПа. [1]",
+      "source_ids_by_number": {
+        "1": "056",
+        "2": "083",
+        "3": "017",
+        "4": "119",
+        "5": "236",
+        "6": "032"
+      },
+      "complete_source_map": true,
+      "calls": [
+        {
+          "stage": "parts",
+          "input_sha256": "dfb39cc446e319e47b299a6f438e70c736c3f9f69e0693f9a6661f8ecbad4bc7",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 199,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 107,
+            "total_tokens": 306
+          },
+          "answer": "{\n  \"properties\": [\n    {\n      \"subject_property\": \"приёмочные испытания насосов\",\n      \"scopes\": [\n        \"Север\",\n        \"Юг\"\n      ],\n      \"period\": \"\"\n    },\n    {\n      \"subject_property\": \"давление\",\n      \"scopes\": [\n        \"Север\",\n        \"Юг\"\n      ],\n      \"period\": \"\"\n    }\n  ]\n}",
+          "seconds": 4.43,
+          "request_sha256": "6f6d30ca02cb7ddddf92f9bbd54b712a9e96496ef10b8a9f85e11f32660a29e7"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "a5c058e3df5b37b46732a0684375c2e7dcb418efcefd93171cdf47fea7f1af5d",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 456,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 18,
+            "total_tokens": 474
+          },
+          "answer": "{\"status\": \"supported\", \"excerpts\": [\"6.1\"]}",
+          "seconds": 1.28,
+          "request_sha256": "179a06b4c3dc294e2d9bc5cd28cdb5f673ec5be32ffec23d40939e243d59e27e"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "a1dca7aa15b052b420609e26a0b5e361cfcad8f73f89d02d2d1e0392e42d022b",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 456,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 18,
+            "total_tokens": 474
+          },
+          "answer": "{\"status\": \"supported\", \"excerpts\": [\"6.1\"]}",
+          "seconds": 1.3,
+          "request_sha256": "c7be1a7aeb85f7179f1533b5c5225eefc347ff047aa6623d5c04ef36739428be"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "8f66b33707a904c3f482abdc82aaf8eb2ad465ec36c06673f5e744e07bfcf355",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 451,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 18,
+            "total_tokens": 469
+          },
+          "answer": "{\"status\": \"supported\", \"excerpts\": [\"3.1\"]}",
+          "seconds": 1.27,
+          "request_sha256": "4199f65b023e47edad7c8ebf0fa6831fb57100987bffb116af9d4089a36a4760"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "aa122a26f6a01bf37416cfe1fb412a1840c77084f646915fe8fd02ed10978537",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 451,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 18,
+            "total_tokens": 469
+          },
+          "answer": "{\"status\": \"supported\", \"excerpts\": [\"1.1\"]}",
+          "seconds": 1.32,
+          "request_sha256": "5425ad0c14522a248f7e04ab9ee8fa5e26379d95f7f4a4bd66afda80a20681df"
+        },
+        {
+          "stage": "review",
+          "input_sha256": "988179fe931a2cb8bd57d65d823eb92954735398f2a7db86494fc19e5afd2df4",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 398,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 32,
+            "total_tokens": 430
+          },
+          "answer": "{\"accepted\": [\"1/6.1\", \"2/6.1\", \"3/3.1\", \"4/1.1\"]}",
+          "seconds": 1.67,
+          "request_sha256": "8bbc8fa72a5f6754753b90638583d07faeb1f8b89759ef2b7a58e6babceb2c74"
+        }
+      ],
+      "part_trace": {
+        "properties": [
+          {
+            "subject_property": "приёмочные испытания насосов",
+            "scopes": [
+              "Север",
+              "Юг"
+            ],
+            "period": ""
+          },
+          {
+            "subject_property": "давление",
+            "scopes": [
+              "Север",
+              "Юг"
+            ],
+            "period": ""
+          }
+        ],
+        "editions": {},
+        "readings": [
+          {
+            "property": "приёмочные испытания насосов",
+            "scope": "Север",
+            "period": "",
+            "status": "supported",
+            "excerpts": [
+              "6.1"
+            ]
+          },
+          {
+            "property": "приёмочные испытания насосов",
+            "scope": "Юг",
+            "period": "",
+            "status": "supported",
+            "excerpts": [
+              "6.1"
+            ]
+          },
+          {
+            "property": "давление",
+            "scope": "Север",
+            "period": "",
+            "status": "supported",
+            "excerpts": [
+              "3.1"
+            ]
+          },
+          {
+            "property": "давление",
+            "scope": "Юг",
+            "period": "",
+            "status": "supported",
+            "excerpts": [
+              "1.1"
+            ]
+          }
+        ],
+        "accepted": [
+          "1/6.1",
+          "2/6.1",
+          "3/3.1",
+          "4/1.1"
+        ]
+      },
+      "seconds": 11.28
+    },
+    {
+      "case": "pump",
+      "variant": "without_032",
+      "route": "parts",
+      "visible": [
+        "056",
+        "017",
+        "119",
+        "070",
+        "144"
+      ],
+      "answer": "давление · насосы на северном участке — На участке Север приёмочное испытание насоса проводят при давлении 184 кПа. [2] На участке Юг приёмочное испытание насоса проводят при давлении 273 кПа. [1]\n\nдавление · насосы на южном участке — На участке Юг приёмочное испытание насоса проводят при давлении 273 кПа. [1]\n\nусловие начала испытаний · насосы на северном и южном участках — В предоставленных материалах сведений нет.",
+      "source_ids_by_number": {
+        "1": "056",
+        "2": "017",
+        "3": "119",
+        "4": "070",
+        "5": "144"
+      },
+      "complete_source_map": true,
+      "calls": [
+        {
+          "stage": "parts",
+          "input_sha256": "ea7021d78a738e839448b1db585303b8fc2bc518ca47c07d0e0b912e79d76702",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 194,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 100,
+            "total_tokens": 294
+          },
+          "answer": "{\n  \"properties\": [\n    {\n      \"subject_property\": \"давление\",\n      \"scopes\": [\"насосы на северном участке\", \"насосы на южном участке\"],\n      \"period\": \"\"\n    },\n    {\n      \"subject_property\": \"условие начала испытаний\",\n      \"scopes\": [\"насосы на северном и южном участках\"],\n      \"period\": \"\"\n    }\n  ]\n}",
+          "seconds": 3.97,
+          "request_sha256": "651967fd46705f1e9f69f9596c6bdfaed243c5239c033c9d43d32756e8f321b3"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "f83607c5839d5ad069fbf87ca886b27e29a139d81e991bcd76943c597d9b07ed",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 413,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 23,
+            "total_tokens": 436
+          },
+          "answer": "{\"status\": \"supported\", \"excerpts\": [\"2.1\", \"1.1\"]}",
+          "seconds": 1.4,
+          "request_sha256": "bce4fc83f86d723451cc96a9e70ca5afc4da7a47ef2e061594db79d3d6957644"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "5b137b2a4e2ba4a542800d00583021514f4773d98bcd9af5600cbd3db8fc29fc",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 413,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 18,
+            "total_tokens": 431
+          },
+          "answer": "{\"status\": \"supported\", \"excerpts\": [\"1.1\"]}",
+          "seconds": 1.24,
+          "request_sha256": "ad1662a6131cb158628be2259cf7a7c177ef65496ce2d310ca14c5a0764da9e2"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "330b64203db2940fac9ef48069951d7bde7d93e8aac77c8bd54f09631870588e",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 419,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 15,
+            "total_tokens": 434
+          },
+          "answer": "{\"status\": \"missing\", \"excerpts\": []}",
+          "seconds": 1.03,
+          "request_sha256": "bbedfb7c72cc8526c81a052a4291b094f4f3fc1363093ba24d2917aac2e3e052"
+        },
+        {
+          "stage": "review",
+          "input_sha256": "79ab630e881bde850b2c07cba9a6c0e961e93f3f7a53ee5bfa89641185160311",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 330,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 25,
+            "total_tokens": 355
+          },
+          "answer": "{\"accepted\": [\"1/2.1\", \"1/1.1\", \"2/1.1\"]}",
+          "seconds": 1.17,
+          "request_sha256": "bcaeea9ca164dc2edf0c3c5083046c03cd30efc2bbb22093f0bba0ca1ee4cccd"
+        }
+      ],
+      "part_trace": {
+        "properties": [
+          {
+            "subject_property": "давление",
+            "scopes": [
+              "насосы на северном участке",
+              "насосы на южном участке"
+            ],
+            "period": ""
+          },
+          {
+            "subject_property": "условие начала испытаний",
+            "scopes": [
+              "насосы на северном и южном участках"
+            ],
+            "period": ""
+          }
+        ],
+        "editions": {},
+        "readings": [
+          {
+            "property": "давление",
+            "scope": "насосы на северном участке",
+            "period": "",
+            "status": "supported",
+            "excerpts": [
+              "2.1",
+              "1.1"
+            ]
+          },
+          {
+            "property": "давление",
+            "scope": "насосы на южном участке",
+            "period": "",
+            "status": "supported",
+            "excerpts": [
+              "1.1"
+            ]
+          },
+          {
+            "property": "условие начала испытаний",
+            "scope": "насосы на северном и южном участках",
+            "period": "",
+            "status": "missing",
+            "excerpts": []
+          }
+        ],
+        "accepted": [
+          "1/1.1",
+          "1/2.1",
+          "2/1.1"
+        ]
+      },
+      "seconds": 8.8
+    },
+    {
+      "case": "pump",
+      "variant": "without_017",
+      "route": "parts",
+      "visible": [
+        "056",
+        "119",
+        "070",
+        "032",
+        "144"
+      ],
+      "answer": "давление · насосы на северном участке — На участке Юг приёмочное испытание насоса проводят при давлении 273 кПа. [1]\n\nдавление · насосы на южном участке — На участке Юг приёмочное испытание насоса проводят при давлении 273 кПа. [1]\n\nусловие начала испытаний · насосы на северном и южном участках — Допуск к приёмочным испытаниям насосов на обоих участках выдаётся только после охлаждения теплоносителя до 26 °C. [4]",
+      "source_ids_by_number": {
+        "1": "056",
+        "2": "119",
+        "3": "070",
+        "4": "032",
+        "5": "144"
+      },
+      "complete_source_map": true,
+      "calls": [
+        {
+          "stage": "parts",
+          "input_sha256": "ea7021d78a738e839448b1db585303b8fc2bc518ca47c07d0e0b912e79d76702",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 194,
+            "prompt_tokens_details": {
+              "cached_tokens": 190
+            },
+            "completion_tokens": 100,
+            "total_tokens": 294
+          },
+          "answer": "{\n  \"properties\": [\n    {\n      \"subject_property\": \"давление\",\n      \"scopes\": [\"насосы на северном участке\", \"насосы на южном участке\"],\n      \"period\": \"\"\n    },\n    {\n      \"subject_property\": \"условие начала испытаний\",\n      \"scopes\": [\"насосы на северном и южном участках\"],\n      \"period\": \"\"\n    }\n  ]\n}",
+          "seconds": 3.77,
+          "request_sha256": "f983a54418bc0e794997560680c31d340fffff1c92682dce5c5d69ab7f7f1916"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "6ec033c9e415e46c12ce001f47746a383466a9eb4ba6c101363713a73512dccb",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 403,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 23,
+            "total_tokens": 426
+          },
+          "answer": "{\"status\": \"supported\", \"excerpts\": [\"1.1\", \"4.1\"]}",
+          "seconds": 1.41,
+          "request_sha256": "04ee2541e28a130327009f9d905a52438028608284d5950ef48f0535b98f4097"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "5d7858c6e375d479b5ec89bb05cccce0cee601b6e41603ac955a4a805824a574",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 403,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 18,
+            "total_tokens": 421
+          },
+          "answer": "{\"status\": \"supported\", \"excerpts\": [\"1.1\"]}",
+          "seconds": 1.27,
+          "request_sha256": "3e729d4f07f3d412211524d487c721a69aaea642b4e058eeb7bf5bc8f11233ba"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "67402b41939973e8826a12b84c78029270ce797e1833e5546736b4c8f9e855c6",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 409,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 18,
+            "total_tokens": 427
+          },
+          "answer": "{\"status\": \"supported\", \"excerpts\": [\"4.1\"]}",
+          "seconds": 1.16,
+          "request_sha256": "fa2a0647f3de5464a97e032c9d5b2e8922a23d8ff8cf0f3196fdff630ab68334"
+        },
+        {
+          "stage": "review",
+          "input_sha256": "dba6976a64309bf5ad6b1584787676d9f41d7fec90e84d293ce6fe5e38731d0e",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 410,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 25,
+            "total_tokens": 435
+          },
+          "answer": "{\"accepted\": [\"1/1.1\", \"2/1.1\", \"3/4.1\"]}",
+          "seconds": 1.3,
+          "request_sha256": "bd0c08aa0de5f941f76a9ef74f00624529efcab1a0baea8da5cbb24c9fe65d30"
+        }
+      ],
+      "part_trace": {
+        "properties": [
+          {
+            "subject_property": "давление",
+            "scopes": [
+              "насосы на северном участке",
+              "насосы на южном участке"
+            ],
+            "period": ""
+          },
+          {
+            "subject_property": "условие начала испытаний",
+            "scopes": [
+              "насосы на северном и южном участках"
+            ],
+            "period": ""
+          }
+        ],
+        "editions": {},
+        "readings": [
+          {
+            "property": "давление",
+            "scope": "насосы на северном участке",
+            "period": "",
+            "status": "supported",
+            "excerpts": [
+              "1.1",
+              "4.1"
+            ]
+          },
+          {
+            "property": "давление",
+            "scope": "насосы на южном участке",
+            "period": "",
+            "status": "supported",
+            "excerpts": [
+              "1.1"
+            ]
+          },
+          {
+            "property": "условие начала испытаний",
+            "scope": "насосы на северном и южном участках",
+            "period": "",
+            "status": "supported",
+            "excerpts": [
+              "4.1"
+            ]
+          }
+        ],
+        "accepted": [
+          "1/1.1",
+          "2/1.1",
+          "3/4.1"
+        ]
+      },
+      "seconds": 8.92
+    },
+    {
+      "case": "pump",
+      "variant": "all_support_removed",
+      "route": "parts",
+      "visible": [
+        "119",
+        "070",
+        "144"
+      ],
+      "answer": "[[NO_EVIDENCE]] давление · насосы на северном участке — В предоставленных материалах сведений нет.\n\nдавление · насосы на южном участке — В предоставленных материалах сведений нет.\n\nусловие начала испытаний · насосы на северном и южном участках — В предоставленных материалах сведений нет.",
+      "source_ids_by_number": {
+        "1": "119",
+        "2": "070",
+        "3": "144"
+      },
+      "complete_source_map": true,
+      "calls": [
+        {
+          "stage": "parts",
+          "input_sha256": "ea7021d78a738e839448b1db585303b8fc2bc518ca47c07d0e0b912e79d76702",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 194,
+            "prompt_tokens_details": {
+              "cached_tokens": 190
+            },
+            "completion_tokens": 100,
+            "total_tokens": 294
+          },
+          "answer": "{\n  \"properties\": [\n    {\n      \"subject_property\": \"давление\",\n      \"scopes\": [\"насосы на северном участке\", \"насосы на южном участке\"],\n      \"period\": \"\"\n    },\n    {\n      \"subject_property\": \"условие начала испытаний\",\n      \"scopes\": [\"насосы на северном и южном участках\"],\n      \"period\": \"\"\n    }\n  ]\n}",
+          "seconds": 3.8,
+          "request_sha256": "b21aacb1aeaf7333c1b6f6da6739846c82611d71c71f037e2753eccbaaeab1af"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "1fbc939cf6a92851a1dfad1e67e620c2df98240bc62227003ffb72a9538090e6",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 322,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 15,
+            "total_tokens": 337
+          },
+          "answer": "{\"status\": \"missing\", \"excerpts\": []}",
+          "seconds": 0.98,
+          "request_sha256": "47aa90c967215cdeefb8361709d54faf237694ae8a2fbfb162b37c86ff4a8b72"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "9309f095de2acaa6fc9cdde9e07ae8f78900b9b30609aa3ecb3b3478c6972ee7",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 322,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 15,
+            "total_tokens": 337
+          },
+          "answer": "{\"status\": \"missing\", \"excerpts\": []}",
+          "seconds": 0.95,
+          "request_sha256": "66c97906a99b3a5c673078bbd861945680647fdb4f66c25266f80b0639117849"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "28ace64a0c07a1b0b58794a006c8d0109cfce3e1d1d4104613756b032a819391",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 328,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 15,
+            "total_tokens": 343
+          },
+          "answer": "{\"status\": \"missing\", \"excerpts\": []}",
+          "seconds": 0.96,
+          "request_sha256": "5b55af82766fa0f419bd0f198c66ddd929ccfdda495662315a7a7c579d1ba9ff"
+        }
+      ],
+      "part_trace": {
+        "properties": [
+          {
+            "subject_property": "давление",
+            "scopes": [
+              "насосы на северном участке",
+              "насосы на южном участке"
+            ],
+            "period": ""
+          },
+          {
+            "subject_property": "условие начала испытаний",
+            "scopes": [
+              "насосы на северном и южном участках"
+            ],
+            "period": ""
+          }
+        ],
+        "editions": {},
+        "readings": [
+          {
+            "property": "давление",
+            "scope": "насосы на северном участке",
+            "period": "",
+            "status": "missing",
+            "excerpts": []
+          },
+          {
+            "property": "давление",
+            "scope": "насосы на южном участке",
+            "period": "",
+            "status": "missing",
+            "excerpts": []
+          },
+          {
+            "property": "условие начала испытаний",
+            "scope": "насосы на северном и южном участках",
+            "period": "",
+            "status": "missing",
+            "excerpts": []
+          }
+        ],
+        "accepted": []
+      },
+      "seconds": 6.7
+    },
+    {
+      "case": "cart",
+      "variant": "original",
+      "route": "parts",
+      "visible": [
+        "070",
+        "094",
+        "231",
+        "017",
+        "158",
+        "056"
+      ],
+      "answer": "давление в шинах тележки · тележка — Давление в шинах тележки 315 кПа. [1]\n\nчастота проверки давления в шинах тележки · тележка — Проверку давления в шинах тележки проводят ежемесячно. [1]",
+      "source_ids_by_number": {
+        "1": "070",
+        "2": "094",
+        "3": "231",
+        "4": "017",
+        "5": "158",
+        "6": "056"
+      },
+      "complete_source_map": true,
+      "calls": [
+        {
+          "stage": "parts",
+          "input_sha256": "c6e16b8b2ffc0f763ef618dc1c9a742e0f90fd76dc13b6ea751a6713c0a4e707",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 188,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 89,
+            "total_tokens": 277
+          },
+          "answer": "{\n  \"properties\": [\n    {\n      \"subject_property\": \"давление в шинах тележки\",\n      \"scopes\": [\"тележка\"],\n      \"period\": \"\"\n    },\n    {\n      \"subject_property\": \"частота проверки давления в шинах тележки\",\n      \"scopes\": [\"тележка\"],\n      \"period\": \"\"\n    }\n  ]\n}",
+          "seconds": 3.52,
+          "request_sha256": "78e45652697dc5ef3b960d3c02c26689eda3bede88dd8b3168d1b90094ca8ca9"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "30ceae56b3d9a3c51591677400d82ef95a2b2caa0547c1548ac21de895069ab5",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 473,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 18,
+            "total_tokens": 491
+          },
+          "answer": "{\"status\": \"supported\", \"excerpts\": [\"1.2\"]}",
+          "seconds": 1.18,
+          "request_sha256": "4c32fb5d50e8a6600dc3777b786c40754b4b12a02939c76659015b186748093d"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "a3b71fe7786b77c3b1931f18e6c522df0ffca6fa9fbe4a39ee37913d8b9b2123",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 475,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 18,
+            "total_tokens": 493
+          },
+          "answer": "{\"status\": \"supported\", \"excerpts\": [\"1.1\"]}",
+          "seconds": 1.16,
+          "request_sha256": "6a9737ece66e61a1655d2157c0cfcc1b8867981b2885300a241ed4c561322aa4"
+        },
+        {
+          "stage": "review",
+          "input_sha256": "16b68e3e5d0bccf140bacf60d3370e785f1860558698910151b806214fa16e1f",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 258,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 18,
+            "total_tokens": 276
+          },
+          "answer": "{\"accepted\": [\"1/1.2\", \"2/1.1\"]}",
+          "seconds": 0.88,
+          "request_sha256": "7aaafc128b2115b1806b989aca881cb0024fd559bb75261bc0c439766935d1c2"
+        }
+      ],
+      "part_trace": {
+        "properties": [
+          {
+            "subject_property": "давление в шинах тележки",
+            "scopes": [
+              "тележка"
+            ],
+            "period": ""
+          },
+          {
+            "subject_property": "частота проверки давления в шинах тележки",
+            "scopes": [
+              "тележка"
+            ],
+            "period": ""
+          }
+        ],
+        "editions": {},
+        "readings": [
+          {
+            "property": "давление в шинах тележки",
+            "scope": "тележка",
+            "period": "",
+            "status": "supported",
+            "excerpts": [
+              "1.2"
+            ]
+          },
+          {
+            "property": "частота проверки давления в шинах тележки",
+            "scope": "тележка",
+            "period": "",
+            "status": "supported",
+            "excerpts": [
+              "1.1"
+            ]
+          }
+        ],
+        "accepted": [
+          "1/1.2",
+          "2/1.1"
+        ]
+      },
+      "seconds": 6.75
+    },
+    {
+      "case": "warranty",
+      "variant": "original",
+      "route": "parts",
+      "visible": [
+        "094",
+        "119",
+        "056",
+        "032",
+        "017",
+        "144"
+      ],
+      "answer": "[[NO_EVIDENCE]] срок гарантии на насосы · северный участок — В предоставленных материалах сведений нет.\n\nсрок гарантии на насосы · южный участок — В предоставленных материалах сведений нет.",
+      "source_ids_by_number": {
+        "1": "094",
+        "2": "119",
+        "3": "056",
+        "4": "032",
+        "5": "017",
+        "6": "144"
+      },
+      "complete_source_map": true,
+      "calls": [
+        {
+          "stage": "parts",
+          "input_sha256": "678be55fa858a65742567923e9bea7c6a70cd632b733758ead9cceff2a4549a8",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 188,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 55,
+            "total_tokens": 243
+          },
+          "answer": "{\n  \"properties\": [\n    {\n      \"subject_property\": \"срок гарантии на насосы\",\n      \"scopes\": [\"северный участок\", \"южный участок\"],\n      \"period\": \"\"\n    }\n  ]\n}",
+          "seconds": 2.22,
+          "request_sha256": "ed1174e2a6106de75bfbb9fa3269cfd1e886ac1cf952835801d7b8565b072738"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "b35e986ed8d1e8708efe8af3286d9fcc1c5ba7e2be6b5a1900863e597fbd2a65",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 430,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 15,
+            "total_tokens": 445
+          },
+          "answer": "{\"status\": \"missing\", \"excerpts\": []}",
+          "seconds": 1.05,
+          "request_sha256": "c27b2771162f83f99e24960a1e27bb333ec4072789ce66a002d2b3622b0d954c"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "5914b9ab066a99cbe9eeb297d3ebbd5f516809005f38fa6896278efbfa28763c",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 429,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 15,
+            "total_tokens": 444
+          },
+          "answer": "{\"status\": \"missing\", \"excerpts\": []}",
+          "seconds": 1.03,
+          "request_sha256": "710a609b9433a47fcdaa1e324b45f7c830058348a152db8407455e0ead045402"
+        }
+      ],
+      "part_trace": {
+        "properties": [
+          {
+            "subject_property": "срок гарантии на насосы",
+            "scopes": [
+              "северный участок",
+              "южный участок"
+            ],
+            "period": ""
+          }
+        ],
+        "editions": {},
+        "readings": [
+          {
+            "property": "срок гарантии на насосы",
+            "scope": "северный участок",
+            "period": "",
+            "status": "missing",
+            "excerpts": []
+          },
+          {
+            "property": "срок гарантии на насосы",
+            "scope": "южный участок",
+            "period": "",
+            "status": "missing",
+            "excerpts": []
+          }
+        ],
+        "accepted": []
+      },
+      "seconds": 4.3
+    }
+  ]
+}

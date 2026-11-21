@@ -1,6 +1,7 @@
 export interface Scope {
   scope_type: 'none' | 'all' | 'dataset' | 'datasets' | 'project' | 'projects' | 'mixed';
   project_ids: number[]; dataset_ids: string[]; selected_sources_only: boolean;
+  document_ids?: string[];
 }
 export interface Session {
   session_id: string; title: string; project_id: number | null;
@@ -65,7 +66,7 @@ export interface CitationCheck { status?: string; linked?: number[] }
 export interface SourceReadFailure { source: { doc_name?: string }; code: string; message: string }
 export interface StreamEvent { event: string; data: unknown }
 export interface Dataset { id: string; name: string; documents?: number; document_count?: number }
-export interface ModelRole { model_id: string; connection_id: string; status?: string; code?: string }
+export interface ModelRole { model_id: string; connection_id: string; status?: string; code?: string; auto_refresh?: boolean }
 export const emptyScope = (): Scope => ({ scope_type: 'none', project_ids: [], dataset_ids: [], selected_sources_only: false });
 export const sourcesFor = (payload: ChatPayload): Source[] => payload.source_map ?? payload.retrieval_trace?.source_map ?? [];
 export const sourcePage = (source: Source): number => {
@@ -93,11 +94,20 @@ export function sourceReadStart(source: Source): number {
 }
 export function sourcePlace(source: Source): string {
   if (source.model_locator) return ` · ID ${source.model_locator.native_id}`;
-  const { sheet = source.sheet_name, row = source.row, cell, anchor } = source.locator ?? {};
-  if (sheet && row) return ` · ${sheet} · ${cell || `строка ${row}`}`;
+  const { cell, anchor } = source.locator ?? {};
+  const workbook = sourceWorkbookRow(source);
+  if (workbook) return ` · ${workbook.sheet} · ${cell || `строка ${workbook.row}`}`;
   const paragraph = anchor?.match(/^para(\d+)$/);
   if (paragraph) return ` · абзац ${Number(paragraph[1]) + 1}`;
   const wordRow = anchor?.match(/^t(\d+)r(\d+)$/);
   if (wordRow) return ` · таблица ${Number(wordRow[1]) + 1}, строка ${Number(wordRow[2]) + 1}`;
   return source.source_page || source.page || source.page_number ? ` · стр. ${sourcePage(source)}` : '';
+}
+
+export function sourceWorkbookRow(source: Source): { sheet: string; row: number } | undefined {
+  const sheet = source.locator?.sheet ?? source.sheet_name;
+  const row = source.locator?.row ?? source.row;
+  if (!source.model_locator && sheet && typeof row === 'number' && Number.isSafeInteger(row) && row > 0) {
+    return { sheet, row };
+  }
 }

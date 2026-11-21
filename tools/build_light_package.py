@@ -197,7 +197,20 @@ def stage_skill_dependencies(destination, source=None):
     from tools.skill_python_asset import seal, stage
     lock_hash = hash_file(ROOT / "uv.lock")
     if source is not None:
-        receipt = stage(destination, source, lock_sha256=lock_hash)
+        sealed = Path(source) / "skill-python-receipt.json"
+        if sealed.is_file():
+            previous = json.loads(sealed.read_text(encoding="utf-8"))
+            if previous.get("schema") != "les.skill-python.v1" or previous.get("source_uv_lock_sha256") != lock_hash:
+                raise ValueError("Prepared skill runtime was sealed against a different lock")
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.TemporaryDirectory(dir=destination.parent) as scratch:
+                checked = Path(scratch) / "skill-python"
+                receipt = stage(checked, source, lock_sha256=lock_hash)
+                if receipt["inventory_sha256"] != previous.get("inventory_sha256"):
+                    raise ValueError("Prepared skill runtime differs from its sealed files")
+                checked.rename(destination)
+        else:
+            receipt = stage(destination, source, lock_sha256=lock_hash)
     else:
         with tempfile.TemporaryDirectory(prefix="les-build-tools-") as scratch:
             scratch = Path(scratch)

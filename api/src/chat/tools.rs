@@ -475,9 +475,12 @@ impl Tools {
                 }
             };
             let mut raw = raw;
-            let pull_evidence = raw
-                .as_object_mut()
-                .and_then(|object| object.remove("_pull_evidence"));
+            let pull_evidence = ["_pull_workbook_evidence", "_pull_evidence"].map(|key| {
+                (
+                    key,
+                    raw.as_object_mut().and_then(|object| object.remove(key)),
+                )
+            });
             if let Some(grant) = read_grant {
                 if raw["result"].is_object() {
                     raw["result"]["context_budget"] = grant;
@@ -494,8 +497,12 @@ impl Tools {
                 json!({"event":"chat_tool_finished","tool":name,"status":finished["envelope"]["status"],"code":finished["envelope"]["code"],"duration_ms":finished["envelope"]["duration_ms"]})
             );
             let mut payload = self.payload(name, &finished["envelope"], operation.as_deref());
-            if let Some(evidence) = pull_evidence.filter(|_| payload["status"] == "ok") {
-                payload["_pull_evidence"] = evidence;
+            if payload["status"] == "ok" {
+                for (key, evidence) in pull_evidence {
+                    if let Some(evidence) = evidence {
+                        payload[key] = evidence;
+                    }
+                }
             }
             if let Some(request) = source_request {
                 payload["inputs"] = json!([request]);

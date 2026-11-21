@@ -12,7 +12,10 @@ pub fn handles(method: &str, path: &str) -> bool {
         (
             "GET",
             "/api/light/library" | "/api/light/forest" | "/api/light/intake" | FOLDER_WATCHES
-        ) | ("POST", "/api/rag/datasets" | FOLDER_WATCHES)
+        ) | (
+            "POST",
+            "/api/rag/datasets" | "/api/light/intake" | FOLDER_WATCHES
+        )
     )
 }
 
@@ -28,6 +31,12 @@ pub async fn handle(context: Arc<Context>, request: Request) -> Response {
         Ok(cors) => cors,
         Err(response) => return response,
     };
+    if write
+        && request.uri().path() == "/api/light/intake"
+        && !auth::origin_allowed(request.headers(), &cors)
+    {
+        return error(StatusCode::FORBIDDEN, "Действие недоступно с этого адреса.");
+    }
     let mut response = dispatch(context, request, write).await;
     response.headers_mut().extend(cors);
     response
@@ -39,6 +48,7 @@ pub async fn handle(context: Arc<Context>, request: Request) -> Response {
 async fn dispatch(context: Arc<Context>, request: Request, write: bool) -> Response {
     let uri = request.uri();
     let folder_watches = uri.path() == FOLDER_WATCHES;
+    let retry_intake = write && uri.path() == "/api/light/intake";
     let mut args: Map<String, Value> = reqwest::Url::parse(&format!("http://localhost{uri}"))
         .map(|url| {
             url.query_pairs()
@@ -47,6 +57,9 @@ async fn dispatch(context: Arc<Context>, request: Request, write: bool) -> Respo
         })
         .unwrap_or_default();
     let action = if write {
+        if retry_intake {
+            args.clear();
+        }
         let bytes = match to_bytes(request.into_body(), 16_384).await {
             Ok(bytes) => bytes,
             Err(_) => {
@@ -60,7 +73,7 @@ async fn dispatch(context: Arc<Context>, request: Request, write: bool) -> Respo
             match serde_json::from_slice::<Value>(&bytes) {
                 Ok(Value::Null) => {}
                 Ok(Value::Object(body)) => {
-                    if folder_watches {
+                    if folder_watches || retry_intake {
                         args = body;
                     } else if let Some(value) = body.get("name") {
                         if !value.is_string() {
@@ -75,7 +88,12 @@ async fn dispatch(context: Arc<Context>, request: Request, write: bool) -> Respo
                 _ => return error(StatusCode::UNPROCESSABLE_ENTITY, "Ожидается объект JSON."),
             }
         }
-        if folder_watches {
+        if retry_intake {
+            if args.len() != 1 || !valid_intake_id(&args) {
+                return error(StatusCode::UNPROCESSABLE_ENTITY, "Укажите ID импорта.");
+            }
+            "intake_retry"
+        } else if folder_watches {
             "intake_watch_set"
         } else {
             args.entry("name").or_insert_with(|| "".into());
@@ -90,13 +108,7 @@ async fn dispatch(context: Arc<Context>, request: Request, write: bool) -> Respo
         }
         "intake_watch_list"
     } else if uri.path() == "/api/light/intake" {
-        let Some(id) = args.get("id").and_then(Value::as_str) else {
-            return error(StatusCode::UNPROCESSABLE_ENTITY, "Укажите ID импорта.");
-        };
-        if id.is_empty()
-            || id.len() > 64
-            || !id.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-')
-        {
+        if !valid_intake_id(&args) {
             return error(StatusCode::UNPROCESSABLE_ENTITY, "Неверный ID импорта.");
         }
         "job_get"
@@ -145,7 +157,7 @@ async fn dispatch(context: Arc<Context>, request: Request, write: bool) -> Respo
     .await;
     match result {
         Ok(result) if result["status"] == "completed" && result["value"].is_object() => {
-            if action == "intake_watch_set" {
+            if matches!(action, "intake_watch_set" | "intake_retry") {
                 crate::intake::wake(&context);
             }
             json_response(StatusCode::OK, result["value"].clone(), "rust.library")
@@ -155,6 +167,12 @@ async fn dispatch(context: Arc<Context>, request: Request, write: bool) -> Respo
             result["detail"]
                 .as_str()
                 .unwrap_or("Набор документов не найден."),
+        ),
+        Ok(result) if result["code"] == "WORKSPACE_CONFLICT" => error(
+            StatusCode::CONFLICT,
+            result["detail"]
+                .as_str()
+                .unwrap_or("Задание уже обрабатывается."),
         ),
         Ok(result) if result["code"] == "WORKSPACE_INVALID" => error(
             if write {
@@ -171,6 +189,14 @@ async fn dispatch(context: Arc<Context>, request: Request, write: bool) -> Respo
             "Каталог документов недоступен. Повторите действие.",
         ),
     }
+}
+
+fn valid_intake_id(args: &Map<String, Value>) -> bool {
+    args.get("id").and_then(Value::as_str).is_some_and(|id| {
+        !id.is_empty()
+            && id.len() <= 64
+            && id.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-')
+    })
 }
 
 pub(crate) fn catalog(database: &Path, action: &str, args: Value) -> Value {

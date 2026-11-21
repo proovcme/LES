@@ -1,4 +1,5 @@
 //! Bounded OpenAI chat decoder. Provider framing, reasoning and tool deltas stay native.
+use crate::chat_stream_metrics::StreamMetrics;
 use crate::ollama_chat::{Limits, Reasoning};
 use axum::body::{Body, Bytes};
 use futures_util::{stream, StreamExt};
@@ -9,6 +10,7 @@ use std::{collections::VecDeque, convert::Infallible};
 pub const PROTOCOL: &str = "openai-chat.v1";
 pub const WIRE: &str = "x-les-chat-wire";
 const INVALID: &str = "UPSTREAM_STREAM_EVENT_INVALID";
+#[cfg(test)]
 const LIMIT: &str = "UPSTREAM_RESPONSE_TOO_LARGE";
 const INTERRUPTED: &str = "UPSTREAM_STREAM_INTERRUPTED";
 
@@ -18,8 +20,7 @@ struct Decoder {
     collector: chat_stream::Stream,
     pending: VecDeque<Value>,
     data: Vec<u8>,
-    lines: usize,
-    consumed: usize,
+    metrics: StreamMetrics,
     thinking: bool,
     finished: bool,
     saw_payload: bool,
@@ -38,8 +39,7 @@ impl Decoder {
             collector: chat_stream::Stream::default(),
             pending,
             data: Vec::new(),
-            lines: 0,
-            consumed: 0,
+            metrics: StreamMetrics::default(),
             thinking,
             finished: false,
             saw_payload: false,
@@ -73,14 +73,6 @@ impl Decoder {
             self.event(json!({"kind":"usage","usage":usage}))?;
         }
         Ok(())
-    }
-    fn charge(&mut self, size: usize) -> Result<(), &'static str> {
-        self.consumed = self.consumed.saturating_add(size);
-        if self.consumed > self.limits.bytes {
-            Err(LIMIT)
-        } else {
-            Ok(())
-        }
     }
     fn finish(&mut self, reason: &str) -> Result<(), &'static str> {
         let tail = self.reasoning.finish(reason)?;
@@ -149,23 +141,24 @@ impl Decoder {
             return Err(INVALID);
         }
         if !thought.is_null() && thought != "" {
-            self.charge(
-                thought
-                    .as_str()
-                    .map_or_else(|| thought.to_string().len(), str::len),
-            )?;
+            self.metrics.reasoning_bytes += thought
+                .as_str()
+                .map_or_else(|| thought.to_string().len(), str::len);
+            self.metrics.check_payload(self.limits.bytes)?;
             self.reasoning.separate();
             if !self.thinking {
                 self.pending.push_back(json!({"thinking":true}));
                 self.thinking = true;
             }
         }
-        self.charge(text.len())?;
+        self.metrics.content_bytes += text.len();
+        self.metrics.check_payload(self.limits.bytes)?;
         let emitted = self.reasoning.feed(text);
         self.text(emitted)?;
         if let Some(tools) = tools {
             let calls = tools.as_array().ok_or("UPSTREAM_TOOL_CALLS_INVALID")?;
-            self.charge(tools.to_string().len())?;
+            self.metrics.tool_bytes += tools.to_string().len();
+            self.metrics.check_payload(self.limits.bytes)?;
             self.event(json!({"kind":"tool_delta","tool_calls":calls.iter().filter(|v|v.is_object()).collect::<Vec<_>>(),"model_id":self.model}))?;
         }
         if let Some(reason) = choice["finish_reason"].as_str().filter(|v| !v.is_empty()) {
@@ -176,9 +169,16 @@ impl Decoder {
         Ok(false)
     }
     fn line(&mut self, raw: &[u8]) -> Result<bool, &'static str> {
-        self.lines = self.lines.saturating_add(1);
-        if self.lines > self.limits.events || raw.len() > self.limits.line {
-            return Err(LIMIT);
+        self.metrics.lines += 1;
+        if self.metrics.lines > self.limits.events {
+            return Err(self
+                .metrics
+                .exceeded("sse_lines", self.metrics.lines, self.limits.events));
+        }
+        if raw.len() > self.limits.line {
+            return Err(self
+                .metrics
+                .exceeded("sse_line_bytes", raw.len(), self.limits.line));
         }
         let raw = raw.strip_suffix(b"\r").unwrap_or(raw);
         if raw.is_empty() {
@@ -191,7 +191,11 @@ impl Decoder {
         if let Some(raw) = raw.strip_prefix(b"data:") {
             let raw = raw.strip_prefix(b" ").unwrap_or(raw);
             if self.data.len() + raw.len() + 1 > self.limits.line {
-                return Err(LIMIT);
+                return Err(self.metrics.exceeded(
+                    "sse_data_bytes",
+                    self.data.len() + raw.len() + 1,
+                    self.limits.line,
+                ));
             }
             if !self.data.is_empty() {
                 self.data.push(b'\n');
@@ -222,6 +226,19 @@ impl Decoder {
             .ok_or("UPSTREAM_RESPONSE_INVALID")?;
         self.model = payload["model"].as_str().unwrap_or("").into();
         self.saw_payload = true;
+        self.metrics.content_bytes = message
+            .get("content")
+            .and_then(Value::as_str)
+            .map_or(0, str::len);
+        self.metrics.reasoning_bytes = message
+            .get("reasoning_content")
+            .or_else(|| message.get("reasoning"))
+            .and_then(Value::as_str)
+            .map_or(0, str::len);
+        self.metrics.tool_bytes = message
+            .get("tool_calls")
+            .filter(|v| !v.is_null())
+            .map_or(0, |v| v.to_string().len());
         self.usage(&payload)?;
         if message
             .get("reasoning_content")
@@ -270,8 +287,13 @@ impl State {
             let mut data = Vec::new();
             while let Some(part) = self.response.as_mut().unwrap().next().await {
                 let part = part?;
+                self.decoder.metrics.wire_bytes += part.len();
                 if data.len() + part.len() > self.decoder.limits.bytes {
-                    return Err(LIMIT);
+                    return Err(self.decoder.metrics.exceeded(
+                        "json_body_bytes",
+                        data.len() + part.len(),
+                        self.decoder.limits.bytes,
+                    ));
                 }
                 data.extend_from_slice(&part);
             }
@@ -281,7 +303,10 @@ impl State {
         loop {
             if self.chunk.is_empty() {
                 match self.response.as_mut().unwrap().next().await {
-                    Some(Ok(chunk)) => self.chunk = chunk,
+                    Some(Ok(chunk)) => {
+                        self.decoder.metrics.wire_bytes += chunk.len();
+                        self.chunk = chunk;
+                    }
                     Some(Err(code)) => return Err(code),
                     None => {
                         if !self.line.is_empty() {
@@ -295,7 +320,11 @@ impl State {
             let newline = self.chunk.iter().position(|b| *b == b'\n');
             let size = newline.unwrap_or(self.chunk.len());
             if self.line.len() + size > self.decoder.limits.line {
-                return Err(LIMIT);
+                return Err(self.decoder.metrics.exceeded(
+                    "sse_line_bytes",
+                    self.line.len() + size,
+                    self.decoder.limits.line,
+                ));
             }
             self.line.extend_from_slice(&self.chunk.split_to(size));
             if newline.is_some() {
@@ -319,7 +348,16 @@ pub fn from_source(source: crate::model_http::Source, limits: Limits, streaming:
     };
     Body::from_stream(stream::unfold(state, |mut state| async move {
         loop {
-            if let Some(event) = state.decoder.pending.pop_front() {
+            if let Some(mut event) = state.decoder.pending.pop_front() {
+                if state.decoder.limits.report
+                    && (event.get("finish").is_some() || event.get("error").is_some())
+                {
+                    event["stream_metrics"] = state.decoder.metrics.snapshot(if state.streaming {
+                        "openai_sse"
+                    } else {
+                        "openai_json"
+                    });
+                }
                 let mut bytes = event.to_string().into_bytes();
                 bytes.push(b'\n');
                 return Some((Ok::<_, Infallible>(bytes), state));
@@ -391,6 +429,19 @@ mod tests {
         assert_eq!(
             d.payload(br#"{"choices":[{"delta":{"content":"123456"}}]}"#),
             Err(LIMIT)
+        );
+        assert_eq!(
+            d.metrics.snapshot("openai_sse")["limit"],
+            json!({"name":"response_payload_bytes","observed":6,"maximum":5})
+        );
+        let mut d = Decoder::new(Limits::parse("2/5/0").unwrap());
+        for _ in 0..256 {
+            d.line(b"").unwrap();
+        }
+        assert_eq!(d.line(b""), Err(LIMIT));
+        assert_eq!(
+            d.metrics.snapshot("openai_sse")["limit"],
+            json!({"name":"sse_lines","observed":257,"maximum":256})
         );
     }
 }

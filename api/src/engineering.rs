@@ -1,4 +1,6 @@
 //! Explicit loopback companion bridge; snapshots use the ordinary indexing queue.
+#[cfg(windows)]
+mod desktop;
 mod registered;
 use crate::{auth, error, json_response, Context};
 use axum::{body::to_bytes, extract::Request, http::StatusCode, response::Response};
@@ -57,12 +59,17 @@ impl Companion {
             .map_err(|_| "ENGINEERING_ENDPOINT_INVALID")?;
         url.query_pairs_mut()
             .extend_pairs(fields.iter().map(|(k, v)| (*k, v.as_str())));
-        let mut response = self
-            .client
-            .get(url)
-            .send()
-            .await
-            .map_err(|_| "ENGINEERING_UNAVAILABLE")?;
+        let response = self.client.get(url.clone()).send().await;
+        #[cfg(windows)]
+        let response = if response.as_ref().is_err_and(reqwest::Error::is_connect)
+            && desktop::matches(&self.url)
+        {
+            desktop::ensure_started(self.url.port().ok_or("ENGINEERING_ENDPOINT_INVALID")?).await?;
+            self.client.get(url).send().await
+        } else {
+            response
+        };
+        let mut response = response.map_err(|_| "ENGINEERING_UNAVAILABLE")?;
         if !response.status().is_success() {
             return Err("ENGINEERING_SOURCE_UNAVAILABLE".into());
         }
@@ -411,12 +418,11 @@ async fn perform(context: Arc<Context>, body: Value) -> Result<Value> {
             let capabilities = companion
                 .get("/simulation/les-capabilities.json", &[])
                 .await
-                .map_err(|code| {
-                    if code == "ENGINEERING_UNAVAILABLE" {
-                        code
-                    } else {
+                .map_err(|code| match code.as_str() {
+                    "ENGINEERING_SOURCE_UNAVAILABLE" | "ENGINEERING_RESPONSE_INVALID" => {
                         "ENGINEERING_VIEWER_UPDATE_REQUIRED".into()
                     }
+                    _ => code,
                 })?;
             if capabilities["contract"] != "uvyazka.les-viewer.v1"
                 || (preview && capabilities["dataset_preview"] != true)
@@ -516,7 +522,10 @@ pub async fn handle(context: Arc<Context>, request: Request) -> Response {
 fn message(code: &str) -> &'static str {
     match code {
         "ENGINEERING_ENDPOINT_INVALID"=>"Укажите локальный адрес Увязки с портом. Адрес настольной Увязки по умолчанию — http://127.0.0.1:17881/.",
-        "ENGINEERING_UNAVAILABLE"=>"Увязка не отвечает. Запустите её и проверьте адрес.",
+        "ENGINEERING_UNAVAILABLE"=>"Увязка не отвечает по указанному адресу.",
+        "ENGINEERING_DESKTOP_NOT_INSTALLED"=>"Настольная Увязка не найдена среди установленных приложений Windows.",
+        "ENGINEERING_DESKTOP_START_FAILED"=>"Windows не смогла запустить Увязку. Можно повторить подключение.",
+        "ENGINEERING_DESKTOP_START_TIMEOUT"=>"Увязка запустилась, но её служба не открыла порт. Можно повторить подключение.",
         "ENGINEERING_PROJECT_SYNC_FAILED"=>"Не удалось сохранить список проектов Увязки. Повторите синхронизацию.",
         "ENGINEERING_PROJECT_UNAVAILABLE"=>"Проект не найден в Увязке. Обновите список проектов.",
         "ENGINEERING_PERMISSION_DENIED"=>"Увязка отклонила чтение. Проверьте её локальную панель и совместимость подключения; исходники не изменены.",

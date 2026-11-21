@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import App from './App.svelte';
+import StatusPage from './components/StatusPage.svelte';
 import { Workspace } from './lib/workspace.svelte';
 import { emptyScope } from './lib/contracts';
 
@@ -38,21 +39,106 @@ beforeEach(() => {
 });
 afterEach(async () => { await unmount(component); document.body.innerHTML = ''; vi.unstubAllGlobals(); });
 
-it('selects a retrieval strategy in answer options and restores the preference', async () => {
-  await settle(() => !!document.querySelector('#question'));
-  document.querySelector<HTMLButtonElement>('button[aria-label="Параметры ответа"]')!.click();
-  await settle(() => !!document.querySelector('dialog select'));
-  const modes = document.querySelector<HTMLSelectElement>('dialog select')!;
-  expect([...modes.options].map(item => item.value)).toEqual(['pull', 'push', 'hybrid']);
-  modes.value = 'hybrid';
-  modes.dispatchEvent(new Event('change', { bubbles: true }));
-  flushSync();
+it('offers indexing status after a folder is queued and saves the current draft before opening it', async () => {
+  const persist = vi.spyOn(workspace, 'persist').mockResolvedValue(undefined);
+  vi.spyOn(workspace, 'refreshDatasets').mockResolvedValue(undefined);
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+    if (path === '/api/projects') return json({ projects: [] });
+    if (path === '/api/light/folder-watches') return json({ watches: [] });
+    if (path === '/api/health') return json({ status: 'ok', rag: { status: 'ready', dense_available: true, qdrant: { ok: true, points: 53169 } } });
+    if (path === '/api/model-connections/effective') return json({ roles: { embeddings: { model_id: 'Учебная модель' } } });
+    if (path.startsWith('/api/jobs/summary')) return json({ jobs: [
+      { id: 'running', status: 'running', phase: 'index', total: 328, indexed: 308, index_pending: 20,
+        current_stage: 'EMBED', current_file: 'План.pdf' },
+      { id: 'old', status: 'failed', phase: 'index', superseded: 1, source: 'native_external', message: 'Прежний сбой' },
+    ] });
+    if (path === '/api/rag/datasets') return json({ id: 'folder', name: 'Тест' });
+    if (path === '/api/rag/index-external') return json({ intake_job_id: 'queued' });
+    throw new Error('Unexpected fixture request: ' + path);
+  }));
+  const findButton = (name: string) => [...document.querySelectorAll<HTMLButtonElement>('button')]
+    .find((button) => button.textContent?.trim() === name);
+  await settle(() => findButton('Данные')?.disabled === false);
+  findButton('Данные')!.click();
+  await settle(() => document.querySelector<HTMLInputElement>('dialog input[placeholder="Вставьте путь к папке"]')?.disabled === false);
+  await settle(() => document.querySelector('dialog .status-jobs')?.textContent?.includes('308 из 328') === true);
+  expect(document.querySelector('dialog .status-jobs')?.textContent).toContain('Индекс · Поиск доступен');
+  expect(document.querySelector('dialog .status-jobs')?.textContent).toContain('Осталось 20');
+  expect(document.querySelector('dialog .status-jobs')?.textContent).not.toContain('Прежний сбой');
+  expect(findButton('К ходу индексации')).toBeUndefined();
+  const input = document.querySelector<HTMLInputElement>('dialog input[placeholder="Вставьте путь к папке"]')!;
+  input.value = 'C:/Тест';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  await settle(() => findButton('Добавить папку')?.disabled === false);
+  findButton('Добавить папку')!.click();
+  await settle(() => !!findButton('К ходу индексации'));
+  const assign = vi.fn();
+  vi.stubGlobal('location', { href: location.href, origin: location.origin, assign });
+  findButton('К ходу индексации')!.click();
+  await settle(() => assign.mock.calls.length === 1);
+  expect(persist).toHaveBeenCalledOnce();
+  expect(String(assign.mock.calls[0][0])).toContain('/app/?view=status&session=demo');
+});
+
+it('shows why indexing is waiting and retries the original job from the status page', async () => {
+  const job = { id: 'folder-job', source: 'native_external', phase: 'index', status: 'waiting',
+    message: 'Индексация ждёт свободную оперативную память.', can_retry: 1, total: 328 };
+  const retry = vi.fn();
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
+    if (path.startsWith('/api/jobs/summary')) return json({ jobs: [job] });
+    if (path === '/api/light/intake' && init?.method === 'POST') {
+      retry(JSON.parse(String(init.body)));
+      job.status = 'queued';
+      job.can_retry = 0;
+      return json(job);
+    }
+    if (path === '/api/model-connections/effective') return json({ roles: {} });
+    return json({ status: 'ok' });
+  }));
+  const panel = mount(StatusPage, { target: document.body });
+  const retryButton = () => [...document.querySelectorAll<HTMLButtonElement>('.status-jobs button')]
+    .find((button) => button.textContent?.trim() === 'Повторить индексацию');
   try {
-    expect(workspace.retrievalMode).toBe('hybrid');
-    expect(new Workspace().retrievalMode).toBe('hybrid');
+    await settle(() => !!retryButton());
+    expect(document.querySelector('.status-jobs')?.textContent).toContain(job.message);
+    retryButton()!.click();
+    await settle(() => document.querySelector('.status-jobs')?.textContent?.includes('В очереди') === true);
+    expect(retry).toHaveBeenCalledExactlyOnceWith({ id: job.id });
   } finally {
-    localStorage.removeItem('les.retrieval-mode');
+    await unmount(panel);
   }
+});
+
+it('offers document scope as the search control in the composer', async () => {
+  const scope = () => document.querySelector<HTMLButtonElement>('.composer-actions .scope-button');
+  await settle(() => scope()?.disabled === false);
+  expect(document.querySelector('.composer-actions [aria-label="Параметры ответа"]')).toBeNull();
+  scope()!.click();
+  await settle(() => !!document.querySelector('dialog input[value="all"]'));
+  expect(document.querySelector('dialog')?.textContent).toContain('Где искать ответ');
+});
+
+it('saves the exact catalog IDs of two documents from the composer', async () => {
+  await settle(() => !!document.querySelector('#question'));
+  workspace.datasets = [{ id: 'one', name: 'Документы' }];
+  const docs = ['current/Notes.pdf', 'archive/Notes.pdf', 'B.pdf'].map((file_name, i) => ({
+    id: String(i), dataset_id: 'one', file_name,
+  }));
+  const save = vi.spyOn(workspace, 'setScope').mockResolvedValue();
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+    expect(path).toContain('/api/light/library?dataset_id=one');
+    return json({ documents: docs, total: 3 });
+  }));
+  document.querySelector<HTMLButtonElement>('.composer-actions .scope-button')!.click();
+  await settle(() => !!document.querySelector('input[value="documents"]'));
+  document.querySelector<HTMLInputElement>('input[value="documents"]')!.click();
+  await settle(() => document.querySelectorAll('dialog input[type="checkbox"]').length === 3);
+  const boxes = document.querySelectorAll<HTMLInputElement>('dialog input[type="checkbox"]');
+  boxes[0].click(); boxes[2].click();
+  document.querySelector<HTMLButtonElement>('dialog .modal-footer button:last-child')!.click();
+  await settle(() => save.mock.calls.length === 1);
+  expect(save.mock.calls[0][0]).toEqual({ scope_type: 'datasets', dataset_ids: ['one'], project_ids: [],
+    selected_sources_only: false, document_ids: ['0', '2'] });
 });
 
 it('uses the paperclip to index a file, waits for publication and preserves the draft', async () => {

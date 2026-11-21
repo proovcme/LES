@@ -117,7 +117,7 @@ pub(super) fn rows(request: &Value) -> Result<Value> {
 }
 
 /// Decode object keys in source order without enabling a second JSON map implementation.
-fn ordered(text: &str) -> Vec<(String, Value)> {
+pub(super) fn ordered(text: &str) -> Vec<(String, Value)> {
     let bytes = text.as_bytes();
     let mut at = 0;
     let mut out = Vec::new();
@@ -291,6 +291,9 @@ pub(super) fn chunks(request: &Value) -> Result<Value> {
         );
         metadata.insert("extractor".into(), json!(field(row, "extractor")));
         metadata.insert("row".into(), row["source_row"].clone());
+        if let Some(group) = row.get("workbook_group") {
+            metadata.insert("workbook_group".into(), group.clone());
+        }
         for (first, second, key) in [
             ("name", "work_name", "name"),
             ("code", "designation", "code"),

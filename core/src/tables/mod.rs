@@ -1,5 +1,7 @@
 //! Table values are source data. No domain workflow or model calls live here.
 pub mod artifacts;
+mod groups;
+pub use groups::identifiers as group_identifiers;
 mod normalize;
 mod prepare;
 mod storage;
@@ -23,6 +25,7 @@ pub fn execute(request: &Value) -> Result<Value> {
         Some("write") => storage::write(request),
         Some("read") => storage::read(request),
         Some("select") => storage::select(request),
+        Some("groups") => storage::groups(request),
         Some("schema") => Ok(SCHEMA.clone()),
         Some("references") => artifacts::refs(request),
         Some("sum_rows") => sum_rows(request),
@@ -70,9 +73,8 @@ fn sum_rows(request: &Value) -> Result<Value> {
 pub(super) fn present(value: &Value) -> bool {
     match value {
         Value::Null => false,
-        Value::Bool(v) => *v,
+        Value::Bool(_) | Value::Number(_) => true,
         Value::String(v) => !v.is_empty(),
-        Value::Number(v) => v.as_f64() != Some(0.0),
         Value::Array(v) => !v.is_empty(),
         Value::Object(v) => !v.is_empty(),
     }

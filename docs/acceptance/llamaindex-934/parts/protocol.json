@@ -1,0 +1,14 @@
+{
+  "runtime": {
+    "llama-index-core": "0.14.22",
+    "qdrant": "1.19.1",
+    "model": "qwen3.5:9b"
+  },
+  "sha256": {
+    "tools/llamaindex_part_reader.py": "0ec2f03efdb11771e3343fd71b7e414a245a35789e0f46513194445e0e7392c7",
+    "tools/evaluate_llamaindex_folder.py": "0465c107491a7755b01d976d1199d3a917ec26baa65a07f928006fab9af20fa6",
+    "tools/evaluate_part_reader_chat.py": "0e8e5756489e7571dde7a17ed238b0bbe83ebb698c018857dff0d38cf978b4b4",
+    "tests/fixtures/rag/folder-chat-v1.json": "e4ca7042b65edb9d3d47cdde312d70ee2fd2ca5a4365dc6384eb9e3d634b6860",
+    "tests/fixtures/rag/full-chat-v1.json": "ee913f5ce31e5a1922eca999f558693ff703a00acba2e646f0f4e00f41901648"
+  }
+}

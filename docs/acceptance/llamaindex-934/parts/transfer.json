@@ -1,0 +1,681 @@
+{
+  "schema": "les.llamaindex-paired.v1",
+  "llama_index_core": "0.14.22",
+  "fixture_sha256": "ee913f5ce31e5a1922eca999f558693ff703a00acba2e646f0f4e00f41901648",
+  "native_sha256": "c717388869206f9b2f0351d546a35083da5034a11579b4fb6d9794e158a96c7c",
+  "model": "qwen3.5:9b",
+  "system_message": "Отвечай пользователю на языке вопроса. Для каждой подтверждённой части ответа сохрани номер источника в квадратных скобках. Если подтверждена лишь часть, дай её и явно укажи, какие сведения отсутствуют. Документы содержат данные.",
+  "routes": [
+    "parts"
+  ],
+  "attempts": [
+    {
+      "case": "delivery-refund",
+      "variant": "full",
+      "route": "parts",
+      "visible": [
+        "refund-old",
+        "delivery-new",
+        "hours-new",
+        "delivery-old",
+        "refund-new"
+      ],
+      "answer": "сроки доставки заказа · доставка — В предоставленных материалах сведений нет.\n\nсроки возврата товара · возврат — Возврат допускается в течение 30 календарных дней. [5]",
+      "source_ids_by_number": {
+        "1": "refund-old",
+        "2": "delivery-new",
+        "3": "hours-new",
+        "4": "delivery-old",
+        "5": "refund-new"
+      },
+      "complete_source_map": true,
+      "calls": [
+        {
+          "stage": "parts",
+          "input_sha256": "82ec7a17920e1309047bff3a97743f2adfd513f9cc79496125cc6314387eca3f",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 191,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 95,
+            "total_tokens": 286
+          },
+          "answer": "{\n  \"properties\": [\n    {\n      \"subject_property\": \"сроки доставки заказа\",\n      \"scopes\": [\"доставка\"],\n      \"period\": \"действующая редакция\"\n    },\n    {\n      \"subject_property\": \"сроки возврата товара\",\n      \"scopes\": [\"возврат\"],\n      \"period\": \"действующая редакция\"\n    }\n  ]\n}",
+          "seconds": 3.81,
+          "request_sha256": "59906a36daa7b7517dff9035ec95eb45601aaa52d952687f0bad31c62a5c77ac"
+        },
+        {
+          "stage": "editions",
+          "input_sha256": "e33a400ed8df25f264e798753e60e01b17f70bf3567e61a7c332a8b0f56ab9c5",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 473,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 87,
+            "total_tokens": 560
+          },
+          "answer": "{\n  \"exclude\": [\n    {\n      \"source\": 1,\n      \"basis\": \"1.2\"\n    },\n    {\n      \"source\": 2,\n      \"basis\": \"2.2\"\n    },\n    {\n      \"source\": 4,\n      \"basis\": \"4.2\"\n    }\n  ]\n}",
+          "seconds": 4.13,
+          "request_sha256": "0f33dbfd2dabff8c4cfa732001d2c5f2094dc8e88f7c16c433729b0a269aa8a6"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "1a58e4245209e285208b684546abfdc930cb56ef1a4ea595081f150a03bad8c1",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 360,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 14,
+            "total_tokens": 374
+          },
+          "answer": "{\"status\": \"missing\", \"excerpts\": []}",
+          "seconds": 1.14,
+          "request_sha256": "97adfb92ae16e3876dbfedaf0d37583b0e68ccc6e4dd0e1839b546c5ad9e05d5"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "234b54e7537d67d8ac5c843daafc2cea28b817c57278f2451af5b532cd75e99f",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 360,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 23,
+            "total_tokens": 383
+          },
+          "answer": "{\"status\": \"supported\", \"excerpts\": [\"5.3\", \"5.2\"]}",
+          "seconds": 1.61,
+          "request_sha256": "c153b0394965b3dca70d71c351cbd3cb7611b93f269fdc689b7d18e643d90b1d"
+        },
+        {
+          "stage": "review",
+          "input_sha256": "1c44cc9157d3a895c83082a96c98b251f45c8d0cb9b9b001314bebef48b333ef",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 265,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 11,
+            "total_tokens": 276
+          },
+          "answer": "{\"accepted\": [\"2/5.3\"]}",
+          "seconds": 0.9,
+          "request_sha256": "a48ce689bb70ee4ccc7d96bb00b9f747339bbf8e083a7398328daa659dd8db4b"
+        }
+      ],
+      "part_trace": {
+        "properties": [
+          {
+            "subject_property": "сроки доставки заказа",
+            "scopes": [
+              "доставка"
+            ],
+            "period": "действующая редакция"
+          },
+          {
+            "subject_property": "сроки возврата товара",
+            "scopes": [
+              "возврат"
+            ],
+            "period": "действующая редакция"
+          }
+        ],
+        "editions": {
+          "действующая редакция": [
+            {
+              "source": 1,
+              "basis": "1.2"
+            },
+            {
+              "source": 2,
+              "basis": "2.2"
+            },
+            {
+              "source": 4,
+              "basis": "4.2"
+            }
+          ]
+        },
+        "readings": [
+          {
+            "property": "сроки доставки заказа",
+            "scope": "доставка",
+            "period": "действующая редакция",
+            "status": "missing",
+            "excerpts": []
+          },
+          {
+            "property": "сроки возврата товара",
+            "scope": "возврат",
+            "period": "действующая редакция",
+            "status": "supported",
+            "excerpts": [
+              "5.3",
+              "5.2"
+            ]
+          }
+        ],
+        "accepted": [
+          "2/5.3"
+        ]
+      },
+      "seconds": 11.6
+    },
+    {
+      "case": "delivery-refund",
+      "variant": "current-refund-removed",
+      "route": "parts",
+      "visible": [
+        "refund-old",
+        "delivery-new",
+        "hours-new",
+        "delivery-old",
+        "shipping"
+      ],
+      "answer": "сроки доставки заказа · доставка — Заказ доставляют за 7 рабочих дней. [2]\n\nсроки возврата товара · возврат — В предоставленных материалах сведений нет.",
+      "source_ids_by_number": {
+        "1": "refund-old",
+        "2": "delivery-new",
+        "3": "hours-new",
+        "4": "delivery-old",
+        "5": "shipping"
+      },
+      "complete_source_map": true,
+      "calls": [
+        {
+          "stage": "parts",
+          "input_sha256": "82ec7a17920e1309047bff3a97743f2adfd513f9cc79496125cc6314387eca3f",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 191,
+            "prompt_tokens_details": {
+              "cached_tokens": 187
+            },
+            "completion_tokens": 95,
+            "total_tokens": 286
+          },
+          "answer": "{\n  \"properties\": [\n    {\n      \"subject_property\": \"сроки доставки заказа\",\n      \"scopes\": [\"доставка\"],\n      \"period\": \"действующая редакция\"\n    },\n    {\n      \"subject_property\": \"сроки возврата товара\",\n      \"scopes\": [\"возврат\"],\n      \"period\": \"действующая редакция\"\n    }\n  ]\n}",
+          "seconds": 4.38,
+          "request_sha256": "59906a36daa7b7517dff9035ec95eb45601aaa52d952687f0bad31c62a5c77ac"
+        },
+        {
+          "stage": "editions",
+          "input_sha256": "11399029d8ff8243625dc6e5fd6b8f2349e9fcbcd51b85cfa1da8ae88fd857b3",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 447,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 63,
+            "total_tokens": 510
+          },
+          "answer": "{\n  \"exclude\": [\n    {\n      \"source\": 1,\n      \"basis\": \"1.2\"\n    },\n    {\n      \"source\": 4,\n      \"basis\": \"4.2\"\n    }\n  ]\n}",
+          "seconds": 2.91,
+          "request_sha256": "17c66f6da39a24580e410928b8385afdc399526b2b24e892b43e800e2baf9924"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "41742655a5f9f942f58155d95a127a9cb7d16ec45a849ba92fe18f520cb4afa9",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 392,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 18,
+            "total_tokens": 410
+          },
+          "answer": "{\"status\": \"supported\", \"excerpts\": [\"2.3\"]}",
+          "seconds": 1.18,
+          "request_sha256": "fe1e88dd69dfbf257504f454043e012a9e27523114b452b96b89205b67487a73"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "f6b9bafe66866d3d3c436e93139badf32c2940a8cee231771ada3fb1ce2f15c1",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 392,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 15,
+            "total_tokens": 407
+          },
+          "answer": "{\"status\": \"missing\", \"excerpts\": []}",
+          "seconds": 1.01,
+          "request_sha256": "129b75f09d08feb6590b93490201db6fee4b975114820f340f78cc9923a25ed2"
+        },
+        {
+          "stage": "review",
+          "input_sha256": "340bc35019d011f4c5834c8e7f4e752931fdd8fc1c4f2b916a2a927a73195f71",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 206,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 11,
+            "total_tokens": 217
+          },
+          "answer": "{\"accepted\": [\"1/2.3\"]}",
+          "seconds": 0.63,
+          "request_sha256": "e786114aa32cf9fdc9dbc5ed2a1b5bafd06372506bd3de494df1ab11c9699109"
+        }
+      ],
+      "part_trace": {
+        "properties": [
+          {
+            "subject_property": "сроки доставки заказа",
+            "scopes": [
+              "доставка"
+            ],
+            "period": "действующая редакция"
+          },
+          {
+            "subject_property": "сроки возврата товара",
+            "scopes": [
+              "возврат"
+            ],
+            "period": "действующая редакция"
+          }
+        ],
+        "editions": {
+          "действующая редакция": [
+            {
+              "source": 1,
+              "basis": "1.2"
+            },
+            {
+              "source": 4,
+              "basis": "4.2"
+            }
+          ]
+        },
+        "readings": [
+          {
+            "property": "сроки доставки заказа",
+            "scope": "доставка",
+            "period": "действующая редакция",
+            "status": "supported",
+            "excerpts": [
+              "2.3"
+            ]
+          },
+          {
+            "property": "сроки возврата товара",
+            "scope": "возврат",
+            "period": "действующая редакция",
+            "status": "missing",
+            "excerpts": []
+          }
+        ],
+        "accepted": [
+          "1/2.3"
+        ]
+      },
+      "seconds": 10.11
+    },
+    {
+      "case": "islands",
+      "variant": "exception",
+      "route": "parts",
+      "visible": [
+        "delivery-new",
+        "refund-new",
+        "shipping",
+        "delivery-old",
+        "hours-new"
+      ],
+      "answer": "доставка на остров · при заказе на 6000 рублей — Исключение: на острова доставка стоит 900 рублей при любой сумме заказа. [3]",
+      "source_ids_by_number": {
+        "1": "delivery-new",
+        "2": "refund-new",
+        "3": "shipping",
+        "4": "delivery-old",
+        "5": "hours-new"
+      },
+      "complete_source_map": true,
+      "calls": [
+        {
+          "stage": "parts",
+          "input_sha256": "6afffd982f5d771becf73ca881448f2bd32625aacd37ea8717a4bab1594f519f",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 187,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 55,
+            "total_tokens": 242
+          },
+          "answer": "{\n  \"properties\": [\n    {\n      \"subject_property\": \"доставка на остров\",\n      \"scopes\": [\"при заказе на 6000 рублей\"],\n      \"period\": \"\"\n    }\n  ]\n}",
+          "seconds": 2.38,
+          "request_sha256": "ab230a3a84b8477784aed6a29e9c48cdf1167c0bd8d2bac69b1f4073fbb49e8f"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "e802a9c6af0e1a955768401c80b61a6f96de885c9b640b70e63915b29764ef11",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 527,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 23,
+            "total_tokens": 550
+          },
+          "answer": "{\"status\": \"supported\", \"excerpts\": [\"3.1\", \"3.2\"]}",
+          "seconds": 1.44,
+          "request_sha256": "37fb680ee4acd8a21ca044c8ef492b5acd58dddca3580ec367121dc67ddc6e87"
+        },
+        {
+          "stage": "review",
+          "input_sha256": "0f59d0e7a111c9e89ec27d231410d4c36276ae4deb42f45e09dae9549ff806a0",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 266,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 11,
+            "total_tokens": 277
+          },
+          "answer": "{\"accepted\": [\"1/3.2\"]}",
+          "seconds": 0.71,
+          "request_sha256": "ea325758b1a4e52c4f59dbf78c799097f0bdc0aa1456b3935ffb456fb99b59bc"
+        }
+      ],
+      "part_trace": {
+        "properties": [
+          {
+            "subject_property": "доставка на остров",
+            "scopes": [
+              "при заказе на 6000 рублей"
+            ],
+            "period": ""
+          }
+        ],
+        "editions": {},
+        "readings": [
+          {
+            "property": "доставка на остров",
+            "scope": "при заказе на 6000 рублей",
+            "period": "",
+            "status": "supported",
+            "excerpts": [
+              "3.1",
+              "3.2"
+            ]
+          }
+        ],
+        "accepted": [
+          "1/3.2"
+        ]
+      },
+      "seconds": 4.52
+    },
+    {
+      "case": "launch",
+      "variant": "conflict",
+      "route": "parts",
+      "visible": [
+        "launch-a",
+        "delivery-new",
+        "hours-new",
+        "launch-b",
+        "refund-new"
+      ],
+      "answer": "[[NO_EVIDENCE]] дата запуска проекта · проект — В предоставленных материалах сведений нет.",
+      "source_ids_by_number": {
+        "1": "launch-a",
+        "2": "delivery-new",
+        "3": "hours-new",
+        "4": "launch-b",
+        "5": "refund-new"
+      },
+      "complete_source_map": true,
+      "calls": [
+        {
+          "stage": "parts",
+          "input_sha256": "e1fcaa2887c89466ff701a95b1a441da9920cf239a7cf8811d64757025425f32",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 182,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 46,
+            "total_tokens": 228
+          },
+          "answer": "{\n  \"properties\": [\n    {\n      \"subject_property\": \"дата запуска проекта\",\n      \"scopes\": [\"проект\"],\n      \"period\": \"\"\n    }\n  ]\n}",
+          "seconds": 1.97,
+          "request_sha256": "e0af776359f617d88c027d20f17730c57b1f7589adec1c4d82faebe7ad532766"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "9ae32169e9d044a40a9c0f2fcd543d1759e14f7ee0abf01b8f64c0c0258c29f3",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 531,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 15,
+            "total_tokens": 546
+          },
+          "answer": "{\"status\": \"missing\", \"excerpts\": []}",
+          "seconds": 1.21,
+          "request_sha256": "9a14da24588c6c154aa66395dd940ed496db5c5d9ef6558c091182afe9efd4c0"
+        }
+      ],
+      "part_trace": {
+        "properties": [
+          {
+            "subject_property": "дата запуска проекта",
+            "scopes": [
+              "проект"
+            ],
+            "period": ""
+          }
+        ],
+        "editions": {},
+        "readings": [
+          {
+            "property": "дата запуска проекта",
+            "scope": "проект",
+            "period": "",
+            "status": "missing",
+            "excerpts": []
+          }
+        ],
+        "accepted": []
+      },
+      "seconds": 3.18
+    },
+    {
+      "case": "director",
+      "variant": "missing",
+      "route": "parts",
+      "visible": [
+        "launch-a",
+        "hours-new",
+        "storage",
+        "delivery-old",
+        "refund-new"
+      ],
+      "answer": "[[NO_EVIDENCE]] директор лаборатории · называется — В предоставленных материалах сведений нет.",
+      "source_ids_by_number": {
+        "1": "launch-a",
+        "2": "hours-new",
+        "3": "storage",
+        "4": "delivery-old",
+        "5": "refund-new"
+      },
+      "complete_source_map": true,
+      "calls": [
+        {
+          "stage": "parts",
+          "input_sha256": "3792f3a6c89566ecdfe56999558639e8c1b76ab10da5cf27f15d159e240911b0",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 175,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 48,
+            "total_tokens": 223
+          },
+          "answer": "{\n  \"properties\": [\n    {\n      \"subject_property\": \"директор лаборатории\",\n      \"scopes\": [\"называется\"],\n      \"period\": \"\"\n    }\n  ]\n}",
+          "seconds": 2.02,
+          "request_sha256": "c0d13c2ee5a3e07fc5083c112e119850e1acd0e191dc36b6ce60baa918420f36"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "b1f1cb3ef0fd7119cf01ab816b8e31caf331ad666451df4d4025c69ab2bb0ffd",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 508,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 14,
+            "total_tokens": 522
+          },
+          "answer": "{\"status\": \"missing\", \"excerpts\": []}",
+          "seconds": 1.01,
+          "request_sha256": "73f9c079829a1e7747e3029694bed59d6a9d095997dada7a3455a20bf92cacb9"
+        }
+      ],
+      "part_trace": {
+        "properties": [
+          {
+            "subject_property": "директор лаборатории",
+            "scopes": [
+              "называется"
+            ],
+            "period": ""
+          }
+        ],
+        "editions": {},
+        "readings": [
+          {
+            "property": "директор лаборатории",
+            "scope": "называется",
+            "period": "",
+            "status": "missing",
+            "excerpts": []
+          }
+        ],
+        "accepted": []
+      },
+      "seconds": 3.03
+    },
+    {
+      "case": "library",
+      "variant": "editions",
+      "route": "parts",
+      "visible": [
+        "hours-old",
+        "access",
+        "hours-new",
+        "delivery-old",
+        "shipping"
+      ],
+      "answer": "Библиотека · апрель 2031 года — График библиотеки с 2031-03-01: открыта с 10:00 до 19:00. [3]",
+      "source_ids_by_number": {
+        "1": "hours-old",
+        "2": "access",
+        "3": "hours-new",
+        "4": "delivery-old",
+        "5": "shipping"
+      },
+      "complete_source_map": true,
+      "calls": [
+        {
+          "stage": "parts",
+          "input_sha256": "372d2152e204fd3be74a7d77dd076dadec36fd027f00213ac7ba229d341c42d4",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 184,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 53,
+            "total_tokens": 237
+          },
+          "answer": "{\n  \"properties\": [\n    {\n      \"subject_property\": \"Библиотека\",\n      \"scopes\": [\"апрель 2031 года\"],\n      \"period\": \"\"\n    }\n  ]\n}",
+          "seconds": 2.29,
+          "request_sha256": "ebe0b69b5d9c1f5cc77a003426ac9bc50decac7c3534e4fc98e4c734ec2d89e6"
+        },
+        {
+          "stage": "read",
+          "input_sha256": "556a8a26edeb0a6a126f08dfd99ddcb0fc2b7c33033b83977abd6159379ce1f4",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 478,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 18,
+            "total_tokens": 496
+          },
+          "answer": "{\"status\": \"supported\", \"excerpts\": [\"3.1\"]}",
+          "seconds": 1.2,
+          "request_sha256": "5efc93b88689d0f8b69003861c3c7c70c17c0ca1aafe65d3ff50d3b337ab73da"
+        },
+        {
+          "stage": "review",
+          "input_sha256": "aed18a6d53bd8036a9130c5c62b272f02dfb1f0d8b998c24d866be149149df5e",
+          "finish": "stop",
+          "usage": {
+            "prompt_tokens": 222,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "completion_tokens": 11,
+            "total_tokens": 233
+          },
+          "answer": "{\"accepted\": [\"1/3.1\"]}",
+          "seconds": 0.64,
+          "request_sha256": "823c11e448b883ce51da6ffe0ec41ac4df0c14476385efdc386a8dc31a2bc64e"
+        }
+      ],
+      "part_trace": {
+        "properties": [
+          {
+            "subject_property": "Библиотека",
+            "scopes": [
+              "апрель 2031 года"
+            ],
+            "period": ""
+          }
+        ],
+        "editions": {},
+        "readings": [
+          {
+            "property": "Библиотека",
+            "scope": "апрель 2031 года",
+            "period": "",
+            "status": "supported",
+            "excerpts": [
+              "3.1"
+            ]
+          }
+        ],
+        "accepted": [
+          "1/3.1"
+        ]
+      },
+      "seconds": 4.13
+    }
+  ]
+}

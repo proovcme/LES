@@ -21,7 +21,7 @@
   import EngineeringModels from './components/EngineeringModels.svelte';
 
   let { workspace = new Workspace() }: { workspace?: Workspace } = $props();
-  let modal = $state<'sessions' | 'scope' | 'options' | 'attachment' | 'models' | 'mail' | 'data' | 'profiles' | 'mcp' | 'update' | 'engineering' | null>(null);
+  let modal = $state<'sessions' | 'scope' | 'attachment' | 'models' | 'mail' | 'data' | 'profiles' | 'mcp' | 'update' | 'engineering' | null>(null);
   let source = $state<Source | null>(null); let mobileNav = $state(false);
   let actionBusy = $state(false); let sessionQuery = $state('');
   let memoryOpen = $state(false); let memoryDirty = $state(false); let memoryEditor: AgentMemory;
@@ -29,7 +29,8 @@
   let indexFile = false;
   let sourceTrigger: HTMLElement | null = null; let followAnswer = $state(true);
   const disabled = $derived(workspace.busy || workspace.contextChanging || workspace.uploading || workspace.closing || actionBusy || workspace.loading);
-  const scopeLabel = $derived(workspace.session?.scope.scope_type === 'mixed' ? 'Проект и наборы'
+  const scopeLabel = $derived(workspace.session?.scope.document_ids?.length ? `Выбрано документов: ${workspace.session.scope.document_ids.length}`
+    : workspace.session?.scope.scope_type === 'mixed' ? 'Проект и наборы'
     : workspace.session?.scope.project_ids.length ? 'Документы проекта'
     : workspace.session?.scope.dataset_ids.length
     ? workspace.session.scope.dataset_ids.map((id) => workspace.datasets.find((item) => item.id === id)?.name || 'Набор недоступен').join(', ')
@@ -77,6 +78,7 @@
       location.assign(url);
     });
   }
+  function openStatus() { return navigate(statusPath, location.origin); }
   function openSource(value: Source) { sourceTrigger = document.activeElement as HTMLElement; source = value; }
   function openOrigin(value: import('./lib/contracts').SourceOrigin) {
     if (source) source = pickSourceOrigin(source, value);
@@ -129,7 +131,7 @@
     </div>
     <div class="nav-footer">
       <button class="nav-item" disabled={disabled} onclick={() => { modal = 'update'; mobileNav = false; }}><Icon name="status" />Обновление</button>
-      <button class="nav-item" disabled={disabled} onclick={() => navigate(statusPath, location.origin)}><Icon name="status" />Состояние</button>
+      <button class="nav-item" disabled={disabled} onclick={openStatus}><Icon name="status" />Состояние</button>
       {#if workspace.nativeModelSettings || workspace.legacyURL}
         <button class="nav-item" disabled={disabled} onclick={openModels}><Icon name="settings" />{workspace.nativeModelSettings ? 'Модели' : 'Настройки'}</button>
       {/if}
@@ -140,7 +142,7 @@
     <header class="chat-header">
       <button class="mobile-menu icon-button quiet" aria-label={mobileNav ? 'Закрыть меню' : 'Открыть меню'} aria-expanded={mobileNav} onclick={() => mobileNav = !mobileNav}><Icon name={mobileNav ? 'close' : 'menu'} /></button>
       <div class="chat-heading"><h1>{workspace.session?.title || 'Новый диалог'}</h1></div>
-      <div class="model-indicator" title="Назначенная модель ответов"><span>{workspace.model?.model_id || 'Модель не назначена'}<small>{workspace.service || 'Модель ответов'}{workspace.model?.status === 'blocked' ? ' · требует проверки' : ''}</small></span></div>
+      <div class="model-indicator" title="Назначенная модель ответов"><span>{workspace.model?.model_id || 'Модель не назначена'}<small>{workspace.service || 'Модель ответов'}{workspace.model?.auto_refresh ? ' · проверится при отправке' : workspace.model?.status === 'blocked' ? ' · требует проверки' : ''}</small></span></div>
     </header>
     <div id="chat-content" class="chat-content" tabindex="-1">
       {#if workspace.notice}<p class="notice" role="status">{workspace.notice}</p>{/if}
@@ -189,7 +191,7 @@
           <div class="composer-actions">
             <input class="sr-only" type="file" bind:this={fileInput} tabindex="-1" aria-label="Выбрать файл" onchange={() => { const file = fileInput.files?.[0]; if (file) void workspace.attach(file, indexFile); fileInput.value = ''; }} />
             <button type="button" class="icon-button quiet" aria-label={workspace.indexedAttachments ? 'Прикрепить файл' : 'Прикрепить файл для чтения'} aria-haspopup={workspace.indexedAttachments ? 'dialog' : undefined} disabled={disabled || !workspace.session} onclick={() => workspace.indexedAttachments ? modal = 'attachment' : chooseFile(false)}><Icon name="paperclip" /></button>
-            <button type="button" class="scope-button quiet" disabled={disabled || !workspace.session} onclick={() => modal = 'scope'} title={scopeLabel}><Icon name="folder" /><span>{scopeLabel}</span></button><button type="button" class="icon-button quiet options-button" aria-label="Параметры ответа" aria-haspopup="dialog" data-active={workspace.retrievalMode !== 'pull'} disabled={disabled} onclick={() => modal = 'options'}><Icon name="settings" /></button>
+            <button type="button" class="scope-button quiet" aria-haspopup="dialog" disabled={disabled || !workspace.session} onclick={() => modal = 'scope'} title={scopeLabel}><Icon name="folder" /><span>{scopeLabel}</span></button>
             {#if workspace.busy}<button type="button" class="stop-button" aria-label="Остановить ответ" onclick={() => workspace.stop()}><Icon name="stop" /><span class="send-label">Остановить</span></button>{:else}<button type="submit" class="send-button" disabled={disabled || !workspace.session || !workspace.text.trim()} aria-label="Отправить вопрос"><Icon name="arrow" /><span class="send-label">Отправить</span></button>{/if}
           </div>
         </form>
@@ -202,7 +204,7 @@
 {#if modal === 'data'}
   <DataLibrary datasets={workspace.datasets} refresh={() => workspace.refreshDatasets()}
     useProject={(id) => workspace.setScope({ scope_type: 'project', project_ids: [id], dataset_ids: [], selected_sources_only: false })}
-    close={() => modal = null} />
+    showIndexing={openStatus} close={() => modal = null} />
 {/if}
 <AgentMemory bind:this={memoryEditor} bind:open={memoryOpen} projectId={workspace.session?.project_id || 0} onDirty={(value) => memoryDirty = value} />
 {#if modal === 'sessions'}
@@ -235,17 +237,6 @@
       <button type="button" class="quiet" onclick={() => chooseFile(false)}>Прочитать в чате</button>
       <button type="button" disabled={workspace.indexWatching} onclick={() => chooseFile(true)}>Добавить в поиск</button>
     </div>
-  </Modal>
-{:else if modal === 'options'}
-  <Modal title="Параметры ответа" close={() => modal = null}>
-    <label class="field retrieval-option">Поиск в выбранных документах
-      <select value={workspace.retrievalMode} onchange={(event) => workspace.setRetrievalMode(event.currentTarget.value)}>
-        <option value="pull">По запросу модели</option>
-        <option value="push">Лес ищет перед ответом</option>
-        <option value="hybrid">Лес ищет, модель может дочитать</option>
-      </select>
-    </label>
-    <div class="modal-footer"><button onclick={() => modal = null}>Готово</button></div>
   </Modal>
 {/if}
 {#if source}{#key `${source.index}:${source.doc_id}:${source.source_sha256}:${source.view_sha256}:${sourceReadStart(source)}:${sourcePage(source)}`}

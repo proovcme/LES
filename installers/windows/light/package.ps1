@@ -88,6 +88,17 @@ if ($Mode -ne 'Validate') {
   }
 }
 $journalPath = Join-Path $stateRoot 'install-transaction.json'
+function Write-InstallTransaction($staging, $backup, $operation) {
+  $temporary = $journalPath + '.tmp'
+  @{ application_id=$appId; staging=$staging; backup=$backup; operation=$operation } |
+    ConvertTo-Json | Set-Content -LiteralPath $temporary -Encoding UTF8
+  Move-Item -LiteralPath $temporary -Destination $journalPath -Force
+}
+function Complete-RollbackIdentity {
+  $identityPath = Join-Path $stateRoot 'light-install.json'
+  @{ application_id=$appId } | ConvertTo-Json | Set-Content -LiteralPath ($identityPath + '.tmp') -Encoding UTF8
+  Move-Item -LiteralPath ($identityPath + '.tmp') -Destination $identityPath -Force
+}
 if ($Mode -ne 'Validate' -and (Test-Path -LiteralPath $journalPath)) {
   Assert-PlainTree $stateRoot
   Assert-Marker $stateRoot
@@ -118,8 +129,14 @@ if ($Mode -ne 'Validate' -and (Test-Path -LiteralPath $journalPath)) {
       throw
     }
   }
+  $resumedRollback = $pending.PSObject.Properties['operation'] -and $pending.operation -eq 'rollback'
+  if ($resumedRollback) {
+    Assert-Marker $installRoot
+    Complete-RollbackIdentity
+  }
   if (Test-Path -LiteralPath $pendingStaging) { Remove-Item -LiteralPath $pendingStaging -Recurse -Force }
   Remove-Item -LiteralPath $journalPath -Force
+  if ($resumedRollback -and $Mode -eq 'Rollback') { Write-Output 'Откат LES Light завершён.'; exit 0 }
 }
 if ($Mode -eq 'Recover') { Write-Output 'Восстановление LES Light завершено.'; exit 0 }
 if ($Mode -eq 'Rollback') {
@@ -139,12 +156,14 @@ if ($Mode -eq 'Rollback') {
   Assert-PlainTree $backup
   Assert-Marker $backup
   $failed = $installRoot + '.staging-' + [Guid]::NewGuid().ToString('N')
+  Write-InstallTransaction $failed $backup 'rollback'
   Move-Item -LiteralPath $installRoot -Destination $failed
   try { Move-Item -LiteralPath $backup -Destination $installRoot }
   catch { Move-Item -LiteralPath $failed -Destination $installRoot; throw }
   Assert-PlainTree $failed
   Remove-Item -LiteralPath $failed -Recurse -Force
-  @{ application_id=$appId } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $stateRoot 'light-install.json') -Encoding UTF8
+  Complete-RollbackIdentity
+  Remove-Item -LiteralPath $journalPath -Force
   Write-Output 'Предыдущая версия LES Light восстановлена. Документы и почта сохранены.'
   exit 0
 }
@@ -275,9 +294,7 @@ try {
     New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
     @{ application_id=$appId } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $stateRoot 'light-install.json') -Encoding UTF8
   }
-  $journalTemporary = $journalPath + '.tmp'
-  @{ application_id=$appId; staging=$staging; backup=$backup } | ConvertTo-Json | Set-Content -LiteralPath $journalTemporary -Encoding UTF8
-  Move-Item -LiteralPath $journalTemporary -Destination $journalPath -Force
+  Write-InstallTransaction $staging $backup 'install'
   if (Test-Path -LiteralPath $installRoot) { Move-Item -LiteralPath $installRoot -Destination $backup }
   try { Move-Item -LiteralPath $staging -Destination $installRoot; $swapped = $true }
   catch {

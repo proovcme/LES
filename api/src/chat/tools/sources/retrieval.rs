@@ -13,7 +13,7 @@ mod query_cache;
 mod ready;
 mod trial;
 mod views;
-fn original_reader(name: &str) -> &'static str {
+pub(super) fn original_reader(name: &str) -> &'static str {
     match name
         .rsplit('.')
         .next()
@@ -176,13 +176,12 @@ async fn scoped_configuration(
         Ok((frozen,revision,prefix,consent))
     }).await.map_err(|_|"INDEX_SETTINGS_INVALID")?
 }
-/// The coordinator and recovery use the same initial read policy as tools.
-pub(in crate::chat) async fn initial(context: Arc<Context>, turn: &Prepared) -> Result<Value> {
+pub(in crate::chat) fn initial_budget(turn: &Prepared) -> Result<u64> {
     // This is only an IO ceiling. The shared model packer owns final admission
     // with the actual prompt, schemas and dialogue. A fixed 6000-char pre-cut
     // discarded continuation pages before that packer could consider them.
     let profile = &turn.connection.profile;
-    let chars = profile["input_token_limit"]
+    Ok(profile["input_token_limit"]
         .as_u64()
         .ok_or("CHAT_CONTEXT_INVALID")?
         .saturating_sub(
@@ -196,7 +195,11 @@ pub(in crate::chat) async fn initial(context: Arc<Context>, turn: &Prepared) -> 
                 .ok_or("CHAT_CONTEXT_INVALID")?,
         )
         .saturating_mul(2)
-        .clamp(1, 16000);
+        .clamp(1, 16000))
+}
+/// The coordinator and recovery use the same initial read policy as tools.
+pub(in crate::chat) async fn initial(context: Arc<Context>, turn: &Prepared) -> Result<Value> {
+    let chars = initial_budget(turn)?;
     let focus_pdf = turn.profile["mode"] == "search"
         && matches!(
             turn.request["retrieval_mode"].as_str().unwrap_or("pull"),
@@ -238,21 +241,7 @@ pub(in crate::chat) async fn initial(context: Arc<Context>, turn: &Prepared) -> 
         let budget = (chars / 3).clamp(1, 4000);
         let mut args = json!({"doc_id":source["doc_id"],"source_sha256":source["source_sha256"],
             "q":query,"limit":4,"max_chars":budget});
-        let coordinates = les_core::chat_request::sheet_rows(query);
-        if let Some((sheet, rows)) = coordinates
-            .first_key_value()
-            .filter(|_| coordinates.len() == 1)
-        {
-            let (Some(first), Some(last)) = (rows.first(), rows.last()) else {
-                continue;
-            };
-            if (*last - *first + 1) == rows.len() as u64 {
-                args["sheet_name"] = json!(sheet);
-                args["row_start"] = json!(first);
-                args["row_end"] = json!(last);
-                args["limit"] = json!(rows.len().clamp(1, 16));
-            }
-        }
+        super::workbook::addressed_range(query, &mut args);
         let rows = match super::workbook::read(context.clone(), &scope, &args).await {
             Ok(Some(read))
                 if read["result"]["passages"]
@@ -395,8 +384,21 @@ async fn search_view(
     } else {
         Default::default()
     };
+    let (datasets, pinned_file) = if args["doc_id"].as_str().is_some_and(|id| !id.is_empty()) {
+        let doc = document(&context, &args).await?;
+        scoped_document(turn, &doc)?;
+        if !datasets.contains(&doc["dataset_id"]) {
+            return Err("TOOL_SCOPE_VIOLATION".into());
+        }
+        (
+            vec![doc["dataset_id"].clone()],
+            Some(doc["file_name"].clone()),
+        )
+    } else {
+        (datasets, None)
+    };
     if args["view"] == "documents" {
-        return super::catalog::search(context, turn, &args, &datasets).await;
+        return super::catalog::search(context, turn, &args, &datasets, pinned_file).await;
     }
     let remote_scope = Some(turn.scope["resolved_dataset_ids"].clone());
     let cached = query_cache::load(context.clone(), query.to_owned()).await?;
@@ -433,10 +435,8 @@ async fn search_view(
     if vector.iter().any(|v| !v.is_finite()) {
         return Err("UPSTREAM_EMBEDDING_RESPONSE_INVALID".into());
     }
-    let files = if args["doc_id"].as_str().is_some_and(|s| !s.is_empty()) {
-        let doc = document(&context, &args).await?;
-        scoped_document(turn, &doc)?;
-        vec![doc["file_name"].clone()]
+    let files = if let Some(file) = pinned_file {
+        vec![file]
     } else if let Some(name) = args["doc_name"].as_str().filter(|s| !s.is_empty()) {
         vec![json!(name)]
     } else {
@@ -611,6 +611,18 @@ async fn search_view(
                             Err(error) => eprintln!("{}", json!({"event":"pull_pdf_evidence_unavailable","code":error.code})),
                         }
                     }
+                }
+            }
+            if args["_pull_pdf_focus"] == true && offset == 0 && !overview_requested {
+                // Read matching descendants in shortlisted books even if the
+                // index returned only the group heading or neighbouring rows.
+                let groups = super::workbook::group_evidence(
+                    context.clone(), turn, query,
+                    reply["result"]["candidate_documents"].as_array().map(Vec::as_slice).unwrap_or_default(),
+                    max_chars,
+                ).await;
+                if groups.is_object() {
+                    reply["_pull_workbook_evidence"] = groups;
                 }
             }
             Ok(reply)
@@ -1225,6 +1237,9 @@ async fn passages(
         if p["reading_representation"].is_string() {
             source["reading_representation"] = p["reading_representation"].clone();
         }
+        if p["verified_cells"] == true {
+            source["verified_cells"] = json!(true);
+        }
         if p["pdf_excerpt_line"].is_u64() {
             source["pdf_excerpt_line"] = p["pdf_excerpt_line"].clone();
             source["reading_unit_sha256"] = p["reading_unit_sha256"].clone();
@@ -1264,6 +1279,7 @@ async fn passages(
         sources.push(source.clone());
         output.push(json!({"text":text,"canonical":p["canonical"],"source":source,"chunk_ord":p["chunk_ord"],"source_ref":p["source_ref"]}));
     }
+    super::workbook::attach_groups(context, &mut output, &mut sources).await;
     if output.is_empty() {
         if let Some(code) = hydrated["read_failures"][0]["code"].as_str() {
             return Err(code.into());

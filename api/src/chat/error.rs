@@ -5,6 +5,9 @@ pub struct Failure {
     pub code: String,
     pub status: StatusCode,
     pub checkpoint: Option<(String, usize)>,
+    source_label: Option<String>,
+    pub(super) stream_metrics: Option<Value>,
+    pub(super) history_id: Option<i64>,
 }
 impl From<&str> for Failure {
     fn from(code: &str) -> Self {
@@ -54,6 +57,13 @@ impl Failure {
             )
         {
             StatusCode::UNPROCESSABLE_ENTITY
+        } else if code == "SOURCE_DOCUMENT_NOT_FOUND" {
+            StatusCode::NOT_FOUND
+        } else if matches!(
+            code,
+            "SOURCE_IDENTITY_AMBIGUOUS" | "REQUIRED_DOCUMENT_NOT_DELIVERED"
+        ) {
+            StatusCode::UNPROCESSABLE_ENTITY
         } else if matches!(code, "MODEL_QUEUE_TIMEOUT" | "CHAT_SERVICE_BUSY") {
             StatusCode::TOO_MANY_REQUESTS
         } else {
@@ -63,10 +73,19 @@ impl Failure {
             code: code.into(),
             status,
             checkpoint: None,
+            source_label: None,
+            stream_metrics: None,
+            history_id: None,
         }
+    }
+    pub(super) fn for_source(mut self, label: &str) -> Self {
+        self.source_label = Some(label.to_owned());
+        self
     }
     pub fn payload(&self) -> Value {
         let detail=match self.code.as_str(){
+            "UPSTREAM_RESPONSE_TOO_LARGE"=>"Поток ответа модели превысил допустимый объём. Подробности сохранены в диагностике запроса.",
+            "SOURCE_CONTEXT_WINDOW_EMPTY"=>"Поиск нашёл материал, но ни одна целая выдержка не поместилась в контекст модели. Сузьте вопрос или увеличьте окно модели.",
             "CHAT_QUESTION_REQUIRED"=>"Введите сообщение.",
             "CHAT_TEXT_LIMIT"=>"Текст слишком большой. Прикрепите документ файлом или сократите сообщение.",
             "CHAT_SCOPE_EMPTY"=>"В выбранной области нет доступных документов. Добавьте документы или выберите другой набор.",
@@ -105,6 +124,10 @@ impl Failure {
             "SESSION_PROVIDER_OVERRIDE_DISABLED"=>"Выберите модель в настройках Леса. Подключение модели на один запрос в этом режиме пока недоступно.",
             "CANDIDATE_ACCEPTANCE_REQUIRED"=>"Режим проверки кандидата модели здесь недоступен. Используйте настройки моделей.",
             "CAPABILITY_SNAPSHOT_STALE"|"CAPABILITY_SNAPSHOT_MISSING"|"CAPABILITY_SNAPSHOT_EXPIRED"=>"Обновите проверку подключения модели в настройках.",
+            "MODEL_MEMORY_GUARD"=>"Для проверки локальной модели нужно не менее 4 ГБ свободной оперативной памяти. Вопрос сохранён.",
+            "MODEL_ENDPOINT_UNREACHABLE"=>"Локальный сервер модели не отвечает. Проверьте его запуск и повторите вопрос.",
+            "CHAT_ANSWER_PROBE_FAILED"=>"Локальная модель не подтвердила возможность отвечать. Проверьте её подключение в настройках.",
+            "CHAT_ANSWER_MODEL_CHANGED"=>"Назначение модели изменилось во время проверки. Повторите запрос с текущей моделью.",
             "UPSTREAM_TIMEOUT"|"MODEL_TIMEOUT"=>"Модель не ответила вовремя. Проверьте её состояние и повторите запрос.",
             "UPSTREAM_AUTHENTICATION_FAILED"=>"Сервис модели отклонил ключ API. Проверьте ключ в настройках подключения.",
             "UPSTREAM_ACCESS_DENIED"=>"Сервис запретил доступ к модели. Проверьте права подключения.",
@@ -115,6 +138,9 @@ impl Failure {
             "CONTEXT_REQUIRED_SECTION_OVERFLOW"=>"Выбранные документы и обязательные результаты не помещаются в контекст модели. Сузьте задачу или выберите модель с большим контекстом.",
             "INDEX_CHANGED_DURING_SEARCH"|"PDF_REVISION_CHANGED"|"SOURCE_REVISION_CHANGED"=>"Документ изменился во время чтения. Повторите запрос для текущей редакции.",
             "SOURCE_EVIDENCE_MISSING"=>"Лес не нашёл подтверждения в выбранных документах. Уточните вопрос или проверьте, что выбран нужный файл и его индекс готов.",
+            "SOURCE_DOCUMENT_NOT_FOUND"|"SOURCE_DOCUMENT_MISSING"=>"Выбранный документ недоступен в этой области. Проверьте набор и путь к файлу.",
+            "SOURCE_IDENTITY_AMBIGUOUS"=>"В выбранной области несколько документов с этим именем. Укажите полный путь или выберите конкретный документ в списке.",
+            "REQUIRED_DOCUMENT_NOT_DELIVERED"=>"Для обязательного документа не удалось поместить подтверждённый фрагмент в запрос модели. Сузьте вопрос или увеличьте окно.",
             "SOURCE_READ_REQUIRED"=>"Модель завершила поиск, но не дочитала документ для проверки ответа. Ответ не подтверждён; уточните задачу или повторите запрос.",
             "SOURCE_CITATION_MISSING"=>"Модель прочитала источники, но после повтора не связала ответ с доказательствами. Ответ не подтверждён; повторите запрос или уточните нужный документ.",
             "SOURCE_PART_IDENTITY_MISMATCH"=>"Имя рисунка или вложения не совпадает с его идентификатором. Откройте список частей документа и повторите чтение по точному имени. Ответ не подтверждён.",
@@ -131,10 +157,42 @@ impl Failure {
             value if value.starts_with("TOOL_")=>"Инструмент не завершил действие. Откройте подробности; Лес не считает его выполненным.",
             _=>"Не удалось завершить запрос. Подробности сохранены в журнале. Проверьте подключение модели и повторите действие."
         };
+        let mut detail = self
+            .source_label
+            .as_ref()
+            .map_or_else(|| detail.to_owned(), |label| format!("«{label}». {detail}"));
+        if let Some(metrics) = &self.stream_metrics {
+            let limit = &metrics["limit"];
+            if let (Some(name), Some(observed), Some(maximum)) = (
+                limit["name"].as_str(),
+                limit["observed"].as_u64(),
+                limit["maximum"].as_u64(),
+            ) {
+                let measure = match name {
+                    "sse_lines" | "ndjson_lines" => "Количество строк потока",
+                    "sse_line_bytes" | "ndjson_line_bytes" => "Длина одной строки в байтах",
+                    "sse_data_bytes" => "Размер данных одного события в байтах",
+                    "visible_answer_bytes" => "Размер текста ответа в байтах",
+                    "normalized_buffer_bytes" => "Размер буфера событий в байтах",
+                    "json_body_bytes" => "Размер JSON-ответа в байтах",
+                    _ => "Объём содержимого ответа в байтах",
+                };
+                detail = format!("{measure} — {observed}, допустимо {maximum}.");
+                if let Some(id) = self.history_id {
+                    detail.push_str(&format!(" Номер запроса в журнале — {id}."));
+                }
+            }
+        }
         let mut payload = json!({"code":self.code,"detail":detail,"message":detail,"retryable":self.status!=StatusCode::UNPROCESSABLE_ENTITY});
         if let Some((stage, count)) = &self.checkpoint {
             payload["stage"] = json!(stage);
             payload["model_call"] = json!(count);
+        }
+        if let Some(id) = self.history_id {
+            payload["history_id"] = json!(id);
+        }
+        if let Some(metrics) = &self.stream_metrics {
+            payload["stream_metrics"] = metrics.clone();
         }
         payload
     }

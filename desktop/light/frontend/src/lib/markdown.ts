@@ -1,6 +1,8 @@
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
-import type { Source } from './contracts';
+import { sourcePlace, type Source } from './contracts';
+
+const citation = /\[(?:Источник\s+)?(\d+)\]/gi;
 
 /** Only references present in the backend source map become evidence buttons. */
 export function answerHTML(text: string, sources: Source[]): string {
@@ -43,7 +45,9 @@ export function renderAnswer(text: string, sources: Source[]): { html: string; l
       }
     }
     node.data = value;
-    const matches = [...node.data.matchAll(/\[(?:Источник\s+)?(\d+)\]/gi)];
+  }
+  for (const node of nodes) {
+    const matches = [...node.data.matchAll(citation)];
     if (!matches.length) continue;
     const fragment = document.createDocumentFragment(); let cursor = 0;
     for (const match of matches) {
@@ -53,7 +57,9 @@ export function renderAnswer(text: string, sources: Source[]): { html: string; l
         linked.add(source.index);
         const button = document.createElement('button');
         button.type = 'button'; button.className = 'citation'; button.dataset.citation = String(source.index);
-        button.textContent = `[${source.index}]`; button.setAttribute('aria-label', `Источник ${source.index}: ${source.doc_name || 'Документ'}`);
+        button.textContent = `[${source.index}]`;
+        button.setAttribute('aria-label', `Источник ${source.index}: ${source.doc_name || 'Документ'}${sourcePlace(source)}`);
+        button.title = button.getAttribute('aria-label')!;
         const word = /\S+\s*$/.exec(prefix);
         if (word && word[0].trim().length <= 40) {
           fragment.append(prefix.slice(0, word.index));

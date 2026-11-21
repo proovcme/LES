@@ -1,0 +1,908 @@
+{
+  "candidate": {
+    "schema": "les.native-api-asset.v1",
+    "file": "les-api.exe",
+    "build_number": 934,
+    "sha256": "66dadc41ab58774524bb292ccba93fbdb8027a4b3d3bd6099ffc7cd3ed1199a2",
+    "source_sha256": "a5025f0e384a44dfdbfe5362c1a75c6c2685820eb2056bfc7fbe758ffd2e83b6",
+    "remapped_paths": true
+  },
+  "corpus": {
+    "documents": 60,
+    "scope": "whole dataset",
+    "query_mode": "hybrid",
+    "embedding": "bge-m3",
+    "model": "qwen3.5:2b",
+    "protocol": "Ollama /v1",
+    "live_window": 8192
+  },
+  "baseline_932": "folder-chat-932.json",
+  "intermediate_933": {
+    "question": "При каком давлении испытывают насосы на северном и южном участках и при каком условии можно начинать эти испытания?",
+    "http": 200,
+    "error": null,
+    "answer": "На основе предоставленных источников:\n\n**Приёмочное испытание насосов на Северном участке:**\n*   **Давление:** 184 кПа [Источник 1].\n*   **Условие начала:** После охлаждения теплоносителя до 26 °C [Источник 5].\n\n**Приёмочное испытание насосов на Южном участке:**\n*   **Давление:** 273 кПа [Источник 2].\n*   **Условие начала:** Не указано в предоставленных фрагментах.\n\nТакже для обоих участков необходимо выполнить проверку давления в шинах тележки (315 кПа) и проверить расходомер на стенде с водой (предельный расход 42 л/мин), однако эти проверки относятся к другим элементам оборудования, а не непосредственно к насосам [Источник 4], [Источник 8].",
+    "linked_documents": {
+      "1": "manuals/017.txt",
+      "2": "manuals/056.txt",
+      "4": "manuals/070.txt",
+      "5": "manuals/032.txt",
+      "8": "manuals/158.txt"
+    },
+    "candidate_documents": 60,
+    "calls": [
+      {
+        "call": 1,
+        "source_indexes": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31,
+          32,
+          33,
+          34,
+          35,
+          36,
+          37,
+          38,
+          39,
+          40,
+          41,
+          42,
+          43,
+          44,
+          45,
+          46,
+          47
+        ],
+        "evidence_limit": null,
+        "omissions": [
+          {
+            "kind": "evidence",
+            "omitted": 13,
+            "reason": "budget_exhausted",
+            "total": 60
+          },
+          {
+            "kind": "checkpoint",
+            "omitted": 1,
+            "reason": "budget_exhausted",
+            "total": 1
+          }
+        ],
+        "available_output_tokens": 1225,
+        "sent_output_limit": 1225,
+        "sent_reasoning_effort": "none",
+        "request_sha256": "b408227ca6007cf53f9833ea29eda89cad5f149fb79a132858261671db8fb402"
+      },
+      {
+        "call": 2,
+        "source_indexes": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31,
+          32,
+          33,
+          34,
+          35,
+          36,
+          37,
+          38,
+          39,
+          40,
+          41,
+          42,
+          43,
+          44,
+          45,
+          46,
+          47,
+          48,
+          49,
+          50,
+          51,
+          52,
+          53,
+          54,
+          55,
+          56,
+          57,
+          58,
+          59,
+          60
+        ],
+        "evidence_limit": null,
+        "omissions": [],
+        "available_output_tokens": 1205,
+        "sent_output_limit": 1205,
+        "sent_reasoning_effort": "none",
+        "request_sha256": "2364caf20326dda5e4d30506e26cf0fbbbe784cdaf675068b28277916c137996"
+      }
+    ],
+    "response_metrics": [
+      {
+        "content_bytes": 2758,
+        "elapsed_ms": 10141,
+        "first_decoded_event_ms": 4666,
+        "limit": null,
+        "lines_processed": 1140,
+        "protocol": "openai_sse",
+        "separate_reasoning_bytes": 0,
+        "tool_bytes": 0,
+        "wire_bytes_received": 118883
+      },
+      {
+        "content_bytes": 1127,
+        "elapsed_ms": 2070,
+        "first_decoded_event_ms": 456,
+        "limit": null,
+        "lines_processed": 344,
+        "protocol": "openai_sse",
+        "separate_reasoning_bytes": 0,
+        "tool_bytes": 0,
+        "wire_bytes_received": 36215
+      }
+    ]
+  },
+  "live_934": {
+    "positive": {
+      "question": "При каком давлении испытывают насосы на северном и южном участках и при каком условии можно начинать эти испытания?",
+      "http": 503,
+      "error": "SOURCE_CITATION_MISSING",
+      "answer": null,
+      "linked_documents": {},
+      "candidate_documents": 60,
+      "calls": [
+        {
+          "call": 1,
+          "source_indexes": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          "evidence_limit": 6,
+          "omissions": [
+            {
+              "kind": "evidence",
+              "omitted": 54,
+              "reason": "model_evidence_limit",
+              "total": 60
+            }
+          ],
+          "available_output_tokens": 4356,
+          "sent_output_limit": 4356,
+          "sent_reasoning_effort": "none",
+          "request_sha256": "eb43eb03548ed0386a34f41bcaced032d1c541dd6e60eae10ec80d330589efd1"
+        },
+        {
+          "call": 2,
+          "source_indexes": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          "evidence_limit": 6,
+          "omissions": [
+            {
+              "kind": "evidence",
+              "omitted": 54,
+              "reason": "model_evidence_limit",
+              "total": 60
+            }
+          ],
+          "available_output_tokens": 5582,
+          "sent_output_limit": 5582,
+          "sent_reasoning_effort": "none",
+          "request_sha256": "5a89603a7121181f6e2ed7dcc4061e28a4b49aa054dc8bb5c10a11bebff22462"
+        }
+      ],
+      "response_metrics": []
+    },
+    "rephrased": {
+      "question": "Что нужно сделать до приёмочных испытаний насосов на участках Север и Юг? Укажи общее условие и отдельно давление для каждого участка.",
+      "http": 200,
+      "error": null,
+      "answer": "Для проведения приёмочных испытаний насосов на участках Север и Юг необходимо выполнить следующие действия до начала испытаний:\n\n**Общее условие:**\nДо начала приёмочных испытаний инженер проверяет комплектность паспорта и оформляет журнал испытаний. Номер формы для этого составляет **136**. Это действие выполняется независимо от конкретного участка, но требует наличия паспорта (см. [Источник 6]).\n\n**Отдельное давление для каждого участка:**\n*   **Участок Север:** Приёмочное испытание насоса проводят при давлении **184 кПа**. Показания манометра заносят в журнал испытаний. Это действие выполняется кладовщиком (см. [Источник 1]).\n*   **Участок Юг:** Приёмочное испытание насоса проводят при давлении **273 кПа**. Протокол оформляет дежурный инженер.\n\nТаким образом, общий процесс включает проверку паспорта и оформление журнала формы 136, а затем проведение испытаний на конкретных давлениях (184 кПа для Севера и 273 кПа для Юга) с соответствующими записями в журнале.",
+      "linked_documents": {
+        "1": "manuals/017.txt",
+        "6": "manuals/236.txt"
+      },
+      "candidate_documents": 60,
+      "calls": [
+        {
+          "call": 1,
+          "source_indexes": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          "evidence_limit": 6,
+          "omissions": [
+            {
+              "kind": "evidence",
+              "omitted": 54,
+              "reason": "model_evidence_limit",
+              "total": 60
+            }
+          ],
+          "available_output_tokens": 4329,
+          "sent_output_limit": 4329,
+          "sent_reasoning_effort": "none",
+          "request_sha256": "863ef872455f2f61fc7818ae0e88580089168c51a85a10e772b6fb8eafe11b6a"
+        },
+        {
+          "call": 2,
+          "source_indexes": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          "evidence_limit": 6,
+          "omissions": [
+            {
+              "kind": "evidence",
+              "omitted": 54,
+              "reason": "model_evidence_limit",
+              "total": 60
+            }
+          ],
+          "available_output_tokens": 5554,
+          "sent_output_limit": 5554,
+          "sent_reasoning_effort": "none",
+          "request_sha256": "cea0b916079e594881359f26ea6c7e9780c5cc743e6108ab3f9b68f6756bedad"
+        }
+      ],
+      "response_metrics": [
+        {
+          "content_bytes": 1138,
+          "elapsed_ms": 5562,
+          "first_decoded_event_ms": 4205,
+          "limit": null,
+          "lines_processed": 296,
+          "protocol": "openai_sse",
+          "separate_reasoning_bytes": 0,
+          "tool_bytes": 0,
+          "wire_bytes_received": 31310
+        },
+        {
+          "content_bytes": 1737,
+          "elapsed_ms": 2119,
+          "first_decoded_event_ms": 192,
+          "limit": null,
+          "lines_processed": 460,
+          "protocol": "openai_sse",
+          "separate_reasoning_bytes": 0,
+          "tool_bytes": 0,
+          "wire_bytes_received": 48714
+        }
+      ]
+    },
+    "cart": {
+      "question": "Какое давление должно быть в шинах тележки и как часто его проверяют?",
+      "http": 200,
+      "error": null,
+      "answer": "В предоставленных фрагментах (S1, S2, S3, S4, S5, S6) нет информации о том, как часто проверяют давление в шинах тележки. Фрагмент S1 упоминает, что проверку проводят ежемесячно, но не указывает конкретное значение давления для этой проверки.\n\nДополнительных данных о давлении в шинах тележки в других фрагментах (S2–S6) нет.",
+      "linked_documents": {},
+      "candidate_documents": 60,
+      "calls": [
+        {
+          "call": 1,
+          "source_indexes": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          "evidence_limit": 6,
+          "omissions": [
+            {
+              "kind": "evidence",
+              "omitted": 54,
+              "reason": "model_evidence_limit",
+              "total": 60
+            }
+          ],
+          "available_output_tokens": 4354,
+          "sent_output_limit": 4354,
+          "sent_reasoning_effort": "none",
+          "request_sha256": "8929b3a062150e944dcc5002b6268351086b0283c9eb933b6565456beaf2ab78"
+        }
+      ],
+      "response_metrics": [
+        {
+          "content_bytes": 587,
+          "elapsed_ms": 5229,
+          "first_decoded_event_ms": 4370,
+          "limit": null,
+          "lines_processed": 214,
+          "protocol": "openai_sse",
+          "separate_reasoning_bytes": 0,
+          "tool_bytes": 0,
+          "wire_bytes_received": 22344
+        }
+      ]
+    },
+    "missing": {
+      "question": "Какой установлен срок гарантии на насосы северного и южного участков в месяцах?",
+      "http": 200,
+      "error": null,
+      "answer": "В предоставленных фрагментах (S1–S6) нет информации о сроках гарантии на насосы.\n\n*   **Источник 1** говорит только о проверке остатка смазки и времени проведения дежурства.\n*   **Источник 2** упоминает допуск к испытаниям, но не сроки гарантии.\n*   **Источник 3** указывает на передачу протоколов в архив, но не на гарантийный срок.\n*   **Источник 4** описывает условия приёмочного испытания (давление), а не гарантию.\n*   **Источник 5** описывает сигналы при начале работ, без информации о гарантии.\n*   **Источник 6** указывает на время проведения испытаний и ответственное лицо, но не на гарантийный срок.\n\nВ прочитанных фрагментах отсутствуют сведения о сроках гарантии.",
+      "linked_documents": {},
+      "candidate_documents": 60,
+      "calls": [
+        {
+          "call": 1,
+          "source_indexes": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          "evidence_limit": 6,
+          "omissions": [
+            {
+              "kind": "evidence",
+              "omitted": 54,
+              "reason": "model_evidence_limit",
+              "total": 60
+            }
+          ],
+          "available_output_tokens": 4374,
+          "sent_output_limit": 4374,
+          "sent_reasoning_effort": "none",
+          "request_sha256": "4d571de401bc8c6aecc3a2832a0285bbff62dc9291d183612486cf760a98d881"
+        }
+      ],
+      "response_metrics": [
+        {
+          "content_bytes": 1202,
+          "elapsed_ms": 7045,
+          "first_decoded_event_ms": 5512,
+          "limit": null,
+          "lines_processed": 346,
+          "protocol": "openai_sse",
+          "separate_reasoning_bytes": 0,
+          "tool_bytes": 0,
+          "wire_bytes_received": 36496
+        }
+      ]
+    }
+  },
+  "received_requests_934": {
+    "8192": {
+      "omissions": [
+        {
+          "kind": "evidence",
+          "omitted": 54,
+          "reason": "model_evidence_limit",
+          "total": 60
+        }
+      ],
+      "sections": [
+        {
+          "items": 1,
+          "kind": "profile_prefix",
+          "tokens": 727
+        },
+        {
+          "items": 2,
+          "kind": "request",
+          "tokens": 1152
+        },
+        {
+          "items": 6,
+          "kind": "evidence",
+          "tokens": 431
+        }
+      ],
+      "found_documents": 60,
+      "prepared_source_indices": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "first_request_received_bytes": 9506,
+      "sha256_confirmed_by_receiver": true,
+      "wire_source_markers": {
+        "при давлении 184 кПа": true,
+        "при давлении 273 кПа": true,
+        "после охлаждения теплоносителя до 26 °C": true
+      },
+      "first_input_facts": 3,
+      "wire_output_limit": 4356,
+      "reasoning_effort": "none",
+      "sent_output_limit": 4356,
+      "input_token_limit": 8192,
+      "total_calls": 2
+    },
+    "24000": {
+      "omissions": [
+        {
+          "kind": "evidence",
+          "omitted": 54,
+          "reason": "model_evidence_limit",
+          "total": 60
+        }
+      ],
+      "sections": [
+        {
+          "items": 1,
+          "kind": "profile_prefix",
+          "tokens": 727
+        },
+        {
+          "items": 2,
+          "kind": "request",
+          "tokens": 1152
+        },
+        {
+          "items": 6,
+          "kind": "evidence",
+          "tokens": 431
+        }
+      ],
+      "found_documents": 60,
+      "prepared_source_indices": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "first_request_received_bytes": 9508,
+      "sha256_confirmed_by_receiver": true,
+      "wire_source_markers": {
+        "при давлении 184 кПа": true,
+        "при давлении 273 кПа": true,
+        "после охлаждения теплоносителя до 26 °C": true
+      },
+      "first_input_facts": 3,
+      "wire_output_limit": 20164,
+      "reasoning_effort": "none",
+      "sent_output_limit": 20164,
+      "input_token_limit": 24000,
+      "total_calls": 2
+    }
+  },
+  "empty_window_934": [
+    {
+      "attached_chars": 5468,
+      "code": "SOURCE_CITATION_MISSING",
+      "provider_calls": 2
+    },
+    {
+      "attached_chars": 8202,
+      "code": "SOURCE_CITATION_MISSING",
+      "provider_calls": 1
+    },
+    {
+      "attached_chars": 9569,
+      "code": "SOURCE_CITATION_MISSING",
+      "provider_calls": 1
+    },
+    {
+      "attached_chars": 10252,
+      "code": "SOURCE_CITATION_MISSING",
+      "provider_calls": 1
+    },
+    {
+      "attached_chars": 10594,
+      "code": "CONTEXT_REQUIRED_SECTION_OVERFLOW",
+      "provider_calls": 0
+    },
+    {
+      "attached_chars": 10423,
+      "code": "SOURCE_CONTEXT_WINDOW_EMPTY",
+      "provider_calls": 0
+    }
+  ],
+  "fixture_sha256": "e4ca7042b65edb9d3d47cdde312d70ee2fd2ca5a4365dc6384eb9e3d634b6860",
+  "comparison_model": "qwen3.5:9b",
+  "live_934_9b": {
+    "positive": {
+      "question": "При каком давлении испытывают насосы на северном и южном участках и при каком условии можно начинать эти испытания?",
+      "http": 200,
+      "error": null,
+      "answer": "На основании предоставленных фрагментов:\n\n*   На **северном участке** приёмочное испытание насоса проводят при давлении **184 кПа** [Источник 1].\n*   На **южном участке** приёмочное испытание насоса проводят при давлении **273 кПа** [Источник 2].\n*   Испытания можно начинать только после охлаждения теплоносителя до **26 °C**, так как допуск к ним выдаётся только при соблюдении этого условия [Источник 4].",
+      "linked_documents": {
+        "1": "manuals/017.txt",
+        "2": "manuals/056.txt",
+        "4": "manuals/032.txt"
+      },
+      "candidate_documents": 60,
+      "calls": [
+        {
+          "call": 1,
+          "source_indexes": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          "evidence_limit": 6,
+          "omissions": [
+            {
+              "kind": "evidence",
+              "omitted": 54,
+              "reason": "model_evidence_limit",
+              "total": 60
+            }
+          ],
+          "available_output_tokens": 4356,
+          "sent_output_limit": 4356,
+          "sent_reasoning_effort": "none",
+          "request_sha256": "bd49c93fbf83de867f803b4984841fba3afa1efb126bacbfee0deabbf1230709"
+        }
+      ],
+      "response_metrics": [
+        {
+          "content_bytes": 706,
+          "elapsed_ms": 16471,
+          "first_decoded_event_ms": 12371,
+          "limit": null,
+          "lines_processed": 214,
+          "protocol": "openai_sse",
+          "separate_reasoning_bytes": 0,
+          "tool_bytes": 0,
+          "wire_bytes_received": 22463
+        }
+      ]
+    },
+    "rephrased": {
+      "question": "Что нужно сделать до приёмочных испытаний насосов на участках Север и Юг? Укажи общее условие и отдельно давление для каждого участка.",
+      "http": 503,
+      "error": "SOURCE_CITATION_MISSING",
+      "answer": null,
+      "linked_documents": {},
+      "candidate_documents": 60,
+      "calls": [
+        {
+          "call": 1,
+          "source_indexes": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          "evidence_limit": 6,
+          "omissions": [
+            {
+              "kind": "evidence",
+              "omitted": 54,
+              "reason": "model_evidence_limit",
+              "total": 60
+            }
+          ],
+          "available_output_tokens": 4329,
+          "sent_output_limit": 4329,
+          "sent_reasoning_effort": "none",
+          "request_sha256": "b4e1280a010b3793ff2e38e21b5b9096782cf4c8c0a512eedee8f7405442121f"
+        },
+        {
+          "call": 2,
+          "source_indexes": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          "evidence_limit": 6,
+          "omissions": [
+            {
+              "kind": "evidence",
+              "omitted": 54,
+              "reason": "model_evidence_limit",
+              "total": 60
+            }
+          ],
+          "available_output_tokens": 5554,
+          "sent_output_limit": 5554,
+          "sent_reasoning_effort": "none",
+          "request_sha256": "baeeb6d3b094cbd74429f67e0341965872548b25c39b84bb7c620f829af57cb3"
+        }
+      ],
+      "response_metrics": []
+    },
+    "cart": {
+      "question": "Какое давление должно быть в шинах тележки и как часто его проверяют?",
+      "http": 200,
+      "error": null,
+      "answer": "Давление в шинах тележки должно составлять 315 кПа, а проверку проводят ежемесячно [Источник 1].",
+      "linked_documents": {
+        "1": "manuals/070.txt"
+      },
+      "candidate_documents": 60,
+      "calls": [
+        {
+          "call": 1,
+          "source_indexes": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          "evidence_limit": 6,
+          "omissions": [
+            {
+              "kind": "evidence",
+              "omitted": 54,
+              "reason": "model_evidence_limit",
+              "total": 60
+            }
+          ],
+          "available_output_tokens": 4353,
+          "sent_output_limit": 4353,
+          "sent_reasoning_effort": "none",
+          "request_sha256": "0b037e1ebd2a0ccb2caadfe1a96c413a31943699b6b2007ae0fa0143d19810ec"
+        }
+      ],
+      "response_metrics": [
+        {
+          "content_bytes": 171,
+          "elapsed_ms": 13541,
+          "first_decoded_event_ms": 12509,
+          "limit": null,
+          "lines_processed": 56,
+          "protocol": "openai_sse",
+          "separate_reasoning_bytes": 0,
+          "tool_bytes": 0,
+          "wire_bytes_received": 5729
+        }
+      ]
+    },
+    "missing": {
+      "question": "Какой установлен срок гарантии на насосы северного и южного участков в месяцах?",
+      "http": 200,
+      "error": null,
+      "answer": "В предоставленных фрагментах источников нет сведений об установленном сроке гарантии на насосы для северного и южного участков. В текстах упоминаются только условия проведения испытаний (температура, давление), порядок оформления протоколов и дежурные инженеры, но не сроки гарантийных обязательств.",
+      "linked_documents": {},
+      "candidate_documents": 60,
+      "calls": [
+        {
+          "call": 1,
+          "source_indexes": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          "evidence_limit": 6,
+          "omissions": [
+            {
+              "kind": "evidence",
+              "omitted": 54,
+              "reason": "model_evidence_limit",
+              "total": 60
+            }
+          ],
+          "available_output_tokens": 4374,
+          "sent_output_limit": 4374,
+          "sent_reasoning_effort": "none",
+          "request_sha256": "236cdb15bd8f8adc8695860af47e368ff0b2249ef365df0f9d26730802f7dd5d"
+        }
+      ],
+      "response_metrics": [
+        {
+          "content_bytes": 571,
+          "elapsed_ms": 15066,
+          "first_decoded_event_ms": 12481,
+          "limit": null,
+          "lines_processed": 142,
+          "protocol": "openai_sse",
+          "separate_reasoning_bytes": 0,
+          "tool_bytes": 0,
+          "wire_bytes_received": 14945
+        }
+      ]
+    }
+  },
+  "received_requests_934_9b": {
+    "8192": {
+      "omissions": [
+        {
+          "kind": "evidence",
+          "omitted": 54,
+          "reason": "model_evidence_limit",
+          "total": 60
+        }
+      ],
+      "sections": [
+        {
+          "items": 1,
+          "kind": "profile_prefix",
+          "tokens": 727
+        },
+        {
+          "items": 2,
+          "kind": "request",
+          "tokens": 1152
+        },
+        {
+          "items": 6,
+          "kind": "evidence",
+          "tokens": 431
+        }
+      ],
+      "found_documents": 60,
+      "prepared_source_indices": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "first_request_received_bytes": 9506,
+      "sha256_confirmed_by_receiver": true,
+      "wire_source_markers": {
+        "при давлении 184 кПа": true,
+        "при давлении 273 кПа": true,
+        "после охлаждения теплоносителя до 26 °C": true
+      },
+      "first_input_facts": 3,
+      "wire_output_limit": 4356,
+      "reasoning_effort": "none",
+      "sent_output_limit": 4356,
+      "input_token_limit": 8192,
+      "total_calls": 2,
+      "complete_source_texts": {
+        "017": true,
+        "056": true,
+        "032": true
+      },
+      "complete_common_condition": "Допуск к приёмочным испытаниям насосов на обоих участках выдаётся только после охлаждения теплоносителя до 26 °C."
+    },
+    "24000": {
+      "omissions": [
+        {
+          "kind": "evidence",
+          "omitted": 54,
+          "reason": "model_evidence_limit",
+          "total": 60
+        }
+      ],
+      "sections": [
+        {
+          "items": 1,
+          "kind": "profile_prefix",
+          "tokens": 727
+        },
+        {
+          "items": 2,
+          "kind": "request",
+          "tokens": 1152
+        },
+        {
+          "items": 6,
+          "kind": "evidence",
+          "tokens": 431
+        }
+      ],
+      "found_documents": 60,
+      "prepared_source_indices": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "first_request_received_bytes": 9508,
+      "sha256_confirmed_by_receiver": true,
+      "wire_source_markers": {
+        "при давлении 184 кПа": true,
+        "при давлении 273 кПа": true,
+        "после охлаждения теплоносителя до 26 °C": true
+      },
+      "first_input_facts": 3,
+      "wire_output_limit": 20164,
+      "reasoning_effort": "none",
+      "sent_output_limit": 20164,
+      "input_token_limit": 24000,
+      "total_calls": 2,
+      "complete_source_texts": {
+        "017": true,
+        "056": true,
+        "032": true
+      },
+      "complete_common_condition": "Допуск к приёмочным испытаниям насосов на обоих участках выдаётся только после охлаждения теплоносителя до 26 °C."
+    }
+  },
+  "comparison_on_frozen_passages": {
+    "qwen3.5:2b": {
+      "report": "folder-selection-934.json",
+      "exact_source_sets": 12,
+      "attempts": 20
+    },
+    "qwen3.5:9b": {
+      "report": "folder-selection-934-9b.json",
+      "exact_source_sets": 15,
+      "attempts": 20
+    }
+  }
+}

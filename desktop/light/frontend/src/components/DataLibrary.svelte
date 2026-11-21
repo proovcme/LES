@@ -6,11 +6,13 @@
   import Icon from './Icon.svelte';
   import Modal from './Modal.svelte';
   import FolderWatches from './FolderWatches.svelte';
+  import IndexingJobs from './IndexingJobs.svelte';
 
   type Project = { id: number; name: string; status: string; uvyazka_id?: string; uvyazka_present?: number };
   type Desktop = Window & { __TAURI__?: { core: { invoke: (name: string, args?: object) => Promise<string | null> } } };
-  let { datasets, refresh, useProject, close }: {
-    datasets: Dataset[]; refresh: () => Promise<void>; useProject: (id: number) => Promise<void>; close: () => void;
+  let { datasets, refresh, useProject, showIndexing, close }: {
+    datasets: Dataset[]; refresh: () => Promise<void>; useProject: (id: number) => Promise<void>;
+    showIndexing: () => Promise<void>; close: () => void;
   } = $props();
   let section = $state<'folders' | 'projects'>('folders');
   let projects = $state<Project[]>([]);
@@ -22,8 +24,9 @@
   let project = $state<number | null>(null);
   let projectName = $state('');
   let busy = $state('');
-  let notice = $state('');
+  let notice = $state<{ text: string; indexing?: boolean } | null>(null);
   let error = $state('');
+  let queue = $state<IndexingJobs>();
   const pick = (window as Desktop).__TAURI__?.core.invoke;
   const post = <T,>(url: string, body: object) => request<T>(url, { method: 'POST', body: JSON.stringify(body) });
   let suggestedName = $derived(path.trim().split(/[\\/]/).filter(Boolean).at(-1)?.slice(0, 120) ?? '');
@@ -32,7 +35,7 @@
 
   async function act(message: string, fn: () => Promise<void>) {
     if (busy) return;
-    busy = message; notice = ''; error = '';
+    busy = message; notice = null; error = '';
     try { await fn(); }
     catch (failure) { error = typeof failure === 'string' ? failure : errorMessage(failure); }
     finally { busy = ''; }
@@ -65,7 +68,8 @@
     await post('/api/rag/index-external', { path: root, dataset_id: selected, background: true, parse_limit: 500, watch: followFolder });
     watchRevision += 1;
     path = ''; name = ''; selected = '';
-    notice = 'Папка добавлена в очередь. Ход индексации — в разделе «Состояние».';
+    notice = { text: 'Папка добавлена в очередь.', indexing: true };
+    void queue?.refresh();
   }
   async function createProject() {
     const trimmed = projectName.trim();
@@ -73,11 +77,11 @@
     const item = await post<Project>('/api/projects', { name: trimmed });
     await loadProjects();
     project = item.id; projectName = '';
-    notice = 'Проект создан. Теперь его можно открыть в чате или привязать к нему папку.';
+    notice = { text: 'Проект создан. Теперь его можно открыть в чате или привязать к нему папку.' };
   }
   function switchTo(next: typeof section) {
     section = next;
-    notice = ''; error = '';
+    notice = null; error = '';
   }
 </script>
 
@@ -88,6 +92,9 @@
   </div>
 
   {#if section === 'folders'}
+    <IndexingJobs bind:this={queue} showIndexHealth>
+      {#snippet actions()}<button type="button" class="quiet" disabled={!!busy} onclick={showIndexing}>Состояние Леса</button>{/snippet}
+    </IndexingJobs>
     <form class="editor-form library-form" onsubmit={(event) => { event.preventDefault(); void act('Подключаем папку…', addFolder); }}>
       <div class="intro">
         <h3>Подключить папку</h3>
@@ -153,7 +160,10 @@
     </form>
   {/if}
 
-  <div role="status" class:message={busy || notice}>{busy || notice}</div>
+  <div class="result" class:message={busy || notice}>
+    <div role="status">{busy || notice?.text}</div>
+    {#if !busy && notice?.indexing}<button type="button" class="quiet" onclick={showIndexing}>К ходу индексации</button>{/if}
+  </div>
   {#if error}<p class="message error" role="alert">{error}</p>{/if}
 </Modal>
 
@@ -179,6 +189,7 @@
   .project-list span { overflow-wrap: anywhere; }
   .project-list button { flex-shrink: 0; }
   .message { margin: 12px 0 0; padding: 9px 12px; background: var(--forest-floor); border-radius: 8px; font-size: 14px; }
+  .result { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
   .error { color: var(--forest-error, #8a211a); }
   @media (max-width: 500px) {
     .folder-choice { grid-template-columns: minmax(0, 1fr); }

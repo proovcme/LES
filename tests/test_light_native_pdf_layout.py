@@ -122,9 +122,65 @@ def test_chat_reads_cells_while_the_index_keeps_its_search_representation(native
     tokens=''.join(value for event,value in events if event=='event: token')
     assert '999' not in tokens and '17.25' in tokens and '"rows"' not in tokens
     assert any(event=='event: final' and value['artifact']['validation']=='source_rows_verified' for event,value in events)
+    expected_calls = 3
+    if strict and mode == 'search':
+        request = {'question':'How much Alpha item is in the documents?', 'mode':mode,
+                   'retrieval_mode':'push','scope':{'scope_type':'dataset','dataset_ids':[dataset]}}
+        t.scripts.extend([{'text':'Alpha item: 999 pcs [Источник 1]'}] * 2)
+        rejected = t.client.post('/api/chat',json=request)
+        assert rejected.status_code == 503 and rejected.json()['code'] == 'TABLE_FACTS_REQUIRED'
+        t.scripts.append({'text':json.dumps({'answerable':False,'rows':[],'sums':[],'missing':['guarantee']})})
+        missing = t.client.post('/api/chat',json={**request,'question':'What is the guarantee?'})
+        assert missing.raise_for_status().json()['artifact']['validation'] == 'insufficient_evidence'
+        expected_calls += 3
     with closing(QdrantClient(url=t.env['LES_LIGHT_QDRANT_URL'],api_key=t.env['LES_LIGHT_QDRANT_API_KEY'],check_compatibility=False)) as c:
         c.set_payload(collection,payload={'pdf_page_view_sha256':'0'*64},points=[views[0].id],wait=True)
     failed=t.client.post('/api/chat',json={'question':'How much Alpha item is in the documents?',
         'mode':mode,'retrieval_mode':'push','scope':{'scope_type':'dataset','dataset_ids':[dataset],'selected_sources_only':strict}})
     assert failed.status_code==503 and failed.json()['code']=='PDF_PAGE_VIEW_INVALID'
-    assert len(t.seen)==3
+    assert len(t.seen)==expected_calls
+
+
+@pytest.mark.parametrize('native_turn',['rag-small'],indirect=True)
+def test_folder_hybrid_binds_pdf_row_when_prose_is_also_present(native_turn,tmp_path):
+    t = native_turn
+    folder = tmp_path / 'documents'
+    folder.mkdir()
+    grid(folder/'Register.pdf')
+    (folder/'Notes.txt').write_text('Alpha item is checked at the receiving desk.', encoding='utf-8')
+    dataset = t.client.post('/api/rag/datasets',json={'name':'Mixed folder'}).raise_for_status().json()['id']
+    job = t.client.post('/api/rag/index-external',json={'path':str(folder),'dataset_id':dataset,
+                        'background':True}).raise_for_status().json()['intake_job_id']
+    wait_for(lambda:t.client.get('/api/light/intake',params={'id':job}).json()['status']=='completed',timeout=40)
+    session = 'mixed-register'
+    def row_address(body):
+        import sqlite3
+        with sqlite3.connect(t.database) as db:
+            trace, = db.execute('SELECT retrieval_trace_json FROM chat_history WHERE session_id=? ORDER BY id DESC LIMIT 1',(session,)).fetchone()
+        sources = json.loads(trace)['source_map']
+        digest = hashlib.sha256(b'|1|Alpha item|pcs|17.25|').hexdigest()
+        index = next(s['index'] for s in sources if s.get('verified_cells') and s.get('reading_unit_sha256')==digest)
+        message = '\n'.join(m['content'] for m in body['messages'])
+        line = re.search(r'R(\d+) C1: 1; C2: Alpha item',message)
+        return index, int(line[1])
+    def wrong(body):
+        index, _ = row_address(body)
+        return {'text':f'Alpha item: 999 pcs [Источник {index}]'}
+    def valid(body):
+        index,row = row_address(body)
+        return {'text':json.dumps({'answerable':True,'rows':[f'S{index}R{row}'],'sums':[],'missing':[]})}
+    t.scripts.extend([wrong,valid])
+    reply = t.client.post('/api/chat',json={'question':'How much Alpha item is in the documents?',
+        'mode':'search','retrieval_mode':'hybrid','session_id':session,
+        'scope':{'scope_type':'datasets','dataset_ids':[dataset],'selected_sources_only':False}})
+    assert reply.status_code == 200, reply.text
+    data = reply.json()
+    assert len(t.seen)==2 and data['retrieval_trace']['cell_selection_retry']
+    assert '999' not in data['answer'] and '17.25' in data['answer']
+    assert data['artifact']['table_facts']['rows'][0]['cells']==['1','Alpha item','pcs','17.25']
+    from tools.inspect_chat_turn import inspect
+    trace = inspect(t.database, data['history_id'])
+    assert trace['outcome']['validation'] == 'source_rows_verified'
+    assert len(trace['calls']) == 2 and all(c['sent_to_model'] for c in trace['calls'])
+    assert trace['selected_rows'][0]['source_index'] in trace['citations']['linked']
+    assert all(text not in json.dumps(trace) for text in ('Alpha item','Register.pdf','receiving desk'))

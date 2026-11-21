@@ -5,7 +5,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::sync::LazyLock;
 
 static MARKER: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\[(?:Источники?\s+([0-9][0-9,;\s–—\-]*)(?:,[ \t]*(?:страница|стр\.?|page)[ \t]+[0-9]+)?|([0-9][0-9,;\s–—\-]*))(?:\|([^\]\n]*))?\]").unwrap()
+    Regex::new(r"(?i)\[(?:Источники?\s+([0-9][0-9,;\s–—\-]*)(?:,[ \t]*(?:страница|стр\.?|page)[ \t]+[0-9]+)?|([0-9]+))(?:\|([^\]\n]*))?\]").unwrap()
 });
 static NAMED_PARENTHETICAL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\(Источники?[ \t]+([0-9][0-9,; \t–—\-]*)(?:,[ \t]*(?:страница|стр\.?|page)[ \t]+[0-9]+)?\)").unwrap()
@@ -22,6 +22,55 @@ static CODE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?s)```.*?(?:```|$)|~~~.*?(?:~~~|$)|``.*?(?:``|$)|`[^`\n]*(?:`|$)|!?\[[^\]\n]*\]\([^\)\n]*\)").unwrap()
 });
 static HANDLE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\bQ[0-9]+\.H[0-9]+\b").unwrap());
+static LIST_REFERENCE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?m)^([ ]{0,3})[+*-][ \t]+[^\r\n]+?([ \t]+\[Источник ([0-9]+)\])[ \t]*\r?$")
+        .unwrap()
+});
+
+fn merge_adjacent_references(answer: &str, valid: &BTreeSet<u32>) -> (String, usize) {
+    let mut protected = CODE.find_iter(answer).peekable();
+    let mut previous: Option<(&str, u32, usize, std::ops::Range<usize>)> = None;
+    let mut removals = Vec::new();
+    for captures in LIST_REFERENCE.captures_iter(answer) {
+        let line = captures.get(0).unwrap();
+        let reference = captures.get(2).unwrap();
+        let Some(index) = captures[3]
+            .parse::<u32>()
+            .ok()
+            .filter(|n| valid.contains(n))
+        else {
+            previous = None;
+            continue;
+        };
+        while protected
+            .peek()
+            .is_some_and(|span| span.end() <= reference.start())
+        {
+            protected.next();
+        }
+        if protected
+            .peek()
+            .is_some_and(|span| span.start() < reference.end())
+            || MARKER.is_match(&answer[line.start()..reference.start()])
+        {
+            previous = None;
+            continue;
+        }
+        let indent = captures.get(1).unwrap().as_str();
+        if let Some((old_indent, old_index, end, span)) = previous.take() {
+            if old_indent == indent && old_index == index && &answer[end..line.start()] == "\n" {
+                removals.push(span);
+            }
+        }
+        previous = Some((indent, index, line.end(), reference.range()));
+    }
+    let mut result = answer.to_owned();
+    let count = removals.len();
+    for span in removals.into_iter().rev() {
+        result.replace_range(span, "");
+    }
+    (result, count)
+}
 
 fn numbers(value: &str) -> BTreeSet<u32> {
     let mut result = BTreeSet::new();
@@ -172,12 +221,31 @@ pub fn execute(request: &Value) -> Result<Value, &'static str> {
     }
     output.push_str(&transform(&answer[cursor..]));
     cited.extend(link_cited);
-    Ok(json!({"answer":output,"indexes":cited,"unknown_indexes":unknown,"header_repairs":repairs}))
+    let (output, repeated_markers_removed) = if request["merge_adjacent_references"] == true {
+        merge_adjacent_references(&output, &valid)
+    } else {
+        (output, 0)
+    };
+    Ok(
+        json!({"answer":output,"indexes":cited,"unknown_indexes":unknown,"header_repairs":repairs,
+        "repeated_markers_removed":repeated_markers_removed}),
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn adjacent_list_fields_share_a_link_but_separate_claims_and_code_keep_theirs() {
+        let answer = "A\n- Brand: X [Источник 1]\n- Supplier: Y [Источник 1]\n\nB\n- Value: Z [Источник 1]\n\n```\n- a [Источник 1]\n- b [Источник 1]\n```";
+        let result = execute(
+            &json!({"answer":answer,"sources":[{"index":1}],"merge_adjacent_references":true}),
+        )
+        .unwrap();
+        assert_eq!(result["answer"], answer.replacen("X [Источник 1]", "X", 1));
+        assert_eq!(result["indexes"], json!([1]));
+        assert_eq!(result["repeated_markers_removed"], 1);
+    }
     #[test]
     fn an_exact_bound_markdown_link_counts_without_rewriting_its_label() {
         let answer = "[План · стр. 2](/api/source?id=x#page=2) ` [код](/api/source?id=y) `";

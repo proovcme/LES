@@ -20,9 +20,17 @@ fn origins(sources: &Value) -> Result<Vec<&Value>> {
     Ok(found)
 }
 pub(crate) async fn physical(context: Arc<Context>, sources: &Value) -> Result<()> {
+    originals(context, sources, &[]).await
+}
+pub(crate) async fn originals(
+    context: Arc<Context>,
+    sources: &Value,
+    required: &[Value],
+) -> Result<()> {
     let mut seen = HashMap::new();
     for source in origins(sources)?.into_iter().filter(|s| {
-        s["prepared_evidence_origin"] == true
+        required.iter().any(|d| d["id"] == s["doc_id"])
+            || s["prepared_evidence_origin"] == true
             || matches!(
                 s["evidence_kind"].as_str(),
                 Some(

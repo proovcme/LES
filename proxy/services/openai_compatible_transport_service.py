@@ -152,6 +152,7 @@ def _model_body(connection, request, *, native, streaming):
             'schema': 'les.model-request.v1', 'action': 'prepare', 'native': native, 'streaming': streaming,
             'connection': {'model_id': connection.model_id, 'locality': connection.locality.value,
                            'input_token_limit': connection.effective_preset.input_token_limit,
+                           'reasoning_control': connection.capability_snapshot.transport_options.get('reasoning_control'),
                            'max_output_field': connection.capability_snapshot.transport_options.get('max_output_field', 'max_tokens')},
             'request': {'messages': _plain_json(request.messages), 'tools': _plain_json(request.tools),
                         'max_output_tokens': request.max_output_tokens, 'temperature': request.temperature,

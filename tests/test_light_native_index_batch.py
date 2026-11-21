@@ -7,6 +7,7 @@ from pathlib import Path
 import sqlite3
 import subprocess
 import sys
+import sysconfig
 import time
 
 import pytest
@@ -229,7 +230,7 @@ def test_last_file_commit_before_process_death_still_emits_post_index_event(tmp_
         'commit_last_then_pause(json.load(open(sys.argv[3],encoding="utf-8")))')
     root=Path(__file__).resolve().parents[1];program=getattr(sys,'_base_executable',sys.executable)
     with (tmp_path/'child.log').open('wb') as log:
-        child=subprocess.Popen([program,'-I','-S','-c',script,str(root),str(root/'.venv/Lib/site-packages'),str(request_path)],stdout=log,stderr=log,
+        child=subprocess.Popen([program,'-I','-S','-c',script,str(root),sysconfig.get_path('purelib'),str(request_path)],stdout=log,stderr=log,
             creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
         try:
             deadline=time.monotonic()+15;marker=Path(request['database']).parent/'last-committed'
@@ -257,7 +258,7 @@ def test_owner_death_releases_lease_recovers_pending_and_cleans_owned_spools(tmp
     # Windows venv redirector which would leave its child running.
     program=getattr(sys,'_base_executable',sys.executable)
     with (tmp_path/'child.log').open('wb') as log:
-        child=subprocess.Popen([program,'-I','-S','-c',script,str(root),str(root/'.venv/Lib/site-packages'),str(request_path)],stdout=log,stderr=log,
+        child=subprocess.Popen([program,'-I','-S','-c',script,str(root),sysconfig.get_path('purelib'),str(request_path)],stdout=log,stderr=log,
             creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
         try:
             deadline=time.monotonic()+15

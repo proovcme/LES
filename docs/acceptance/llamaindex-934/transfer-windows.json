@@ -1,0 +1,145 @@
+{
+  "schema": "les.llamaindex.authored-transfer-window.v1",
+  "fixture_sha256": "ee913f5ce31e5a1922eca999f558693ff703a00acba2e646f0f4e00f41901648",
+  "model": "qwen3.5:9b",
+  "cases": [
+    {
+      "case": "delivery-refund",
+      "variant": "full",
+      "question": "Каковы действующие сроки доставки заказа и возврата товара? Укажи срок и единицу для каждого.",
+      "expected": [
+        "delivery-new",
+        "refund-new"
+      ],
+      "calls": [
+        {
+          "model": "qwen3.5:9b",
+          "visible": [
+            "refund-old",
+            "delivery-new",
+            "hours-new",
+            "delivery-old",
+            "refund-new"
+          ],
+          "temperature": 0.1,
+          "max_tokens": 4356,
+          "reasoning_effort": "none"
+        }
+      ]
+    },
+    {
+      "case": "delivery-refund",
+      "variant": "current-refund-removed",
+      "question": "Каковы действующие сроки доставки заказа и возврата товара? Укажи срок и единицу для каждого.",
+      "expected": [
+        "delivery-new"
+      ],
+      "calls": [
+        {
+          "model": "qwen3.5:9b",
+          "visible": [
+            "refund-old",
+            "delivery-new",
+            "hours-new",
+            "delivery-old",
+            "shipping"
+          ],
+          "temperature": 0.1,
+          "max_tokens": 4356,
+          "reasoning_effort": "none"
+        }
+      ]
+    },
+    {
+      "case": "islands",
+      "variant": "exception",
+      "question": "Сколько стоит доставка на остров при заказе на 6000 рублей?",
+      "expected": [
+        "shipping"
+      ],
+      "calls": [
+        {
+          "model": "qwen3.5:9b",
+          "visible": [
+            "delivery-new",
+            "refund-new",
+            "shipping",
+            "delivery-old",
+            "hours-new"
+          ],
+          "temperature": 0.1,
+          "max_tokens": 4356,
+          "reasoning_effort": "none"
+        }
+      ]
+    },
+    {
+      "case": "launch",
+      "variant": "conflict",
+      "question": "Назови точную утверждённую дату запуска проекта.",
+      "expected": [
+        "launch-a",
+        "launch-b"
+      ],
+      "calls": [
+        {
+          "model": "qwen3.5:9b",
+          "visible": [
+            "launch-a",
+            "delivery-new",
+            "hours-new",
+            "launch-b",
+            "refund-new"
+          ],
+          "temperature": 0.1,
+          "max_tokens": 4356,
+          "reasoning_effort": "none"
+        }
+      ]
+    },
+    {
+      "case": "director",
+      "variant": "missing",
+      "question": "Как называется директор лаборатории?",
+      "expected": [],
+      "calls": [
+        {
+          "model": "qwen3.5:9b",
+          "visible": [
+            "launch-a",
+            "hours-new",
+            "storage",
+            "delivery-old",
+            "refund-new"
+          ],
+          "temperature": 0.1,
+          "max_tokens": 4356,
+          "reasoning_effort": "none"
+        }
+      ]
+    },
+    {
+      "case": "library",
+      "variant": "editions",
+      "question": "До какого часа работает библиотека в апреле 2031 года?",
+      "expected": [
+        "hours-new"
+      ],
+      "calls": [
+        {
+          "model": "qwen3.5:9b",
+          "visible": [
+            "hours-old",
+            "access",
+            "hours-new",
+            "delivery-old",
+            "shipping"
+          ],
+          "temperature": 0.1,
+          "max_tokens": 4356,
+          "reasoning_effort": "none"
+        }
+      ]
+    }
+  ]
+}

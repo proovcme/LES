@@ -44,9 +44,9 @@ def materialize(document, font=None):
     if kind == 'csv':
         text = StringIO(); csv.writer(text).writerows(document['rows'])
         return document['id']+'.csv', text.getvalue().encode('utf-8-sig')
-    if kind != 'md':
+    if kind not in {'md', 'txt'}:
         raise ValueError('Unsupported authored document format')
-    return document['id']+'.md', document['text'].encode('utf-8')
+    return document['id']+'.'+kind, document['text'].encode('utf-8')
 
 
 def stream_final(response):

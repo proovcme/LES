@@ -1,6 +1,18 @@
 //! Project the authoritative turn into the public chat and history contract.
 use serde_json::{json, Value};
 
+pub(super) fn with_cited_excerpts(mut response: Value) -> Value {
+    let Some(mut sources) = response.get_mut("source_map").map(std::mem::take) else {
+        return response;
+    };
+    if les_core::chat_context::attach_cited_excerpts(&mut sources, &response["retrieval_trace"]) {
+        response["citation_map"] = sources.clone();
+        response["retrieval_trace"]["source_map"] = sources.clone();
+    }
+    response["source_map"] = sources;
+    response
+}
+
 pub(super) fn decorate(mut response: Value) -> Value {
     response["completion_status"] = response["artifact"]["completion_status"].clone();
     response["execution"] = response["artifact"]["execution_summary"].clone();

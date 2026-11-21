@@ -5,9 +5,10 @@ pub(super) async fn search(
     turn: &SourceContext,
     args: &Value,
     datasets: &[Value],
+    pinned_file: Option<Value>,
 ) -> Result<Value> {
     let limit = args["limit"].as_u64().unwrap_or(12).clamp(1, 50);
-    let result = page(context, turn, args, datasets, limit).await?;
+    let result = page(context, turn, args, datasets, limit, pinned_file).await?;
     Ok(envelope(
         "search_sources",
         "document_catalog",
@@ -17,7 +18,7 @@ pub(super) async fn search(
 }
 pub(super) async fn map(context: Arc<Context>, turn: &SourceContext, args: Value) -> Result<Value> {
     let dataset = args["dataset_id"].clone();
-    let mut result = page(context, turn, &json!({}), &[dataset.clone()], 100).await?;
+    let mut result = page(context, turn, &json!({}), &[dataset.clone()], 100, None).await?;
     result["dataset_id"] = dataset;
     result["limit"] = json!(100);
     Ok(envelope("dataset_map", "dataset_map", result, vec![]))
@@ -28,6 +29,7 @@ async fn page(
     args: &Value,
     datasets: &[Value],
     limit: u64,
+    pinned_file: Option<Value>,
 ) -> Result<Value> {
     for dataset in datasets {
         scoped(turn, dataset)?;
@@ -39,7 +41,9 @@ async fn page(
     if offset > 100000 {
         return Err("SOURCE_OFFSET_INVALID".into());
     }
-    let selected = if turn.request["selected_sources_only"] == true {
+    let selected = if let Some(file) = pinned_file {
+        vec![file]
+    } else if turn.request["selected_sources_only"] == true {
         selected_scoped(turn)
     } else {
         vec![]

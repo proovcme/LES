@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -17,18 +18,25 @@ SPECS={
 
 def source_digest(component,root=ROOT):
     SPECS[component]
-    paths=[root/'config/version.json']
-    paths.extend(root/'config'/name for name in ('execution-presets.json','chat-profile-defaults.json','builtin-tools.json','lexical-v2.json',
-        'model-connection-templates.json','table-row-schema.json','extraction-errors.json','unicode/15.1.0.json') if (root/'config'/name).is_file())
-    if component == 'api':
-        paths.extend(root/'qdrant_visualizer'/name for name in (
-            'index.html', 'forest.css', 'app-nav.css', 'forest.js', 'forest-model.js', 'forest-scene.js',
-            'navigation.js', 'forest-mist.svg', 'search.html', 'search.js',
-        ) if (root/'qdrant_visualizer'/name).is_file())
+    root = root.resolve()
+    paths = {root/'config/version.json'}
     for folder in ('core',component, *(['vector'] if component == 'api' else [])):
-        paths.extend(root.joinpath(folder,'src').rglob('*.rs'))
-        paths.extend(root.joinpath(folder,'src').rglob('*.sql'))
-        paths.extend(root/folder/name for name in ('Cargo.toml','Cargo.lock'))
+        crate = root / folder
+        sources = list((crate/'src').rglob('*.rs'))
+        if (crate/'build.rs').is_file():
+            sources.append(crate/'build.rs')
+        paths.update(sources)
+        paths.update(crate/name for name in ('Cargo.toml','Cargo.lock'))
+        for source in sources:
+            contents = source.read_text(encoding='utf-8')
+            for macro in re.finditer(r'\binclude_(?:str|bytes)!\s*\(', contents):
+                literal = re.match(r'\s*"([^"\\]+)"\s*,?\s*\)', contents[macro.end():])
+                if not literal:
+                    raise ValueError(f'Unsupported embedded path in {source.relative_to(root)}')
+                embedded = (source.parent / literal[1]).resolve()
+                if not embedded.is_relative_to(root):
+                    raise ValueError('Embedded build input outside repository')
+                paths.add(embedded)
     digest=hashlib.sha256()
     for path in sorted(paths):
         if path.is_symlink():
@@ -37,12 +45,13 @@ def source_digest(component,root=ROOT):
     return digest.hexdigest()
 
 
-def stage_asset(component,output,source,expected_source):
+def stage_asset(component,output,source,expected_source,*,features=()):
     _,schema,receipt_name=SPECS[component]
     receipt=json.loads((source.parent/receipt_name).read_text(encoding='utf-8'))
     if (receipt.get('schema')!=schema or receipt.get('file')!=source.name
             or receipt.get('sha256')!=hashlib.sha256(source.read_bytes()).hexdigest()
             or receipt.get('source_sha256')!=expected_source or receipt.get('remapped_paths') is not True
+            or receipt.get('features',[])!=sorted(set(features))
             or component=='parsers' and receipt.get('revision')!='les.parsers.v1'):
         raise ValueError('Native asset does not match its receipt/source')
     output.mkdir(parents=True,exist_ok=False)
@@ -69,7 +78,10 @@ def build(component,output,*,offline=False,features=()):
         command.append('--offline')
     if features:
         command.extend(['--features', ','.join(sorted(set(features)))])
+    inputs = source_digest(component)
     subprocess.run(command,env=environment,check=True)
+    if source_digest(component) != inputs:
+        raise ValueError('Native build inputs changed during compilation')
     file=name+('.exe' if sys.platform=='win32' else '')
     target=Path(environment.get('CARGO_TARGET_DIR', str(ROOT/component/'target')))
     source=target/'release'/file
@@ -79,7 +91,7 @@ def build(component,output,*,offline=False,features=()):
     version=json.loads((ROOT/'config/version.json').read_text(encoding='utf-8'))
     receipt={'schema':schema,'file':file,'build_number':version['build_number'],
              'sha256':hashlib.sha256(source.read_bytes()).hexdigest(),
-             'source_sha256':source_digest(component),'remapped_paths':True}
+             'source_sha256':inputs,'remapped_paths':True}
     if features:
         receipt['features']=sorted(set(features))
     if component == 'parsers':
