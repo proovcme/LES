@@ -153,7 +153,7 @@ def test_folder_hybrid_binds_pdf_row_when_prose_is_also_present(native_turn,tmp_
                         'background':True}).raise_for_status().json()['intake_job_id']
     wait_for(lambda:t.client.get('/api/light/intake',params={'id':job}).json()['status']=='completed',timeout=40)
     session = 'mixed-register'
-    def row_address(body):
+    def row_address(body, *, require_address):
         import sqlite3
         with sqlite3.connect(t.database) as db:
             trace, = db.execute('SELECT retrieval_trace_json FROM chat_history WHERE session_id=? ORDER BY id DESC LIMIT 1',(session,)).fetchone()
@@ -162,12 +162,16 @@ def test_folder_hybrid_binds_pdf_row_when_prose_is_also_present(native_turn,tmp_
         index = next(s['index'] for s in sources if s.get('verified_cells') and s.get('reading_unit_sha256')==digest)
         message = '\n'.join(m['content'] for m in body['messages'])
         line = re.search(r'R(\d+) C1: 1; C2: Alpha item',message)
-        return index, int(line[1])
+        if require_address or line:
+            assert line, message
+            return index, int(line[1])
+        assert '|1|Alpha item|pcs|17.25|' in message
+        return index, None
     def wrong(body):
-        index, _ = row_address(body)
+        index, _ = row_address(body, require_address=False)
         return {'text':f'Alpha item: 999 pcs [Источник {index}]'}
     def valid(body):
-        index,row = row_address(body)
+        index,row = row_address(body, require_address=True)
         return {'text':json.dumps({'answerable':True,'rows':[f'S{index}R{row}'],'sums':[],'missing':[]})}
     t.scripts.extend([wrong,valid])
     reply = t.client.post('/api/chat',json={'question':'How much Alpha item is in the documents?',

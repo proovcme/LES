@@ -10871,6 +10871,19 @@
       "windows_runtime_explicit": false
     },
     {
+      "inbound": [],
+      "lines": 49,
+      "module": "tests.test_light_folder_window_trial",
+      "outbound": [
+        "tools/evaluate_folder_tables.py",
+        "tools/evaluate_folder_window.py",
+        "tools/folder_cell_reader.py"
+      ],
+      "path": "tests/test_light_folder_window_trial.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
       "inbound": [
         "tests/test_light_resource_memory.py"
       ],
@@ -11232,6 +11245,7 @@
         "tests/test_light_native_dataset_reader.py",
         "tests/test_light_native_docx_parts.py",
         "tests/test_light_native_evidence_packet.py",
+        "tests/test_light_native_folder_fields.py",
         "tests/test_light_native_folder_watch.py",
         "tests/test_light_native_index_batch.py",
         "tests/test_light_native_indexed_attachment.py",
@@ -11367,6 +11381,7 @@
         "tests/test_light_native_document_review.py",
         "tests/test_light_native_docx_parts.py",
         "tests/test_light_native_evidence_packet.py",
+        "tests/test_light_native_folder_fields.py",
         "tests/test_light_native_model_discovery.py",
         "tests/test_light_native_model_settings.py",
         "tests/test_light_native_numeric_evidence.py",
@@ -11620,6 +11635,18 @@
         "proxy/services/tool_harness_service.py"
       ],
       "path": "tests/test_light_native_filesystem.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
+      "lines": 56,
+      "module": "tests.test_light_native_folder_fields",
+      "outbound": [
+        "tests/test_light_native_api.py",
+        "tests/test_light_native_chat_turn.py"
+      ],
+      "path": "tests/test_light_native_folder_fields.py",
       "status": "TEST_OR_TOOL_ONLY",
       "windows_runtime_explicit": false
     },
@@ -11926,7 +11953,7 @@
       "inbound": [
         "tests/test_light_native_parser_pipeline.py"
       ],
-      "lines": 186,
+      "lines": 190,
       "module": "tests.test_light_native_pdf_layout",
       "outbound": [
         "proxy/services/model_connection_contracts.py",
@@ -13326,7 +13353,9 @@
         "tools/documentation_contract.py",
         "tools/evaluate_claim_judge.py",
         "tools/evaluate_folder_evidence.py",
+        "tools/evaluate_folder_tables.py",
         "tools/evaluate_folder_transfer.py",
+        "tools/evaluate_folder_window.py",
         "tools/evaluate_light_chat.py",
         "tools/evaluate_light_semantics.py",
         "tools/evaluate_llamaindex_folder.py",
@@ -13336,6 +13365,7 @@
         "tools/evaluate_rag_trial_answers.py",
         "tools/evaluate_retrieval_candidate.py",
         "tools/ezhik_imap_smoke.py",
+        "tools/folder_cell_reader.py",
         "tools/generate_native_unicode.py",
         "tools/inspect_chat_turn.py",
         "tools/install_les.py",
@@ -13651,6 +13681,21 @@
       "windows_runtime_explicit": false
     },
     {
+      "inbound": [
+        "tests/test_light_folder_window_trial.py"
+      ],
+      "lines": 110,
+      "module": "tools.evaluate_folder_tables",
+      "outbound": [
+        "tools/__init__.py",
+        "tools/evaluate_folder_window.py",
+        "tools/folder_cell_reader.py"
+      ],
+      "path": "tools/evaluate_folder_tables.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
       "inbound": [],
       "lines": 96,
       "module": "tools.evaluate_folder_transfer",
@@ -13660,6 +13705,20 @@
         "tools/evaluate_part_reader_chat.py"
       ],
       "path": "tools/evaluate_folder_transfer.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "tests/test_light_folder_window_trial.py",
+        "tools/evaluate_folder_tables.py"
+      ],
+      "lines": 203,
+      "module": "tools.evaluate_folder_window",
+      "outbound": [
+        "tools/__init__.py"
+      ],
+      "path": "tools/evaluate_folder_window.py",
       "status": "TEST_OR_TOOL_ONLY",
       "windows_runtime_explicit": false
     },
@@ -13805,6 +13864,20 @@
         "tools/__init__.py"
       ],
       "path": "tools/ezhik_imap_smoke.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "tests/test_light_folder_window_trial.py",
+        "tools/evaluate_folder_tables.py"
+      ],
+      "lines": 138,
+      "module": "tools.folder_cell_reader",
+      "outbound": [
+        "tools/__init__.py"
+      ],
+      "path": "tools/folder_cell_reader.py",
       "status": "TEST_OR_TOOL_ONLY",
       "windows_runtime_explicit": false
     },
@@ -16078,9 +16151,9 @@
     "product_reachable": 417,
     "registered_api_routes": 298,
     "runtime_support": 5,
-    "test_or_tool_only": 293,
-    "tracked_python_files": 722,
-    "tracked_python_lines": 173231
+    "test_or_tool_only": 298,
+    "tracked_python_files": 727,
+    "tracked_python_lines": 173791
   },
   "warnings": []
 }

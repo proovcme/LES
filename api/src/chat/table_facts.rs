@@ -3,6 +3,7 @@
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 mod addresses;
+pub(super) mod lookup;
 mod quantities;
 use addresses::Reference;
 #[derive(Default)]
@@ -916,6 +917,7 @@ mod tests {
             data,
             paragraphs: BTreeMap::new(),
             literal_sources: HashSet::new(),
+            cell_sources: HashSet::new(),
             headers: BTreeMap::from([(
                 (1, 4),
                 vec!["Item".into(), "Unit".into(), "Quantity".into()],

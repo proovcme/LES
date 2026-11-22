@@ -367,6 +367,16 @@ pub fn instructions(snapshot: &Value) -> Result<String> {
     parts.push("Ссылки на материалы с метками [Источник N] оформляй точно этими метками; для веб-страниц используй предоставленный URL.".into());
     Ok(parts.join("\n\n"))
 }
+
+pub fn default_search_instructions(snapshot: &Value) -> bool {
+    let search = &defaults()["search"];
+    snapshot["mode"] == "search"
+        && snapshot["prompt_text"] == search["prompt"]
+        && snapshot["skill_text"] == search["skill"]
+        && snapshot["additional_skills"]
+            .as_array()
+            .is_none_or(Vec::is_empty)
+}
 fn run(request: &Value) -> Result<Value> {
     if request["schema"] != "les.chat-profiles.v1" {
         return Err(invalid("Некорректный контракт профилей"));
