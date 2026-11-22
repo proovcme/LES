@@ -76,6 +76,7 @@ pub(super) async fn attach_groups(
     context: &Context,
     passages: &mut [Value],
     sources: &mut [Value],
+    lookup_cells: bool,
 ) {
     let Some(store) = &context.index_store else {
         return;
@@ -120,7 +121,7 @@ pub(super) async fn attach_groups(
                     .map(|(_, sheet, row)| json!({"sheet_name":sheet,"row":row}))
                     .collect::<Vec<_>>();
                 les_core::tables::execute(
-                    &json!({"action":"groups","path":path,"source_sha256":sha,"rows":targets,"include_cells":true}),
+                    &json!({"action":"groups","path":path,"source_sha256":sha,"rows":targets,"include_cells":lookup_cells}),
                 )
             });
             let data = match result {

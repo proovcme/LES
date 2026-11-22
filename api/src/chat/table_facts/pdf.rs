@@ -20,6 +20,70 @@ fn contains_cell(text: &str, cell: &str) -> bool {
 }
 
 impl Rows {
+    pub(in crate::chat) fn requests_quantity(question: &str) -> bool {
+        let lower = question.to_lowercase();
+        lower
+            .split(|c: char| !c.is_alphabetic())
+            .any(|word| matches!(word, "количество" | "quantity" | "qty"))
+    }
+    pub(in crate::chat) fn unique_pdf_quantity_source(&self, question: &str) -> Option<u64> {
+        let mut matches = self.data.iter().filter(|(_, (cells, source))| {
+            quantity(question, "", cells, &source["pdf_quantity_columns"]).is_some()
+        });
+        let (&(index, _), _) = matches.next()?;
+        matches.next().is_none().then_some(index)
+    }
+
+    pub(in crate::chat) fn confirmation_format(index: u64) -> Value {
+        json!({"type":"json_schema","json_schema":{"name":"les_pdf_quantity","strict":true,
+            "schema":{"type":"object","additionalProperties":false,"required":["source"],
+            "properties":{"source":{"type":["integer","null"],"enum":[index,null]}}}}})
+    }
+
+    pub(in crate::chat) fn quantity_key_format() -> Value {
+        json!({"type":"json_schema","json_schema":{"name":"les_pdf_position","strict":true,
+            "schema":{"type":"object","additionalProperties":false,"required":["item"],
+            "properties":{"item":{"type":["string","null"]}}}}})
+    }
+
+    pub(in crate::chat) fn quantity_key(question: &str, answer: &str) -> Option<String> {
+        let v: Value = serde_json::from_str(super::json_answer(answer)).ok()?;
+        let key = v
+            .as_object()
+            .filter(|o| o.len() == 1)?
+            .get("item")?
+            .as_str()?
+            .trim();
+        (key.chars().count() <= 256 && contains_cell(&question.to_lowercase(), &key.to_lowercase()))
+            .then(|| key.to_owned())
+    }
+
+    pub(in crate::chat) fn source_for_key(&self, key: &str) -> Option<u64> {
+        let name = key.to_lowercase();
+        let mut eligible = self.data.iter().filter(|(_, (cells, source))| {
+            cells.iter().any(|cell| cell.to_lowercase() == name)
+                && quantity(key, "", cells, &source["pdf_quantity_columns"]).is_some()
+        });
+        let (&(index, _), _) = eligible.next()?;
+        eligible.next().is_none().then_some(index)
+    }
+
+    pub(in crate::chat) fn confirmation_answer(
+        text: &str,
+        index: u64,
+    ) -> Result<Option<String>, &'static str> {
+        let value: Value =
+            serde_json::from_str(super::json_answer(text)).map_err(|_| "TABLE_FACTS_REQUIRED")?;
+        let object = value
+            .as_object()
+            .filter(|o| o.len() == 1)
+            .ok_or("TABLE_FACTS_REQUIRED")?;
+        match object.get("source") {
+            Some(Value::Null) => Ok(None),
+            Some(n) if n.as_u64() == Some(index) => Ok(Some(format!("[Источник {index}]"))),
+            _ => Err("TABLE_ROW_NOT_VISIBLE"),
+        }
+    }
     pub(in crate::chat) fn cited_pdf_row(
         &self,
         question: &str,
@@ -79,9 +143,7 @@ impl Rows {
             return Ok(None);
         };
         // A second row answering the same literal question needs disambiguation.
-        if self.data.iter().any(|(&(s, _), (other, origin))| {
-            s != index && quantity(question, "", other, &origin["pdf_quantity_columns"]).is_some()
-        }) {
+        if self.unique_pdf_quantity_source(question) != Some(index) {
             return Ok(None);
         }
         let mut verified = self.finish_value(
@@ -94,7 +156,16 @@ impl Rows {
             receipt["rows"][0]["quantity_column"] = columns["quantity"].clone();
             receipt["rows"][0]["unit_column"] = columns["unit"].clone();
             let escape = les_core::chat_context::literal_markdown;
-            *rendered = format!("{} {} {marker}", escape(amount), escape(unit));
+            if unit.trim().is_empty() {
+                receipt["status"] = json!("partial");
+                receipt["missing"] = json!(["Единица измерения"]);
+                *rendered = format!(
+                    "Количество — {}. Единица в строке не указана. {marker}",
+                    escape(amount)
+                );
+            } else {
+                *rendered = format!("{} {} {marker}", escape(amount), escape(unit));
+            }
         }
         Ok(verified.map(|(rendered, receipt)| (rendered, receipt, source)))
     }
@@ -121,19 +192,35 @@ fn quantity<'a>(
     let (Some(value), Some(unit)) = (field("quantity"), field("unit")) else {
         return None;
     };
-    if unit.trim().is_empty() || decimal(unit).is_ok() {
+    if decimal(unit).is_ok() {
         return None;
     }
     let Ok(amount) = decimal(value) else {
         return None;
     };
+    let query = question.to_lowercase();
     let mut named = cells
         .iter()
-        .filter(|c| *c != unit && decimal(c).is_err() && contains_cell(question, c));
+        .filter(|c| *c != unit && decimal(c).is_err() && contains_cell(&query, &c.to_lowercase()));
     let (Some(item), None) = (named.next(), named.next()) else {
         return None;
     };
     if answer.trim().is_empty() {
+        return Some((value, unit));
+    }
+    if unit.trim().is_empty() {
+        return None;
+    }
+    let compact = answer
+        .trim()
+        .trim_end_matches('.')
+        .trim()
+        .replace("**", "")
+        .replace('`', "");
+    if compact
+        .strip_suffix(unit)
+        .is_some_and(|n| decimal(n.trim()) == Ok(amount))
+    {
         return Some((value, unit));
     }
     // An explanatory parenthesis may translate the unit. It cannot establish
@@ -171,6 +258,7 @@ mod tests {
         let columns = json!({"width":4,"quantity":4,"unit":3});
         for accepted in [
             "Alpha item 17,250 pcs",
+            "17,25 pcs",
             "",
             "Количество Alpha item **17,25** (или 17.25) штук. Единица — pcs.",
             "Alpha item **17,25** (или 17,25 штук). Единица — pcs (pieces).",
@@ -191,6 +279,7 @@ mod tests {
             "Alpha item 17.25 pcs (или 18)",
             "Alpha item pcs",
             "Alpha item 17.25",
+            "17,25 kg",
         ] {
             assert!(
                 !row_supports_quantity(question, rejected, &cells, &columns),
@@ -217,5 +306,56 @@ mod tests {
             &reordered,
             &columns
         ));
+    }
+
+    #[test]
+    fn confirmation_accepts_only_the_offered_source_or_explicit_abstention() {
+        assert_eq!(
+            Rows::confirmation_answer(r#"{"source":3}"#, 3).unwrap(),
+            Some("[Источник 3]".to_owned())
+        );
+        assert!(Rows::confirmation_answer(r#"{"source":null}"#, 3)
+            .unwrap()
+            .is_none());
+        for answer in [
+            r#"{"source":2}"#,
+            r#"{"source":"3"}"#,
+            "{}",
+            r#"{"source":3,"sums":[]}"#,
+        ] {
+            assert!(Rows::confirmation_answer(answer, 3).is_err());
+        }
+    }
+
+    #[test]
+    fn an_empty_unit_preserves_the_confirmed_amount_and_version() {
+        let row = "|1|Alpha item||17.25|";
+        let source = json!({"index":3,"verified_cells":true,"evidence_kind":"indexed_pdf_row",
+            "doc_id":"doc","source_sha256":"revision","reading_unit_sha256":les_core::sha256_hex(row.as_bytes()),
+            "pdf_quantity_columns":{"width":4,"quantity":4,"unit":3}});
+        let sources = json!([source]);
+        let block = json!({"schema":"les.evidence-block.v1","source_index":3,"body_offset":0,"text":row,"verified_cells":true});
+        let rows = Rows::from_blocks(std::iter::once(&block), &sources);
+        assert_eq!(rows.source_for_key("Alpha item"), Some(3));
+        assert_eq!(rows.source_for_key("Beta item"), None);
+        assert_eq!(
+            Rows::quantity_key("Количество Alpha item?", r#"{"item":"Beta item"}"#),
+            None
+        );
+        let (text, receipt, _) = rows
+            .cited_pdf_row("Количество Alpha item?", "[Источник 3]", &sources)
+            .unwrap()
+            .unwrap();
+        assert!(text.contains("17.25") && text.contains("не указана"));
+        assert_eq!(receipt["status"], "partial");
+        assert_eq!(receipt["rows"][0]["cells"][2], "");
+        assert!(rows
+            .cited_pdf_row(
+                "Количество Alpha item?",
+                "Alpha item 17.25 kg [Источник 3]",
+                &sources
+            )
+            .unwrap()
+            .is_none());
     }
 }

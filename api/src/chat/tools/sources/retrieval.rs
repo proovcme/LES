@@ -1288,7 +1288,13 @@ async fn passages(
         sources.push(source.clone());
         output.push(json!({"text":text,"canonical":p["canonical"],"source":source,"chunk_ord":p["chunk_ord"],"source_ref":p["source_ref"]}));
     }
-    super::workbook::attach_groups(context, &mut output, &mut sources).await;
+    let lookup_cells = model_pack
+        && turn.profile["mode"] == "search"
+        && turn.request["retrieval_mode"] == "hybrid"
+        && crate::chat::table_facts::lookup::Lookup::named_record(
+            turn.request["question"].as_str().unwrap_or(""),
+        );
+    super::workbook::attach_groups(context, &mut output, &mut sources, lookup_cells).await;
     if output.is_empty() {
         if let Some(code) = hydrated["read_failures"][0]["code"].as_str() {
             return Err(code.into());

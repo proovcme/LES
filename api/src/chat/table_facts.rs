@@ -199,6 +199,20 @@ impl Rows {
         Ok(all_pdf && !excerpts.is_empty() && quantities::contradicts(answer, &excerpts))
     }
     pub(super) fn new(packet: &Value, sources: &Value) -> Self {
+        let blocks = packet["sections"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|s| s["kind"] == "evidence")
+            .flat_map(|s| s["objects"].as_array().into_iter().flatten())
+            .map(|object| &object["payload"]);
+        Self::from_blocks(blocks, sources)
+    }
+
+    pub(super) fn from_blocks<'a>(
+        blocks: impl Iterator<Item = &'a Value>,
+        sources: &Value,
+    ) -> Self {
         fn visit(value: &Value, sources: &Value, out: &mut Rows) {
             if value["schema"] == "les.evidence-unit.v1" {
                 for b in value["blocks"].as_array().into_iter().flatten() {
@@ -305,15 +319,8 @@ impl Rows {
             }
         }
         let mut out = Self::default();
-        for section in packet["sections"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter(|s| s["kind"] == "evidence")
-        {
-            for object in section["objects"].as_array().into_iter().flatten() {
-                visit(&object["payload"], sources, &mut out);
-            }
+        for block in blocks {
+            visit(block, sources, &mut out);
         }
         out
     }

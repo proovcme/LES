@@ -84,6 +84,9 @@ fn literal(question: &str) -> Option<&str> {
 }
 
 impl Lookup {
+    pub(in crate::chat) fn named_record(question: &str) -> bool {
+        literal(question).is_some()
+    }
     pub(crate) fn from_blocks(question: &str, blocks: &[Value]) -> Option<Self> {
         let key = literal(question)?.to_owned();
         let mut headers = Vec::new();

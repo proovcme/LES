@@ -13,9 +13,9 @@ from tests.test_light_native_chat_turn import native_turn
 from tests.test_light_native_api import wait_for
 
 
-def grid(path,transform=False,thick=False,quantity='17.25',continuation=False):
+def grid(path,transform=False,thick=False,quantity='17.25',continuation=False,unit='pcs'):
     xs=[20,70,190,240,290];ys=[160,190,220,250,280]
-    cells=[['Position','Item','Unit','Quantity'],['1','Alpha item','pcs',quantity],['2','Beta item','m','23.50']]
+    cells=[['Position','Item','Unit','Quantity'],['1','Alpha item',unit,quantity],['2','Beta item','m','23.50']]
     ops=['q 0.8 0 0 0.8 15 20 cm'] if transform else []
     ops += [f'{x} 160 m {x} 280 l S' for x in xs]
     ops += [f'20 {y} m 290 {y} l S' for y in ys]
@@ -171,8 +171,10 @@ def test_folder_hybrid_binds_pdf_row_when_prose_is_also_present(native_turn,tmp_
         index, _ = row_address(body, require_address=False)
         return {'text':f'Alpha item: 999 pcs [Источник {index}]'}
     def valid(body):
-        index,row = row_address(body, require_address=True)
-        return {'text':json.dumps({'answerable':True,'rows':[f'S{index}R{row}'],'sums':[],'missing':[]})}
+        index, _ = row_address(body, require_address=False)
+        instruction = body['messages'][0]['content']
+        assert f'{{"source":{index}}}' in instruction and 'sums' not in instruction
+        return {'text':json.dumps({'source':index})}
     t.scripts.extend([wrong,valid])
     reply = t.client.post('/api/chat',json={'question':'How much Alpha item is in the documents?',
         'mode':'search','retrieval_mode':'hybrid','session_id':session,
@@ -218,7 +220,7 @@ def test_folder_hybrid_binds_pdf_row_when_prose_is_also_present(native_turn,tmp_
     session = 'mixed-register-citation'
     def cite_row(body):
         index, _ = row_address(body, require_address=False)
-        assert 'верни только ссылку' in body['messages'][0]['content']
+        assert 'только ссылку' in body['messages'][0]['content']
         return {'text':f'[Источник {index}]'}
     t.scripts.append(cite_row)
     compact = t.client.post('/api/chat',json={**request,'session_id':session}).raise_for_status().json()
@@ -233,9 +235,44 @@ def test_folder_hybrid_binds_pdf_row_when_prose_is_also_present(native_turn,tmp_
     assert len(t.seen) == 6 and corrected['retrieval_trace']['cell_selection_retry']
     assert 'kg' not in corrected['answer'] and corrected['artifact']['table_facts']['rows'][0]['cells'] == row['cells']
 
+    from proxy.services.model_connection_contracts import CapabilityName, CapabilityObservation, CapabilitySnapshot, CapabilityState
+    observed = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    t.registry.save_capability_snapshot(CapabilitySnapshot('cap:pdf-quantity',t.revision.revision_id,
+        tuple(CapabilityObservation(cap,CapabilityState.SUPPORTED,'probe',observed) for cap in
+            (CapabilityName.CHAT_COMPLETIONS,CapabilityName.STREAMING,CapabilityName.TOOLS,CapabilityName.STRUCTURED_OUTPUT)),
+        observed,datetime(2099,1,1,tzinfo=timezone.utc),{'observed_context_tokens':'8192'}),actor='admin:test')
+    def choose_item(body):
+        index, _ = row_address(body, require_address=False)
+        assert not body.get('tools')
+        schema = body['response_format']['json_schema']['schema']
+        assert schema['required'] == ['item'] and index > 0
+        return {'text':json.dumps({'item':'Alpha item'})}
+    session = 'mixed-register-structured'
+    t.scripts.append(choose_item)
+    structured = t.client.post('/api/chat',json={**request,'session_id':session}).raise_for_status().json()
+    assert len(t.seen) == 7 and structured['answer'] == compact['answer']
+    assert structured['artifact']['table_facts']['selection'] == 'named_pdf_position'
+
+    session = 'mixed-register-additional-fields'
+    def read_more(body):
+        choose_item(body)
+        return {'text':'{"item":null}'}
+    def desk(body):
+        assert 'receiving desk' in '\n'.join(m['content'] for m in body['messages'])
+        assert body.get('response_format',{}).get('json_schema',{}).get('name') != 'les_pdf_position'
+        import sqlite3
+        with sqlite3.connect(t.database) as db:
+            raw, = db.execute('SELECT retrieval_trace_json FROM chat_history WHERE session_id=? ORDER BY id DESC LIMIT 1',(session,)).fetchone()
+        note = next(s['index'] for s in json.loads(raw)['source_map'] if s['doc_name'].endswith('Notes.txt'))
+        return {'text':f'Позицию проверяют на приёмке [Источник {note}].'}
+    t.scripts.extend([read_more,desk])
+    more = t.client.post('/api/chat',json={**request,'session_id':session,
+        'question':'Количество Alpha item есть в реестре. Где его проверяют согласно заметке?'}).raise_for_status().json()
+    assert len(t.seen) == 9 and 'приёмке' in more['answer']
+
     session = 'mixed-register-revision'
     def revise_before_reply(body):
-        response = cite_row(body)
+        response = choose_item(body)
         grid(folder/'Register.pdf', quantity='21')
         return response
     t.scripts.append(revise_before_reply)
