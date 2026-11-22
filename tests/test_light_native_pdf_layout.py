@@ -232,3 +232,12 @@ def test_folder_hybrid_binds_pdf_row_when_prose_is_also_present(native_turn,tmp_
     corrected = t.client.post('/api/chat',json={**request,'session_id':session}).raise_for_status().json()
     assert len(t.seen) == 6 and corrected['retrieval_trace']['cell_selection_retry']
     assert 'kg' not in corrected['answer'] and corrected['artifact']['table_facts']['rows'][0]['cells'] == row['cells']
+
+    session = 'mixed-register-revision'
+    def revise_before_reply(body):
+        response = cite_row(body)
+        grid(folder/'Register.pdf', quantity='21')
+        return response
+    t.scripts.append(revise_before_reply)
+    changed = t.client.post('/api/chat',json={**request,'session_id':session})
+    assert changed.status_code == 503 and changed.json()['code'] == 'SOURCE_REVISION_CHANGED'

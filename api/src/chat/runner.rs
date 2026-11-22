@@ -1018,7 +1018,6 @@ pub async fn run(
                                 s["evidence_kind"].as_str(),
                                 Some(
                                     "physical_pdf_page"
-                                        | "indexed_pdf_row"
                                         | "physical_pdf_unit"
                                         | "physical_word_section"
                                         | "physical_workbook_row"
@@ -1065,10 +1064,18 @@ pub async fn run(
                             &visible,
                         )?
                     };
-                    match cited.map_or_else(
-                        || table_rows.finish_checked(text, true),
-                        |row| Ok(Some(row)),
-                    ) {
+                    let checked = if let Some((rendered, receipt, source)) = cited {
+                        tools::sources::verify_originals(
+                            context.clone(),
+                            &json!([source]),
+                            &[json!({"id":source["doc_id"]})],
+                        )
+                        .await?;
+                        Ok(Some((rendered, receipt)))
+                    } else {
+                        table_rows.finish_checked(text, true)
+                    };
+                    match checked {
                         Err("TABLE_FACTS_REQUIRED" | "TABLE_ROW_NOT_VISIBLE") if !cell_retry => {
                             cell_retry = true;
                             journal.checkpoint("reset", json!("")).await?;

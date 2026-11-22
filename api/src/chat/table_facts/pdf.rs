@@ -25,7 +25,7 @@ impl Rows {
         question: &str,
         answer: &str,
         sources: &Value,
-    ) -> Result<Option<(String, Value)>, &'static str> {
+    ) -> Result<Option<(String, Value, &Value)>, &'static str> {
         let refs = les_core::citations::execute(&json!({"answer":answer,"sources":sources}))?;
         let Some([id]) = refs["indexes"].as_array().map(Vec::as_slice) else {
             return Ok(None);
@@ -96,7 +96,7 @@ impl Rows {
             let escape = les_core::chat_context::literal_markdown;
             *rendered = format!("{} {} {marker}", escape(amount), escape(unit));
         }
-        Ok(verified)
+        Ok(verified.map(|(rendered, receipt)| (rendered, receipt, source)))
     }
 }
 
