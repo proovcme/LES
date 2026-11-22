@@ -4,6 +4,7 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 mod addresses;
 pub(super) mod lookup;
+mod pdf;
 mod quantities;
 use addresses::Reference;
 #[derive(Default)]

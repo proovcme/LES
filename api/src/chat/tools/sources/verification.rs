@@ -35,6 +35,7 @@ pub(crate) async fn originals(
                 s["evidence_kind"].as_str(),
                 Some(
                     "physical_pdf_page"
+                        | "indexed_pdf_row"
                         | "physical_pdf_unit"
                         | "physical_word_section"
                         | "physical_workbook_row"

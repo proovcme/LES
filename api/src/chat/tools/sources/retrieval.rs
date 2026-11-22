@@ -1243,6 +1243,15 @@ async fn passages(
         if p["pdf_excerpt_line"].is_u64() {
             source["pdf_excerpt_line"] = p["pdf_excerpt_line"].clone();
             source["reading_unit_sha256"] = p["reading_unit_sha256"].clone();
+            if p["pdf_quantity_columns"].is_object() {
+                source["pdf_quantity_columns"] = p["pdf_quantity_columns"].clone();
+            }
+            if source["evidence_kind"].is_null()
+                && source["verified_cells"] == true
+                && source["reading_representation"] == "pdf_excerpt"
+            {
+                source["evidence_kind"] = json!("indexed_pdf_row");
+            }
         }
         if let Some(document) = hydrated["documents"]
             .as_array()

@@ -27,6 +27,10 @@ fn values(text: &str) -> HashMap<String, HashSet<i128>> {
     units
 }
 
+pub(super) fn explicit_units_match(text: &str, unit: &str) -> bool {
+    values(text).keys().all(|claimed| claimed == unit)
+}
+
 pub(super) fn contradicts(answer: &str, excerpts: &[&str]) -> bool {
     let reported = values(answer);
     if reported.is_empty() {

@@ -188,3 +188,47 @@ def test_folder_hybrid_binds_pdf_row_when_prose_is_also_present(native_turn,tmp_
     assert len(trace['calls']) == 2 and all(c['sent_to_model'] for c in trace['calls'])
     assert trace['selected_rows'][0]['source_index'] in trace['citations']['linked']
     assert all(text not in json.dumps(trace) for text in ('Alpha item','Register.pdf','receiving desk'))
+
+    def first_answer(body):
+        index, _ = row_address(body, require_address=False)
+        return {'text': (
+            'Количество Alpha item указано как **17,25** (или 17,25 штук).\n\n'
+            '*   **Единица измерения:** pcs (pcs = pieces)\n'
+            f'*   **Источник:** [Источник {index} | Register.pdf · стр. 1]'
+        )}
+
+    session = 'mixed-register-first-answer'
+    t.scripts.append(first_answer)
+    request = {'question':'Какое количество Alpha item указано в реестре? Укажи единицу и источник.',
+               'mode':'search','retrieval_mode':'hybrid','scope':{'scope_type':'datasets','dataset_ids':[dataset]}}
+    first = t.client.post('/api/chat',json={**request,'session_id':session}).raise_for_status().json()
+    assert len(t.seen) == 3 and not first['retrieval_trace']['cell_selection_retry']
+    assert first['artifact']['table_facts']['selection'] == 'model_citation'
+    row, = first['artifact']['table_facts']['rows']
+    assert row['cells'] == ['1','Alpha item','pcs','17.25']
+    assert (row['quantity_column'], row['unit_column']) == (4, 3)
+    linked, = first['retrieval_trace']['citation_check']['linked']
+    source = next(s for s in first['source_map'] if s['index'] == linked)
+    assert row['source_index'] == linked and row['doc_id'] == source['doc_id']
+    assert source['quote'] == '|1|Alpha item|pcs|17.25|' and '17.25' in first['answer']
+    original = t.client.get('/api/documents/by-id/'+source['doc_id']+'/raw').raise_for_status().content
+    assert original == (folder/'Register.pdf').read_bytes()
+    assert row['source_sha256'] == hashlib.sha256(original).hexdigest()
+
+    session = 'mixed-register-citation'
+    def cite_row(body):
+        index, _ = row_address(body, require_address=False)
+        assert 'верни только ссылку' in body['messages'][0]['content']
+        return {'text':f'[Источник {index}]'}
+    t.scripts.append(cite_row)
+    compact = t.client.post('/api/chat',json={**request,'session_id':session}).raise_for_status().json()
+    assert len(t.seen) == 4 and compact['answer'] == f'17.25 pcs [Источник {linked}]'
+
+    session = 'mixed-register-conflict'
+    def wrong_unit(body):
+        index, _ = row_address(body, require_address=False)
+        return {'text':f'Alpha item 17.25 kg [Источник {index}]'}
+    t.scripts.extend([wrong_unit,valid])
+    corrected = t.client.post('/api/chat',json={**request,'session_id':session}).raise_for_status().json()
+    assert len(t.seen) == 6 and corrected['retrieval_trace']['cell_selection_retry']
+    assert 'kg' not in corrected['answer'] and corrected['artifact']['table_facts']['rows'][0]['cells'] == row['cells']
