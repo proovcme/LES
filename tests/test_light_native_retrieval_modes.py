@@ -744,6 +744,8 @@ def test_hybrid_keeps_four_documents_before_factual_answer(native_turn,tmp_path)
     delivered=json.dumps(t.seen[0]['messages'])
     assert all(f'{i}.txt' in delivered for i in range(4))
     assert all(proof.rstrip() in delivered for proof in proofs)
+    assert result['retrieval_trace']['contexts'][0]['folder_question'] is False
+    assert 'citation_format_required' in delivered
     assert len(t.seen)==1 and result['artifact']['tool_results']==[]
     assert len(result['source_map'])==4
     assert result['retrieval_trace']['prefetch']['read_receipt']['schema']=='les.indexed-read.v1'
