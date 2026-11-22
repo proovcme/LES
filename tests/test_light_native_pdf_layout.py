@@ -169,6 +169,7 @@ def test_folder_hybrid_binds_pdf_row_when_prose_is_also_present(native_turn,tmp_
         return index, None
     def wrong(body):
         index, _ = row_address(body, require_address=False)
+        assert 'citation_format_required' in json.dumps(body['messages'])
         return {'text':f'Alpha item: 999 pcs [Источник {index}]'}
     def valid(body):
         index, _ = row_address(body, require_address=False)
