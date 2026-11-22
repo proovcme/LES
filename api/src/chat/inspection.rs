@@ -237,6 +237,12 @@ pub(super) fn answer_text(text: &str, grounded: bool) -> (std::borrow::Cow<'_, s
             .trim_start_matches(['—', '–', ':'])
             .trim_start()
     });
+    if prefix.is_some() && answer.trim().is_empty() {
+        return (
+            "В прочитанных фрагментах не удалось подтвердить запрошенные сведения.".into(),
+            true,
+        );
+    }
     // The leading marker is the refusal protocol. Later marker-led lines
     // are control text and carry no evidence.
     if !answer
@@ -371,4 +377,7 @@ fn a_late_control_line_is_hidden_but_a_refusal_keeps_its_explanation() {
     assert_eq!(clean, "No matching document.");
     assert!(refused);
     assert_eq!(answer_text(&mixed, false).0, mixed);
+    let (message, refused) = answer_text("[[NO_EVIDENCE]]", true);
+    assert!(refused && !message.is_empty());
+    assert_eq!(answer_text("", true), ("".into(), false));
 }

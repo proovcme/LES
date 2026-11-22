@@ -19,10 +19,15 @@ from tests.pdf_fixtures import write_pdf
 
 def source_excerpt_reply(body):
     """A numeric mock selects delivered evidence instead of inventing its values."""
-    text=json.dumps(body['messages'],ensure_ascii=False)
+    text='\n'.join(message.get('content') or '' for message in body['messages'])
     reference=re.search(r'\[Фрагмент (S\d+)\]',text)
-    assert reference, 'No admitted excerpt reached the model'
-    return {'text':json.dumps({'answerable':True,'rows':[reference[1]],'sums':[]})}
+    if reference:
+        address = reference[1]
+    else:
+        header = re.search(r'(?m)^\[Источник (\d+) \| [^\]\n]+\]\n(?=\S)', text)
+        assert header, 'No admitted excerpt reached the model'
+        address = 'S'+header[1]
+    return {'text':json.dumps({'answerable':True,'rows':[address],'sums':[]})}
 
 
 def test_source_api_distinguishes_unready_index_from_empty_evidence_without_calling_chat(native_turn):
@@ -739,6 +744,8 @@ def test_hybrid_keeps_four_documents_before_factual_answer(native_turn,tmp_path)
     delivered=json.dumps(t.seen[0]['messages'])
     assert all(f'{i}.txt' in delivered for i in range(4))
     assert all(proof.rstrip() in delivered for proof in proofs)
+    assert result['retrieval_trace']['contexts'][0]['folder_question'] is False
+    assert 'citation_format_required' in delivered
     assert len(t.seen)==1 and result['artifact']['tool_results']==[]
     assert len(result['source_map'])==4
     assert result['retrieval_trace']['prefetch']['read_receipt']['schema']=='les.indexed-read.v1'
@@ -852,8 +859,12 @@ def test_push_pull_and_hybrid_share_retrieval_and_keep_plain_chat_unscoped(nativ
         return t.client.post('/api/chat', json={**base,'retrieval_mode':mode,**overrides})
 
     def delivered(body):
-        text=json.dumps(body['messages'], ensure_ascii=False)
-        return proof in text and '[Фрагмент S' in text
+        for message in body['messages']:
+            text = message.get('content') or ''
+            if proof in text and ('[Фрагмент S' in text or
+                    re.search(r'(?m)^\[Источник \d+ \| [^\]\n]+\]\n'+re.escape(proof),text)):
+                return True
+        return False
 
     def check_result(result, mode):
         assert result['retrieval_trace']['mode'] == mode

@@ -672,6 +672,13 @@ pub(super) fn select(request: &Value) -> Result<Value> {
 }
 
 pub(super) fn groups(request: &Value) -> Result<Value> {
+    fn cell_text(value: &Value) -> String {
+        if value.is_null() {
+            String::new()
+        } else {
+            super::string(value)
+        }
+    }
     let rows = request["rows"]
         .as_array()
         .filter(|rows| (1..=512).contains(&rows.len()))
@@ -688,19 +695,53 @@ pub(super) fn groups(request: &Value) -> Result<Value> {
     }
     let mut groups = super::groups::Groups::default();
     let mut matches = Vec::new();
+    let mut headers = HashMap::new();
     for row in reader
         .get_row_iter(None)
         .map_err(|error| failure(&error, READ))?
     {
         let row = row_value(&row.map_err(|error| failure(&error, READ))?)?;
         let sheet = field(&row, "sheet_name");
+        if request["include_cells"] == true {
+            if let Some(raw) = row["source_header_raw"].as_str() {
+                let original = super::normalize::ordered(raw);
+                if !original.is_empty()
+                    && original
+                        .iter()
+                        .enumerate()
+                        .all(|(i, (k, _))| k == &format!("col_{}", i + 1))
+                {
+                    headers.insert(
+                        sheet.to_owned(),
+                        original
+                            .into_iter()
+                            .map(|(_, v)| cell_text(&v))
+                            .collect::<Vec<_>>(),
+                    );
+                }
+            }
+        }
         let wanted = row["source_row"]
             .as_u64()
             .and_then(|n| targets.get_mut(sheet).map(|rows| (n, rows)))
             .is_some_and(|(n, rows)| rows.remove(&n));
-        if let Some(group) = groups.observe(&row, wanted) {
-            matches
-                .push(json!({"sheet_name":sheet,"row":row["source_row"],"workbook_group":group}));
+        let group = groups.observe(&row, wanted);
+        if wanted && (group.is_some() || request["include_cells"] == true) {
+            let mut result = json!({"sheet_name":sheet,"row":row["source_row"]});
+            if let Some(group) = group {
+                result["workbook_group"] = group;
+            }
+            if let Some(original) = headers.get(sheet) {
+                let cells = super::normalize::ordered(field(&row, "raw_row"));
+                if !cells.is_empty() && cells.len() >= original.len() {
+                    let mut labels = original.clone();
+                    labels.resize(cells.len(), String::new());
+                    let values: Vec<_> = cells.iter().map(|(_, v)| cell_text(v)).collect();
+                    result["canonical"] = json!({"schema":"les.document-structure.v1",
+                        "kind":"table","header":labels,"rows":[values]});
+                }
+            }
+            matches.push(result);
         }
         if wanted && targets.get(sheet).is_some_and(HashSet::is_empty) {
             targets.remove(sheet);

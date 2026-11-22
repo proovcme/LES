@@ -664,6 +664,12 @@ impl Evidence {
         if source["evidence_kind"] == "physical_pdf_unit" {
             note.push_str("Это отдельная структурная часть страницы, а не вся страница. Общие выводы о требованиях и исключениях требуют дочитывания оригинала через read_pdf_source.\n");
         }
+        if let (Some(quantity), Some(unit)) = (
+            source["pdf_quantity_columns"]["quantity"].as_u64(),
+            source["pdf_quantity_columns"]["unit"].as_u64(),
+        ) {
+            note.push_str(&format!("Заголовки исходной таблицы: столбец {quantity} — количество, столбец {unit} — единица.\n"));
+        }
         if let Some(code) = source["table_projection_warning"].as_str() {
             note.push_str(crate::document_parser::projection_notice(code));
             note.push('\n');

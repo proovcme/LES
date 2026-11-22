@@ -13,9 +13,9 @@ from tests.test_light_native_chat_turn import native_turn
 from tests.test_light_native_api import wait_for
 
 
-def grid(path,transform=False,thick=False,quantity='17.25',continuation=False):
+def grid(path,transform=False,thick=False,quantity='17.25',continuation=False,unit='pcs'):
     xs=[20,70,190,240,290];ys=[160,190,220,250,280]
-    cells=[['Position','Item','Unit','Quantity'],['1','Alpha item','pcs',quantity],['2','Beta item','m','23.50']]
+    cells=[['Position','Item','Unit','Quantity'],['1','Alpha item',unit,quantity],['2','Beta item','m','23.50']]
     ops=['q 0.8 0 0 0.8 15 20 cm'] if transform else []
     ops += [f'{x} 160 m {x} 280 l S' for x in xs]
     ops += [f'20 {y} m 290 {y} l S' for y in ys]
@@ -153,7 +153,7 @@ def test_folder_hybrid_binds_pdf_row_when_prose_is_also_present(native_turn,tmp_
                         'background':True}).raise_for_status().json()['intake_job_id']
     wait_for(lambda:t.client.get('/api/light/intake',params={'id':job}).json()['status']=='completed',timeout=40)
     session = 'mixed-register'
-    def row_address(body):
+    def row_address(body, *, require_address):
         import sqlite3
         with sqlite3.connect(t.database) as db:
             trace, = db.execute('SELECT retrieval_trace_json FROM chat_history WHERE session_id=? ORDER BY id DESC LIMIT 1',(session,)).fetchone()
@@ -162,13 +162,20 @@ def test_folder_hybrid_binds_pdf_row_when_prose_is_also_present(native_turn,tmp_
         index = next(s['index'] for s in sources if s.get('verified_cells') and s.get('reading_unit_sha256')==digest)
         message = '\n'.join(m['content'] for m in body['messages'])
         line = re.search(r'R(\d+) C1: 1; C2: Alpha item',message)
-        return index, int(line[1])
+        if require_address or line:
+            assert line, message
+            return index, int(line[1])
+        assert '|1|Alpha item|pcs|17.25|' in message
+        return index, None
     def wrong(body):
-        index, _ = row_address(body)
+        index, _ = row_address(body, require_address=False)
+        assert 'citation_format_required' in json.dumps(body['messages'])
         return {'text':f'Alpha item: 999 pcs [Источник {index}]'}
     def valid(body):
-        index,row = row_address(body)
-        return {'text':json.dumps({'answerable':True,'rows':[f'S{index}R{row}'],'sums':[],'missing':[]})}
+        index, _ = row_address(body, require_address=False)
+        instruction = body['messages'][0]['content']
+        assert f'{{"source":{index}}}' in instruction and 'sums' not in instruction
+        return {'text':json.dumps({'source':index})}
     t.scripts.extend([wrong,valid])
     reply = t.client.post('/api/chat',json={'question':'How much Alpha item is in the documents?',
         'mode':'search','retrieval_mode':'hybrid','session_id':session,
@@ -184,3 +191,91 @@ def test_folder_hybrid_binds_pdf_row_when_prose_is_also_present(native_turn,tmp_
     assert len(trace['calls']) == 2 and all(c['sent_to_model'] for c in trace['calls'])
     assert trace['selected_rows'][0]['source_index'] in trace['citations']['linked']
     assert all(text not in json.dumps(trace) for text in ('Alpha item','Register.pdf','receiving desk'))
+
+    def first_answer(body):
+        index, _ = row_address(body, require_address=False)
+        return {'text': (
+            'Количество Alpha item указано как **17,25** (или 17,25 штук).\n\n'
+            '*   **Единица измерения:** pcs (pcs = pieces)\n'
+            f'*   **Источник:** [Источник {index} | Register.pdf · стр. 1]'
+        )}
+
+    session = 'mixed-register-first-answer'
+    t.scripts.append(first_answer)
+    request = {'question':'Какое количество Alpha item указано в реестре? Укажи единицу и источник.',
+               'mode':'search','retrieval_mode':'hybrid','scope':{'scope_type':'datasets','dataset_ids':[dataset]}}
+    first = t.client.post('/api/chat',json={**request,'session_id':session}).raise_for_status().json()
+    assert len(t.seen) == 3 and not first['retrieval_trace']['cell_selection_retry']
+    assert first['artifact']['table_facts']['selection'] == 'model_citation'
+    row, = first['artifact']['table_facts']['rows']
+    assert row['cells'] == ['1','Alpha item','pcs','17.25']
+    assert (row['quantity_column'], row['unit_column']) == (4, 3)
+    linked, = first['retrieval_trace']['citation_check']['linked']
+    source = next(s for s in first['source_map'] if s['index'] == linked)
+    assert row['source_index'] == linked and row['doc_id'] == source['doc_id']
+    assert source['quote'] == '|1|Alpha item|pcs|17.25|' and '17.25' in first['answer']
+    original = t.client.get('/api/documents/by-id/'+source['doc_id']+'/raw').raise_for_status().content
+    assert original == (folder/'Register.pdf').read_bytes()
+    assert row['source_sha256'] == hashlib.sha256(original).hexdigest()
+
+    session = 'mixed-register-citation'
+    def cite_row(body):
+        index, _ = row_address(body, require_address=False)
+        assert 'только ссылку' in body['messages'][0]['content']
+        return {'text':f'[Источник {index}]'}
+    t.scripts.append(cite_row)
+    compact = t.client.post('/api/chat',json={**request,'session_id':session}).raise_for_status().json()
+    assert len(t.seen) == 4 and compact['answer'] == f'17.25 pcs [Источник {linked}]'
+
+    session = 'mixed-register-conflict'
+    def wrong_unit(body):
+        index, _ = row_address(body, require_address=False)
+        return {'text':f'Alpha item 17.25 kg [Источник {index}]'}
+    t.scripts.extend([wrong_unit,valid])
+    corrected = t.client.post('/api/chat',json={**request,'session_id':session}).raise_for_status().json()
+    assert len(t.seen) == 6 and corrected['retrieval_trace']['cell_selection_retry']
+    assert 'kg' not in corrected['answer'] and corrected['artifact']['table_facts']['rows'][0]['cells'] == row['cells']
+
+    from proxy.services.model_connection_contracts import CapabilityName, CapabilityObservation, CapabilitySnapshot, CapabilityState
+    observed = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    t.registry.save_capability_snapshot(CapabilitySnapshot('cap:pdf-quantity',t.revision.revision_id,
+        tuple(CapabilityObservation(cap,CapabilityState.SUPPORTED,'probe',observed) for cap in
+            (CapabilityName.CHAT_COMPLETIONS,CapabilityName.STREAMING,CapabilityName.TOOLS,CapabilityName.STRUCTURED_OUTPUT)),
+        observed,datetime(2099,1,1,tzinfo=timezone.utc),{'observed_context_tokens':'8192'}),actor='admin:test')
+    def choose_item(body):
+        index, _ = row_address(body, require_address=False)
+        assert not body.get('tools')
+        schema = body['response_format']['json_schema']['schema']
+        assert schema['required'] == ['item'] and index > 0
+        return {'text':json.dumps({'item':'Alpha item'})}
+    session = 'mixed-register-structured'
+    t.scripts.append(choose_item)
+    structured = t.client.post('/api/chat',json={**request,'session_id':session}).raise_for_status().json()
+    assert len(t.seen) == 7 and structured['answer'] == compact['answer']
+    assert structured['artifact']['table_facts']['selection'] == 'named_pdf_position'
+
+    session = 'mixed-register-additional-fields'
+    def read_more(body):
+        choose_item(body)
+        return {'text':'{"item":null}'}
+    def desk(body):
+        assert 'receiving desk' in '\n'.join(m['content'] for m in body['messages'])
+        assert body.get('response_format',{}).get('json_schema',{}).get('name') != 'les_pdf_position'
+        import sqlite3
+        with sqlite3.connect(t.database) as db:
+            raw, = db.execute('SELECT retrieval_trace_json FROM chat_history WHERE session_id=? ORDER BY id DESC LIMIT 1',(session,)).fetchone()
+        note = next(s['index'] for s in json.loads(raw)['source_map'] if s['doc_name'].endswith('Notes.txt'))
+        return {'text':f'Позицию проверяют на приёмке [Источник {note}].'}
+    t.scripts.extend([read_more,desk])
+    more = t.client.post('/api/chat',json={**request,'session_id':session,
+        'question':'Количество Alpha item есть в реестре. Где его проверяют согласно заметке?'}).raise_for_status().json()
+    assert len(t.seen) == 9 and 'приёмке' in more['answer']
+
+    session = 'mixed-register-revision'
+    def revise_before_reply(body):
+        response = choose_item(body)
+        grid(folder/'Register.pdf', quantity='21')
+        return response
+    t.scripts.append(revise_before_reply)
+    changed = t.client.post('/api/chat',json={**request,'session_id':session})
+    assert changed.status_code == 503 and changed.json()['code'] == 'SOURCE_REVISION_CHANGED'

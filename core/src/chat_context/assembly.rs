@@ -213,7 +213,7 @@ pub(super) fn assemble(request: &Value) -> Result<Value> {
         candidate("dialogue", recent_dialogue, true),
         candidate("dialogue", prior_dialogue, false),
     ];
-    if !sources.is_empty() {
+    if !sources.is_empty() && request["folder_question"] != true {
         // Admit mandatory turns and evidence before spending any space on its
         // description. Optional tool schemas precede evidence in the pack order.
         let proof_candidates = candidates

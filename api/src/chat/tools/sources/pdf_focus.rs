@@ -9,6 +9,36 @@ fn separator(line: &str) -> bool {
         && line.chars().all(|c| "|-: \t".contains(c))
 }
 
+// The native layout reader starts its physical grid with this marker and
+// terminates it before free page text. Line numbers match excerpts().
+fn quantity_columns(text: &str) -> Option<(std::ops::Range<usize>, Value)> {
+    let mut lines = text
+        .lines()
+        .flat_map(|line| line.split('\r'))
+        .map(str::trim)
+        .enumerate();
+    lines.find(|(_, line)| *line == "[Ячейки PDF]")?;
+    let (start, first) = lines.next()?;
+    let (_, header) = les_core::chat_context::table_rows(first).pop()?;
+    let column = |names: &[&str]| {
+        let mut hits = header
+            .iter()
+            .enumerate()
+            .filter(|(_, label)| names.contains(&label.to_lowercase().as_str()));
+        let (position, _) = hits.next()?;
+        hits.next().is_none().then_some(position + 1)
+    };
+    let quantity = column(&["quantity", "qty", "количество", "кол-во"])?;
+    let unit = column(&["unit", "единица", "единица измерения", "ед. изм."])?;
+    let count = lines
+        .take_while(|(_, line)| line.starts_with('|') && line.ends_with('|'))
+        .count();
+    Some((
+        start + 1..start + 1 + count,
+        json!({"width":header.len(),"quantity":quantity,"unit":unit}),
+    ))
+}
+
 fn excerpts(
     text: &str,
     query: &str,
@@ -239,6 +269,7 @@ pub(super) fn index_excerpts(
         let file = payload["file_name"].as_str();
         let reading_question = crate::chat::inspection::read_question(query, file, selected_files);
         let matches = excerpts(text, reading_question, file.unwrap_or(""), false)?;
+        let grid = from_table_view.then(|| quantity_columns(text)).flatten();
         if matches.is_empty() || matches.len() > materialization_limit {
             result.push(point);
             continue;
@@ -272,6 +303,10 @@ pub(super) fn index_excerpts(
             body["canonical"] = canonical(&text);
             if from_table_view && !les_core::chat_context::table_rows(&text).is_empty() {
                 body["verified_cells"] = json!(true);
+                if let Some((_, columns)) = grid.as_ref().filter(|(range, _)| range.contains(&line))
+                {
+                    body["pdf_quantity_columns"] = columns.clone();
+                }
             }
             body["reading_unit_sha256"] = json!(les_core::sha256_hex(text.as_bytes()));
             body["text"] = json!(text);

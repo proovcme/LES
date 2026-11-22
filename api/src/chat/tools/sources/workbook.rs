@@ -76,6 +76,7 @@ pub(super) async fn attach_groups(
     context: &Context,
     passages: &mut [Value],
     sources: &mut [Value],
+    lookup_cells: bool,
 ) {
     let Some(store) = &context.index_store else {
         return;
@@ -120,7 +121,7 @@ pub(super) async fn attach_groups(
                     .map(|(_, sheet, row)| json!({"sheet_name":sheet,"row":row}))
                     .collect::<Vec<_>>();
                 les_core::tables::execute(
-                    &json!({"action":"groups","path":path,"source_sha256":sha,"rows":targets}),
+                    &json!({"action":"groups","path":path,"source_sha256":sha,"rows":targets,"include_cells":lookup_cells}),
                 )
             });
             let data = match result {
@@ -140,7 +141,7 @@ pub(super) async fn attach_groups(
                 .filter_map(|item| {
                     Some((
                         (item["sheet_name"].as_str()?, item["row"].as_u64()?),
-                        &item["workbook_group"],
+                        item,
                     ))
                 })
                 .collect();
@@ -155,9 +156,15 @@ pub(super) async fn attach_groups(
     .await;
     match found {
         Ok(found) => {
-            for (index, group) in found {
-                sources[index]["workbook_group"] = group.clone();
-                passages[index]["source"]["workbook_group"] = group;
+            for (index, item) in found {
+                if let Some(group) = item.get("workbook_group") {
+                    sources[index]["workbook_group"] = group.clone();
+                }
+                if let Some(canonical) = item.get("canonical") {
+                    passages[index]["canonical"] = canonical.clone();
+                    sources[index]["evidence_kind"] = json!("physical_workbook_row");
+                }
+                passages[index]["source"] = sources[index].clone();
             }
         }
         Err(_) => eprintln!(

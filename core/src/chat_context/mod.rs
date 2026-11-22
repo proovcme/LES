@@ -60,6 +60,9 @@ fn object_render(value: &Value) -> String {
         .unwrap_or_else(|| evidence_render(&value["payload"]))
 }
 fn evidence_text(value: &Value, text: &str) -> String {
+    if value["plain_excerpt"] == true {
+        return text.to_owned();
+    }
     let index = value["source_index"].as_u64().unwrap_or(0);
     if value["table_geometry_unverified"] == true {
         return format!("[Фрагмент S{index}]\n{text}");
