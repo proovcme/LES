@@ -5,6 +5,7 @@ mod addressed_rows;
 mod envelope;
 pub(super) mod failures;
 mod indexed_page;
+mod indexed_workbooks;
 mod matching;
 mod packing;
 mod pagination;
@@ -305,6 +306,23 @@ pub(in crate::chat) async fn initial(context: Arc<Context>, turn: &Prepared) -> 
     }
     Ok(result)
 }
+/// Folder answers use the same hybrid store with bounded expansion from indexed text only.
+pub(in crate::chat) async fn indexed(context: Arc<Context>, turn: &Prepared) -> Result<Value> {
+    let scope = SourceContext::from(turn);
+    if let Some(result) = indexed_workbooks::named(context.clone(), &scope).await? {
+        return Ok(result);
+    }
+    let mut result = search_view(
+        context.clone(),
+        &scope,
+        json!({"q":turn.request["question"],"max_chars":10000,"limit":10}),
+        ReadView::Indexed,
+    )
+    .await?;
+    indexed_workbooks::append_related(context, &scope, &mut result).await;
+    Ok(result)
+}
+
 pub(in crate::chat) async fn search(
     context: Arc<Context>,
     turn: &SourceContext,
@@ -346,7 +364,8 @@ async fn search_view(
     args: Value,
     view: ReadView,
 ) -> Result<Value> {
-    let navigation = view == ReadView::Navigation;
+    let indexed = view == ReadView::Indexed;
+    let navigation = matches!(view, ReadView::Navigation | ReadView::Indexed);
     let control = trial::Control::requested(&args)?;
     let compact = super::packet::requested()? && super::context_snapshot(&args);
     let overview_requested = args["view"] == "overview";
@@ -524,7 +543,7 @@ async fn search_view(
                 if candidates.len() >= 64 { break; }
             }
             let max_chars=args["max_chars"].as_u64().or_else(||args["_context_budget_chars"].as_u64()).unwrap_or(3000).clamp(1,16000) as usize;
-            let context_budget = if navigation {
+            let context_budget = if navigation && !indexed {
                 Some(
                     args["_context_budget_chars"]
                         .as_u64()
@@ -588,12 +607,12 @@ async fn search_view(
                 envelope::fit_ranked_context(&mut reply,max_chars)?;
             } else if args["view"] == "context" || overview_requested {
                 envelope::fit_context(&mut reply,max_chars,false)?;
-            } else if navigation {
+            } else if navigation && !indexed {
                 fit_envelope_budget(&mut reply, 22500, 240)?;
             }
             control.reply(query,&reply);
             if compact { reply = super::packet::encode(&reply)?; }
-            if navigation {
+            if navigation && !indexed {
                 Page::new(offset, total).apply(&mut reply, "total_candidates")?;
                 if args["_pull_pdf_focus"] == true && args["view"] == "passages" && offset == 0 {
                     let pdf: Vec<_> = raw_points.iter()
@@ -875,6 +894,7 @@ enum ReadView {
     #[default]
     Context,
     Navigation,
+    Indexed,
     Prefetch,
 }
 
@@ -886,6 +906,48 @@ struct ReadMode<'a> {
     addressed: Vec<Value>,
     pdf_focus: bool,
 }
+fn indexed_neighbors(mut points: Vec<Value>, hydrated: &Value) -> Vec<Value> {
+    let mut seen: std::collections::HashSet<_> = points.iter().map(|p| p["id"].clone()).collect();
+    let mut neighbours = Vec::new();
+    for anchor in points.iter().take(6) {
+        let p = &anchor["payload"];
+        let Some(ordinal) = p["chunk_ord"].as_u64() else {
+            continue;
+        };
+        for point in hydrated["sections"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .flat_map(|section| section["points"].as_array().into_iter().flatten())
+        {
+            let candidate = &point["payload"];
+            let Some(other) = candidate["chunk_ord"].as_u64() else {
+                continue;
+            };
+            if ordinal.abs_diff(other) > 1
+                || [
+                    "dataset_id",
+                    "file_name",
+                    "parent_id",
+                    "source_sha256",
+                    "page",
+                    "source_page",
+                    "sheet_name",
+                ]
+                .iter()
+                .any(|field| p[*field] != candidate[*field])
+                || !seen.insert(point["id"].clone())
+            {
+                continue;
+            }
+            neighbours.push(point.clone());
+        }
+    }
+    let insertion = points.len().min(6);
+    points.splice(insertion..insertion, neighbours);
+    points
+}
+
 async fn passages(
     context: &Context,
     turn: &SourceContext,
@@ -904,7 +966,8 @@ async fn passages(
         addressed,
         pdf_focus,
     } = mode;
-    let paginated = view == ReadView::Navigation;
+    let indexed = view == ReadView::Indexed;
+    let paginated = matches!(view, ReadView::Navigation | ReadView::Indexed);
     let model_pack = view == ReadView::Prefetch;
     let expand_document = !paginated;
     let store = context
@@ -983,7 +1046,11 @@ async fn passages(
     };
     let pdf_ms = pdf_started.elapsed().as_millis();
     let packing_started = std::time::Instant::now();
-    let (mut points, mut hydrated) = views::project_with_pdf_hits(points, hydrated, pdf_focus)?;
+    let (mut points, mut hydrated) = if indexed {
+        (indexed_neighbors(points, &hydrated), hydrated)
+    } else {
+        views::project_with_pdf_hits(points, hydrated, pdf_focus)?
+    };
     if pdf_focus {
         points = super::pdf_focus::index_excerpts(points, query, &selected_scoped(turn))?;
         // Focused PDF hits already carry their reading text. Broad parent
@@ -1056,6 +1123,9 @@ async fn passages(
     for point in selected {
         let p = &point["payload"];
         let text = p["text"].as_str().unwrap_or("");
+        if indexed && (p["type"] == "table_navigation_projection" || text.trim().is_empty()) {
+            continue;
+        }
         let doc = catalog
             .get(
                 context,
@@ -1284,6 +1354,17 @@ async fn passages(
                 source["document_fragment_count"] = json!(rows.len());
                 source["context_origin"] = json!("document");
             }
+        }
+        if indexed {
+            // This proves the stored excerpt and locator for this revision. It
+            // does not claim a physical read or verification of OCR numbers.
+            source["evidence_admissible"] = json!(true);
+            source["evidence_kind"] = json!("indexed_chunk");
+            if source["sheet_name"].is_string() && source["row"].is_u64() {
+                source["locator"]["sheet"] = source["sheet_name"].clone();
+                source["locator"]["row"] = source["row"].clone();
+            }
+            source.as_object_mut().unwrap().remove("read_required");
         }
         sources.push(source.clone());
         output.push(json!({"text":text,"canonical":p["canonical"],"source":source,"chunk_ord":p["chunk_ord"],"source_ref":p["source_ref"]}));

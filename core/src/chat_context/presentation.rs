@@ -5,13 +5,14 @@ pub fn attach_cited_excerpts(sources: &mut Value, trace: &Value) -> bool {
         return false;
     };
     let cited = list(&trace["citation_syntax"], "indexes");
+    let show_delivered = trace["mode"] == "indexed";
     let Some(round) = list(trace, "contexts")
         .last()
         .filter(|round| round["delivery"] == "confirmed")
     else {
         return false;
     };
-    if cited.is_empty() {
+    if cited.is_empty() && !show_delivered {
         return false;
     }
     let mut changed = false;
@@ -30,7 +31,7 @@ pub fn attach_cited_excerpts(sources: &mut Value, trace: &Value) -> bool {
             let index = &block["source_index"];
             if block["schema"] != "les.evidence-block.v1"
                 || !index.is_u64()
-                || !cited.contains(index)
+                || (!show_delivered && !cited.contains(index))
             {
                 continue;
             }

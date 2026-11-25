@@ -1,5 +1,18 @@
 # Модули LES RAG
 
+
+## Обычный чат по набору
+
+`desktop/light/frontend/src/lib/workspace.svelte.ts` выбирает режим `indexed`.
+`api/src/chat/runner/indexed.rs` выполняет один модельный запрос.
+`api/src/chat/tools/sources/retrieval.rs` использует общий гибридный поиск
+и добирает соседние фрагменты. `retrieval/indexed_workbooks.rs` подбирает
+сохранённые строки названной книги в пределах выбранного набора.
+`core/src/chat_context/presentation.rs` формирует карту источников из
+отправленного окна. [Договор контекста](modules/native-chat-context.md).
+
+## История модулей
+
 913: `api/src/engineering.rs` и `core/src/catalog/projects.rs` синхронизируют
 проекты Увязки. Штатная очередь сохраняет снимки в набор связанного проекта.
 Просмотр закреплён за оригиналом и передан

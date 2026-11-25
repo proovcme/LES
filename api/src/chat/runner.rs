@@ -13,6 +13,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod indexed;
+
 pub async fn run(
     context: Arc<Context>,
     request: &mut Value,
@@ -67,6 +69,9 @@ pub async fn run(
     .await
     .map_err(|_| "MODEL_QUEUE_TIMEOUT")?
     .map_err(|_| "MODEL_QUEUE_TIMEOUT")?;
+    if retrieval_mode == "indexed" {
+        return indexed::answer(context, &turn, journal, sink, started, deadline).await;
+    }
     let mut tools = tools::Tools::new(&context, &turn).await?;
     if turn.egress_tag.is_none() {
         tools.bind_table(super::table_document::TableTool::bind(&context, &turn).await?);
@@ -258,6 +263,7 @@ pub async fn run(
     let mut pdf_confirmation = None;
     let mut cell_retry = false;
     let mut lookup = None;
+    let mut first_search_window = None;
     loop {
         super::budget::remaining(deadline)?;
         match agent.next().await? {
@@ -417,24 +423,23 @@ pub async fn run(
                 }
                 let mut advertised = if final_answer || direct {
                     vec![]
+                } else if native && hybrid_search {
+                    tools.folder_schemas(
+                        turn.connection.profile["max_tools"].as_u64().unwrap_or(5) as usize,
+                        &disclosed,
+                    )
                 } else {
                     tools.disclosed_schemas(
-                        if native && hybrid_search {
-                            // Search and extension access suffice until the
-                            // model asks for a specific reader.
-                            2 + disclosed.len().min(3)
-                        } else {
-                            tools.schema_limit(
-                                turn.connection.profile["normal_tool_count"]
-                                    .as_u64()
-                                    .unwrap_or(3) as usize,
-                                turn.connection.profile["max_tools"].as_u64().unwrap_or(3) as usize,
-                                turn.scope["document_grounding_enabled"] == true
-                                    && disclosed.is_empty()
-                                    && !review_active
-                                    && tools.table.is_none(),
-                            )
-                        },
+                        tools.schema_limit(
+                            turn.connection.profile["normal_tool_count"]
+                                .as_u64()
+                                .unwrap_or(3) as usize,
+                            turn.connection.profile["max_tools"].as_u64().unwrap_or(3) as usize,
+                            turn.scope["document_grounding_enabled"] == true
+                                && disclosed.is_empty()
+                                && !review_active
+                                && tools.table.is_none(),
+                        ),
                         turn.scope["document_grounding_enabled"] == true,
                         &disclosed,
                     )
@@ -531,13 +536,12 @@ pub async fn run(
                         question["context_window_note"] = json!("Цитируй только фрагменты из текущего окна. Если нужный фрагмент не поместился, повтори чтение. Карточка файла или квитанция вызова не заменяет его текст.");
                     }
                     if !direct && !final_answer {
-                        question["reader_contract"] = json!("Оригинал PDF проверяет read_pdf_source: возьми doc_id из результата поиска и страницу из заголовка фрагмента. read_source читает индекс. Ошибка чтения не подтверждает оригинал.");
+                        question["reader_contract"] = json!("Оригинал PDF проверяет read_pdf_source: возьми doc_id из карточки файла и страницу из заголовка фрагмента. read_source читает индекс. Ошибка чтения не подтверждает оригинал.");
                     }
                 }
                 let navigation = if candidate_documents.is_array()
                     && exchanges.is_empty()
                     && !prefetch_focused
-                    && !ranked_prefetch
                     && !final_answer
                     && !direct
                 {
@@ -556,7 +560,8 @@ pub async fn run(
                                     .as_u64()
                                     .unwrap_or(512),
                             )
-                            .min(8000) as usize,
+                            .min(if ranked_prefetch { 2400 } else { 8000 })
+                            as usize,
                     )]
                 } else {
                     vec![]
@@ -590,7 +595,12 @@ pub async fn run(
                 } else if turn.scope["document_grounding_enabled"] == true {
                     json!(super::inspection::answer_prompt(
                         round_base.as_str().ok_or("CHAT_CONTEXT_INVALID")?,
-                        native && !advertised.is_empty()
+                        native && !advertised.is_empty(),
+                        agent
+                            .results()
+                            .last()
+                            .map(effective)
+                            .is_some_and(super::inspection::complete_source_read),
                     ))
                 } else {
                     round_base.clone()
@@ -608,7 +618,7 @@ pub async fn run(
                 let mut context_request = json!({"action":"assemble","preset":{"preset_id":profile["preset_id"],"input_limit":input,"generation_reserve":profile["generation_reserve_tokens"],"safety_reserve":profile["safety_reserve_tokens"]},
                     "optional_evidence_limit":evidence_limit,
                     "profile_prefix":round_prompt,"request_payload":question,"shortlist":if native{json!([])}else{json!(advertised)},
-                    "checkpoint":navigation,"working_memory":turn.memory,"dialogue":turn.dialogue,"evidence":initial,"source_map":evidence.sources,"compact_source_evidence":compact_sources,
+                    "checkpoint":navigation,"working_memory":turn.memory,"dialogue":turn.dialogue,"evidence":initial,"compact_source_evidence":compact_sources,
                     "required_evidence":required,"tool_exchange":if native{json!([])}else{json!(exchanges)},"native_tool_exchange":native_groups,"native_tool_history":native_history});
                 pdf_quantity_lookup = pdf_confirmation.is_some()
                     || folder_pdf_table && (pdf_key_lookup || !require_cells);
@@ -648,27 +658,50 @@ pub async fn run(
                         }
                     }
                 }
-                let capacity = super::budget::reader_capacity(
-                    &context_request,
-                    proof_blocks,
-                    usize::from(native && !exchanges.is_empty()),
-                );
-                let packed = match capacity {
-                    Ok(chars) => {
-                        tools.read_max_chars = chars;
-                        if !short_question {
-                            context_request["request_payload"]["reader_budget_max_chars"] =
-                                json!(chars);
+                let single_pass = hybrid_search
+                    && contexts.is_empty()
+                    && selected.is_none()
+                    && named_documents.is_empty()
+                    && exchanges.is_empty()
+                    && required.is_empty()
+                    && !initial.is_empty()
+                    && !evidence.needs_read()
+                    && !final_answer
+                    && !answer_window_retry
+                    && !short_question
+                    && !require_cells
+                    && turn.attachment.is_null()
+                    && turn.request["attachment_context"].is_null()
+                    && les_core::chat_profiles::default_search_instructions(&turn.profile);
+                let packed = if single_pass {
+                    // Excerpt headers already identify the sources. Keep the full
+                    // map for validation and trace, outside the model's window.
+                    let packed = les_core::chat_context::execute(&context_request)?;
+                    first_search_window = Some(context_request);
+                    packed
+                } else {
+                    first_search_window = None;
+                    context_request["source_map"] = json!(evidence.sources);
+                    match super::budget::reader_capacity(
+                        &context_request,
+                        proof_blocks,
+                        usize::from(native && !exchanges.is_empty()),
+                    ) {
+                        Ok(chars) => {
+                            tools.read_max_chars = chars;
+                            if !short_question {
+                                context_request["request_payload"]["reader_budget_max_chars"] =
+                                    json!(chars);
+                            }
+                            les_core::chat_context::execute(&context_request)?
                         }
-                        les_core::chat_context::execute(&context_request)?
+                        // Preserve the schema-release recovery if a continuation
+                        // does not fit during the capacity probe.
+                        Err(error) if error.code == "CONTEXT_REQUIRED_SECTION_OVERFLOW" => {
+                            json!({"overflow":true})
+                        }
+                        Err(error) => return Err(error),
                     }
-                    // The capacity probe uses the same packer. Its overflow
-                    // must take the same schema-release path as the full call,
-                    // rather than aborting before that recovery can run.
-                    Err(error) if error.code == "CONTEXT_REQUIRED_SECTION_OVERFLOW" => {
-                        json!({"overflow":true})
-                    }
-                    Err(error) => return Err(error),
                 };
                 if packed["overflow"] == true {
                     if native
@@ -748,7 +781,7 @@ pub async fn run(
                         .await?;
                     published_sources = visible.clone();
                 }
-                contexts.push(json!({"delivery":"prepared","context":trace,"sources":visible,"table_selection":require_cells,"folder_question":short_question,"workbook_lookup":lookup.is_some(),"pdf_quantity_lookup":pdf_quantity_lookup,"pdf_key_lookup":pdf_key_lookup,"schema_reserved_tokens":reserve,"focused_citations":focused_citations,"prefetch_complete":prefetch_complete,"ranked_window_full":ranked_window_full,"missing_named_document":missing_named_document}));
+                contexts.push(json!({"delivery":"prepared","context":trace,"sources":visible,"single_pass":single_pass,"table_selection":require_cells,"folder_question":short_question,"workbook_lookup":lookup.is_some(),"pdf_quantity_lookup":pdf_quantity_lookup,"pdf_key_lookup":pdf_key_lookup,"schema_reserved_tokens":reserve,"focused_citations":focused_citations,"prefetch_complete":prefetch_complete,"ranked_prefetch":ranked_prefetch,"ranked_window_full":ranked_window_full,"missing_named_document":missing_named_document}));
                 sink.emit("sources", json!({"source_map":visible,"sources":visible}))
                     .await?;
                 let packet = &packed["packet"];
@@ -891,6 +924,9 @@ pub async fn run(
                 agent.model_result_bound(response,Some(&json!({"question":turn.request["question"],"dataset_ids":turn.scope["resolved_dataset_ids"],"target":null,"sources":evidence.sources})))?;
             }
             Step::Tool(call) => {
+                if let Some(window) = first_search_window.take() {
+                    tools.read_max_chars = super::budget::reader_capacity(&window, 0, 0)?;
+                }
                 // A selection is not an answer, including legacy JSON-selection models.
                 journal.checkpoint("reset", json!("")).await?;
                 sink.emit("reset", json!("")).await?;
@@ -922,11 +958,24 @@ pub async fn run(
                     }
                 }
                 evidence.add(&payload);
+                let effect = effective(&payload);
+                if contexts.len() == 1
+                    && contexts[0]["ranked_prefetch"] == true
+                    && matches!(
+                        effect["tool"].as_str(),
+                        Some("read_source" | "read_pdf_source" | "read_excel_source")
+                    )
+                    && effect["status"] == "ok"
+                    && effect["result"]["coverage"] != "no_matches"
+                {
+                    // An explicit read extends the delivered preview, not the
+                    // entire ranked pool of passages from the initial search.
+                    evidence.retain_initial_preview(&contexts[0]["sources"]);
+                }
                 let mut projected = evidence.projection(&payload, tools.read_max_chars);
                 if turn.profile["mode"] == "search" && evidence.has_reads() {
                     super::protocol::compact_source_receipt(&mut projected);
                 }
-                let effect = effective(&payload);
                 if tools::sources::selected_files(&turn).is_empty() {
                     tools.observe_sources(&payload);
                 }
@@ -1162,7 +1211,7 @@ pub async fn run(
                 } else {
                     text
                 };
-                let citations = les_core::citations::execute(
+                let mut citations = les_core::citations::execute(
                     &json!({"answer":text,"sources":visible,
                     "merge_adjacent_references":turn.profile["mode"] == "search" && table_facts.is_null()}),
                 )?;
@@ -1178,7 +1227,22 @@ pub async fn run(
                         && visible
                             .as_array()
                             .is_some_and(|sources| !sources.is_empty()));
-                if (unconfirmed && has_citations)
+                let cited_miss = unconfirmed
+                    && (has_citations || unresolved)
+                    && table_facts.is_null()
+                    && agent.results().iter().map(effective).any(|result| {
+                        super::inspection::complete_source_read(result)
+                            || (result["status"] == "ok"
+                                && result["operation"] == "filtered_read"
+                                && result["result"]["coverage"] == "no_matches")
+                    });
+                if cited_miss {
+                    // The model explicitly reported no evidence after a read
+                    // finished. Its citations do not support an answer.
+                    citations = les_core::citations::execute(
+                        &json!({"answer":super::inspection::NO_EVIDENCE_MESSAGE,"sources":visible}),
+                    )?;
+                } else if (unconfirmed && has_citations)
                     || (turn.scope["document_grounding_enabled"] == true && unresolved)
                     || (must_cite
                         && !unconfirmed

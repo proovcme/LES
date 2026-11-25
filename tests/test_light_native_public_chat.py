@@ -139,7 +139,9 @@ def test_push_without_a_prepared_index_reports_search_configuration_not_a_model_
         answer,success,artifact=db.execute('SELECT answer,success,artifact_json FROM chat_history').fetchone()
     assert error['status']==503 and error['message']==error['detail']
     assert answer=='' and success==0
-    assert json.loads(artifact)['error']=={key:error[key] for key in ('code','detail')}
+    assert error['stage']=='retrieval' and error['model_call']==0
+    assert json.loads(artifact)['error']=={key:error[key] for key in
+        ('code','detail','stage','model_call','history_id')}
 
 
 def test_pending_options_fail_before_even_a_deterministic_command(native_turn):

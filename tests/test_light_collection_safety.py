@@ -251,8 +251,12 @@ def test_native_lexical_migration_preserves_existing_text_and_repairs_fts(tmp_pa
 
 def test_native_edge_initialization_survives_death_before_final_catalog_commit(collection):
     from qdrant_client import QdrantClient
+    program = os.getenv('LES_TEST_EDGE_API')
+    if not program:
+        pytest.skip('Build the Edge-enabled API')
     case=collection;case.stop()
     edge=case.state/'edge'
+    case.command[0] = program
     case.command.extend(['--edge-storage',str(edge)])
     case.environment['LES_LIGHT_QDRANT_URL']=str(case.client.base_url).rstrip('/')
     case.start()

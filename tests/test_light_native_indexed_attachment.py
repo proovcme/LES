@@ -19,8 +19,8 @@ from tests.test_light_native_intake_execution import settings
 
 def exercise(tmp_path, files):
     import pypdfium2_raw
-    program=os.getenv('LES_TEST_NATIVE_API')
-    if not program or not os.getenv('LES_TEST_EDGE_API'):
+    program=os.getenv('LES_TEST_EDGE_API')
+    if not program:
         pytest.skip('Build the Edge-enabled API')
     state=tmp_path/'state';database=state/'data/meta.db';database.parent.mkdir(parents=True)
     hashes={path.name:hashlib.sha256(path.read_bytes()).hexdigest() for path in files}

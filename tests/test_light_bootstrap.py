@@ -79,6 +79,21 @@ def test_manifest_uses_fixed_repository_and_ignores_supplied_executable_url(serv
     assert b'evil.exe' not in result.stdout
 
 
+@pytest.mark.parametrize('version, suffix', [
+    ('', 'latest/download/light-update.json'),
+    ('0.1.3', 'download/v0.1.3/light-update.json'),
+])
+def test_online_installer_selects_the_requested_release(version, suffix):
+    select = f"$ReleaseVersion={quote(version)}; " if version else ""
+    result = run(
+        select +
+        "function Get-LesRelease ($client, [uri]$uri) { throw $uri.AbsoluteUri }; "
+        "Install-LesRelease"
+    )
+    assert result.returncode != 0
+    assert f'https://github.com/proovcme/LES/releases/{suffix}'.encode() in result.stdout
+
+
 @pytest.mark.parametrize('case', ['valid', 'corrupt', 'truncated', 'oversized', 'http_error'])
 def test_download_checks_actual_bytes_before_making_executable(tmp_path, server, case):
     base, responses = server

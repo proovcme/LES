@@ -318,7 +318,7 @@ def source_read(t, dataset, suffix):
     return {'tool':'read_source','args':{'doc_id':document,'limit':1}}
 
 
-@pytest.mark.parametrize('native_turn', ['rag'], indirect=True)
+@pytest.mark.parametrize('native_turn', ['rag', 'rag-small'], indirect=True)
 def test_unread_documents_remain_reachable_without_a_separate_model_selector(native_turn,tmp_path):
     t=native_turn;folder=tmp_path/'sources';folder.mkdir()
     for i in range(12):
@@ -331,6 +331,8 @@ def test_unread_documents_remain_reachable_without_a_separate_model_selector(nat
         delivered=json.dumps(body['messages'])
         assert 'SOURCE_DOCUMENT_SELECTION' not in delivered
         chosen['initial_markers']={i for i in range(12) if f'CONTENT_ONLY_{i}_END' in delivered}
+        assert 0<len(chosen['initial_markers'])<12
+        assert 'read_source' in {tool['function']['name'] for tool in body['tools']}
         for message in body['messages']:
             content=message.get('content') or ''
             for marker in re.finditer(r'"candidate_documents"\s*:',content):
@@ -338,10 +340,12 @@ def test_unread_documents_remain_reachable_without_a_separate_model_selector(nat
                 if not isinstance(cards,dict):continue
                 assert cards['evidence_admissible'] is False and cards['total']==12
                 assert len(cards['documents'])==12
-                chosen.update(cards['documents'][-1])
-                label=chosen['title'].rsplit(' / ',1)[-1]
-                chosen['number']=int(re.fullmatch(r'source_(\d+)\.txt',label)[1])
-                return {'tool':'read_source','args':{'doc_id':chosen['doc_id']}}
+                for card in reversed(cards['documents']):
+                    label=card['title'].rsplit(' / ',1)[-1]
+                    number=int(re.fullmatch(r'source_(\d+)\.txt',label)[1])
+                    if number not in chosen['initial_markers']:
+                        chosen.update(card,number=number)
+                        return {'tool':'read_source','args':{'doc_id':chosen['doc_id']}}
         raise AssertionError('The searched document pool was hidden from the reader')
     def answer(body):
         text='\n'.join(m.get('content') or '' for m in body['messages'])
@@ -349,9 +353,11 @@ def test_unread_documents_remain_reachable_without_a_separate_model_selector(nat
         assert f'CONTENT_ONLY_{number}_END' in text
         assert all(f'CONTENT_ONLY_{i}_END' in text for i in chosen['initial_markers'])
         assert all(f'CONTENT_ONLY_{i}_END' not in text for i in range(12) if i!=number and i not in chosen['initial_markers'])
-        fragments=re.split(r'\[Фрагмент (S\d+)\]',text)
-        selected=next(fragments[i] for i in range(1,len(fragments),2) if f'CONTENT_ONLY_{number}_END' in fragments[i+1])
-        return {'text':json.dumps({'answerable':True,'rows':[selected],'sums':[]})}
+        fragments=re.split(r'(?m)^\[Источник (\d+) \| [^\]\n]+\]\n',text)
+        index=next(int(fragments[i]) for i in range(1,len(fragments),2)
+                   if f'CONTENT_ONLY_{number}_END' in fragments[i+1])
+        chosen['index']=index
+        return {'text':f'The record says CONTENT_ONLY_{number}_END. [Источник {index}]'}
     before=len(t.embeddings.calls)
     t.scripts.extend([read_later_document,answer])
     result=t.client.post('/api/chat',json={'question':'Read the POOL_ANCHOR original record.',
@@ -360,7 +366,8 @@ def test_unread_documents_remain_reachable_without_a_separate_model_selector(nat
     assert len(result['retrieval_trace']['prefetch']['candidate_documents'])==12
     assert chosen['doc_id'] in {s['doc_id'] for s in result['source_map']}
     assert len(result['source_map'])==len(chosen['initial_markers']|{chosen['number']})
-    assert {r['doc_id'] for r in result['artifact']['table_facts']['rows']}=={chosen['doc_id']}
+    assert result['retrieval_trace']['citation_check']['linked']==[chosen['index']]
+    assert {s['doc_id'] for s in result['source_map'] if s['index']==chosen['index']}=={chosen['doc_id']}
     assert [r['tool'] for r in result['artifact']['tool_results']]==['read_source']
 
 
@@ -388,7 +395,7 @@ def test_tool_budget_allows_bounded_passages_with_their_citation_and_receipt_arr
 
 @pytest.mark.parametrize('native_turn', ['rag-small'], indirect=True)
 @pytest.mark.parametrize('mode',['search','agent'])
-@pytest.mark.parametrize('numeric_error',[None,'repair','repeat'])
+@pytest.mark.parametrize('numeric_error',[None,'TABLE_ROW_NOT_VISIBLE','TABLE_VALUE_INVALID'])
 def test_hybrid_finishes_from_a_larger_answer_window_before_committing_partial_table_data(native_turn,tmp_path,mode,numeric_error):
     t=native_turn;folder=tmp_path/'documents';folder.mkdir()
     pages=['CONTROL_SCHEDULE\n'+'\n'.join(f'| CONTROL_PAGE_{letter} | m | 7 |' for _ in range(20)) for letter in 'ABCD']
@@ -397,8 +404,9 @@ def test_hybrid_finishes_from_a_larger_answer_window_before_committing_partial_t
     job=t.client.post('/api/rag/index-external',json={'path':str(folder),'dataset_id':dataset,'background':True}).raise_for_status().json()['intake_job_id']
     wait_for(lambda:t.client.get('/api/light/intake',params={'id':job}).json().get('status')=='completed',timeout=40)
     def select_partial(body):
-        text=json.dumps(body['messages'],ensure_ascii=False)
-        assert body['tools'] and not all(f'CONTROL_PAGE_{letter}' in text for letter in 'ABCD')
+        text = '\n'.join(message['content'] for message in body['messages'])
+        assert body['tools']
+        assert not all(f'CONTROL_PAGE_{letter}' in text for letter in 'ABCD')
         return {'text':'{"answerable":false,"rows":[],"sums":[]}'}
     def select_complete(body):
         text='\n'.join(m['content'] for m in body['messages'])
@@ -408,24 +416,24 @@ def test_hybrid_finishes_from_a_larger_answer_window_before_committing_partial_t
             chosen.append(next(re.match(r'(S\d+R\d+) ',line)[1] for line in text.splitlines()
                                if re.match(r'(S\d+R\d+) ',line) and f'CONTROL_PAGE_{letter}' in line))
         return {'text':json.dumps({'answerable':True,'rows':chosen,'sums':[]})}
-    def invalid_sum(body):
+    def select_terminal(body):
         selected=select_complete(body)
-        value=json.loads(selected['text']);value['sums']=[{'column':999,'unit_column':None}]
+        value=json.loads(selected['text'])
+        if numeric_error == 'TABLE_ROW_NOT_VISIBLE':
+            value['rows'] = ['S999R1']
+        elif numeric_error == 'TABLE_VALUE_INVALID':
+            value['sums'] = [{'column':999,'unit_column':None}]
         return {'text':json.dumps(value)}
-    def correction(body):
-        text=json.dumps(body['messages'],ensure_ascii=False)
-        assert 'TABLE_VALUE_INVALID' in text and '"column": 999' not in text
-        return invalid_sum(body) if numeric_error=='repeat' else select_complete(body)
-    t.scripts.extend([select_partial,invalid_sum,correction] if numeric_error else [select_partial,select_complete])
+    t.scripts.extend([select_partial, select_terminal])
     session=t.client.post('/api/workspace/sessions',json={'title':'Saved context window'}).raise_for_status().json()['session_id']
-    response=t.client.post('/api/chat',json={'question':'Read CONTROL_SCHEDULE quantities. '+('Preserve original reading context. '*90),
+    response=t.client.post('/api/chat',json={'question':'Read CONTROL_SCHEDULE quantities. '+('Preserve original reading context. '*105),
         'session_id':session,'mode':mode,'retrieval_mode':'hybrid','scope':{'scope_type':'dataset','dataset_ids':[dataset],'selected_sources_only':True}})
-    assert len(t.seen)==(3 if numeric_error else 2) and not t.scripts, response.text
-    if numeric_error=='repeat':
-        assert response.status_code==503 and response.json()['code']=='TABLE_VALUE_INVALID'
+    assert len(t.seen)==2 and not t.scripts, response.text[:600]
+    if numeric_error:
+        assert response.status_code==503 and response.json()['code']==numeric_error
         with sqlite3.connect(t.database) as db:
             answer,success,artifact=db.execute('SELECT answer,success,artifact_json FROM chat_history ORDER BY id DESC LIMIT 1').fetchone()
-        assert answer=='' and not success and json.loads(artifact)['error']['code']=='TABLE_VALUE_INVALID'
+        assert answer=='' and not success and json.loads(artifact)['error']['code']==numeric_error
         return
     result=response.raise_for_status().json()
     assert result['retrieval_trace']['answer_window_retry'] is True
@@ -602,7 +610,13 @@ def test_sequential_reads_in_an_8k_window_get_bounded_portions_and_keep_durable_
         grant=result['result']['context_budget']
         assert grant['requested_max_chars']==16000 and 0<grant['granted_max_chars']<16000
         assert result['result']['coverage']=='bounded'
-        index=result['result']['passages'][0]['source']['index']
+        references=result['result']['read_sources']
+        assert 'passages' not in result['result']
+        assert {ref['doc_id'] for ref in references}=={reads[1]['args']['doc_id']}
+        text='\n'.join(message.get('content') or '' for message in body['messages'] if message.get('role')!='tool')
+        excerpts=re.split(r'(?m)^\[Источник (\d+) \| [^\]\n]+\]\n',text)
+        index=next(int(excerpts[i]) for i in range(1,len(excerpts),2)
+                   if int(excerpts[i]) in references[0]['source_indexes'] and 'beta controlled reading' in excerpts[i+1])
         return {'text':f'Read the current beta source [Источник {index}]'}
     t.scripts.extend([*reads,inspected])
     result=t.client.post('/api/chat',json={'question':'Read the second source after the first','mode':'search','retrieval_mode':'pull',
@@ -745,11 +759,113 @@ def test_hybrid_keeps_four_documents_before_factual_answer(native_turn,tmp_path)
     assert all(f'{i}.txt' in delivered for i in range(4))
     assert all(proof.rstrip() in delivered for proof in proofs)
     assert result['retrieval_trace']['contexts'][0]['folder_question'] is False
+    assert result['retrieval_trace']['contexts'][0]['single_pass'] is True
+    assert 'reader_budget_max_chars' not in delivered
+    assert 'les.model-section-coverage.v1' not in delivered
+    assert 'les.model-coverage-summary.v1' not in delivered
     assert 'citation_format_required' in delivered
     assert len(t.seen)==1 and result['artifact']['tool_results']==[]
     assert len(result['source_map'])==4
     assert result['retrieval_trace']['prefetch']['read_receipt']['schema']=='les.indexed-read.v1'
     assert result['retrieval_trace']['source_inspection']['performed'] is True
+
+
+@pytest.mark.parametrize('native_turn', ['rag-small'], indirect=True)
+def test_first_hybrid_window_grants_reader_budget_on_tool_call(native_turn, tmp_path):
+    t = native_turn
+    folder = tmp_path / 'reader-budget'
+    folder.mkdir()
+    proof = 'Ventilation control pressure is stable.'
+    path = folder / 'note.txt'
+    path.write_text(proof, encoding='utf-8')
+    dataset = t.client.post('/api/rag/datasets', json={'name': 'Reader budget'}).raise_for_status().json()['id']
+    job = t.client.post('/api/rag/index-external', json={
+        'path': str(folder), 'dataset_id': dataset, 'background': True,
+    }).raise_for_status().json()['intake_job_id']
+    wait_for(lambda: t.client.get('/api/light/intake', params={'id': job}).json()['status'] == 'completed', timeout=40)
+
+    read = source_read(t, dataset, path.name)
+    read['args']['max_chars'] = 16000
+
+    def answer(body):
+        messages = body['messages']
+        assert any(message['role'] == 'tool' for message in messages)
+        result = json.loads(next(message['content'] for message in reversed(messages) if message['role'] == 'tool'))
+        grant = result['result']['context_budget']
+        assert grant['requested_max_chars'] == 16000
+        assert 0 < grant['granted_max_chars'] < 16000
+        evidence = '\n'.join(message.get('content') or '' for message in messages if message['role'] != 'tool')
+        assert proof in evidence
+        index = re.search(r'\[Источник (\d+)(?:\]| \|)', evidence)[1]
+        return {'text': f'{proof} [Источник {index}]'}
+
+    t.scripts.extend([read, answer])
+    result = t.client.post('/api/chat', json={
+        'question': 'Is the ventilation control pressure stable?',
+        'mode': 'search', 'retrieval_mode': 'hybrid',
+        'scope': {'scope_type': 'dataset', 'dataset_ids': [dataset]},
+    }).raise_for_status().json()
+    contexts = result['retrieval_trace']['contexts']
+    assert [context['single_pass'] for context in contexts] == [True, False]
+    assert proof in result['answer']
+    assert result['retrieval_trace']['citation_syntax']['indexes']
+    receipt, = result['artifact']['tool_results']
+    assert receipt['result']['passages'][0]['text'] == proof
+
+
+@pytest.mark.parametrize('native_turn', ['rag-small'], indirect=True)
+@pytest.mark.parametrize('filtered,cites_checked_file', [(True, False), (True, True), (False, True)])
+def test_hybrid_reports_no_match_in_a_read_without_aborting_the_chat(native_turn, tmp_path, filtered, cites_checked_file):
+    t = native_turn
+    folder = tmp_path / 'sensor-manual'
+    folder.mkdir()
+    path = folder / 'manual.txt'
+    path.write_text('Calibration temperature for the sensor is 19 degrees.', encoding='utf-8')
+    dataset = t.client.post('/api/rag/datasets', json={'name': 'Sensor manual'}).raise_for_status().json()['id']
+    job = t.client.post('/api/rag/index-external', json={
+        'path': str(folder), 'dataset_id': dataset, 'background': True,
+    }).raise_for_status().json()['intake_job_id']
+    wait_for(lambda: t.client.get('/api/light/intake', params={'id': job}).json()['status'] == 'completed', timeout=40)
+    read = source_read(t, dataset, path.name)
+    if filtered:
+        read['args']['q'] = 'warranty'
+    else:
+        read['args'].pop('limit')
+    missing = 'В прочитанных материалах папки срок гарантии не найден.'
+
+    def answer(body):
+        tool = next(message for message in body['messages'] if message['role'] == 'tool')
+        payload = json.loads(tool['content'])
+        assert payload['status'] == 'ok'
+        if filtered:
+            assert payload['result']['coverage'] == 'no_matches'
+            assert payload['result']['reading_scope'] == 'query_matches'
+            assert payload['result']['complete_corpus'] is False
+            assert payload['result']['passages'] == []
+            assert payload.get('sources', []) == []
+            index = 1
+        else:
+            assert payload['result']['coverage'] == 'complete'
+            assert payload['result']['read_sources'][0]['doc_id'] == read['args']['doc_id']
+            index = payload['result']['read_sources'][0]['source_indexes'][0]
+            delivered = '\n'.join(m.get('content') or '' for m in body['messages'] if m['role'] != 'tool')
+            assert 'Calibration temperature for the sensor is 19 degrees.' in delivered
+        citation = f' Проверен файл [Источник {index}].' if cites_checked_file else ''
+        return {'text': f'[[NO_EVIDENCE]] {missing}{citation}'}
+
+    t.scripts.extend([read, answer])
+    reply = t.client.post('/api/chat', json={
+        'question': 'What is the warranty period for the sensor?',
+        'mode': 'search', 'retrieval_mode': 'hybrid',
+        'scope': {'scope_type': 'dataset', 'dataset_ids': [dataset]},
+    })
+    assert reply.status_code == 200, reply.text
+    result = reply.json()
+    expected = 'В просмотренных материалах не удалось найти ответ на этот вопрос.' if cites_checked_file else missing
+    assert result['answer'] == expected
+    assert result['retrieval_trace']['citation_syntax']['indexes'] == []
+    assert result['artifact']['completion_status'] == 'completed'
+    assert len(t.seen) == 2
 
 
 @pytest.mark.parametrize('native_turn', ['rag'], indirect=True)
@@ -1011,3 +1127,42 @@ def test_word_filtered_compound_match_is_not_reported_as_a_complete_document(nat
         'tool': 'read_source', 'args': {**args, 'q': '117.25'}})
     assert wrong_number.json()['code'] == 'SOURCE_SECTION_NOT_FOUND'
     assert not t.seen, 'The shared source reader must not call an answer model'
+
+
+@pytest.mark.parametrize('native_turn', ['rag'], indirect=True)
+def test_indexed_turn_keeps_source_cards_without_reopening_pdf_or_requiring_labels(native_turn, tmp_path):
+    t = native_turn
+    folder = tmp_path / 'indexed-documents'
+    folder.mkdir()
+    path = write_pdf(folder / 'Pressure.pdf', [b'BT /F1 12 Tf 50 700 Td (Control pressure 17.35 kPa) Tj ET'])
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    dataset = t.client.post('/api/rag/datasets', json={'name': 'Indexed pressure'}).raise_for_status().json()['id']
+    job = t.client.post('/api/rag/index-external', json={
+        'path': str(folder), 'dataset_id': dataset, 'background': True,
+    }).raise_for_status().json()['intake_job_id']
+    wait_for(lambda: t.client.get('/api/light/intake', params={'id': job}).json().get('status') == 'completed', timeout=40)
+
+    def answer(body):
+        assert not body.get('tools')
+        assert any('Control pressure 17.35 kPa' in message['content'] for message in body['messages'])
+        return {'text': '17.35 kPa [Источник 99999]'}
+
+    backup = path.with_suffix('.offline')
+    path.rename(backup)
+    t.scripts.append(answer)
+    try:
+        result = t.client.post('/api/chat', json={
+            'question': 'What is the control pressure?', 'mode': 'search', 'retrieval_mode': 'indexed',
+            'scope': {'scope_type': 'dataset', 'dataset_ids': [dataset], 'selected_sources_only': True},
+        }).raise_for_status().json()
+    finally:
+        backup.rename(path)
+    assert len(t.seen) == 1
+    assert '17.35 kPa' in result['answer']
+    assert result['retrieval_trace']['citation_check']['unresolved'] == [99999]
+    source = result['source_map'][0]
+    assert source['page'] == 1 and source['url'].endswith('#page=1')
+    assert source['source_sha256'] == digest and source['evidence_kind'] == 'indexed_chunk'
+    assert 'Control pressure 17.35 kPa' in source['quote']
+    raw = t.client.get(source['url'].split('#')[0]).raise_for_status().content
+    assert hashlib.sha256(raw).hexdigest() == digest

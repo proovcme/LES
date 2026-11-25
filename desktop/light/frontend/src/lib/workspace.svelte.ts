@@ -316,7 +316,8 @@ export class Workspace {
       const body = { question, session_id: session.session_id, project_id: session.project_id,
         scope: session.scope, mode: session.role === 'agent' && session.scope.scope_type !== 'none' ? 'search' : session.role,
         attachment_id: attachment?.attachment_id,
-        retrieval_mode: 'hybrid',
+        retrieval_mode: !attachment && ['dataset', 'datasets'].includes(session.scope.scope_type)
+          && !session.scope.document_ids?.length && ['agent', 'search'].includes(session.role) ? 'indexed' : 'hybrid',
       };
       const key = await this.sendKey(JSON.stringify(body), session.session_id);
       reply = this.pendingSend!.reply;

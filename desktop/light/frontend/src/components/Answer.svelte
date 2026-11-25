@@ -10,9 +10,11 @@
   const sources = $derived(message.meta?.source_map || []);
   const rendered = $derived(renderAnswer(message.text, sources));
   const quoted = $derived(sources.filter((source) => rendered.linked.has(source.index)));
-  const found = $derived(sources.filter((source) => !rendered.linked.has(source.index)));
+  const indexed = $derived(message.meta?.retrieval_trace?.mode === 'indexed');
+  const found = $derived(indexed ? sources : sources.filter((source) => !rendered.linked.has(source.index)));
+  const foundTitle = $derived(indexed ? 'Фрагменты, переданные модели' : 'Найденные материалы');
   const citationStatus = $derived(message.meta?.retrieval_trace?.citation_check?.status);
-  const missingAttribution = $derived(!streaming && message.text
+  const missingAttribution = $derived(!indexed && !streaming && message.text
     && (citationStatus === 'missing_labels' || citationStatus === 'no_sources'
       || (sources.length > 0 && quoted.length === 0)));
   const execution = $derived(message.meta?.execution ?? message.meta?.retrieval_trace?.execution);
@@ -52,7 +54,7 @@
     {#if message.meta?.error}<p class="partial" role="alert">{message.meta.error.detail}</p>
     {:else if message.meta?.partial}<p class="partial">{message.meta.completion_status === 'in_progress' ? 'Ответ ещё формируется.' : (message.text ? 'Ответ прерван. Полученный текст сохранён; проверьте его перед использованием.' : 'Ответ прерван до получения текста. Вопрос можно повторить.')}</p>
     {:else if !message.text && !streaming}<p class="muted">Текст ответа не получен. Вопрос можно повторить.</p>{/if}
-    {#if quoted.length}
+    {#if quoted.length && !indexed}
       <section class="sources" aria-label="Цитаты в ответе">
         <p class="sources-title">Цитаты в ответе</p>
         <ul>{#each quoted.slice(0, 3) as source (source.index)}<li><SourceButton {source} open={openSource} /></li>{/each}</ul>
@@ -60,9 +62,9 @@
       </section>
     {/if}
     {#if found.length}
-      <section class="sources" aria-label="Найденные материалы">
+      <section class="sources" aria-label={foundTitle}>
         <details open={!quoted.length && !streaming}>
-          <summary>Найденные материалы · {found.length}</summary>
+          <summary>{foundTitle} · {found.length}</summary>
           <ul>{#each found as source (source.index)}<li><SourceButton {source} open={openSource} /></li>{/each}</ul>
         </details>
       </section>

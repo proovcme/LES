@@ -39,6 +39,7 @@ export interface ContextReportCall {
 }
 export const contextPath = (sid: string) => `/api/workspace/memory/context/${encodeURIComponent(sid)}`;
 interface RetrievalTrace {
+  mode?: string;
   source_map?: Source[]; status?: string; read_failures?: SourceReadFailure[];
   omitted_reads?: { index: number; label: string }[];
   tool_loop?: { status?: string }; execution?: ExecutionSummary; citation_check?: CitationCheck;

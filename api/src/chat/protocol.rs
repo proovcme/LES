@@ -77,6 +77,18 @@ pub(super) fn compact_source_receipt(value: &mut Value) {
     ) {
         return;
     }
+    if value["tool"] == "read_pdf_source"
+        && value["result"]["text"].is_string()
+        && value["sources"][0]["label"] == value["result"]["text"]
+    {
+        // The corresponding evidence block owns the page body. A citation
+        // label in the receipt's text field looks like the text of the page.
+        let result = value["result"].as_object_mut().unwrap();
+        result.remove("text");
+        if result.get("passages").is_some_and(Value::is_null) {
+            result.remove("passages");
+        }
+    }
     let Some(rows) = value["result"]["passages"]
         .as_array()
         .filter(|rows| !rows.is_empty())

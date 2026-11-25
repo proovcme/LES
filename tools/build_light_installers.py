@@ -72,6 +72,7 @@ def build(payload: Path, output: Path, makensis: Path, *, edge_preview: bool = F
         return
     subprocess.run([
         str(makensis), "/INPUTCHARSET", "UTF8", f"/DOUTPUT_FILE={output / 'LES-RAG-Web-Setup.exe'}",
+        f"/DPRODUCT_VERSION={package['version']}",
         str(INSTALLERS / "bootstrap.nsi"),
     ], cwd=INSTALLERS, check=True)
     shutil.copy2(INSTALLERS / "install-les.ps1", output / "install-les.ps1")

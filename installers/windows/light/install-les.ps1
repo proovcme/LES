@@ -4,6 +4,7 @@ param(
     [switch]$Silent,
     [switch]$DownloadOnly,
     [string]$OutputDirectory = '',
+    [ValidatePattern('^\d+\.\d+\.\d+\z')][string]$ReleaseVersion,
     [ValidateSet('', 'Check', 'Download', 'Launch')][string]$DesktopAction = '',
     [long]$ExpectedBuild = 0,
     [string]$ExpectedSha = '',
@@ -131,7 +132,14 @@ function Install-LesRelease {
     $client = New-LesHttpClient
     try {
         Write-Host 'Checking the public LES RAG release...'
-        $release = Get-LesRelease $client ([uri]'https://github.com/proovcme/LES/releases/latest/download/light-update.json')
+        $manifest = 'https://github.com/proovcme/LES/releases/latest/download/light-update.json'
+        if ($ReleaseVersion) {
+            $manifest = "https://github.com/proovcme/LES/releases/download/v$ReleaseVersion/light-update.json"
+        }
+        $release = Get-LesRelease $client ([uri]$manifest)
+        if ($ReleaseVersion -and $release.Version -cne $ReleaseVersion) {
+            throw 'The release manifest does not match the requested version.'
+        }
         $directory = $OutputDirectory
         if (-not $directory) {
             if (-not $env:LOCALAPPDATA) { throw 'Windows local user profile is unavailable.' }

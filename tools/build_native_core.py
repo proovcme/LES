@@ -9,6 +9,9 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+if not __package__:
+    sys.path.insert(0, str(ROOT))
+from tools.native_asset import remapped_rustflags
 
 
 def stage_asset(output: Path, source: Path):
@@ -31,12 +34,7 @@ def build(output: Path, *, offline=False):
     if offline:
         command.append('--offline')
     environment = os.environ.copy()
-    flags = (environment['CARGO_ENCODED_RUSTFLAGS'].split('\x1f') if environment.get('CARGO_ENCODED_RUSTFLAGS')
-             else environment.get('RUSTFLAGS', '').split())
-    for source, replacement in ((Path.home(), 'build-home'),
-            (Path(os.getenv('CARGO_HOME', str(Path.home()/'.cargo'))), 'cargo'), (ROOT, 'les')):
-        flags.append(f'--remap-path-prefix={source}={replacement}')
-    environment['CARGO_ENCODED_RUSTFLAGS'] = '\x1f'.join(flags)
+    environment['CARGO_ENCODED_RUSTFLAGS'] = remapped_rustflags()
     subprocess.run(command, check=True, env=environment)
     name = 'les_core.dll' if sys.platform == 'win32' else ('libles_core.dylib' if sys.platform == 'darwin' else 'libles_core.so')
     target_dir = Path(environment.get('CARGO_TARGET_DIR', ROOT/'core/target'))

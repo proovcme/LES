@@ -59,6 +59,17 @@ def stage_asset(component,output,source,expected_source,*,features=()):
     return output/source.name
 
 
+def remapped_rustflags():
+    encoded = os.getenv('CARGO_ENCODED_RUSTFLAGS')
+    flags = encoded.split('\x1f') if encoded else os.getenv('RUSTFLAGS', '').split()
+    for source, replacement in ((Path.home(), 'build-home'),
+            (Path(os.getenv('CARGO_HOME', str(Path.home() / '.cargo'))), 'cargo'), (ROOT, 'les')):
+        flag = f'--remap-path-prefix={source}={replacement}'
+        if flag not in flags:
+            flags.append(flag)
+    return '\x1f'.join(flags)
+
+
 def build(component,output,*,offline=False,features=()):
     if output.exists():
         raise FileExistsError('Use a fresh output directory to preserve rollback assets')
@@ -67,13 +78,9 @@ def build(component,output,*,offline=False,features=()):
         raise ValueError('Unsupported native build feature')
     environment=os.environ.copy()
     environment['CARGO_INCREMENTAL']='0'
-    flags=(environment['CARGO_ENCODED_RUSTFLAGS'].split('\x1f') if environment.get('CARGO_ENCODED_RUSTFLAGS')
-           else environment.get('RUSTFLAGS','').split())
-    for source,replacement in ((Path.home(),'build-home'),
-            (Path(os.getenv('CARGO_HOME',str(Path.home()/'.cargo'))),'cargo'),(ROOT,'les')):
-        flags.append(f'--remap-path-prefix={source}={replacement}')
-    environment['CARGO_ENCODED_RUSTFLAGS']='\x1f'.join(flags)
-    command=['cargo','build','--locked','--release','-j','1','--manifest-path',str(ROOT/component/'Cargo.toml')]
+    environment.setdefault('CARGO_BUILD_JOBS', '1')
+    environment['CARGO_ENCODED_RUSTFLAGS'] = remapped_rustflags()
+    command=['cargo','build','--locked','--release','--manifest-path',str(ROOT/component/'Cargo.toml')]
     if offline:
         command.append('--offline')
     if features:
