@@ -5,6 +5,18 @@
 
 LES RAG is a desktop app for searching and chatting with your documents. Connect a model, choose a folder in File Explorer, and ask a question. From an answer, you can open the source document at the relevant page.
 
+## Chat and sources
+
+In this demo folder, LES finds an airflow value in a spreadsheet. Below the
+answer, you can see the excerpts sent to the model and a link to row 2 on the
+Ventilation sheet.
+
+![Answer from the demo folder and the excerpts sent to the model](assets/screenshots/folder-chat-942.png)
+
+Open the citation to see the same row in the original workbook.
+
+![Source panel showing the Ventilation sheet and the contents of row 2](assets/screenshots/source-row-942.png)
+
 ## How search works
 
 ```mermaid
@@ -36,7 +48,3 @@ retrieval and can return sources without calling the answer model.
 - **Models.** Connect local Ollama or an OpenAI-compatible API. Assign the answer and embedding models separately. Docker is not required.
 - **Desktop.** The Windows app uses a Svelte chat, Rust API, and Rust background services. It bundles Python solely to run external skills offline. Projects, memory, chat profiles, MCP connections, and updates are available from the app.
 - **Integrations.** [MCP, API, and CLI](docs/public/les-light/README.md#для-интеграций) · [macOS preview](docs/MACOS_PREVIEW.md) · [Limitations and backlog](docs/BACKLOG.md) · [License](LICENSE).
-
-![Connecting a folder in the Data and Projects dialog](assets/screenshots/data-848.png)
-
-[Knowledge Forest — an interactive document map](assets/screenshots/forest-835.jpg)
