@@ -154,6 +154,15 @@ impl Tools {
         };
         limit.min(maximum.max(1))
     }
+    pub(super) fn folder_schemas(&self, maximum: usize, disclosed: &[String]) -> Vec<Value> {
+        let limit = (4 + disclosed.len().min(1)).min(maximum);
+        let mut schemas = self.disclosed_schemas(limit, true, disclosed);
+        schemas[0]["function"]["description"] = json!(
+            "Use this only for approved capabilities that have no direct function in this turn. Search and ordinary document reads use their direct functions."
+        );
+        schemas.rotate_left(1);
+        schemas
+    }
     pub fn disclosed_schemas(
         &self,
         limit: usize,
@@ -426,7 +435,42 @@ impl Tools {
                         ));
                         args["_automatic_focus"] = json!(true);
                     }
-                    let mut result = sources::run(context, turn, name, args).await?;
+                    let empty_read_scope = if matches!(name, "read_source" | "read_excel_source")
+                        && args["offset"].as_u64().unwrap_or_default() == 0
+                    {
+                        if args["clause"]
+                            .as_str()
+                            .is_some_and(|s| !s.trim().is_empty())
+                        {
+                            Some("clause")
+                        } else if args["q"].as_str().is_some_and(|s| !s.trim().is_empty()) {
+                            Some("query_matches")
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+                    let mut result = match sources::run(context, turn, name, args).await {
+                        Err(error)
+                            if error.code == "SOURCE_SECTION_NOT_FOUND"
+                                && empty_read_scope.is_some() =>
+                        {
+                            // A filtered read found no matching text. Report it to the
+                            // model without admitting evidence or claiming a full read.
+                            envelope(
+                                name,
+                                "filtered_read",
+                                json!({
+                                    "passages":[], "coverage":"no_matches", "reading_scope":empty_read_scope,
+                                    "matches_exhausted":true, "complete_corpus":false, "next_offset":null,
+                                    "note":"По этому условию в выбранном документе совпадений нет. Если прочитанные источники не подтверждают ответ, сообщи пользователю, что подтверждение в папке не найдено."
+                                }),
+                                vec![],
+                            )
+                        }
+                        result => result?,
+                    };
                     if pull && name == "search_sources" && result["operation"] == "indexed_sections"
                     {
                         result["result"]["pull_search"] = json!(true);
@@ -642,7 +686,7 @@ fn bounded_read(name: &str, args: &mut Value, cap: usize, contract: &Value) -> O
     args["max_chars"] = json!(granted);
     Some(
         json!({"requested_max_chars":requested,"granted_max_chars":granted,"reason":"reader_contract_and_model_context_budget",
-        "note":"Размер порции ограничен свободным окном модели с резервом для идентификаторов и квитанции. Это не полный просмотр. Продолжай с точным next_offset при неизменном запросе, документе и редакции."}),
+        "note":"Предел размера порции. При наличии next_offset используй его для продолжения."}),
     )
 }
 #[cfg(test)]

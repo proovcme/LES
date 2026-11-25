@@ -68,7 +68,7 @@ pub fn validate(input: &Value) -> Result<Value> {
             .ok_or("CHAT_RETRIEVAL_MODE_INVALID")?
             .trim()
             .to_ascii_lowercase();
-        if !matches!(mode.as_str(), "push" | "pull" | "hybrid") {
+        if !matches!(mode.as_str(), "push" | "pull" | "hybrid" | "indexed") {
             return Err("CHAT_RETRIEVAL_MODE_INVALID");
         }
         request.insert("retrieval_mode".into(), mode.into());

@@ -179,6 +179,23 @@ pub(super) async fn read(
     turn: &SourceContext,
     args: &Value,
 ) -> Result<Option<Value>> {
+    read_rows(context, turn, args, false).await
+}
+
+pub(super) async fn read_indexed(
+    context: Arc<Context>,
+    turn: &SourceContext,
+    args: &Value,
+) -> Result<Option<Value>> {
+    read_rows(context, turn, args, true).await
+}
+
+async fn read_rows(
+    context: Arc<Context>,
+    turn: &SourceContext,
+    args: &Value,
+    indexed: bool,
+) -> Result<Option<Value>> {
     let doc = document(&context, args).await?;
     scoped_document(turn, &doc)?;
     let expected = doc["file_hash"]
@@ -226,7 +243,7 @@ pub(super) async fn read(
             "match_group":selection["_match_group"],
             "q":if addressed {Value::Null} else {selection["q"].clone()}
         }))?;
-        if selection["_match_group"] != true || page["matches"].as_u64().unwrap_or(0) > 0 {
+        if !indexed && (selection["_match_group"] != true || page["matches"].as_u64().unwrap_or(0) > 0) {
             crate::documents::verified_file(&owner, &original, &expected)?;
         }
         let chunks = les_core::tables::execute(&json!({"action":"chunks","rows":page["rows"],
@@ -271,7 +288,11 @@ pub(super) async fn read(
         }
         source["locator"]["sheet"] = source["sheet_name"].clone();
         source["locator"]["row"] = source["row"].clone();
-        source["evidence_kind"] = json!("physical_workbook_row");
+        source["evidence_kind"] = json!(if indexed {
+            "indexed_workbook_row"
+        } else {
+            "physical_workbook_row"
+        });
         source["view_sha256"] = page["source_sha256"].clone();
         source["snippet"] = json!(text.chars().take(240).collect::<String>());
         source["evidence_admissible"] = json!(true);

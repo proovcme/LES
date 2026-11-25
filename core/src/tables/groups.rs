@@ -19,6 +19,7 @@ struct Heading {
     position: String,
     row: u64,
     title: String,
+    unnumbered_children: bool,
 }
 
 impl Groups {
@@ -42,6 +43,15 @@ impl Groups {
             {
                 position = integer;
             }
+        }
+        if position.is_empty() {
+            // Detail lines in some specifications inherit an explicitly numbered
+            // section heading but do not have a position of their own.
+            return self
+                .headings
+                .last()
+                .filter(|h| wanted && h.unnumbered_children)
+                .map(|h| json!({"position":h.position,"row":h.row,"title":h.title}));
         }
         if position.len() > 64
             || position
@@ -70,6 +80,11 @@ impl Groups {
                 position: position.to_owned(),
                 row: coordinate,
                 title: title.chars().take(320).collect(),
+                // A zero-quantity item with a unit, mark or code is still an item.
+                unnumbered_children: ["unit", "mark", "code", "designation"]
+                    .iter()
+                    .all(|key| field(row, key).trim().is_empty())
+                    && (row["qty"].is_null() || row["qty"].as_f64() == Some(0.0)),
             });
         }
         group

@@ -19,7 +19,8 @@ def index(t, folder):
 
 
 @pytest.mark.parametrize('native_turn', ['rag-small'], indirect=True)
-def test_mixed_discovery_exposes_physical_reader_and_preserves_original_page(native_turn, tmp_path):
+@pytest.mark.parametrize('present', [True, False])
+def test_mixed_discovery_exposes_physical_reader_and_preserves_original_page(native_turn, tmp_path, present):
     t = native_turn
     folder = tmp_path / 'sources'; folder.mkdir()
     pdf = write_pdf(folder / 'source.pdf', ['MIXED_ANCHOR Physical original proof.'])
@@ -29,18 +30,28 @@ def test_mixed_discovery_exposes_physical_reader_and_preserves_original_page(nat
     with sqlite3.connect(t.database) as db:
         doc = db.execute("SELECT id FROM documents WHERE dataset_id=? AND file_name LIKE '%.pdf'", [dataset]).fetchone()[0]
     def read(body):
-        names = {tool['function']['name'] for tool in body['tools']}
-        assert {'search_sources', 'read_source', 'read_pdf_source'} <= names
-        assert 'reader_contract' in json.dumps(body['messages'])
-        assert 'Финальный ответ по источникам: верни только JSON' not in json.dumps(body['messages'], ensure_ascii=False)
+        names = [tool['function']['name'] for tool in body['tools']]
+        assert set(names[:-1]) == {'search_sources', 'read_source', 'read_pdf_source'}
+        assert names[-1].startswith('use_extensions_')
+        delivered = '\n'.join(m.get('content') or '' for m in body['messages'])
+        assert 'reader_contract' in delivered
+        assert 'candidate_documents' in delivered and doc in delivered
+        assert 'Финальный ответ по источникам: верни только JSON' not in delivered
         return {'tool': 'read_pdf_source', 'args': {'doc_id': doc, 'page': 1}}
     def answer(body):
-        text = json.dumps(body['messages'], ensure_ascii=False)
-        indexes = re.findall(r'\[(?:Источник|Source) (\d+)\]', text)
-        assert indexes, text
-        return {'text': f'Physical original proof [Источник {max(map(int, indexes))}]'}
+        assert 'read_pdf_source' in {tool['function']['name'] for tool in body['tools']}
+        delivered = '\n'.join(m.get('content') or '' for m in body['messages'] if m['role'] != 'tool')
+        indexes = re.findall(r'(?m)^\[Источник (\d+) \| [^\]\n]+ · стр\. 1\]', delivered)
+        assert indexes and 'MIXED_ANCHOR Physical original proof.' in delivered
+        receipt = json.loads(next(m['content'] for m in body['messages'] if m['role'] == 'tool'))
+        assert receipt['result']['complete'] and receipt['result']['next_offset'] is None
+        assert 'text' not in receipt['result']
+        assert receipt['sources'][0]['index'] == int(indexes[-1])
+        text = 'Physical original proof' if present else '[[NO_EVIDENCE]] No warranty information on the page.'
+        return {'text': f'{text} [Источник {indexes[-1]}]'}
     t.scripts.extend([read, answer])
-    response = t.client.post('/api/chat', json={'question': 'MIXED_ANCHOR: verify the physical original PDF.', 'mode': 'search', 'retrieval_mode': 'hybrid',
+    question = 'MIXED_ANCHOR: verify the physical original PDF.' if present else 'Is warranty information on the original PDF page with MIXED_ANCHOR?'
+    response = t.client.post('/api/chat', json={'question': question, 'mode': 'search', 'retrieval_mode': 'hybrid',
         'scope': {'scope_type': 'dataset', 'dataset_ids': [dataset], 'selected_sources_only': True}})
     assert response.status_code == 200, response.text
     value = response.json()
@@ -48,7 +59,15 @@ def test_mixed_discovery_exposes_physical_reader_and_preserves_original_page(nat
     assert len(physical) == 1 and physical[0]['doc_id'] == doc and physical[0]['page'] == 1
     assert physical[0]['source_sha256'] == hashlib.sha256(original).hexdigest()
     assert pdf.read_bytes() == original
-    assert any(tool['tool'] == 'read_pdf_source' and tool['status'] == 'ok' for tool in value['artifact']['tool_results'])
+    assert any(tool['tool'] == 'read_pdf_source' and tool['status'] == 'ok'
+               and 'MIXED_ANCHOR Physical original proof.' in tool['result']['text']
+               for tool in value['artifact']['tool_results'])
+    assert len(t.seen) == 2
+    if present:
+        assert value['retrieval_trace']['citation_check']['linked'] == [physical[0]['index']]
+    else:
+        assert value['answer'] == 'В просмотренных материалах не удалось найти ответ на этот вопрос.'
+        assert value['retrieval_trace']['citation_check']['linked'] == []
 
 
 def test_pdf_transfer_boundary_cannot_separate_a_quantity_from_its_row(native_turn):

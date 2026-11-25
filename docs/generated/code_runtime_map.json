@@ -10526,7 +10526,7 @@
     },
     {
       "inbound": [],
-      "lines": 149,
+      "lines": 164,
       "module": "tests.test_light_bootstrap",
       "outbound": [],
       "path": "tests/test_light_bootstrap.py",
@@ -10649,7 +10649,7 @@
     },
     {
       "inbound": [],
-      "lines": 286,
+      "lines": 290,
       "module": "tests.test_light_collection_safety",
       "outbound": [
         "backend/document_catalog.py",
@@ -10938,6 +10938,15 @@
         "proxy/services/chat_session_service.py"
       ],
       "path": "tests/test_light_frontend_drafts.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
+      "lines": 72,
+      "module": "tests.test_light_git_gates",
+      "outbound": [],
+      "path": "tests/test_light_git_gates.py",
       "status": "TEST_OR_TOOL_ONLY",
       "windows_runtime_explicit": false
     },
@@ -11787,7 +11796,7 @@
         "tests/test_light_native_retrieval_modes.py",
         "tools/evaluate_part_reader_chat.py"
       ],
-      "lines": 325,
+      "lines": 328,
       "module": "tests.test_light_native_intake_execution",
       "outbound": [
         "backend/document_catalog.py",
@@ -12002,7 +12011,7 @@
     },
     {
       "inbound": [],
-      "lines": 179,
+      "lines": 181,
       "module": "tests.test_light_native_public_chat",
       "outbound": [
         "proxy/services/model_connection_contracts.py",
@@ -12086,7 +12095,7 @@
     },
     {
       "inbound": [],
-      "lines": 1013,
+      "lines": 1168,
       "module": "tests.test_light_native_retrieval_modes",
       "outbound": [
         "proxy/services/model_connection_contracts.py",
@@ -12138,7 +12147,7 @@
     },
     {
       "inbound": [],
-      "lines": 78,
+      "lines": 97,
       "module": "tests.test_light_native_source_presentation",
       "outbound": [
         "tests/pdf_fixtures.py",
@@ -13467,7 +13476,7 @@
     },
     {
       "inbound": [],
-      "lines": 96,
+      "lines": 97,
       "module": "tools.build_light_installers",
       "outbound": [
         "tools/__init__.py"
@@ -13548,10 +13557,11 @@
         "tests/test_light_core_package.py",
         "tools/install_light_macos.py"
       ],
-      "lines": 61,
+      "lines": 59,
       "module": "tools.build_native_core",
       "outbound": [
-        "tools/__init__.py"
+        "tools/__init__.py",
+        "tools/native_asset.py"
       ],
       "path": "tools/build_native_core.py",
       "status": "TEST_OR_TOOL_ONLY",
@@ -13643,7 +13653,7 @@
       "inbound": [
         "tests/test_documentation_contract.py"
       ],
-      "lines": 106,
+      "lines": 108,
       "module": "tools.documentation_contract",
       "outbound": [
         "tools/__init__.py"
@@ -14183,9 +14193,10 @@
         "tests/test_light_native_parser_package.py",
         "tools/build_light_package.py",
         "tools/build_native_api.py",
+        "tools/build_native_core.py",
         "tools/build_native_runtime.py"
       ],
-      "lines": 110,
+      "lines": 117,
       "module": "tools.native_asset",
       "outbound": [
         "tools/__init__.py"
@@ -16151,9 +16162,9 @@
     "product_reachable": 417,
     "registered_api_routes": 298,
     "runtime_support": 5,
-    "test_or_tool_only": 298,
-    "tracked_python_files": 727,
-    "tracked_python_lines": 173893
+    "test_or_tool_only": 299,
+    "tracked_python_files": 728,
+    "tracked_python_lines": 174171
   },
   "warnings": []
 }

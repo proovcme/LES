@@ -578,20 +578,32 @@ impl Evidence {
         self.retried
     }
     pub(super) fn read_omitted(&self, visible: &Value) -> bool {
-        self.sources.iter().any(|source| {
-            // Delivery is independent of the full-document coverage claim.
-            // A partial but verified read can also be omitted while tool
-            // schemas reserve space, and must remain eligible for the one
-            // existing answer-window retry.
-            source["index"]
-                .as_u64()
-                .is_some_and(|i| self.verified_reads.contains(&i))
-                && !visible
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .any(|s| s["index"] == source["index"])
-        })
+        self.blocks
+            .iter()
+            .chain(self.retained.iter().map(|(_, block)| block))
+            .chain(self.initial.iter().map(|(_, block)| block))
+            .filter_map(|block| block["source_index"].as_u64())
+            .any(|index| {
+                // Delivery is independent of the full-document coverage claim.
+                // A partial but verified read can also be omitted while tool
+                // schemas reserve space, and must remain eligible for the one
+                // existing answer-window retry.
+                self.verified_reads.contains(&index)
+                    && !visible
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .any(|s| s["index"] == index)
+            })
+    }
+    pub(super) fn retain_initial_preview(&mut self, visible: &Value) {
+        self.initial.retain(|(index, _)| {
+            visible
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|source| source["index"] == *index)
+        });
     }
     pub(super) fn omitted_explicit_reads(&self, visible: &Value) -> Vec<Value> {
         self.blocks
@@ -654,7 +666,11 @@ impl Evidence {
     }
     fn block(source: &Value, text: &str, canonical: &Value) -> Value {
         let mut note = if source["ocr"] == true {
+            if source["evidence_kind"] == "indexed_chunk" {
+                "Текст распознан OCR: возможны ошибки знаков, чисел и структуры таблицы.\n"
+            } else {
             "Текст получен OCR: возможны ошибки знаков, чисел и структуры таблицы. Для точных выводов проверь оригинал.\n"
+            }
         } else {
             ""
         }.to_owned();
@@ -1282,7 +1298,10 @@ impl Evidence {
                     })
                 })
                 .unwrap_or_else(|| name.into());
-            let header_label = if source["doc_id"].is_string() {
+            let header_label = if source["evidence_kind"] == "indexed_workbook_row" {
+                // Same-named books must remain distinguishable in the model's text.
+                label.clone()
+            } else if source["doc_id"].is_string() {
                 format!(
                     "{}{}",
                     name.rsplit(['/', '\\']).next().unwrap_or(name),

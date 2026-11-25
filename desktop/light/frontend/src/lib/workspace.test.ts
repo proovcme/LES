@@ -30,12 +30,12 @@ beforeEach(() => {
 });
 afterEach(() => { workspace.dispose(); localStorage.removeItem('les.retrieval-mode'); vi.unstubAllGlobals(); });
 
-it('searches and reads within the saved scope even with an old search preference', async () => {
+it('answers from the index within the saved scope even with an old search preference', async () => {
   await workspace.initialize(); workspace.text = 'Вопрос';
   await workspace.send(); await workspace.persist();
   const call = vi.mocked(fetch).mock.calls.find(([path]) => path === '/api/chat/stream')!;
   const body = JSON.parse(String(call[1]!.body));
-  expect(body.scope.dataset_ids).toEqual(['demo']); expect(body.retrieval_mode).toBe('hybrid');
+  expect(body.scope.dataset_ids).toEqual(['demo']); expect(body.retrieval_mode).toBe('indexed');
   expect(body.mode).toBe('search');
   expect(body).not.toHaveProperty('reranker_enabled');
   expect(body.session_id).toBe(sid); expect(body).not.toHaveProperty('provider_config');

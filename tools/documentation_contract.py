@@ -21,8 +21,10 @@ CANONICAL_PATHS = (
     "docs/RELEASE_LEDGER.md",
     "docs/RELEASE_PROCEDURE.md",
     "docs/LIGHT_ARCHITECTURE.md",
+    "docs/SEPARATION.md",
+    "docs/public/developer-guide.md",
 )
-ENTRY_PATHS = ("README.md", "docs/public/les-light/README.md", "docs/public/les-light/USER_GUIDE.md")
+ENTRY_PATHS = ("README.md", "README.en.md", "USER_GUIDE.md", "docs/public/les-light/README.md", "docs/public/les-light/USER_GUIDE.md")
 ROADMAP_LINE_LIMIT = 300
 _LINK_RE = re.compile(r"(?<!!)\[[^\]]+\]\(([^)]+)\)")
 _FENCE_RE = re.compile(r"^\s*(```|~~~)")

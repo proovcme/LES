@@ -208,7 +208,6 @@ pub(super) fn admit(request: &Value) -> Result<()> {
 fn prepare_sync(context: &Context, mut request: Value, caller: Option<&str>) -> Result<Prepared> {
     let database = &context.database;
     let execution = answer_execution(context)?;
-    let connection = resolve_answer(context, &execution)?;
     let attachment_owner = caller.map(|v| les_core::sha256_hex(v.as_bytes()));
     let sid = request["session_id"].as_str().unwrap_or("").to_owned();
     let session = if sid.is_empty() {
@@ -314,6 +313,7 @@ fn prepare_sync(context: &Context, mut request: Value, caller: Option<&str>) -> 
     if let Some(tag) = &egress_tag {
         les_core::chat_request::egress::history(database, &sid, &history, tag)?;
     }
+    let connection = resolve_answer(context, &execution)?;
     let mut dialogue = Vec::new();
     for row in history.as_array().into_iter().flatten() {
         for (field, role) in [("question", "user"), ("answer", "assistant")] {

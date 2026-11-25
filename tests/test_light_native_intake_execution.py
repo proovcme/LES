@@ -197,8 +197,10 @@ def test_manual_attach_keeps_the_receipt_of_an_existing_automatic_watch_job(tmp_
 @pytest.mark.parametrize('storage',['server','edge'])
 @pytest.mark.parametrize('fresh',[False,True])
 def test_cold_native_intake_model_guard_pdf_and_owner_death(tmp_path,storage,fresh):
-    program=os.getenv('LES_TEST_NATIVE_API');qdrant=os.getenv('LES_TEST_NATIVE_QDRANT')
-    if not program or not qdrant or not os.getenv('LES_CORE_LIBRARY'):pytest.skip('Build native intake assets')
+    program = os.getenv('LES_TEST_EDGE_API' if storage == 'edge' else 'LES_TEST_NATIVE_API')
+    qdrant = os.getenv('LES_TEST_NATIVE_QDRANT')
+    if not program or (storage == 'server' and not qdrant) or not os.getenv('LES_CORE_LIBRARY'):
+        pytest.skip('Build native intake assets for the selected storage')
     if storage=='edge' and not fresh and not os.getenv('LES_TEST_EDGE_VECTOR'):pytest.skip('Build native vector importer')
     import pypdfium2_raw
     state=tmp_path/'state';database=state/'data/meta.db';database.parent.mkdir(parents=True)
@@ -221,7 +223,8 @@ def test_cold_native_intake_model_guard_pdf_and_owner_death(tmp_path,storage,fre
     embeddings=NativeBatchEmbeddings(database);api=None
     revision=embeddings.embedder._resolve_embedding_connection().revision_id
     with sqlite3.connect(database) as db:db.execute("DELETE FROM les_model_role_bindings WHERE role='embeddings'")
-    runtime=LightQdrantRuntime(Path(qdrant),state);port=free_port();upstream=free_port();token='8'*64;edge=tmp_path/'edge'
+    runtime = LightQdrantRuntime(Path(qdrant), state) if storage == 'server' else None
+    port=free_port();upstream=free_port();token='8'*64;edge=tmp_path/'edge'
     if storage=='edge' and not fresh:
         from tests.test_light_edge_migration import source as edge_source, complete
         data,manifest,rows=edge_source(tmp_path,count=1)

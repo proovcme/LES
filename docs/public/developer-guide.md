@@ -1,24 +1,43 @@
 # Development
 
-Windows x64, Python 3.13, uv, Rust, Node.js/npm and NSIS. Node is needed for
-building the interface, not for the installed application.
+Prepare the locked environment once. Windows development uses Python 3.13,
+uv, Rust, Make, and Node.js/npm. Installer builds also need NSIS.
 
 ```powershell
 uv sync --frozen --extra mcp
-uv run python tools/build_native_core.py --output native/core
-$env:LES_CORE_LIBRARY = (Resolve-Path native/core/les_core.dll).Path
-make frontend
-make verify
-make test
-make test-mail
-cargo build --locked --release --manifest-path desktop/light/src-tauri/Cargo.toml
+git config --local core.hooksPath .githooks
+make pre-push
 ```
 
-`make verify-fast` checks formatting-independent static contracts and Python
-syntax without built native assets. CI checks Rust formatting separately first.
-Full `make verify` also captures the API contract and collects tests; it needs
-the native core. `make test` validates the static frontend receipt before the
-long suite, so a missing/stale interface fails immediately. The readiness check
-does not install dependencies or rebuild anything.
+| Check | Use |
+| --- | --- |
+| `make pre-push` | Fast, offline checks, documentation, public files, and retrieval contracts. The Git hook runs it for the outgoing commit. |
+| `make verify` | API contract and test collection. Build the native core first. |
+| `make test-frontend` | Frontend types and behavior. |
+| `make test` | Python and native integration checks. Build the frontend first and provide native binaries to exercise the associated scenarios. |
+| `make test-mail` | Offline mail behavior. |
 
-See [release procedure](../RELEASE_PROCEDURE.md) and [architecture](../LIGHT_ARCHITECTURE.md). The installed application needs neither a development environment nor Docker.
+The full [Windows checks](../../.github/workflows/verify.yml) show which assets
+are built and which environment variables point to them. In particular,
+`LES_TEST_NATIVE_API` selects the Windows server build and `LES_TEST_EDGE_API`
+selects the separate Edge build. Use the locked MCP extra for the subprocess
+tests. Presence of a native asset determines whether its integration tests run.
+
+## Push and merge
+
+Start with a branch. The local hook requires a clean checkout of the outgoing
+commit and stops the push if any fast check fails. GitHub then runs Rust
+formatting, Windows behavior, desktop builds, and frontend checks. Merge only
+after the current pull request has a passing **LES merge gate**. A newer push
+cancels the superseded PR run.
+
+The rule for `main` should require a pull request and the **LES merge gate** on
+an up-to-date revision. Native compilation and tests share the Cargo output,
+profile, and path remapping. The package workflow checks the exact installer
+separately. [Release procedure](../RELEASE_PROCEDURE.md).
+
+For retrieval changes, first inspect the actual request to the model. Compare
+the selected dataset, excerpts, request count, source coordinates, and the
+original opened from the answer. Run a new question and a question without
+support as controls. A scripted provider exercises program behavior. Use a
+live model to measure answer quality.

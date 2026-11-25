@@ -1,0 +1,34 @@
+#!/bin/sh
+set -eu
+
+head=
+while read -r local_ref local_oid remote_ref remote_oid; do
+    case "$remote_ref" in
+        refs/heads/*) ;;
+        *) continue ;;
+    esac
+    [ "$local_ref" != '(delete)' ] || continue
+    if [ -z "$head" ]; then
+        head=$(git rev-parse --verify HEAD)
+    fi
+    if [ "$local_oid" != "$head" ]; then
+        printf '%s\n' "Pre-push checks need the outgoing commit checked out: $local_ref ($local_oid)." >&2
+        exit 1
+    fi
+done
+[ -n "$head" ] || exit 0
+
+require_clean_head() {
+    current_head=$(git rev-parse --verify HEAD)
+    changes=$(git status --porcelain --untracked-files=normal)
+    if [ "$current_head" != "$head" ] || [ -n "$changes" ]; then
+        printf '%s\n' 'Pre-push checks need a clean checkout of the commit being pushed.' >&2
+        exit 1
+    fi
+}
+
+require_clean_head
+export PYTHONUTF8=1 UV_FROZEN=1 UV_NO_SYNC=1
+printf '%s\n' "Testing outgoing commit $head"
+make pre-push </dev/null
+require_clean_head
