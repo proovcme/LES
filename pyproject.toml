@@ -43,14 +43,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-mac-mlx = [
-    "mlx-lm>=0.22.0",
-    "mlx-vlm>=0.3.11",
-    "sentence-transformers>=3.0.0",
-    "torch>=2.2.0",
-    "torchvision>=0.17.0",
-    "coremltools>=9.0",
-]
 windows-reranker = [
     "sentence-transformers>=3.0.0",
     "torch>=2.2.0",
@@ -58,12 +50,6 @@ windows-reranker = [
 ]
 parsers = [
     "docling>=2.101.0",
-]
-desktop = [
-    # Тонкий нативный шелл (окно + трей) поверх веб-UI Совушки (tools/les_shell.py).
-    "pywebview>=5.0",
-    "pystray>=0.19",
-    "Pillow>=10.0",
 ]
 mail-pst = [
     # Архивы Outlook .pst (Windows). C-сборка libpff (self-contained, нужен компилятор).
@@ -101,6 +87,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["backend", "proxy", "proxy.routers", "proxy.services", "proxy.storage", "sovushka", "tools"]
-include = ["mlx_host.py", "lemonade_host.py", "proxy_server.py", "sovushka_ng.py"]
+include = ["lemonade_host.py", "proxy_server.py", "sovushka_ng.py"]
 
 [tool.uv]

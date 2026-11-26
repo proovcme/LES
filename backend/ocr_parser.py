@@ -4,8 +4,6 @@ Explicit legacy backends remain available through RAG_OCR_BACKEND. Failures
 raise exceptions and must never become searchable document content.
 """
 import os
-import sys
-import gc
 import base64
 import logging
 from pathlib import Path
@@ -38,95 +36,6 @@ def render_pdf_to_images(pdf_path: Path, dpi: int = 150) -> List["PIL.Image.Imag
         doc.close()
     logger.info(f"[OCR] Успешно отрендерено страниц: {len(images)}")
     return images
-
-
-class MLXVisualOCRParser:
-    def __init__(self, model_id: str = "mlx-community/GLM-OCR-4bit"):
-        self.model_id = model_id
-        self.model = None
-        self.processor = None
-
-    def load_model(self) -> None:
-        """Lazy loading of the MLX GLM-OCR model and processor."""
-        if self.model is not None and self.processor is not None:
-            return
-
-        logger.info(f"[OCR] Загрузка модели MLX GLM-OCR: {self.model_id}")
-        try:
-            from mlx_vlm import load
-            self.model, self.processor = load(self.model_id)
-            logger.info("[OCR] Модель успешно загружена")
-        except Exception as e:
-            logger.error(f"[OCR] Ошибка загрузки модели {self.model_id}: {e}", exc_info=True)
-            raise
-
-    def unload_model(self) -> None:
-        """Unload model from memory and clean Metal device caches."""
-        if self.model is None and self.processor is None:
-            return
-
-        logger.info(f"[OCR] Выгрузка модели MLX GLM-OCR {self.model_id}")
-        self.model = None
-        self.processor = None
-
-        # Explicitly run GC
-        gc.collect()
-
-        # Clean Metal command queue / memory allocator cache
-        try:
-            import mlx.core as mx
-            mx.metal.clear_cache()
-            logger.info("[OCR] Кэш Metal успешно очищен")
-        except Exception as e:
-            logger.warning(f"[OCR] Не удалось очистить кэш Metal: {e}")
-
-    def pdf_to_images(self, pdf_path: Path, dpi: int = 150) -> List["PIL.Image.Image"]:
-        """Convert PDF pages to PIL Images using pypdfium2."""
-        return render_pdf_to_images(pdf_path, dpi=dpi)
-
-    def ocr_page(self, image: "PIL.Image.Image", prompt: str = "Text Recognition:") -> str:
-        """Run OCR on a single PIL Image."""
-        self.load_model()
-        from mlx_vlm import generate
-        from mlx_vlm.prompt_utils import apply_chat_template
-
-        try:
-            formatted_prompt = apply_chat_template(
-                self.processor, self.model.config, prompt, num_images=1
-            )
-            res = generate(
-                self.model,
-                self.processor,
-                prompt=formatted_prompt,
-                image=image,
-                temperature=0.0,
-                repetition_penalty=1.2,
-                repetition_context_size=64,
-                max_tokens=1024
-            )
-            if hasattr(res, "text"):
-                return res.text or ""
-            return res or ""
-        except Exception as e:
-            logger.error(f"[OCR] Ошибка генерации OCR для страницы: {e}", exc_info=True)
-            raise RuntimeError('Не удалось распознать страницу через MLX') from e
-
-    def parse_pdf(self, pdf_path: Path, prompt: str = "Text Recognition:", dpi: int = 150) -> str:
-        """Perform OCR on all pages of a PDF document and return unified Markdown."""
-        try:
-            images = self.pdf_to_images(pdf_path, dpi=dpi)
-            if not images:
-                return ""
-
-            pages_md = []
-            for idx, img in enumerate(images, 1):
-                logger.info(f"[OCR] Обработка страницы {idx}/{len(images)} ({pdf_path.name})")
-                page_text = self.ocr_page(img, prompt=prompt)
-                pages_md.append(f"## Стр. {idx}\n\n{page_text}")
-
-            return "\n\n".join(pages_md)
-        finally:
-            self.unload_model()
 
 
 def _pil_to_png_b64(image) -> str:
@@ -269,19 +178,15 @@ class TesseractOCRParser:
 
 def make_ocr_parser(model_id: Optional[str] = None):
     """Windows OCR by default; other backends require explicit configuration."""
-    backend = os.getenv("RAG_OCR_BACKEND", "macos" if sys.platform == "darwin" else "windows").strip().lower()
-    if backend in {"macos", "vision"}:
-        from backend.macos_ocr import MacOSOCRParser
-        return MacOSOCRParser()
-    if backend == 'windows':
+    backend = os.getenv("RAG_OCR_BACKEND", "windows").strip().lower()
+    if backend in {"macos", "vision", "mlx", "mlx-vlm"}:
+        raise ValueError("This OCR backend has been retired. Select Windows OCR, Tesseract or configure a remote vision API.")
+    if backend == "windows":
         from backend.windows_ocr import WindowsOCRParser
         return WindowsOCRParser()
     model = model_id or os.getenv("RAG_OCR_MODEL", DEFAULT_OCR_MODEL)
     if backend in ("tesseract", "tess"):
         return TesseractOCRParser()
-    if backend in ("mlx", "mlx-vlm"):
-        # Историческая GLM-OCR модель удалена — для MLX-пути нужна явная MLX-VLM модель.
-        return MLXVisualOCRParser(model_id=model if model != DEFAULT_OCR_MODEL else "mlx-community/GLM-OCR-4bit")
     return OllamaVisualOCRParser(
         model_id=model if model != "mlx-community/GLM-OCR-4bit" else DEFAULT_OCR_MODEL,
         base_url=os.getenv("RAG_OCR_URL", ""),

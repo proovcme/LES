@@ -2,7 +2,6 @@
   "entrypoints": [
     "proxy_server.py",
     "sovushka_ng.py",
-    "mlx_host.py",
     "lemonade_host.py",
     "tools/light_document_worker.py"
   ],
@@ -97,13 +96,11 @@
         "backend/light_qdrant_connection.py",
         "backend/light_qdrant_runtime.py",
         "backend/local_reranker.py",
-        "backend/macos_ocr.py",
         "backend/mail_emlx.py",
         "backend/mail_ingest.py",
         "backend/mail_profile.py",
         "backend/mail_threads.py",
         "backend/metrics_collector.py",
-        "backend/mlx_adapter.py",
         "backend/msg_reader.py",
         "backend/native_core.py",
         "backend/native_document_conversion.py",
@@ -689,7 +686,6 @@
       "inbound": [
         "backend/inference/__init__.py",
         "lemonade_host.py",
-        "mlx_host.py",
         "proxy/routers/chat.py"
       ],
       "lines": 140,
@@ -824,9 +820,7 @@
         "proxy/services/dataset_watch_service.py",
         "proxy/services/light_update_service.py",
         "tests/test_light_launcher.py",
-        "tests/test_light_macos_install.py",
         "tests/test_light_native_runtime.py",
-        "tools/install_light_macos.py",
         "tools/light_launcher.py"
       ],
       "lines": 101,
@@ -900,22 +894,6 @@
         "backend/__init__.py"
       ],
       "path": "backend/local_reranker.py",
-      "status": "PRODUCT_REACHABLE",
-      "windows_runtime_explicit": false
-    },
-    {
-      "inbound": [
-        "backend/ocr_parser.py",
-        "tests/test_light_macos.py"
-      ],
-      "lines": 40,
-      "module": "backend.macos_ocr",
-      "outbound": [
-        "backend/__init__.py",
-        "backend/runtime_paths.py",
-        "backend/windows_ocr.py"
-      ],
-      "path": "backend/macos_ocr.py",
       "status": "PRODUCT_REACHABLE",
       "windows_runtime_explicit": false
     },
@@ -1009,19 +987,6 @@
         "backend/http_client_policy.py"
       ],
       "path": "backend/metrics_collector.py",
-      "status": "PRODUCT_REACHABLE",
-      "windows_runtime_explicit": false
-    },
-    {
-      "inbound": [
-        "mlx_host.py"
-      ],
-      "lines": 489,
-      "module": "backend.mlx_adapter",
-      "outbound": [
-        "backend/__init__.py"
-      ],
-      "path": "backend/mlx_adapter.py",
       "status": "PRODUCT_REACHABLE",
       "windows_runtime_explicit": false
     },
@@ -1278,14 +1243,12 @@
         "proxy/services/kac_pdf_service.py",
         "proxy/services/title_block_extract_service.py",
         "proxy/services/verify_service.py",
-        "tests/test_light_macos.py",
         "tests/test_light_ocr.py"
       ],
-      "lines": 288,
+      "lines": 193,
       "module": "backend.ocr_parser",
       "outbound": [
         "backend/__init__.py",
-        "backend/macos_ocr.py",
         "backend/runtime_paths.py",
         "backend/windows_ocr.py"
       ],
@@ -1662,7 +1625,6 @@
         "backend/format_process.py",
         "backend/native_parquet.py",
         "backend/qdrant_support.py",
-        "mlx_host.py",
         "proxy/app.py",
         "proxy/routers/chat.py",
         "proxy/routers/chat_history.py",
@@ -1883,7 +1845,6 @@
     },
     {
       "inbound": [
-        "backend/macos_ocr.py",
         "backend/ocr_parser.py",
         "backend/pdf_reader.py",
         "backend/qdrant_support.py",
@@ -2101,7 +2062,6 @@
     {
       "inbound": [
         "backend/converter.py",
-        "backend/macos_ocr.py",
         "backend/ocr_parser.py",
         "tests/test_light_native_document.py",
         "tests/test_light_native_preparation.py",
@@ -2192,20 +2152,6 @@
         "backend/inference/validator.py"
       ],
       "path": "lemonade_host.py",
-      "status": "PRODUCT_REACHABLE",
-      "windows_runtime_explicit": true
-    },
-    {
-      "inbound": [],
-      "lines": 2216,
-      "module": "mlx_host",
-      "outbound": [
-        "backend/inference/validator.py",
-        "backend/mlx_adapter.py",
-        "backend/rag_config.py",
-        "proxy/local_model_registry.py"
-      ],
-      "path": "mlx_host.py",
       "status": "PRODUCT_REACHABLE",
       "windows_runtime_explicit": true
     },
@@ -2633,7 +2579,6 @@
     },
     {
       "inbound": [
-        "mlx_host.py",
         "proxy/app.py",
         "proxy/config.py",
         "proxy/routers/chat.py",
@@ -8279,7 +8224,7 @@
         "tests/test_software_versions.py",
         "tools/build_tauri_app.py"
       ],
-      "lines": 339,
+      "lines": 338,
       "module": "proxy.services.version_service",
       "outbound": [
         "proxy/__init__.py",
@@ -10959,7 +10904,7 @@
     },
     {
       "inbound": [],
-      "lines": 92,
+      "lines": 105,
       "module": "tests.test_light_launcher",
       "outbound": [
         "backend/light_processes.py",
@@ -11009,32 +10954,6 @@
         "tools/light_launcher.py"
       ],
       "path": "tests/test_light_lifecycle.py",
-      "status": "TEST_OR_TOOL_ONLY",
-      "windows_runtime_explicit": false
-    },
-    {
-      "inbound": [],
-      "lines": 76,
-      "module": "tests.test_light_macos",
-      "outbound": [
-        "backend/macos_ocr.py",
-        "backend/ocr_parser.py",
-        "tools/light_launcher.py",
-        "tools/light_runtime_assets.py"
-      ],
-      "path": "tests/test_light_macos.py",
-      "status": "TEST_OR_TOOL_ONLY",
-      "windows_runtime_explicit": false
-    },
-    {
-      "inbound": [],
-      "lines": 122,
-      "module": "tests.test_light_macos_install",
-      "outbound": [
-        "backend/light_processes.py",
-        "tools/install_light_macos.py"
-      ],
-      "path": "tests/test_light_macos_install.py",
       "status": "TEST_OR_TOOL_ONLY",
       "windows_runtime_explicit": false
     },
@@ -12210,7 +12129,7 @@
     },
     {
       "inbound": [],
-      "lines": 63,
+      "lines": 62,
       "module": "tests.test_light_ocr",
       "outbound": [
         "backend/converter.py",
@@ -13256,8 +13175,6 @@
         "tools/build_light_frontend.py",
         "tools/build_light_installers.py",
         "tools/build_light_package.py",
-        "tools/build_macos_app.py",
-        "tools/build_macos_dmg.py",
         "tools/build_native_api.py",
         "tools/build_native_core.py",
         "tools/build_native_runtime.py",
@@ -13285,7 +13202,6 @@
         "tools/generate_native_unicode.py",
         "tools/inspect_chat_turn.py",
         "tools/install_les.py",
-        "tools/install_light_macos.py",
         "tools/les_doctor.py",
         "tools/les_runtime_control.py",
         "tools/lesctl.py",
@@ -13397,8 +13313,7 @@
       "inbound": [
         "tests/test_light_package.py",
         "tests/test_light_skill_python_asset.py",
-        "tools/build_light_installers.py",
-        "tools/install_light_macos.py"
+        "tools/build_light_installers.py"
       ],
       "lines": 382,
       "module": "tools.build_light_package",
@@ -13421,35 +13336,6 @@
     },
     {
       "inbound": [
-        "tools/build_macos_dmg.py"
-      ],
-      "lines": 72,
-      "module": "tools.build_macos_app",
-      "outbound": [
-        "tools/__init__.py",
-        "tools/build_release_artifacts.py",
-        "tools/build_tauri_app.py"
-      ],
-      "path": "tools/build_macos_app.py",
-      "status": "TEST_OR_TOOL_ONLY",
-      "windows_runtime_explicit": false
-    },
-    {
-      "inbound": [
-        "tools/build_tauri_app.py"
-      ],
-      "lines": 77,
-      "module": "tools.build_macos_dmg",
-      "outbound": [
-        "tools/__init__.py",
-        "tools/build_macos_app.py"
-      ],
-      "path": "tools/build_macos_dmg.py",
-      "status": "TEST_OR_TOOL_ONLY",
-      "windows_runtime_explicit": false
-    },
-    {
-      "inbound": [
         "tools/build_light_package.py"
       ],
       "lines": 27,
@@ -13464,8 +13350,7 @@
     },
     {
       "inbound": [
-        "tests/test_light_core_package.py",
-        "tools/install_light_macos.py"
+        "tests/test_light_core_package.py"
       ],
       "lines": 59,
       "module": "tools.build_native_core",
@@ -13515,7 +13400,6 @@
     {
       "inbound": [
         "tools/build_light_package.py",
-        "tools/build_macos_app.py",
         "tools/build_tauri_app.py"
       ],
       "lines": 128,
@@ -13530,15 +13414,13 @@
     {
       "inbound": [
         "tests/test_software_versions.py",
-        "tools/build_light_package.py",
-        "tools/build_macos_app.py"
+        "tools/build_light_package.py"
       ],
-      "lines": 593,
+      "lines": 559,
       "module": "tools.build_tauri_app",
       "outbound": [
         "proxy/services/version_service.py",
         "tools/__init__.py",
-        "tools/build_macos_dmg.py",
         "tools/build_release_artifacts.py",
         "tools/windows_prebundle_smoke.py"
       ],
@@ -13550,7 +13432,7 @@
       "inbound": [
         "tests/test_code_runtime_map.py"
       ],
-      "lines": 425,
+      "lines": 424,
       "module": "tools.code_runtime_map",
       "outbound": [
         "tools/__init__.py"
@@ -13853,26 +13735,9 @@
     },
     {
       "inbound": [
-        "tests/test_light_macos_install.py"
-      ],
-      "lines": 123,
-      "module": "tools.install_light_macos",
-      "outbound": [
-        "backend/light_processes.py",
-        "tools/__init__.py",
-        "tools/build_light_package.py",
-        "tools/build_native_core.py",
-        "tools/light_runtime_assets.py"
-      ],
-      "path": "tools/install_light_macos.py",
-      "status": "TEST_OR_TOOL_ONLY",
-      "windows_runtime_explicit": false
-    },
-    {
-      "inbound": [
         "tools/lesctl.py"
       ],
-      "lines": 393,
+      "lines": 341,
       "module": "tools.les_doctor",
       "outbound": [
         "backend/rag_config.py",
@@ -13890,7 +13755,7 @@
         "tools/les_doctor.py",
         "tools/lesctl.py"
       ],
-      "lines": 913,
+      "lines": 902,
       "module": "tools.les_runtime_control",
       "outbound": [
         "tools/__init__.py"
@@ -13959,11 +13824,10 @@
         "tests/test_light_frontend_assets.py",
         "tests/test_light_launcher.py",
         "tests/test_light_lifecycle.py",
-        "tests/test_light_macos.py",
         "tools/light_model_journey.py",
         "tools/light_state_journey.py"
       ],
-      "lines": 311,
+      "lines": 309,
       "module": "tools.light_launcher",
       "outbound": [
         "backend/light_health_monitor.py",
@@ -14044,12 +13908,10 @@
     },
     {
       "inbound": [
-        "tests/test_light_macos.py",
         "tests/test_light_runtime_assets.py",
-        "tools/build_light_package.py",
-        "tools/install_light_macos.py"
+        "tools/build_light_package.py"
       ],
-      "lines": 101,
+      "lines": 71,
       "module": "tools.light_runtime_assets",
       "outbound": [
         "tools/__init__.py"
@@ -14561,12 +14423,6 @@
       "source": "proxy/routers/documents.py"
     },
     {
-      "handler": "embeddings_ollama",
-      "method": "POST",
-      "path": "/api/embeddings",
-      "source": "mlx_host.py"
-    },
-    {
       "handler": "external_radar_summary",
       "method": "GET",
       "path": "/api/external-radar/summary",
@@ -14651,22 +14507,10 @@
       "source": "proxy/routers/forms.py"
     },
     {
-      "handler": "generate_ollama",
-      "method": "POST",
-      "path": "/api/generate",
-      "source": "mlx_host.py"
-    },
-    {
       "handler": "health",
       "method": "GET",
       "path": "/api/health",
       "source": "lemonade_host.py"
-    },
-    {
-      "handler": "health",
-      "method": "GET",
-      "path": "/api/health",
-      "source": "mlx_host.py"
     },
     {
       "handler": "health",
@@ -14679,12 +14523,6 @@
       "method": "GET",
       "path": "/api/host_memory",
       "source": "lemonade_host.py"
-    },
-    {
-      "handler": "host_memory",
-      "method": "GET",
-      "path": "/api/host_memory",
-      "source": "mlx_host.py"
     },
     {
       "handler": "get_indexing_mode",
@@ -15183,12 +15021,6 @@
       "method": "GET",
       "path": "/api/ps",
       "source": "lemonade_host.py"
-    },
-    {
-      "handler": "api_ps",
-      "method": "GET",
-      "path": "/api/ps",
-      "source": "mlx_host.py"
     },
     {
       "handler": "get_advanced_policy",
@@ -15803,12 +15635,6 @@
       "source": "lemonade_host.py"
     },
     {
-      "handler": "switch_model",
-      "method": "POST",
-      "path": "/api/switch_model",
-      "source": "mlx_host.py"
-    },
-    {
       "handler": "tasks_list",
       "method": "GET",
       "path": "/api/tasks",
@@ -15863,18 +15689,6 @@
       "source": "lemonade_host.py"
     },
     {
-      "handler": "unload_all",
-      "method": "POST",
-      "path": "/api/unload_all",
-      "source": "mlx_host.py"
-    },
-    {
-      "handler": "unload_val",
-      "method": "POST",
-      "path": "/api/unload_val",
-      "source": "mlx_host.py"
-    },
-    {
       "handler": "check",
       "method": "GET",
       "path": "/api/update/check",
@@ -15897,12 +15711,6 @@
       "method": "POST",
       "path": "/api/validate",
       "source": "lemonade_host.py"
-    },
-    {
-      "handler": "validate_answer",
-      "method": "POST",
-      "path": "/api/validate",
-      "source": "mlx_host.py"
     },
     {
       "handler": "verify_extract",
@@ -16043,52 +15851,28 @@
       "source": "lemonade_host.py"
     },
     {
-      "handler": "chat_completions",
-      "method": "POST",
-      "path": "/v1/chat/completions",
-      "source": "mlx_host.py"
-    },
-    {
       "handler": "embeddings",
       "method": "POST",
       "path": "/v1/embeddings",
       "source": "lemonade_host.py"
     },
     {
-      "handler": "embeddings_openai",
-      "method": "POST",
-      "path": "/v1/embeddings",
-      "source": "mlx_host.py"
-    },
-    {
-      "handler": "list_models",
-      "method": "GET",
-      "path": "/v1/models",
-      "source": "mlx_host.py"
-    },
-    {
       "handler": "rerank_endpoint",
       "method": "POST",
       "path": "/v1/rerank",
       "source": "lemonade_host.py"
-    },
-    {
-      "handler": "rerank_endpoint",
-      "method": "POST",
-      "path": "/v1/rerank",
-      "source": "mlx_host.py"
     }
   ],
   "schema": "les.code-runtime-map.v1",
   "summary": {
     "dormant_candidates": 0,
     "parse_warnings": 0,
-    "product_reachable": 417,
-    "registered_api_routes": 298,
+    "product_reachable": 414,
+    "registered_api_routes": 285,
     "runtime_support": 5,
-    "test_or_tool_only": 301,
-    "tracked_python_files": 723,
-    "tracked_python_lines": 172495
+    "test_or_tool_only": 296,
+    "tracked_python_files": 715,
+    "tracked_python_lines": 169066
   },
   "warnings": []
 }

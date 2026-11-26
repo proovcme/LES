@@ -289,8 +289,6 @@ def run(args):
 
 
 def default_state() -> Path:
-    if sys.platform == "darwin":
-        return Path.home() / "Library/Application Support/LES Light"
     return Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "LES Light"
 
 

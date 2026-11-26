@@ -10,7 +10,6 @@ from backend.windows_ocr import WindowsOCRParser
 
 
 def test_default_ocr_uses_windows_without_hidden_model(monkeypatch):
-    monkeypatch.setattr(ocr_parser.sys, 'platform', 'win32')
     monkeypatch.delenv('RAG_OCR_BACKEND', raising=False)
     assert isinstance(ocr_parser.make_ocr_parser(), WindowsOCRParser)
 

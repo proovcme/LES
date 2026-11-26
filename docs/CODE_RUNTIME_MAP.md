@@ -19,13 +19,13 @@
 
 | Метрика | Значение |
 | --- | --- |
-| Python-файлов под git | 723 |
-| Строк Python | 172495 |
-| PRODUCT_REACHABLE | 417 |
+| Python-файлов под git | 715 |
+| Строк Python | 169066 |
+| PRODUCT_REACHABLE | 414 |
 | RUNTIME_SUPPORT | 5 |
-| TEST_OR_TOOL_ONLY | 301 |
+| TEST_OR_TOOL_ONLY | 296 |
 | DORMANT_CANDIDATE | 0 |
-| Зарегистрированных API-маршрутов | 298 |
+| Зарегистрированных API-маршрутов | 285 |
 | Ошибок разбора | 0 |
 
 ## Крупнейшие продуктовые модули
@@ -33,7 +33,6 @@
 | Файл | Строк | Прямых потребителей |
 | --- | --- | --- |
 | sovushka/styles.py | 3264 | 3 |
-| mlx_host.py | 2216 | 0 |
 | sovushka/pages/chat.py | 2196 | 2 |
 | proxy/services/chat_evidence_application_service.py | 2122 | 7 |
 | proxy/services/dataset_memory_service.py | 1811 | 10 |
@@ -54,14 +53,15 @@
 | sovushka/components/header.py | 1003 | 2 |
 | proxy/routers/runtime.py | 922 | 3 |
 | proxy/services/project_pdf_extract_service.py | 915 | 4 |
-| tools/les_runtime_control.py | 913 | 4 |
 | proxy/services/document_explorer_service.py | 904 | 5 |
 | proxy/services/mail_registry_service.py | 903 | 6 |
+| tools/les_runtime_control.py | 902 | 4 |
 | proxy/services/project_document_registry_service.py | 853 | 3 |
 | backend/parquet_writer.py | 834 | 6 |
 | proxy/services/notebook_study_service.py | 833 | 3 |
 | backend/mail_profile.py | 825 | 5 |
 | proxy/services/chat_request_service.py | 800 | 5 |
+| backend/pst_reader.py | 790 | 1 |
 
 ## Чат Light: фактические потребители
 

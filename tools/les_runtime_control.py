@@ -31,7 +31,7 @@ ROOT_PLACEHOLDER = "__LES_ROOT__"
 
 # Анти-дрейф (AUDIT_CORE §0/§3.1): рантайм-хоум для путей в плисте берём из LES_HOME, а не из
 # папки скрипта (ROOT) — иначе start/restart из dev-клона переустанавливают плист с dev-путями →
-# MLX/эмбеддер мрут. И существующий рабочий плист НЕ перезаписываем (только если нет / по флагу).
+# службы останавливаются. И существующий рабочий плист НЕ перезаписываем (только если нет / по флагу).
 LES_HOME = (os.getenv("LES_HOME") or os.getenv("LES_RUNTIME_HOME") or "").strip()
 _PLIST_FORCE = os.getenv("LES_PLIST_FORCE", "").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -105,16 +105,6 @@ SERVICES: dict[str, ServiceDef] = {
         health_url="http://127.0.0.1:6333/collections",
         process_tokens=("qdrant",),
     ),
-    "mlx": ServiceDef(
-        key="mlx",
-        title="MLX Host",
-        label="me.ovc.les.mlx",
-        repo_plist="mlx_launchd.plist",
-        agent_plist="me.ovc.les.mlx.plist",
-        port=8080,
-        health_url="http://127.0.0.1:8080/api/health",
-        process_tokens=("mlx_host.py",),
-    ),
     "proxy": ServiceDef(
         key="proxy",
         title="les-proxy",
@@ -145,8 +135,8 @@ SERVICES: dict[str, ServiceDef] = {
     ),
 }
 
-START_ORDER = ("qdrant", "mlx", "proxy", "indexer")
-STOP_ORDER = ("indexer", "proxy", "mlx", "qdrant")
+START_ORDER = ("qdrant", "proxy", "indexer")
+STOP_ORDER = ("indexer", "proxy", "qdrant")
 RUNTIME_PROFILES = ("full", "backend", "ui")
 PROTECTED_PROCESS_NAMES = {
     "System",
@@ -466,7 +456,7 @@ def _install(service: ServiceDef, *, force: bool | None = None) -> bool:
     dst = _agent_path(service)
     force = _PLIST_FORCE if force is None else force
     # КОРЕНЬ «танцев»: существующий рабочий плист НЕ перезаписываем (иначе start/restart из любого
-    # клона переустанавливает его с чужими путями → MLX/эмбеддер мрут). Только если нет / явный force.
+    # клона переустанавливает его с чужими путями → службы останавливаются). Только если нет / явный force.
     if dst.exists() and not force:
         return False
     home = _resolve_home(service)
@@ -640,8 +630,7 @@ def restart_service(service_key: str, wait: bool = True) -> ActionResult:
 
     # launchctl kickstart restarts the old in-memory job definition; it does not
     # reread an already bootstrapped plist. A forced config update therefore needs
-    # bootout -> bootstrap, otherwise EMBED_* changes look applied on disk but the
-    # MLX host continues to run its previous model.
+    # bootout -> bootstrap so the restarted service reads the changed definition.
     if plist_changed and _loaded(service):
         stopped = stop_service(service_key, wait=True, terminate_listener=True)
         if not stopped.ok:
@@ -715,7 +704,7 @@ def wait_for(service_key: str, timeout: int = 45) -> ServiceStatus:
 
 
 def start_core(include_ui: bool = False, include_indexer: bool = True) -> list[ActionResult]:
-    order = list(START_ORDER if include_indexer else ("qdrant", "mlx", "proxy"))
+    order = list(START_ORDER if include_indexer else ("qdrant", "proxy"))
     if include_ui:
         order.append("ui")
     return [start_service(key) for key in order]
@@ -739,7 +728,7 @@ def profile_services(
         return ("ui",)
     services: tuple[str, ...] = ("proxy",)
     if include_local_dependencies:
-        services = ("qdrant", "mlx", "proxy", "indexer")
+        services = START_ORDER
     if normalized == "full":
         services = (*services, "ui")
     return services

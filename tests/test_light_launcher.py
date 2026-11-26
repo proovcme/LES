@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -90,3 +91,15 @@ def test_abrupt_launcher_death_terminates_owned_child():
             parent.wait(timeout=5)
         if child_pid and psutil.pid_exists(child_pid):
             psutil.Process(child_pid).kill()
+
+
+def test_reopen_refuses_foreign_browser_url(tmp_path, monkeypatch):
+    from tools import light_launcher
+
+    status = {
+        "phase": "ready", "instance_id": "own",
+        "api_url": "http://127.0.0.1:1234", "ui_url": "https://example.com/classic",
+    }
+    (tmp_path / "launcher-status.json").write_text(json.dumps(status), encoding="utf-8")
+    monkeypatch.setattr(light_launcher.webbrowser, "open", lambda url: pytest.fail("must not open foreign URL"))
+    assert not light_launcher.reopen_owned_browser(tmp_path)

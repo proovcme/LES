@@ -245,7 +245,7 @@ class Reranker:
 # ─────────────────────────────────────────
 # ЭНДПОИНТ ДЛЯ MLX HOST (/api/rerank)
 # ─────────────────────────────────────────
-# Вставить в mlx_host.py:
+# Пример реализации для совместимого сервиса:
 #
 # @app.post("/api/rerank")
 # async def rerank_endpoint(request: Request):
@@ -313,7 +313,7 @@ class CrossEncoderReranker:
     def __init__(
         self,
         mlx_url: str = "http://127.0.0.1:8080",
-        model: str = "",          # модель задаётся на стороне mlx_host (RERANK_MODEL)
+        model: str = "",          # модель задаётся на стороне сервиса
         mode: str = "batch",      # совместимость сигнатуры; не используется
         timeout: float = 30.0,
         max_chunk_len: int = 1600,

@@ -12,7 +12,6 @@
     "LICENSE",
     "README.md",
     "lemonade_host.py",
-    "mlx_host.py",
     "proxy_server.py",
     "pyproject.toml",
     "sovushka_ng.py",
