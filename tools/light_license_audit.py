@@ -11,11 +11,13 @@ import subprocess
 BLOCKED = {'pymupdf', 'pymupdf4llm', 'pymupdf-layout', 'extract-msg', 'pcodedmp', 'oletools'}
 
 
-def collect(site: Path, output: Path):
+def collect(site: Path, output: Path, *, only: str | None = None):
     distributions = sorted(metadata.distributions(path=[str(site)]), key=lambda d: d.metadata['Name'].lower())
     inventory = []
     for distribution in distributions:
         name, version = distribution.metadata['Name'], distribution.version
+        if only is not None and name.lower() != only:
+            continue
         if name.lower() in BLOCKED:
             raise ValueError(f'Retired dependency in release: {name}')
         destination = output / re.sub(r'[^a-zA-Z0-9_.-]', '_', name)
@@ -24,7 +26,7 @@ def collect(site: Path, output: Path):
         copied = []
         for file in distribution.files or []:
             parts = Path(str(file)).parts
-            if not any(re.search(r'(?i)(licen[sc]e|copying|notice|copyright|authors)([._-]|$)', part) for part in parts):
+            if not any(re.search(r'(?i)(licen[sc]es?|copying|notice|copyright|authors)([._-]|$)', part) for part in parts):
                 continue
             source = Path(distribution.locate_file(file)).resolve()
             if not source.is_relative_to(site.resolve()) or not source.is_file():
@@ -40,20 +42,28 @@ def collect(site: Path, output: Path):
                           'license': str(meta.get('License-Expression') or meta.get('License') or ''),
                           'license_classifiers': classifiers, 'notices': copied,
                           'source': f'https://pypi.org/project/{name}/{version}/#files'})
+    if only is not None:
+        if not inventory or not inventory[0]['notices']:
+            raise ValueError(f'Missing third-party notices for {only}')
+        return inventory
     (output / 'python-packages.json').write_text(json.dumps(inventory, ensure_ascii=False, indent=2), encoding='utf-8')
     (output / 'README.txt').write_text(
         'Third-party components retain their original licenses; the LES license does not replace them.\n'
         'Python source distributions: exact version links in python-packages.json.\n'
-        'Pure-Python MPL components are supplied in source form in native/skill-python/Lib/site-packages.\n'
+        'Pure-Python MPL components are supplied in source form in Lib/site-packages of the optional Python component.\n'
         'Native component sources, including orjson, are available through those versioned source links.\n', encoding='utf-8')
     return inventory
 
 
-def stage_notices(root: Path, payload: Path):
-    output = payload / 'THIRD_PARTY_NOTICES'
-    skill = payload / 'native/skill-python'
+def stage_skill_notices(skill: Path):
+    output = skill / 'THIRD_PARTY_NOTICES'
+    output.mkdir()
     collect(skill / 'Lib/site-packages', output / 'python')
     shutil.copy2(skill / 'LICENSE.txt', output / 'Python-LICENSE.txt')
+
+
+def stage_notices(root: Path, payload: Path):
+    output = payload / 'THIRD_PARTY_NOTICES'
     shutil.copytree(root / 'licenses', output / 'native', dirs_exist_ok=True)
     packages, seen = [], set()
     manifests = ['desktop/light/src-tauri/Cargo.toml', 'core/Cargo.toml']

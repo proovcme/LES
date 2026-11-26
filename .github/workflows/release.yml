@@ -55,7 +55,8 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           $env:LES_TEST_NATIVE_API = (Resolve-Path dist/payload/native/api/les-api.exe).Path
           $env:LES_TEST_NATIVE_QDRANT = (Resolve-Path dist/payload/native/qdrant/qdrant.exe).Path
-          $env:LES_TEST_SKILL_PYTHON = (Resolve-Path dist/payload/native/skill-python/python.exe).Path
+          $build = (Get-Content config/version.json -Raw | ConvertFrom-Json).build_number
+          $env:LES_TEST_OPTIONAL_SKILL_ARCHIVE = (Resolve-Path "dist/payload-assets/LES-Skill-Python-$build.zip").Path
           uv run python tools/build_native_core.py --output native/core
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           $env:LES_CORE_LIBRARY = (Resolve-Path native/core/les_core.dll).Path
@@ -63,6 +64,8 @@ jobs:
           uv run python -m pytest -q tests/test_light_native_pdf_layout.py
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           uv run python -m pytest -q tests/test_light_native_retrieval_modes.py -k indexed_turn
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          uv run python -m pytest -q tests/test_light_native_chat_turn.py -k "external_python_skill or unapproved_external_skill"
       - name: Build offline and web installers
         shell: pwsh
         run: |

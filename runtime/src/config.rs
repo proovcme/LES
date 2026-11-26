@@ -368,10 +368,12 @@ pub fn child_environment(
             .to_string_lossy()
             .into_owned(),
     ));
-    result.push((
-        "LES_SKILL_PYTHON".into(),
-        config.skill_python.to_string_lossy().into_owned(),
-    ));
+    if !config.skill_python.as_os_str().is_empty() {
+        result.push((
+            "LES_SKILL_PYTHON".into(),
+            config.skill_python.to_string_lossy().into_owned(),
+        ));
+    }
     let embedding = config.state.join("models/embeddings/active.json");
     if config.native_api && embedding.is_file() {
         result.push((

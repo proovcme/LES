@@ -100,3 +100,39 @@ def test_compatibility_bootstrap_uses_the_same_rust_selector_and_refuses_bad_ass
     (target/'python313._pth').write_text('python313.zip\n.\n../runtime\nimport site\n',encoding='utf-8')
     with pytest.raises(service.SkillExecutionError) as fault:service._program()
     assert fault.value.code=='SKILL_RUNTIME_INVALID'
+
+
+def test_windows_payload_pins_separate_python_and_keeps_native_pdfium(tmp_path):
+    from tools.build_light_package import skill_asset_path, stage_pdfium, stage_skill_asset
+    from tools.light_license_audit import stage_skill_notices
+
+    runtime = tmp_path / 'runtime'
+    stage(runtime, source(tmp_path / 'source'))
+    site = runtime / 'Lib/site-packages'
+    pdfium = site / 'pypdfium2_raw/pdfium.dll'
+    pdfium.parent.mkdir()
+    pdfium.write_bytes(b'PDFium from the pinned wheel')
+    distribution = site / 'pypdfium2-5.8.0.dist-info'
+    license_path = distribution / 'licenses/BUILD_LICENSES/pdfium.txt'
+    license_path.parent.mkdir(parents=True)
+    license_path.write_text('PDFium license', encoding='utf-8')
+    (distribution / 'METADATA').write_text('Name: pypdfium2\nVersion: 5.8.0\n', encoding='utf-8')
+    (distribution / 'RECORD').write_text(
+        'pypdfium2-5.8.0.dist-info/licenses/BUILD_LICENSES/pdfium.txt,,\n', encoding='utf-8'
+    )
+
+    payload = tmp_path / 'payload'
+    stage_pdfium(payload, pdfium)
+    stage_skill_notices(runtime)
+    stage_skill_asset(payload, runtime, {'build_number': 955})
+    component = skill_asset_path(payload, 955)
+    descriptor = json.loads((payload / 'native/skill-python-download.json').read_text())
+    assert (payload / 'native/pdf/pdfium.dll').read_bytes() == pdfium.read_bytes()
+    assert list((payload / 'THIRD_PARTY_NOTICES/native/pdfium').rglob('pdfium.txt'))
+    assert not list(payload.rglob('python.exe'))
+    assert not list(payload.rglob('*.zip'))
+    assert descriptor['bytes'] == component.stat().st_size
+    assert descriptor['sha256'] == digest(component)
+    assert descriptor['receipt_sha256'] == digest(runtime / 'skill-python-receipt.json')
+    with ZipFile(component) as archive:
+        assert {'python.exe', 'skill-python-receipt.json', 'THIRD_PARTY_NOTICES/Python-LICENSE.txt'} <= set(archive.namelist())

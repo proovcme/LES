@@ -1,7 +1,7 @@
 """Checklist-review engine (Glorax, Phase 2, T2.1+T2.2) — каркас + presence + calculation.
 
 АРХИТЕКТУРА (implementation_plan.md §2-§4, docs/ALGO-glorax-checklist-review.md): generic-профиль
-``checklist-review`` поверх template'ов ``checklist_template_importer`` — не отдельный rule-engine.
+``checklist-review`` поверх сохранённых шаблонов.
 Инвариант (AGENTS.md, ADR-11): чек-лист задаёт вопрос -> RAG ищет evidence -> код проверяет
 формализуемое -> LLM связывает и объясняет -> инженер принимает решение. Уверенный ``yes/no`` без
 ``document_evidence[].source_ref`` — архитектурный регресс (правило 1, safety-тест; calculation
@@ -257,8 +257,7 @@ def _run_presence(criterion: str, dataset_id: str, *,
 # — нужна транслитерация якоря + сопоставление по ПРЕФИКСУ (не по полному слову): транслитерация
 # неоднозначна на конце слова (падежные окончания, й/ы транслитерируются по-разному в разных схемах:
 # "теплотехническИЙ" может лечь на диск и как "-ii", и как "-iy"), а начало содержательного слова
-# устойчиво почти всегда. Таблица — та же ГОСТ-подобная, что DISCIPLINE_TRANSLIT/_TRANSLIT_MAP в
-# checklist_template_importer.py (независимая копия — модули не должны знать друг о друге).
+# устойчиво почти всегда. Используем ГОСТ-подобную таблицу транслитерации.
 _RU_TRANSLIT_MAP = {
     "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "e",
     "ж": "zh", "з": "z", "и": "i", "й": "i", "к": "k", "л": "l", "м": "m",
@@ -1304,7 +1303,7 @@ def run_checklist_review(template: dict[str, Any], *, dataset_id: str,
                           doc_review_provider: Callable[[str], dict[str, Any] | None] | None = None,
                           pp87_config: dict[str, Any] | None = None,
                           ) -> dict[str, Any]:
-    """Прогоняет ``template`` (dict из ``checklist_template_importer``/``load_checklist_template``)
+    """Прогоняет ``template`` (dict из ``load_checklist_template``)
     по ``dataset_id`` и возвращает ``checklist_review_v1`` (implementation_plan.md §4).
 
     Чистая функция: НИКАКИХ обращений к живым Qdrant/MLX/MetaDB — все данные приходят через

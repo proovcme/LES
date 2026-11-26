@@ -1,6 +1,7 @@
 //! Trusted native tool dispatcher. Paths, scope and programs are bound by the server.
 mod access;
 mod local;
+mod skill_python;
 pub(super) mod sources;
 use super::{prepare::Prepared, Context, Result};
 use serde_json::{json, Value};
@@ -443,7 +444,14 @@ impl Tools {
                     ]
                     .contains(&name)
                 {
-                    local::run(context, turn, name, args).await
+                    local::run(
+                        context,
+                        turn,
+                        name,
+                        args,
+                        deadline.min(started + std::time::Duration::from_secs_f64(timeout)),
+                    )
+                    .await
                 } else if name == "web_search" || name == "web_read" {
                     let mut input = args;
                     input["schema"] = json!("les.web.v1");

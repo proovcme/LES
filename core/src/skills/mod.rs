@@ -381,7 +381,11 @@ fn run(request: &Value, work: &Path, id: &str, input: &Value) -> Result<Value> {
     };
     Ok(value)
 }
-fn calculate(request: &Value, root: &Path) -> Result<Value> {
+fn calculate(
+    request: &Value,
+    root: &Path,
+    resolve: impl FnOnce() -> std::result::Result<std::path::PathBuf, runtime::RuntimeFailure>,
+) -> Result<Value> {
     let (approved, source) = approve(root, text(request, "skill")?, text(request, "path")?)?;
     validate_items(&request["items"])?;
     let input = json!({"sha256":approved["sha256"],"entrypoint":approved["entrypoint"],"items":request["items"],"skill":request["skill"],"path":request["path"]});
@@ -390,6 +394,8 @@ fn calculate(request: &Value, root: &Path) -> Result<Value> {
         return Err(fail("SKILL_INPUT_LIMIT", "Входные данные превышают 256 КБ"));
     }
     let artifacts = absolute(request, "artifacts")?;
+    let mut request = request.clone();
+    request["program"] = json!(resolve()?);
     fs::create_dir_all(&artifacts).map_err(|_| storage())?;
     let mut bytes = [0u8; 16];
     getrandom::fill(&mut bytes).map_err(|_| storage())?;
@@ -398,7 +404,7 @@ fn calculate(request: &Value, root: &Path) -> Result<Value> {
     fs::create_dir(&work).map_err(|_| storage())?;
     atomic(&work.join("script.py"), &source)?;
     atomic(&work.join("input.json"), &encoded)?;
-    run(request, &work, &id, &input)
+    run(&request, &work, &id, &input)
 }
 fn read_job(request: &Value) -> Result<Value> {
     let id = text(request, "job_id")?;
@@ -412,6 +418,16 @@ fn read_job(request: &Value) -> Result<Value> {
     )
 }
 pub fn execute(request: &Value) -> Value {
+    execute_with_runtime(request, || {
+        // Compatibility callers report a missing program in the job receipt.
+        Ok(request["program"].as_str().unwrap_or_default().into())
+    })
+}
+
+pub fn execute_with_runtime(
+    request: &Value,
+    resolve: impl FnOnce() -> std::result::Result<std::path::PathBuf, runtime::RuntimeFailure>,
+) -> Value {
     let action = || -> Result<Value> {
         if request["schema"] != "les.skills.v1" {
             return Err(invalid());
@@ -430,7 +446,7 @@ pub fn execute(request: &Value) -> Value {
             "catalog" => catalog(&root, request),
             "read" => read(&root, request),
             "approvals" => Ok(json!({"scripts":approvals(&root)?})),
-            "calculate" => calculate(request, &root),
+            "calculate" => calculate(request, &root, resolve),
             "resume" => {
                 let id = text(request, "job_id")?;
                 let work = job_path(request, id)?;

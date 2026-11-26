@@ -1,13 +1,21 @@
-use super::{envelope, Context, Prepared, Result};
+use super::{envelope, skill_python, Context, Prepared, Result};
 use serde_json::{json, Value};
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    path::PathBuf,
+    sync::{atomic::AtomicBool, Arc},
+    time::Instant,
+};
 pub(super) async fn run(
     context: Arc<Context>,
     turn: &Prepared,
     name: &str,
     args: Value,
+    end: Instant,
 ) -> Result<Value> {
     let name = name.to_owned();
+    let pending = (name == "run_skill_calculation")
+        .then(|| skill_python::Pending(Arc::new(AtomicBool::new(false))));
+    let cancelled = pending.as_ref().map(|guard| guard.0.clone());
     let session = turn.request["session_id"].clone();
     let project = turn.session["project_id"].as_i64().unwrap_or(0);
     tokio::task::spawn_blocking(move||->Result<Value>{
@@ -30,21 +38,21 @@ pub(super) async fn run(
                 "action":"tool_execute","arguments":{"session_id":session,"bound_project_id":project,"tool_arguments":args}})))?;
             return Ok(envelope(&name,args["operation"].as_str().ok_or("TOOL_SCHEMA_INVALID")?,result,vec![]));
         }
-        let (action,program)=match name.as_str(){
-            "list_installed_skills"=>("catalog",None),"read_installed_skill"=>("read",None),
-            "run_skill_calculation"=>{
-                let program=std::env::var_os("LES_SKILL_PYTHON").map(PathBuf::from).filter(|p|p.is_absolute()&&p.is_file()).ok_or("SKILL_RUNTIME_COMPONENT_MISSING")?;
-                ("calculate",Some(program))
-            }
-            "read_skill_calculation"=>if args.get("job_id").and_then(Value::as_str).is_some_and(|s|!s.is_empty()) {("read_job",None)}else{("approvals",None)},
+        let action=match name.as_str(){
+            "list_installed_skills"=>"catalog","read_installed_skill"=>"read",
+            "run_skill_calculation"=>"calculate",
+            "read_skill_calculation"=>if args.get("job_id").and_then(Value::as_str).is_some_and(|s|!s.is_empty()) {"read_job"}else{"approvals"},
             _=>return Err("TOOL_NOT_REGISTERED".into())
         };
         let mut input=json!({"schema":"les.skills.v1","library":context.state_root.join("storage/skills"),"artifacts":context.state_root.join("artifacts/skill-compute"),"action":action});
         input.as_object_mut().unwrap().extend(args.as_object().ok_or("TOOL_SCHEMA_INVALID")?.clone());
         input["schema"]=json!("les.skills.v1");input["library"]=json!(context.state_root.join("storage/skills"));
         input["artifacts"]=json!(context.state_root.join("artifacts/skill-compute"));input["action"]=json!(action);
-        if let Some(program)=program {input["program"]=json!(program);}
-        let response=les_core::skills::execute(&input);
+        let response=if let Some(cancelled)=cancelled {
+            les_core::skills::execute_with_runtime(&input, || skill_python::resolve(&context.state_root, end, &cancelled))
+        } else {
+            les_core::skills::execute(&input)
+        };
         if response["ok"]!=true{return Err(response["error"]["code"].as_str().unwrap_or("SKILL_EXECUTION_FAILED").into());}
         let mut payload=envelope(&name,"installed_skill",response["value"].clone(),vec![]);
         if response["value"]["interrupted"]==true{payload["status"]=json!("error");}Ok(payload)

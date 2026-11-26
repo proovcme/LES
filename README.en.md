@@ -46,5 +46,5 @@ retrieval and can return sources without calling the answer model.
 
 - **Windows x64.** [Web and offline installers](https://github.com/proovcme/LES/releases), [terminal setup and commands](docs/public/les-light/README.md#установка). Installing WebView2 requires internet access if it is not already present. The installer is unsigned.
 - **Models.** Connect local Ollama or an OpenAI-compatible API. Assign the answer and embedding models separately. Docker is not required.
-- **Desktop.** The Windows app uses a Svelte chat, Rust API, and Rust background services. It bundles Python solely to run external skills offline. Projects, memory, chat profiles, MCP connections, and updates are available from the app.
+- **Desktop.** The Windows app uses a Svelte chat, Rust API, and Rust background services. Windows downloads Python the first time an approved external skill script runs. Projects, memory, chat profiles, MCP connections, and updates are available from the app.
 - **Integrations.** [MCP, API, and CLI](docs/public/les-light/README.md#для-интеграций) · [macOS preview](docs/MACOS_PREVIEW.md) · [Limitations and backlog](docs/BACKLOG.md) · [License](LICENSE).

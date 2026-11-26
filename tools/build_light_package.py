@@ -239,12 +239,39 @@ def stage_skill_dependencies(destination, source=None):
     return receipt
 
 
+def skill_asset_path(payload, build_number):
+    return payload.with_name(f"{payload.name}-assets") / f"LES-Skill-Python-{build_number}.zip"
+
+
+def stage_skill_asset(payload, runtime, version):
+    artifact = skill_asset_path(payload, version["build_number"])
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    with artifact.open("xb") as output, zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+        for path in sorted(runtime.rglob("*")):
+            if path.is_file():
+                member = zipfile.ZipInfo(path.relative_to(runtime).as_posix())
+                member.compress_type = zipfile.ZIP_DEFLATED
+                with path.open("rb") as source, archive.open(member, "w") as target:
+                    shutil.copyfileobj(source, target)
+    descriptor = {
+        "schema": "les.skill-python-download.v1",
+        "bytes": artifact.stat().st_size,
+        "sha256": hash_file(artifact),
+        "receipt_sha256": hash_file(runtime / "skill-python-receipt.json"),
+    }
+    (payload / "native/skill-python-download.json").write_text(
+        json.dumps(descriptor, indent=2) + "\n", encoding="utf-8"
+    )
+
+
 def stage_pdfium(payload, source):
     if not source.is_file():
         raise FileNotFoundError("Provide the PDFium DLL from the locked pypdfium2 wheel")
     target = payload / "native/pdf/pdfium.dll"
     target.parent.mkdir(parents=True)
     shutil.copy2(source, target)
+    from tools.light_license_audit import collect
+    collect(source.parent.parent, payload / "THIRD_PARTY_NOTICES/native/pdfium", only="pypdfium2")
 
 
 def write_manifest(payload):
@@ -290,11 +317,14 @@ def build(destination, executable, qdrant=None, native_runtime=None, native_api=
     destination.mkdir(parents=True)
     shutil.copy2(executable, destination / "les-light.exe")
     stage_native_code(destination)
-    skill_root = destination / 'native/skill-python'
-    stage_skill_dependencies(skill_root, skill_python)
-    stage_pdfium(destination, skill_root / "Lib/site-packages/pypdfium2_raw/pdfium.dll")
-    (destination/'native/skill-python-required.json').write_text(
-        json.dumps({'schema':'les.skill-python-required.v1','required':True}),encoding='utf-8')
+    version = json.loads((ROOT / "config/version.json").read_text(encoding="utf-8"))
+    with tempfile.TemporaryDirectory(prefix="les-skill-component-", dir=destination.parent) as scratch:
+        skill_root = Path(scratch) / "skill-python"
+        stage_skill_dependencies(skill_root, skill_python)
+        stage_pdfium(destination, skill_root / "Lib/site-packages/pypdfium2_raw/pdfium.dll")
+        from tools.light_license_audit import stage_skill_notices
+        stage_skill_notices(skill_root)
+        stage_skill_asset(destination, skill_root, version)
     native = destination / "native/qdrant"
     if qdrant:
         receipt = qdrant.parent / "asset-receipt.json"
