@@ -245,13 +245,44 @@ pub(super) fn prepare(
                     .as_bytes()
                 ));
                 metadata["reading_representation"] = json!("engineering_object");
-                collected.extend(source_nodes(
+                if let Some(text) = card["relations_text"].as_str() {
+                    let mut relationship_request = object_request.clone();
+                    relationship_request["file_key"] = json!(format!(
+                        "{}/relations",
+                        object_request["file_key"].as_str().ok_or(INVALID)?
+                    ));
+                    collected.extend(source_nodes(
+                        &relationship_request,
+                        text,
+                        &metadata,
+                        "engineering_object",
+                        false,
+                    )?);
+                }
+                let mut object_nodes = source_nodes(
                     &object_request,
                     card["text"].as_str().ok_or(INVALID)?,
                     &metadata,
                     "engineering_object",
                     false,
-                )?);
+                )?;
+                if let (Some(first), Some(record)) = (
+                    object_nodes.first_mut(),
+                    card.get("indexed_engineering_record"),
+                ) {
+                    let locator = &card["model_locator"];
+                    first["payload"]["engineering_record_key"] =
+                        json!(crate::engineering::indexed_record_key(
+                            record["schema"].as_str().ok_or(INVALID)?,
+                            dataset,
+                            file,
+                            source_hash,
+                            locator["section"].as_str().ok_or(INVALID)?,
+                            locator["native_id"].as_str().ok_or(INVALID)?,
+                        ));
+                    first["payload"]["indexed_engineering_record"] = record.clone();
+                }
+                collected.extend(object_nodes);
             }
             collected
         } else {

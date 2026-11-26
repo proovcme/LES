@@ -11392,6 +11392,7 @@
         "tests/test_light_native_evidence_packet.py",
         "tests/test_light_native_folder_fields.py",
         "tests/test_light_native_model_discovery.py",
+        "tests/test_light_native_model_inventory.py",
         "tests/test_light_native_model_settings.py",
         "tests/test_light_native_numeric_evidence.py",
         "tests/test_light_native_overview.py",
@@ -11868,6 +11869,17 @@
         "tests/test_light_native_chat_turn.py"
       ],
       "path": "tests/test_light_native_model_discovery.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
+      "lines": 178,
+      "module": "tests.test_light_native_model_inventory",
+      "outbound": [
+        "tests/test_light_native_chat_turn.py"
+      ],
+      "path": "tests/test_light_native_model_inventory.py",
       "status": "TEST_OR_TOOL_ONLY",
       "windows_runtime_explicit": false
     },
@@ -13360,6 +13372,7 @@
         "tools/build_tauri_app.py",
         "tools/code_runtime_map.py",
         "tools/documentation_contract.py",
+        "tools/engineering_reader_assets.py",
         "tools/evaluate_claim_judge.py",
         "tools/evaluate_folder_evidence.py",
         "tools/evaluate_folder_tables.py",
@@ -13491,7 +13504,7 @@
         "tests/test_light_skill_python_asset.py",
         "tools/install_light_macos.py"
       ],
-      "lines": 347,
+      "lines": 352,
       "module": "tools.build_light_package",
       "outbound": [
         "tools/__init__.py",
@@ -13500,6 +13513,7 @@
         "tools/build_native_runtime.py",
         "tools/build_release_artifacts.py",
         "tools/build_tauri_app.py",
+        "tools/engineering_reader_assets.py",
         "tools/light_license_audit.py",
         "tools/light_runtime_assets.py",
         "tools/native_asset.py",
@@ -13659,6 +13673,19 @@
         "tools/__init__.py"
       ],
       "path": "tools/documentation_contract.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "tools/build_light_package.py"
+      ],
+      "lines": 86,
+      "module": "tools.engineering_reader_assets",
+      "outbound": [
+        "tools/__init__.py"
+      ],
+      "path": "tools/engineering_reader_assets.py",
       "status": "TEST_OR_TOOL_ONLY",
       "windows_runtime_explicit": false
     },
@@ -16162,9 +16189,9 @@
     "product_reachable": 417,
     "registered_api_routes": 298,
     "runtime_support": 5,
-    "test_or_tool_only": 299,
-    "tracked_python_files": 728,
-    "tracked_python_lines": 174171
+    "test_or_tool_only": 301,
+    "tracked_python_files": 730,
+    "tracked_python_lines": 174440
   },
   "warnings": []
 }

@@ -3,8 +3,8 @@
   import { ApiError, errorMessage } from '../lib/api';
   import UvyazkaInstall from './UvyazkaInstall.svelte';
   import { companionAddress, engineering, rememberCompanion, savedCompanion } from '../lib/engineering';
-  import type { ModelLocator } from '../lib/engineering';
-  let { target }: { target: ModelLocator } = $props();
+  import type { UvyazkaModelLocator } from '../lib/engineering';
+  let { target }: { target: UvyazkaModelLocator } = $props();
   let url = $state(companionAddress()); let link = $state(''); let busy = $state(false); let failure = $state(''); let reason = $state('');
   onMount(() => {
     if (savedCompanion()) return;

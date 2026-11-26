@@ -74,7 +74,7 @@ def native_turn(tmp_path, request):
     def start():
         extra=['--chat-owner','rust'] if public else ['--upstream',f'http://127.0.0.1:{free_port()}']
         p=subprocess.Popen([program,'--listen',f'127.0.0.1:{port}','--state',str(state),'--database',str(database),*extra],env=env,cwd=tmp_path,stdout=log,stderr=log,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0));children.append(p)
-        wait_for(lambda:client.get('/api/profiles').status_code==200);return p
+        wait_for(lambda:client.get('/api/profiles').status_code==200, timeout=30);return p
     try:
         if rag:
             from backend.light_qdrant_runtime import LightQdrantRuntime

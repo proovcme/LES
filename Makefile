@@ -77,7 +77,7 @@ public-check:
 
 package:
 	@test -n "$(DESKTOP_EXE)" -a -n "$(QDRANT_EXE)" -a -n "$(PACKAGE_DIR)" || (echo "Set DESKTOP_EXE, QDRANT_EXE and PACKAGE_DIR" && exit 2)
-	uv run python tools/build_light_package.py --output "$(PACKAGE_DIR)" --desktop-exe "$(DESKTOP_EXE)" --qdrant "$(QDRANT_EXE)"
+	uv run python tools/build_light_package.py --output "$(PACKAGE_DIR)" --desktop-exe "$(DESKTOP_EXE)" --qdrant "$(QDRANT_EXE)" $(if $(ENGINEERING_READERS),--engineering-readers "$(ENGINEERING_READERS)")
 
 validate-package:
 	@test -n "$(PACKAGE_DIR)" || (echo "Set PACKAGE_DIR" && exit 2)

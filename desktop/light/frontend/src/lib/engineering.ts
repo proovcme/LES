@@ -1,9 +1,15 @@
 import { request } from './api';
-export interface ModelLocator {
-  provider: 'uvyazka'; project_id: string; dataset_id: string; object_id: string; native_id: string;
+interface ModelLocatorBase {
+  object_id: string; native_id: string;
   source_sha256: string; source_name: string; section: string;
   coverage: { status: string; limitations?: string[] }; approval_status: 'unreviewed';
 }
+export interface UvyazkaModelLocator extends ModelLocatorBase {
+  provider: 'uvyazka'; project_id: string; dataset_id: string;
+}
+export type ModelLocator = UvyazkaModelLocator | (ModelLocatorBase & {
+  provider: 'les'; identifiers?: { handle?: string; element_id?: string; unique_id?: string };
+});
 const key = 'les.uvyazka.url.v1';
 export function savedCompanion(): string | null { try { return localStorage.getItem(key); } catch { return null; } }
 export function companionAddress(): string { return savedCompanion() || 'http://127.0.0.1:17881/'; }

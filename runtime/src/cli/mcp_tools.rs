@@ -57,6 +57,7 @@ pub fn list() -> Value {
         source_tool("read_pdf_source","Читать настоящую физическую страницу PDF, включая настроенный OCR скана, по doc_id и page. Передавай source_sha256; длинную страницу дочитывай с next_offset и view_sha256 до null. OCR не подтверждает точность чисел; ошибка чтения не подтверждает отсутствие информации."),
         source_tool("read_excel_source","Читать проверенные индексированные разделы книги, с листами и адресами ячеек. Это не вычисление формул и не полная выгрузка всех ячеек. Для последовательного чтения используй read_source."),
         source_tool("dataset_map","Получить каталог файлов набора. Имена и статусы не являются содержимым: нужный документ следует прочитать. Для продолжения каталога используй list_documents с тем же dataset_id и возвращённым next_offset."),
+        source_tool("model_inventory","Ведомость в выбранном датасете. Для RVT режимы list, vendors, power. Для DWG режим dwg_blocks считает вставки и мощность POWER_W. Режим dwg_spec сверяет DWG с Excel в том же наборе. Если книг несколько, укажи spec_doc_id. spec_sheet, row_start и row_end задают строки спецификации. Для следующей страницы передавай тот же index_revision."),
         tool("read_clause","Прочитать точный нумерованный пункт в выбранном документе с проверяемыми фрагментами.",true,false,&["dataset_id","document_id","number"],
             json!({"dataset_id":dataset,"document_id":{"type":"string","maxLength":240},"number":{"type":"string","pattern":"^[0-9]{1,5}(\\.[0-9]{1,5}){1,5}$"}})),
         tool("create_dataset","Создать пустой датасет. Папку можно подключить отдельным вызовом.",false,false,&["name"],
@@ -267,9 +268,8 @@ pub fn call(name: &str, args: &Value) -> Result<Value> {
             }
             api.source_call(name, Value::Object(input))
         }
-        "read_source" | "read_pdf_source" | "read_excel_source" | "dataset_map" => {
-            api.source_call(name, args.clone())
-        }
+        "read_source" | "read_pdf_source" | "read_excel_source" | "dataset_map"
+        | "model_inventory" => api.source_call(name, args.clone()),
         "read_clause" => api.read_clause(
             required(args, "dataset_id")?,
             required(args, "document_id")?,
@@ -289,7 +289,7 @@ pub fn call(name: &str, args: &Value) -> Result<Value> {
             api.require_user_dataset(id)?;
             api.post(
                 "/api/rag/index-external",
-                json!({"dataset_id":id,"path":path,"parse":index,"background":true}),
+                json!({"dataset_id":id,"path":path,"parse":index,"background":true,"parse_limit":500}),
                 25,
             )
         }

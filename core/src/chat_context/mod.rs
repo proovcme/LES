@@ -221,7 +221,8 @@ fn labels(text: &str) -> Vec<Value> {
         .collect()
 }
 fn visible(packet: &Value, sources: &[Value]) -> Vec<Value> {
-    let indexes: Vec<_> = list(packet, "sections")
+    let sections = list(packet, "sections");
+    let mut indexes: Vec<_> = sections
         .iter()
         .filter(|s| s["kind"] == "evidence")
         .flat_map(|s| {
@@ -230,6 +231,38 @@ fn visible(packet: &Value, sources: &[Value]) -> Vec<Value> {
                 .flat_map(|v| evidence_indexes(&v["payload"], &object_render(v)))
         })
         .collect();
+    // Inventory references belong to the trusted tool pairs that actually fit
+    // this packet. Document and assistant text cannot register a citation.
+    for section in sections
+        .iter()
+        .filter(|s| s["kind"] == "native_tool_exchange")
+    {
+        for item in list(section, "objects") {
+            for message in list(item, "payload").iter().filter(|m| m["role"] == "tool") {
+                let Some(payload) = message["content"]
+                    .as_str()
+                    .and_then(|content| serde_json::from_str::<Value>(content).ok())
+                else {
+                    continue;
+                };
+                let mut receipt = &payload;
+                while receipt["operation"] == "call"
+                    && receipt["status"] == "ok"
+                    && receipt["tool"]
+                        .as_str()
+                        .is_some_and(|name| name.starts_with("use_extensions_"))
+                {
+                    receipt = &receipt["result"];
+                }
+                if receipt["schema"] == "les_tool_result_v1"
+                    && receipt["tool"] == "model_inventory"
+                    && receipt["status"] == "ok"
+                {
+                    indexes.extend(list(receipt, "sources").iter().map(|s| s["index"].clone()));
+                }
+            }
+        }
+    }
     sources
         .iter()
         .filter(|s| !s.is_object() || !truth(&s["index"]) || indexes.contains(&s["index"]))

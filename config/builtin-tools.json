@@ -1,7 +1,50 @@
 {
   "schema": "les_tool_registry_v1",
-  "tool_count": 21,
+  "tool_count": 22,
   "tools": [
+    {
+      "name": "model_inventory",
+      "version": "1.2.0",
+      "title": "Ведомость по моделям и чертежам",
+      "category": "dataset",
+      "summary": "Read structured RVT or DWG records across the selected dataset. Use list for RVT elements and their locations or systems, vendors for a Revit vendor list, power for Revit equipment totals, dwg_blocks for DWG insert counts and recorded power, and dwg_spec to compare DWG quantities with one indexed Excel specification. Omit dataset IDs to use the chat selection. Use spec_doc_id when several books are available. Results include revision-pinned sources and pagination.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "dataset_id": {"type": "string", "minLength": 1, "maxLength": 512},
+          "dataset_ids": {"type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 512}},
+          "doc_id": {"type": "string", "minLength": 1, "maxLength": 512},
+          "mode": {"enum": ["list", "vendors", "power", "dwg_blocks", "dwg_spec"]},
+          "spec_doc_id": {"type": "string", "minLength": 1, "maxLength": 512},
+          "spec_sheet": {"type": "string", "minLength": 1, "maxLength": 31},
+          "row_start": {"type": "integer", "minimum": 1, "maximum": 1048576},
+          "row_end": {"type": "integer", "minimum": 1, "maximum": 1048576},
+          "q": {"type": "string", "minLength": 1, "maxLength": 160},
+          "system": {"type": "string", "minLength": 1, "maxLength": 160},
+          "block": {"type": "string", "minLength": 1, "maxLength": 256},
+          "layer": {"type": "string", "minLength": 1, "maxLength": 256},
+          "lighting_only": {"type": "boolean"},
+          "limit": {"type": "integer", "minimum": 1, "maximum": 24},
+          "offset": {"type": "integer", "minimum": 0, "maximum": 50000},
+          "index_revision": {"type": "string", "minLength": 1, "maxLength": 512}
+        },
+        "additionalProperties": false,
+        "required": ["mode"]
+      },
+      "result_schema": "les_tool_result_v1",
+      "returns": "Paged model inventory with aggregates and source references",
+      "effect": "read",
+      "side_effects": "none",
+      "scopes": ["dataset"],
+      "timeout_seconds": 90,
+      "retry": "safe",
+      "idempotency": "derived",
+      "result_budget": {"max_chars": 120000, "max_items": 8192},
+      "model_owned_fields": [],
+      "provenance": "source_refs_required",
+      "approval_required": false,
+      "tags": ["dataset", "rvt", "dwg", "inventory"]
+    },
     {
       "name": "assemble_project_volume",
       "version": "1.0.0",

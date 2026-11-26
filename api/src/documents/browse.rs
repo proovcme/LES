@@ -215,6 +215,7 @@ fn open_original(path: &std::path::Path) -> Result<(), &'static str> {
     let ext = path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
     if ![
         "pdf", "doc", "docx", "xls", "xlsx", "xlsm", "csv", "txt", "md", "pptx", "json", "jsonl",
+        "dwg", "rvt", "ifc",
     ]
     .iter()
     .any(|allowed| ext.eq_ignore_ascii_case(allowed))

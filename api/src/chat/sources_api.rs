@@ -21,6 +21,7 @@ const ALLOWED: &[&str] = &[
     "read_pdf_source",
     "read_excel_source",
     "dataset_map",
+    "model_inventory",
 ];
 
 fn validate(context: &Context, name: &str, args: &Value) -> Result<()> {
@@ -40,11 +41,16 @@ fn prepare(context: &Context, input: &Value) -> Result<(String, Value, SourceCon
         .ok_or("TOOL_NOT_ALLOWED")?;
     let args = input["args"].clone();
     validate(context, name, &args)?;
+    if name == "model_inventory" && args["dataset_id"].is_null() && args["dataset_ids"].is_null() {
+        return Err("TOOL_SCHEMA_INVALID".into());
+    }
     if name == "search_sources" {
         sources::validate_search_cursor(&args)?;
     }
-    if matches!(name, "search_sources" | "read_source" | "read_excel_source")
-        && args["offset"].as_u64().is_some_and(|n| n > 0)
+    if matches!(
+        name,
+        "search_sources" | "read_source" | "read_excel_source" | "model_inventory"
+    ) && args["offset"].as_u64().is_some_and(|n| n > 0)
         && args["view"] != "documents"
         && args["view"] != "parts"
         && args["index_revision"].as_str().is_none_or(str::is_empty)

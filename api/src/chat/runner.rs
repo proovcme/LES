@@ -69,11 +69,25 @@ pub async fn run(
     .await
     .map_err(|_| "MODEL_QUEUE_TIMEOUT")?
     .map_err(|_| "MODEL_QUEUE_TIMEOUT")?;
-    if retrieval_mode == "indexed" {
+    let indexed = retrieval_mode == "indexed";
+    let native =
+        les_core::model_capabilities::require(&turn.connection.snapshot, &["tools".into()], None)
+            .is_ok();
+    if indexed
+        && (!native
+            || !turn.attachment.is_null()
+            || !turn.request["attachment_context"].is_null()
+            || !turn.profile["tools"]
+                .as_array()
+                .is_some_and(|v| v.iter().any(|name| name == "model_inventory")))
+    {
         return indexed::answer(context, &turn, journal, sink, started, deadline).await;
     }
-    let mut tools = tools::Tools::new(&context, &turn).await?;
-    if turn.egress_tag.is_none() {
+    let mut tools = tools::Tools::new(&context, &turn, native).await?;
+    if indexed && !tools.restrict_indexed() {
+        return indexed::answer(context, &turn, journal, sink, started, deadline).await;
+    }
+    if !indexed && turn.egress_tag.is_none() {
         tools.bind_table(super::table_document::TableTool::bind(&context, &turn).await?);
     }
     let available = turn.connection.profile["normal_tool_count"]
@@ -84,7 +98,7 @@ pub async fn run(
             v.iter()
                 .any(|n| n == "search_sources" || n == "read_source" || n == "document_review")
         });
-    if turn.egress_tag.is_none() && retrieval_mode != "push" {
+    if !indexed && turn.egress_tag.is_none() && retrieval_mode != "push" {
         tools.bind_review(
             super::document_review::ReviewTool::bind(&context, &turn, available).await?,
         );
@@ -96,12 +110,10 @@ pub async fn run(
             .checkpoint("attachment_context", request["attachment_context"].clone())
             .await?;
     }
-    let native =
-        les_core::model_capabilities::require(&turn.connection.snapshot, &["tools".into()], None)
-            .is_ok();
     let direct = retrieval_mode == "push" && tools.table.is_none();
     let mut disclosed = Vec::new();
-    let selected_evidence = turn.request["selected_sources_only"] == true
+    let selected_evidence = !indexed
+        && turn.request["selected_sources_only"] == true
         && turn.scope["document_grounding_enabled"] == true
         && (turn.profile["mode"] == "search" || retrieval_mode != "pull");
     let reading_required = context.index_store.is_some()
@@ -123,24 +135,40 @@ pub async fn run(
         .as_array()
         .is_some_and(|ids| !ids.is_empty())
         || tools::sources::selected_files(&turn).len() > 1;
-    let selection = if prefetch_enabled || (explicit_comparison && retrieval_mode != "none") {
-        Some(
-            super::budget::until(
-                deadline,
-                tools::sources::selection::Selection::resolve(
-                    &context,
-                    &tools::sources::SourceContext::from(&turn),
-                ),
+    let selection =
+        if prefetch_enabled || (!indexed && explicit_comparison && retrieval_mode != "none") {
+            Some(
+                super::budget::until(
+                    deadline,
+                    tools::sources::selection::Selection::resolve(
+                        &context,
+                        &tools::sources::SourceContext::from(&turn),
+                    ),
+                )
+                .await?,
             )
-            .await?,
-        )
-    } else {
-        None
-    };
+        } else {
+            None
+        };
     let selected = selection
         .as_ref()
         .filter(|selection| !selection.documents().is_empty());
-    if let Some(selected) = selected {
+    if indexed {
+        sink.progress("retrieval", "Ищу фрагменты в индексе")
+            .await?;
+        let result = super::budget::until(
+            deadline,
+            tools::sources::retrieval::indexed(context.clone(), &turn),
+        )
+        .await?;
+        evidence.add(&result);
+        prefetch = json!({"mode":"indexed","coverage":result["result"]["coverage"],
+            "index_revision":result["result"]["index_revision"],"selection_policy":result["result"]["selection_policy"],
+            "elapsed_ms":retrieval_started.elapsed().as_millis()});
+        journal
+            .checkpoint("retrieval_prefetch", json!(prefetch.to_string()))
+            .await?;
+    } else if let Some(selected) = selected {
         sink.progress("retrieval", "Читаю выбранные документы")
             .await?;
         turn.request["target_files"] = json!(selected
@@ -423,6 +451,8 @@ pub async fn run(
                 }
                 let mut advertised = if final_answer || direct {
                     vec![]
+                } else if indexed {
+                    tools.indexed_schemas()
                 } else if native && hybrid_search {
                     tools.folder_schemas(
                         turn.connection.profile["max_tools"].as_u64().unwrap_or(5) as usize,
@@ -535,7 +565,7 @@ pub async fn run(
                         question["source_coverage_note"] = json!("Поисковые выдержки не означают полный просмотр файлов. Отсутствие факта в короткой выдаче не доказывает его отсутствие в документе. Для такого вывода дочитай нужный раздел либо явно ограничь ответ прочитанными фрагментами.");
                         question["context_window_note"] = json!("Цитируй только фрагменты из текущего окна. Если нужный фрагмент не поместился, повтори чтение. Карточка файла или квитанция вызова не заменяет его текст.");
                     }
-                    if !direct && !final_answer {
+                    if !indexed && !direct && !final_answer {
                         question["reader_contract"] = json!("Оригинал PDF проверяет read_pdf_source: возьми doc_id из карточки файла и страницу из заголовка фрагмента. read_source читает индекс. Ошибка чтения не подтверждает оригинал.");
                     }
                 }
@@ -569,7 +599,9 @@ pub async fn run(
                 if evidence.needs_read() {
                     super::inspection::question(&mut question, evidence.retry_used());
                 }
-                if prefetch["coverage"] == "no_matches" {
+                if prefetch["selection_policy"]["dataset_search_error"].is_string() {
+                    question["source_search_note"] = json!("Поиск по датасету недоступен. Получены только строки названной книги. Укажи это ограничение, если сведения из других файлов не получены через инструмент.");
+                } else if prefetch["coverage"] == "no_matches" {
                     question["source_search_note"] = json!("Первичный поиск в выбранных документах не нашёл подтверждения. Отметь ограничение, если дальнейшее чтение не дало источника.");
                 }
                 if final_answer {
@@ -1025,8 +1057,10 @@ pub async fn run(
                 let ranked_window_full = contexts
                     .last()
                     .is_some_and(|c| c["ranked_window_full"] == true);
-                let read_window =
-                    !ranked_window_full && !focused_answer && evidence.read_omitted(&visible);
+                let read_window = !indexed
+                    && !ranked_window_full
+                    && !focused_answer
+                    && evidence.read_omitted(&visible);
                 let omitted_document = omitted_reads.iter().any(|read| {
                     read["doc_id"].as_str().is_some_and(|doc_id| {
                         !visible

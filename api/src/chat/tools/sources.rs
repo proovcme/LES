@@ -1,5 +1,6 @@
 //! Registered identities and frozen user scope bind every source read.
 mod catalog;
+pub(in crate::chat) mod model_inventory;
 pub(crate) mod packet;
 mod parts;
 pub(super) mod pdf_focus;
@@ -195,6 +196,9 @@ pub(crate) async fn run_scoped(
     }
     if name == "dataset_map" {
         return catalog::map(context, turn, args).await;
+    }
+    if name == "model_inventory" {
+        return model_inventory::run(context, turn, &args).await;
     }
     if name == "read_pdf_source" {
         let doc = document(&context, &args).await?;

@@ -25,6 +25,7 @@ pub(crate) fn supports_mail(path: &Path) -> bool {
 }
 pub(super) const EXTENSIONS: &[&str] = &[
     "xlsx", "xlsm", "xls", "csv", "pptx", "docx", "doc", "txt", "md", "json", "jsonl", "pdf",
+    "dwg", "rvt", "ifc",
 ];
 pub(crate) fn supports(path: &Path) -> bool {
     path.extension()
@@ -164,6 +165,9 @@ fn execute_inner(
     if mail && request["pipeline"] == "nodes" && request["mail_index"] != true {
         // Generic folder publication does not yet enforce the mailbox egress policy.
         return Err("DOCUMENT_NATIVE_DISPATCH_REQUIRED");
+    }
+    if matches!(suffix.as_str(), "dwg" | "rvt" | "ifc") {
+        return engineering(request, path, &suffix, external);
     }
     let bytes = bytes(path)?;
     let source_sha256 = crate::sha256_hex(&bytes);
@@ -311,6 +315,60 @@ fn execute_inner(
         return Err("DOCUMENT_TEXT_LIMIT");
     }
     Ok(result)
+}
+
+fn engineering(
+    request: &Value,
+    path: &Path,
+    suffix: &str,
+    external: &impl Fn(&Value, Option<&[u8]>) -> Result<Value>,
+) -> Result<Value> {
+    const MAX_SOURCE: u64 = 1024 * 1024 * 1024;
+    if !path.is_absolute() {
+        return Err("DOCUMENT_PATH_INVALID");
+    }
+    let metadata = std::fs::metadata(path).map_err(|_| "DOCUMENT_READ_FAILED")?;
+    if !metadata.is_file() {
+        return Err("DOCUMENT_READ_FAILED");
+    }
+    if metadata.len() > MAX_SOURCE {
+        return Err("DOCUMENT_FILE_LIMIT");
+    }
+    let fingerprint = || {
+        crate::files::fingerprint(&json!({"path":path,"include_mtime":true,"deny_writers":true}))
+            .map_err(|code| match code {
+                "CORE_FILE_CHANGED" => "SOURCE_CHANGED_DURING_INDEXING",
+                _ => "DOCUMENT_READ_FAILED",
+            })
+    };
+    let before = fingerprint()?;
+    let hash = before["sha256"].as_str().ok_or("DOCUMENT_READ_FAILED")?;
+    if request
+        .get("source_sha256")
+        .is_some_and(|value| value != hash)
+    {
+        return Err("SOURCE_CHANGED_DURING_INDEXING");
+    }
+    let mut input = request.clone();
+    input["source_sha256"] = json!(hash);
+    let decoded = external(&input, None)?;
+    if fingerprint()? != before {
+        return Err("SOURCE_CHANGED_DURING_INDEXING");
+    }
+    let mut content = crate::engineering::native_content(
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .ok_or("DOCUMENT_PATH_INVALID")?,
+        hash,
+        &decoded,
+    )?;
+    if request["pipeline"] == "nodes" {
+        return pipeline::prepare(request, &[], path, suffix, hash, Some(&content));
+    }
+    content["source_sha256"] = json!(hash);
+    content["status"] = json!("completed");
+    content["owner"] = json!("rust.document.conversion");
+    Ok(content)
 }
 
 fn json_error(code: &str) -> Option<&'static str> {

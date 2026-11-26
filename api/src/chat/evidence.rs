@@ -859,6 +859,41 @@ impl Evidence {
     }
     pub(super) fn add(&mut self, result: &Value) {
         let result = super::protocol::effective(result);
+        if result["tool"] == "model_inventory" && result["status"] == "ok" {
+            let passages = result["sources"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|source| {
+                    let text = source["snippet"]
+                        .as_str()
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| {
+                            format!(
+                                "{}: {}",
+                                source["doc_name"].as_str().unwrap_or("Модель"),
+                                source["model_locator"]["native_id"].as_str().unwrap_or("")
+                            )
+                        });
+                    json!({"text":text,"source":source})
+                })
+                .collect::<Vec<_>>();
+            self.add_passages(
+                &json!({"tool":"model_inventory","status":"ok",
+                "result":{"passages":passages}}),
+                false,
+            );
+            self.delivered.clear();
+            for passage in passages {
+                if let Some(index) = self
+                    .reference(&passage["source"])
+                    .and_then(|r| r["index"].as_u64())
+                {
+                    self.verified_reads.insert(index);
+                }
+            }
+            return;
+        }
         if !result["result"]["evidence_packet"].is_null() {
             if let Err(code) = super::tools::sources::packet::decode(result) {
                 self.read_failures.push(json!({"code":code}));
@@ -1188,7 +1223,12 @@ impl Evidence {
                 rows.iter()
                     .any(|p| p["text"].as_str().is_some_and(|s| !s.is_empty()))
             });
-        if !initial && result["tool"] != "document_review" && has_text {
+        // These tools carry their evidence in the native tool reply.
+        let receipt_only = matches!(
+            result["tool"].as_str(),
+            Some("document_review" | "model_inventory")
+        );
+        if !initial && !receipt_only && has_text {
             // Retained batches are consumed newest first. Reverse the insert
             // order so the most relevant units within each read stay first.
             for block in self.blocks.drain(..).rev() {
@@ -1263,7 +1303,7 @@ impl Evidence {
                     continue;
                 }
                 Self::page_metadata(&mut self.sources[index], result);
-                if !initial && result["tool"] != "document_review" {
+                if !initial && !receipt_only {
                     self.initial.retain(|(i, _)| *i != index + 1);
                     self.retained.retain(|(i, _)| *i != index + 1);
                     if !self.blocks.iter().any(|b| {
@@ -1313,7 +1353,7 @@ impl Evidence {
             source["label"] = json!(label);
             source["header"] = json!(format!("[Источник {index} | {header_label}]"));
             Self::page_metadata(&mut source, result);
-            if result["tool"] != "document_review" {
+            if !receipt_only {
                 let block = Self::block(&source, text, &passage["canonical"]);
                 if initial {
                     self.initial.push((index, block));
@@ -1403,6 +1443,55 @@ impl Evidence {
         if let Some(result) = value["result"].as_object_mut() {
             result.remove("read_receipt");
         }
+        if value["tool"] == "model_inventory" && value["status"] == "ok" {
+            let references = value["sources"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|source| {
+                    Some((
+                        source["index"].as_u64()?,
+                        self.reference(source)?["index"].clone(),
+                    ))
+                })
+                .collect::<std::collections::BTreeMap<_, _>>();
+            let index = |value: &mut Value| {
+                if let Some(global) = value.as_u64().and_then(|local| references.get(&local)) {
+                    *value = global.clone();
+                }
+            };
+            for row in value["result"]["rows"].as_array_mut().into_iter().flatten() {
+                index(&mut row["source_index"]);
+                for key in ["note_source_indices", "block_source_indices"] {
+                    row.get_mut(key)
+                        .and_then(Value::as_array_mut)
+                        .into_iter()
+                        .flatten()
+                        .for_each(&index);
+                }
+                row["candidate"]
+                    .get_mut("source_indices")
+                    .and_then(Value::as_array_mut)
+                    .into_iter()
+                    .flatten()
+                    .for_each(&index);
+                // The audit's per-insert and per-note details stay in the receipt.
+                if let Some(row) = row.as_object_mut() {
+                    row.remove("notes");
+                    row.retain(|_, value| !value.is_null());
+                }
+            }
+            if let Some(models) = value["result"]
+                .as_object_mut()
+                .and_then(|result| result.remove("models"))
+            {
+                let models = models.as_array().map(Vec::as_slice).unwrap_or_default();
+                value["result"]["model_coverage"] = json!({
+                    "total": models.len(),
+                    "unavailable": models.iter().filter(|m|matches!(m["status"].as_str(), Some("model_owner_unavailable" | "records_unavailable" | "not_indexed"))).count()
+                });
+            }
+        }
         // The private journal owns normalized source requests. The provider's
         // call already carries those arguments; never send another copy.
         if [
@@ -1451,6 +1540,11 @@ impl Evidence {
                 .iter()
                 .map(|s| self.reference(s).unwrap_or_else(|| s.clone()))
                 .collect::<Vec<_>>());
+        }
+        if value["tool"] == "model_inventory" && value["status"] == "ok" {
+            for source in value["sources"].as_array_mut().into_iter().flatten() {
+                *source = json!({"index":source["index"],"doc_name":source["doc_name"]});
+            }
         }
         if !value["execution"].is_null() {
             value["execution"] =

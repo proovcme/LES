@@ -85,6 +85,14 @@ pub(crate) fn freeze_ocr(options: &mut Value, state: &Path) {
 
 pub(crate) fn external(request: &Value) -> Result<Value, &'static str> {
     let path = Path::new(request["path"].as_str().ok_or("DOCUMENT_PATH_INVALID")?);
+    if let Some(format) = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(str::to_ascii_lowercase)
+        .filter(|value| matches!(value.as_str(), "dwg" | "rvt" | "ifc"))
+    {
+        return crate::engineering_readers::read(request, path, &format);
+    }
     if request["word_parser"] == "docling"
         && path
             .extension()

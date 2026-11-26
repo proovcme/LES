@@ -192,7 +192,12 @@ impl Builder {
             // A physical-page reading view belongs to one live indexed anchor,
             // not to every embedding slice of that anchor.
             if child > 0 {
-                for field in ["pdf_page_view", "word_reading_view"] {
+                for field in [
+                    "pdf_page_view",
+                    "word_reading_view",
+                    "indexed_engineering_record",
+                    "engineering_record_key",
+                ] {
                     payload.remove(field);
                 }
             }

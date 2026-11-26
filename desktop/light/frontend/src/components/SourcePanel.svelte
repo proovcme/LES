@@ -25,6 +25,7 @@
   }));
   const base = $derived(doc ? `/api/documents/by-id/${encodeURIComponent(doc.id)}` : '');
   const pdf = $derived(/\.pdf$/i.test(doc?.file_name || ''));
+  const snapshot = $derived(source.model_locator?.provider === 'uvyazka');
   const workbook = $derived(/\.(xlsx|xlsm|xls)$/i.test(doc?.file_name || '') ? {
     sheet: source.locator?.sheet ?? source.sheet_name,
     row: source.locator?.row ?? source.row,
@@ -83,15 +84,24 @@
   {/if}
   {#if loading}<p role="status">Проверяю оригинал…</p>{/if}
   {#if error}<p class="error" role="alert">{error}</p>{/if}
-  {#if source.model_locator}<EngineeringSource target={source.model_locator} />{/if}
+  {#if source.model_locator?.provider === 'uvyazka'}
+    <EngineeringSource target={source.model_locator} />
+  {:else if source.model_locator?.provider === 'les'}
+    <p>{source.model_locator.identifiers?.handle ? 'Handle DWG' : 'ElementId Revit'} <strong>{source.model_locator.native_id}</strong></p>
+    {#each source.model_locator.coverage.limitations ?? [] as limitation}
+      <p class="muted">{limitation}</p>
+    {/each}
+  {/if}
   {#if doc}
     {#if !digest}<p class="muted">Для этой цитаты редакция файла не сохранена. Доступен текущий оригинал.</p>{/if}
     <div class="source-actions">
       {#if pdf}<button class="quiet" onclick={() => reading = !reading}>{reading ? 'Скрыть текст' : 'Прочитать текст'}</button>{/if}
       {#if /\.docx$/i.test(doc.file_name)}<button class="quiet" onclick={() => figures = !figures}>{figures ? 'Скрыть рисунки' : 'Рисунки и вложения'}</button>{/if}
-      <button onclick={showOriginal} disabled={preparing}><Icon name="file" />{preparing ? 'Открываю…' : source.model_locator ? 'Показать снимок данных' : 'Показать оригинал'}</button>
-      <a class="button quiet" href={`${base}/raw?${identity}`} download={doc.file_name}><Icon name="external" />{source.model_locator ? 'Скачать снимок' : 'Скачать'}</a>
-      <button class="quiet" onclick={openNative}>{source.model_locator ? 'Открыть файл снимка' : 'Открыть в приложении'}</button>
+      {#if source.model_locator?.provider !== 'les'}
+        <button onclick={showOriginal} disabled={preparing}><Icon name="file" />{preparing ? 'Открываю…' : snapshot ? 'Показать снимок данных' : 'Показать оригинал'}</button>
+      {/if}
+      <a class="button quiet" href={`${base}/raw?${identity}`} download={doc.file_name}><Icon name="external" />{snapshot ? 'Скачать снимок' : 'Скачать'}</a>
+      <button class="quiet" onclick={openNative}>{snapshot ? 'Открыть файл снимка' : 'Открыть в приложении'}</button>
     </div>
     {#if reading}
       {#key `${doc.id}:${page}`}

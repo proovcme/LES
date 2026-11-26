@@ -53,7 +53,16 @@ impl Failure {
             || code == "CHAT_RETRIEVAL_MODE_INVALID"
             || matches!(
                 code,
-                "SOURCE_OFFSET_INVALID" | "SOURCE_SNAPSHOT_OFFSET_INVALID"
+                "SOURCE_OFFSET_INVALID"
+                    | "SOURCE_SNAPSHOT_OFFSET_INVALID"
+                    | "MODEL_INVENTORY_LIMIT"
+                    | "MODEL_INVENTORY_NO_RVT"
+                    | "MODEL_INVENTORY_NO_DWG"
+                    | "DWG_SPEC_WORKBOOK_REQUIRED"
+                    | "DWG_SPEC_SINGLE_DATASET"
+                    | "DWG_SPEC_RANGE_INVALID"
+                    | "DWG_SPEC_NO_POSITIONS"
+                    | "DWG_SPEC_RECORDS_REQUIRED"
             )
         {
             StatusCode::UNPROCESSABLE_ENTITY
@@ -92,6 +101,14 @@ impl Failure {
             "CHAT_SCOPE_INVALID"=>"Не удалось определить выбранные документы. Выберите область поиска ещё раз.",
             "CHAT_RETRIEVAL_MODE_INVALID"=>"Выберите способ поиска в документах в параметрах ответа.",
             "TOOL_SCHEMA_INVALID"=>"Проверьте параметры инструмента по его описанию.",
+            "MODEL_INVENTORY_LIMIT"=>"Запрос охватывает слишком много моделей или записей. Выберите один файл или меньший датасет.",
+            "MODEL_INVENTORY_NO_RVT"=>"В выбранных источниках нет файлов RVT.",
+            "MODEL_INVENTORY_NO_DWG"=>"В выбранных источниках нет файлов DWG.",
+            "DWG_SPEC_WORKBOOK_REQUIRED"=>"Выберите один проиндексированный Excel со спецификацией в том же наборе, что и DWG.",
+            "DWG_SPEC_SINGLE_DATASET"=>"Для сверки выберите один набор с DWG и Excel.",
+            "DWG_SPEC_RANGE_INVALID"=>"Укажите лист Excel и границы строк одной части спецификации.",
+            "DWG_SPEC_NO_POSITIONS"=>"В выбранной области Excel не найдены позиции с количеством и единицей «шт.».",
+            "DWG_SPEC_RECORDS_REQUIRED"=>"Для сверки нужны записи пространства модели. Проверьте индексацию выбранных DWG.",
             "TOOL_SCOPE_VIOLATION"=>"Документ или набор не входит в разрешённую область чтения.",
             "SOURCE_CONTINUATION_VIEW_REQUIRED" => "Для продолжения чтения передайте view_sha256 из предыдущей порции вместе с next_offset.",
             "SOURCE_VIEW_CHANGED" => "Изменился снимок прочитанного текста. Начните чтение заново; старые и новые порции нельзя объединять.",

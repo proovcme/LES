@@ -152,6 +152,7 @@ pub(crate) async fn read(
                 "source_ref",
                 "chunk_ord",
                 "source_sha256",
+                "model_locator",
             ]
             .into_iter()
             .any(|key| seed[key] != payload[key])

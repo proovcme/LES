@@ -316,6 +316,17 @@ pub fn child_environment(
             storage.join("content").to_string_lossy().into_owned(),
         ));
     }
+    if let Some(readers) = config
+        .root
+        .parent()
+        .map(|parent| parent.join("native/engineering-readers"))
+        .filter(|path| path.join("reader-receipt.json").is_file())
+    {
+        result.push((
+            "LES_ENGINEERING_READERS".into(),
+            readers.to_string_lossy().into_owned(),
+        ));
+    }
     #[cfg(windows)]
     if config.native_api {
         let native = config.root.parent().unwrap().join("native/pdf/pdfium.dll");

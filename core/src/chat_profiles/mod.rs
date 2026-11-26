@@ -104,6 +104,12 @@ pub fn effective(snapshot: &Value) -> Result<Value> {
     policy.remove("system_datasets");
     value.insert("rag_policy".into(), policy.into());
     let mut tools = snapshot["tools"].as_array().cloned().unwrap_or_default();
+    // Existing factory snapshots gain the built-in reader. User-defined tool
+    // selections continue to be governed by the saved profile.
+    if snapshot["is_factory"] == true && !tools.iter().any(|v| v == "model_inventory") {
+        tools.push(json!("model_inventory"));
+        value.insert("tools".into(), json!(tools));
+    }
     if let Some(index) = tools.iter().position(|v| v == "web_search") {
         if !tools.iter().any(|v| v == "web_read") {
             tools.insert(index + 1, json!("web_read"));

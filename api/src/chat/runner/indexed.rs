@@ -32,6 +32,10 @@ pub(super) async fn answer(
         tools::sources::retrieval::indexed(context.clone(), turn),
     )
     .await?;
+    let search_error = &result["result"]["selection_policy"]["dataset_search_error"];
+    let search_note = search_error.is_string().then_some(
+        "Поиск по датасету недоступен. Получены только строки названной книги. Укажи это ограничение в ответе.",
+    );
     let prefetch = json!({"mode":"indexed","coverage":result["result"]["coverage"],
         "index_revision":result["result"]["index_revision"],"selection_policy":result["result"]["selection_policy"],
         "elapsed_ms":retrieval_started.elapsed().as_millis()});
@@ -64,11 +68,15 @@ pub(super) async fn answer(
     let mut status = "completed";
     let mut text = "В найденных фрагментах нет данных для ответа на этот вопрос.".to_owned();
     if !blocks.is_empty() {
+        let mut request = json!({"question":turn.request["question"],
+            "output_directive":turn.request["output_directive"],"response_length":turn.request["response_length"]});
+        if let Some(note) = search_note {
+            request["source_search_note"] = json!(note);
+        }
         let packed = les_core::chat_context::execute(&json!({"action":"assemble",
             "preset":{"preset_id":profile["preset_id"],"input_limit":profile["input_token_limit"],
                 "generation_reserve":profile["generation_reserve_tokens"],"safety_reserve":profile["safety_reserve_tokens"]},
-            "profile_prefix":prompt,"request_payload":{"question":turn.request["question"],
-                "output_directive":turn.request["output_directive"],"response_length":turn.request["response_length"]},
+            "profile_prefix":prompt,"request_payload":request,
             "optional_evidence_limit":18,"working_memory":turn.memory,"dialogue":turn.dialogue,
             "evidence":blocks,"compact_source_evidence":true}))?;
         if packed["overflow"] == true {
