@@ -5,6 +5,7 @@ use std::collections::HashSet;
 pub const SCHEMA: &str = "les.uvyazka-snapshot.v1";
 pub const RECORD_SCHEMA: &str = "les.rvt-record.v1";
 pub const DWG_RECORD_SCHEMA: &str = "les.dwg-insert.v1";
+pub const DWG_TABLE_ROW_SCHEMA: &str = "les.dwg-table-row.v1";
 pub const MAX_OBJECTS: usize = 5000;
 const INVALID: &str = "ENGINEERING_SNAPSHOT_INVALID";
 type Result<T> = std::result::Result<T, &'static str>;
@@ -39,6 +40,14 @@ pub fn indexed_record_key(
             .to_string()
             .as_bytes(),
     )
+}
+
+pub fn indexed_record_id(locator: &Value) -> Option<&str> {
+    if locator["record_schema"] == DWG_TABLE_ROW_SCHEMA {
+        locator["object_id"].as_str()
+    } else {
+        locator["native_id"].as_str()
+    }
 }
 
 pub fn rvt_parameter_line(parameter: &Value) -> Option<String> {
@@ -164,7 +173,12 @@ pub fn locator(snapshot: &Value, object: &Value) -> Value {
             "source_sha256":origin["source"]["sha256"],"source_name":origin["source"]["filename"],
             "identifiers":object["identifiers"],"reader":origin["reader"],
             "coverage":origin["coverage"],"approval_status":"unreviewed"});
-        for key in ["drawing_sheet", "model_context"] {
+        for key in [
+            "drawing_sheet",
+            "model_context",
+            "dwg_layer",
+            "dwg_position",
+        ] {
             if let Some(info) = object
                 .get(key)
                 .filter(|value| value.as_object().is_some_and(|m| !m.is_empty()))
@@ -177,6 +191,31 @@ pub fn locator(snapshot: &Value, object: &Value) -> Value {
         }
         if origin["reader"]["format"] == "dwg" && object["dwg_insert"].is_object() {
             locator["record_schema"] = json!(DWG_RECORD_SCHEMA);
+        }
+        if origin["reader"]["format"] == "dwg" && object["dwg_table_row"].is_object() {
+            let row = &object["dwg_table_row"];
+            let cells = row["cells"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|cell| {
+                    let sources = cell["sources"].as_array()?;
+                    if sources.is_empty() {
+                        return None;
+                    }
+                    let ids = sources
+                        .iter()
+                        .map(|s| {
+                            json!({"handle":s["handle"],
+                    "layer":s["layer"],"layer_handle":s["layer_handle"]})
+                        })
+                        .collect::<Vec<_>>();
+                    Some(json!({"column":cell["column"],"sources":ids}))
+                })
+                .collect::<Vec<_>>();
+            locator["record_schema"] = json!(DWG_TABLE_ROW_SCHEMA);
+            locator["dwg_table_row"] = json!({"table_handle":row["table_handle"],"row":row["row"],
+                "method":row["method"],"cells":cells,"layers":row["layers"],"grid_layers":row["grid_layers"]});
         }
         return locator;
     }
@@ -254,6 +293,11 @@ fn project_cards(snapshot: &Value) -> Result<Vec<Value>> {
             let mut insert = object["dwg_insert"].clone();
             insert["schema"] = json!(DWG_RECORD_SCHEMA);
             card["indexed_engineering_record"] = insert;
+        }
+        if card["model_locator"]["record_schema"] == DWG_TABLE_ROW_SCHEMA {
+            let mut row = object["dwg_table_row"].clone();
+            row["schema"] = json!(DWG_TABLE_ROW_SCHEMA);
+            card["indexed_engineering_record"] = row;
         }
         card["text"] = json!(lines.join("\n"));
         Ok(card)

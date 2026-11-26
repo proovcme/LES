@@ -160,11 +160,34 @@ pub async fn run(
             deadline,
             tools::sources::retrieval::indexed(context.clone(), &turn),
         )
-        .await?;
-        evidence.add(&result);
-        prefetch = json!({"mode":"indexed","coverage":result["result"]["coverage"],
-            "index_revision":result["result"]["index_revision"],"selection_policy":result["result"]["selection_policy"],
-            "elapsed_ms":retrieval_started.elapsed().as_millis()});
+        .await;
+        prefetch = match result {
+            Ok(result) => {
+                evidence.add(&result);
+                json!({"mode":"indexed","coverage":result["result"]["coverage"],
+                    "index_revision":result["result"]["index_revision"],"selection_policy":result["result"]["selection_policy"],
+                    "elapsed_ms":retrieval_started.elapsed().as_millis()})
+            }
+            Err(error)
+                if matches!(
+                    error.code.as_str(),
+                    "INDEX_NOT_CONFIGURED" | "INDEX_STORAGE_UNAVAILABLE" | "SOURCE_INDEX_NOT_READY"
+                ) =>
+            {
+                let models = tools::sources::model_inventory::direct_rvt_documents(
+                    &context,
+                    &tools::sources::SourceContext::from(&turn),
+                )
+                .await?;
+                if models.is_empty() {
+                    return Err(error);
+                }
+                tools.restrict_inventory_to_rvt_counts();
+                json!({"mode":"indexed","coverage":"rvt_direct_only","rvt_documents":models,
+                    "text_search_error":error.code,"elapsed_ms":retrieval_started.elapsed().as_millis()})
+            }
+            Err(error) => return Err(error),
+        };
         journal
             .checkpoint("retrieval_prefetch", json!(prefetch.to_string()))
             .await?;
@@ -256,7 +279,7 @@ pub async fn run(
         prompt=json!(format!("{}\n\n{instructions}\nПрошлые сообщения не подтверждают выполнение действий в текущем запросе. Выполненное действие подтверждается только успешным результатом инструмента в этом запросе.",prompt.as_str().ok_or("CHAT_CONTEXT_INVALID")?));
     }
     let mut agent = Coordinator::new(
-        24,
+        if indexed { 2 } else { 24 },
         super::budget::remaining(deadline)?.as_secs_f64(),
         tools
             .contracts
@@ -599,13 +622,23 @@ pub async fn run(
                 if evidence.needs_read() {
                     super::inspection::question(&mut question, evidence.retry_used());
                 }
-                if prefetch["selection_policy"]["dataset_search_error"].is_string() {
+                if prefetch["coverage"] == "rvt_direct_only" {
+                    question["available_rvt_documents"] = prefetch["rvt_documents"].clone();
+                    question["source_search_note"] = json!("Текстовый индекс недоступен. Для подсчёта по выбранной модели вызови model_inventory в режиме rvt_counts. При обычном вопросе по тексту укажи, что индекс недоступен.");
+                } else if prefetch["selection_policy"]["dataset_search_error"].is_string() {
                     question["source_search_note"] = json!("Поиск по датасету недоступен. Получены только строки названной книги. Укажи это ограничение, если сведения из других файлов не получены через инструмент.");
                 } else if prefetch["coverage"] == "no_matches" {
                     question["source_search_note"] = json!("Первичный поиск в выбранных документах не нашёл подтверждения. Отметь ограничение, если дальнейшее чтение не дало источника.");
                 }
                 if final_answer {
                     question["final_answer"]=json!("Ответь по прочитанным данным. Новые вызовы инструментов недоступны. Если сведений недостаточно, обозначь это.");
+                }
+                if indexed
+                    && agent.results().iter().map(effective).any(|result| {
+                        result["tool"] == "model_inventory" && result["status"] == "ok"
+                    })
+                {
+                    question["inventory_citations"] = json!("Для каждого факта из ведомости скопируй готовую метку citation в конце соответствующего предложения. Если ответ частичный, поставь ссылки у подтверждённых фактов и отдельно укажи, каких данных не хватает.");
                 }
                 if citation_retry || prefetch_focused || ranked_prefetch {
                     question["citation_format_required"] = json!("Свяжи каждый подтверждённый факт с видимым источником в формате [Источник N]. Бери номер из заголовка выдержки: номера могут идти с пропусками. Если подтверждённых фактов нет, начни ответ с [[NO_EVIDENCE]], причину сформулируй своими словами и не перечисляй ссылки.");

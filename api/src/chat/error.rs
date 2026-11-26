@@ -58,6 +58,7 @@ impl Failure {
                     | "MODEL_INVENTORY_LIMIT"
                     | "MODEL_INVENTORY_NO_RVT"
                     | "MODEL_INVENTORY_NO_DWG"
+                    | "MODEL_INVENTORY_SELECT_RVT_DOCUMENT"
                     | "DWG_SPEC_WORKBOOK_REQUIRED"
                     | "DWG_SPEC_SINGLE_DATASET"
                     | "DWG_SPEC_RANGE_INVALID"
@@ -104,6 +105,8 @@ impl Failure {
             "MODEL_INVENTORY_LIMIT"=>"Запрос охватывает слишком много моделей или записей. Выберите один файл или меньший датасет.",
             "MODEL_INVENTORY_NO_RVT"=>"В выбранных источниках нет файлов RVT.",
             "MODEL_INVENTORY_NO_DWG"=>"В выбранных источниках нет файлов DWG.",
+            "MODEL_INVENTORY_SELECT_RVT_DOCUMENT"=>"В наборе несколько RVT. Выберите файл модели для ведомости.",
+            "RVT_READER_BUSY"=>"ЛЕС уже читает модель RVT. Повторите запрос после завершения чтения.",
             "DWG_SPEC_WORKBOOK_REQUIRED"=>"Выберите один проиндексированный Excel со спецификацией в том же наборе, что и DWG.",
             "DWG_SPEC_SINGLE_DATASET"=>"Для сверки выберите один набор с DWG и Excel.",
             "DWG_SPEC_RANGE_INVALID"=>"Укажите лист Excel и границы строк одной части спецификации.",

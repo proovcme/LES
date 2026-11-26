@@ -86,7 +86,6 @@ impl Tools {
         let inventory = native
             && grounded
             && !push
-            && context.index_store.is_some()
             && profile["tools"]
                 .as_array()
                 .is_some_and(|v| v.iter().any(|name| name == "model_inventory"))
@@ -130,12 +129,29 @@ impl Tools {
             .retain(|contract| contract["name"] == "model_inventory");
         !self.contracts.is_empty()
     }
+    pub(super) fn restrict_inventory_to_rvt_counts(&mut self) {
+        for contract in self
+            .contracts
+            .iter_mut()
+            .filter(|c| c["name"] == "model_inventory")
+        {
+            contract["input_schema"]["properties"]["mode"]["enum"] = json!(["rvt_counts"]);
+            contract["summary"] = json!("Count saved RVT instances by type and level. Use q for a short literal family/type name. Use doc_id to select a model when several are listed. Missing levels and categories remain unknown.");
+        }
+    }
     pub(super) fn indexed_schemas(&self) -> Vec<Value> {
         self.contracts
             .iter()
             .map(|c| {
                 json!({"type":"function","function":{
-                    "name":c["name"],"description":c["summary"],"parameters":c["input_schema"]
+                    "name":c["name"],
+                    "description":if c["input_schema"]["properties"]["mode"]["enum"] == json!(["rvt_counts"]) {
+                        c["summary"].as_str().unwrap_or_default().to_owned()
+                    } else { format!(
+                        "{} In indexed chat, use inventory for counts, lists or comparisons that need structured records. A completed rvt_counts page already groups all matching saved instances. Use another call only for missing requested data or pagination. For examples of different Revit types, use vendors without q. Answer ordinary text questions from the excerpts.",
+                        c["summary"].as_str().unwrap_or_default()
+                    ) },
+                    "parameters":c["input_schema"]
                 }})
             })
             .collect()
@@ -322,7 +338,12 @@ impl Tools {
                 .cloned()
                 .ok_or("TOOL_NOT_ALLOWED")?;
             let mut args = call["args"].clone();
-            if name == "model_inventory" && args.is_object() && args.get("limit").is_none() {
+            if name == "model_inventory"
+                && args.is_object()
+                && args.get("limit").is_none()
+                && args["mode"] != "dwg_tables"
+                && args["mode"] != "rvt_counts"
+            {
                 args["limit"] = json!(6);
             }
             let pull = turn.profile["mode"] == "search"

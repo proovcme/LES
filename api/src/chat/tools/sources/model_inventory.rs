@@ -1,7 +1,9 @@
 //! Exact dataset reads for engineering tables by source identity.
 mod dwg;
 mod dwg_spec;
+mod dwg_tables;
 mod rows;
+mod rvt_counts;
 
 use super::{
     document, envelope, reference, scoped, scoped_document, selected_scoped, SourceContext,
@@ -10,7 +12,9 @@ use crate::{
     chat::{unwrap, Context, Result},
     index_batch::configuration::{identity, Settings},
 };
-use les_core::engineering::{indexed_record_key, DWG_RECORD_SCHEMA, RECORD_SCHEMA};
+use les_core::engineering::{
+    indexed_record_id, indexed_record_key, DWG_RECORD_SCHEMA, DWG_TABLE_ROW_SCHEMA, RECORD_SCHEMA,
+};
 use serde_json::{json, Value};
 use std::{
     collections::{BTreeSet, HashSet},
@@ -25,7 +29,10 @@ const CHANGED: &str = "INDEX_CHANGED_DURING_SEARCH";
 const LIMIT: &str = "MODEL_INVENTORY_LIMIT";
 
 fn format(args: &Value) -> &'static str {
-    if matches!(args["mode"].as_str(), Some("dwg_blocks" | "dwg_spec")) {
+    if matches!(
+        args["mode"].as_str(),
+        Some("dwg_blocks" | "dwg_spec" | "dwg_tables")
+    ) {
         "dwg"
     } else {
         "rvt"
@@ -51,8 +58,10 @@ pub(in crate::chat) async fn available(context: &Context, turn: &SourceContext) 
         .cloned()
         .unwrap_or_default();
     let names = selected_scoped(turn);
-    let supported = |doc: &Value| {
-        doc["status"] == "INDEXED" && (matches_format(doc, "rvt") || matches_format(doc, "dwg"))
+    let indexed_dwg = context.index_store.is_some();
+    let supported = move |doc: &Value| {
+        (matches_format(doc, "rvt") && doc["status"] != "MISSING")
+            || (indexed_dwg && doc["status"] == "INDEXED" && matches_format(doc, "dwg"))
     };
     if !ids.is_empty() {
         for id in ids {
@@ -87,6 +96,18 @@ pub(in crate::chat) async fn available(context: &Context, turn: &SourceContext) 
         }
         Ok(false)
     }).await.map_err(|_| "SOURCE_CATALOG_UNAVAILABLE")?
+}
+
+pub(in crate::chat) async fn direct_rvt_documents(
+    context: &Context,
+    turn: &SourceContext,
+) -> Result<Vec<Value>> {
+    Ok(models(context, turn, &json!({"mode":"rvt_counts"}))
+        .await?
+        .into_iter()
+        .filter(|doc| doc["status"] != "MISSING")
+        .map(|doc| json!({"doc_id":doc["id"],"file_name":doc["file_name"]}))
+        .collect())
 }
 
 async fn models(context: &Context, turn: &SourceContext, args: &Value) -> Result<Vec<Value>> {
@@ -180,7 +201,18 @@ pub(in crate::chat) async fn run(
     {
         return Err("SOURCE_CONTINUATION_REVISION_REQUIRED".into());
     }
-    let docs = models(&context, turn, args).await?;
+    let mut docs = models(&context, turn, args).await?;
+    if args["mode"] == "rvt_counts" {
+        if docs.is_empty() {
+            return Err("MODEL_INVENTORY_NO_RVT".into());
+        }
+        if docs.len() != 1 {
+            return Err("MODEL_INVENTORY_SELECT_RVT_DOCUMENT".into());
+        }
+        let doc = docs.pop().unwrap();
+        scoped_document(turn, &doc)?;
+        return rvt_counts::run(context, doc, args.clone()).await;
+    }
     scan(context, turn, docs, args).await
 }
 
@@ -192,10 +224,10 @@ async fn scan(
 ) -> Result<Value> {
     let format = format(args);
     let dwg = format == "dwg";
-    let (schema, sections): (_, &[&str]) = if dwg {
-        (DWG_RECORD_SCHEMA, &["elements"])
-    } else {
-        (RECORD_SCHEMA, &["elements", "types"])
+    let (schema, sections): (_, &[&str]) = match args["mode"].as_str() {
+        Some("dwg_tables") => (DWG_TABLE_ROW_SCHEMA, &["dwg_table_rows"]),
+        _ if dwg => (DWG_RECORD_SCHEMA, &["elements"]),
+        _ => (RECORD_SCHEMA, &["elements", "types"]),
     };
     if docs.is_empty() {
         return Err(if dwg {
@@ -244,7 +276,7 @@ async fn scan(
                 for row in batch.drain(..) {
                     let p = &row["payload"];
                     let loc = &p["model_locator"];
-                    let id = loc["native_id"].as_str().ok_or(CHANGED)?;
+                    let id = indexed_record_id(loc).ok_or(CHANGED)?;
                     let section = loc["section"].as_str().ok_or(CHANGED)?;
                     let key = indexed_record_key(schema, ds, file, sha, section, id);
                     if p["dataset_id"] != ds
@@ -287,7 +319,9 @@ async fn scan(
         dwg_spec::compare(&context, turn, &collection, &models, &args, pinned).await?
     } else {
         tokio::task::spawn_blocking(move || {
-            if dwg {
+            if args["mode"] == "dwg_tables" {
+                dwg_tables::table(models, &args, pinned)
+            } else if dwg {
                 dwg::table(models, &args, pinned)
             } else {
                 rows::table(models, &args, pinned)
@@ -309,10 +343,10 @@ fn source(doc: &Value, row: &Value) -> Value {
     result["evidence_kind"] = json!("engineering_snapshot");
     result["evidence_admissible"] = json!(true);
     result["reading_representation"] =
-        json!(if result["model_locator"]["reader"]["format"] == "dwg" {
-            "indexed_dwg_insert"
-        } else {
-            "indexed_rvt_record"
+        json!(match result["model_locator"]["record_schema"].as_str() {
+            Some(DWG_TABLE_ROW_SCHEMA) => "indexed_dwg_table_row",
+            Some(DWG_RECORD_SCHEMA) => "indexed_dwg_insert",
+            _ => "indexed_rvt_record",
         });
     result
 }

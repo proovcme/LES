@@ -1,4 +1,5 @@
 //! Read-only process adapters for engineering files in the regular format worker.
+mod dwg_tables;
 mod projection;
 
 use projection::{dwg_objects, rvt_classes, rvt_context, rvt_object, rvt_saved_label};
@@ -429,7 +430,18 @@ fn rvt(
     ))
 }
 
-pub(super) fn read(input: &Value, original: &Path, format: &str) -> Result<Value> {
+pub(crate) fn rvt_reader_revision() -> Result<&'static str> {
+    let readers = READERS
+        .get_or_init(Readers::load)
+        .as_ref()
+        .map_err(|code| *code)?;
+    if !readers.rvt {
+        return Err(UNAVAILABLE);
+    }
+    Ok(&readers.revision)
+}
+
+pub(crate) fn read(input: &Value, original: &Path, format: &str) -> Result<Value> {
     let readers = READERS
         .get_or_init(Readers::load)
         .as_ref()

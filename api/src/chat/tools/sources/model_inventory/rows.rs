@@ -338,7 +338,7 @@ pub(super) fn table(models: Vec<ModelRows>, args: &Value, revision: Value) -> Re
             let mut evidence = source(item.doc, item.indexed);
             evidence["index"] = json!(index);
             sources.push(evidence);
-            rows.push(json!({"name":item.row["name"],"type_name":item.row["type_name"],"brand":item.row["brand"],
+            rows.push(json!({"name":item.row["name"],"type_name":item.row["type_name"],"type_id":item.row["type_id"],"brand":item.row["brand"],
                 "article":item.row["article"],"manufacturer":item.row["manufacturer"],"supplier":item.row["supplier"],
                 "fields":item.row["fields"],"quantity":quantity,"example_element_id":item.row["element_id"],"source_index":index}));
         }

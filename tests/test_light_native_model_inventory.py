@@ -73,6 +73,7 @@ def test_model_inventory_joins_and_counts_only_after_the_model_calls_it(native_t
     assert all(s["doc_id"] == "scoped-doc" for s in listing["sources"])
     vendor = query(mode="vendors").raise_for_status().json()["result"]["rows"]
     assert len(vendor) == 1 and vendor[0]["quantity"] == 2 and vendor[0]["supplier"] is None
+    assert vendor[0]["type_id"] == "7"
     power = query(mode="power", system="В1 1").raise_for_status().json()["result"]["power"]
     assert power["nominal_w"] == {"sum": 2500.0, "known": 1, "unknown": 1, "conflicts": 0}
     assert power["apparent_va"]["sum"] is None
@@ -100,7 +101,10 @@ def test_model_inventory_joins_and_counts_only_after_the_model_calls_it(native_t
         assert result["result"]["matched_instances"] == 2
         row = result["result"]["rows"][0]
         assert row["name"] == "Кран шаровый"
-        return {"text": f'Кран шаровый, Этаж 01. [Источник {row["source_index"]}]'}
+        source = next(s for s in result["sources"] if s["index"] == row["source_index"])
+        assert source["label"] == f'[Источник {row["source_index"]}]'
+        assert row["citation"] == source["label"]
+        return {"text": f'Кран шаровый, Этаж 01. {source["label"]}'}
 
     body = {"question": question, "mode": "search", "retrieval_mode": "pull",
             "scope": scope}

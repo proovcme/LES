@@ -52,15 +52,15 @@ pub(crate) fn verified_file(
     doc: &Value,
     expected: &str,
 ) -> Result<(File, u64), &'static str> {
-    let (_, file, length) = verified_original(context, doc, expected)?;
+    let (_, file, length, _) = verified_original(context, doc, expected)?;
     Ok((file, length))
 }
 
-fn verified_original(
+pub(crate) fn verified_original(
     context: &Context,
     doc: &Value,
     expected: &str,
-) -> Result<(PathBuf, File, u64), &'static str> {
+) -> Result<(PathBuf, File, u64, String), &'static str> {
     let expected = if expected.is_empty() {
         doc["file_hash"].as_str().unwrap_or("")
     } else {
@@ -99,7 +99,7 @@ fn verified_original(
     let length = file.metadata().map_err(|_| "SOURCE_READ_FAILED")?.len();
     file.seek(SeekFrom::Start(0))
         .map_err(|_| "SOURCE_READ_FAILED")?;
-    Ok((path, file, length))
+    Ok((path, file, length, actual))
 }
 fn byte_range(value: Option<&str>, length: u64) -> Result<Option<(u64, u64)>, ()> {
     let Some(value) = value else { return Ok(None) };

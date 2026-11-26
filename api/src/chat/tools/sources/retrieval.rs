@@ -519,6 +519,7 @@ async fn search_view(
             // Keep navigation in ranked order across pages, including matches
             // from the same file.
             let ranked = reading_units(raw_points);
+            let ranked = if indexed { spread_dwg_labels(ranked) } else { ranked };
             let pdf_focus = automatic_pdf && raw_points.iter().any(|p| super::pdf_focus::is_pdf(&p["payload"]));
             let navigation = navigation && !pdf_focus;
             let points: Vec<Value> = if pdf_focus {
@@ -720,6 +721,31 @@ fn pull_pdf_context_never_overrides_passage_pagination() {
 #[cfg(test)]
 mod selection_tests {
     use super::*;
+    #[test]
+    fn repeated_dwg_label_keeps_its_handle_and_follows_distinct_labels() {
+        let label = |id: &str, sheet: &str, text: &str| {
+            json!({"id":id,"payload":{
+                "dataset_id":"d","file_name":"plan.dwg","source_sha256":"r",
+                "model_locator":{"reader":{"format":"dwg"},"section":"elements",
+                                 "native_id":id,"drawing_sheet":{"handle":sheet}},
+                "text":format!("ID: {id}; раздел: elements; категория: MTEXT\nproperties / layer: Room labels\nproperties / text: {text}\nvalue_semantics: saved_dwg")
+            }})
+        };
+        let first = label("a", "layout", "Room schedule");
+        let repeat = label("b", "layout", "Room schedule");
+        let distinct = label("c", "layout", "Corridor");
+        let other_sheet = label("d", "other", "Room schedule");
+        assert_eq!(
+            spread_dwg_labels(vec![
+                first.clone(),
+                repeat.clone(),
+                distinct.clone(),
+                other_sheet.clone()
+            ]),
+            vec![first, distinct, other_sheet, repeat]
+        );
+    }
+
     #[test]
     fn projected_page_duplicates_do_not_spend_the_other_page_slot() {
         let mut first = point(1, "a", "source.pdf", "r1");
@@ -925,6 +951,54 @@ struct ReadMode<'a> {
     addressed: Vec<Value>,
     pdf_focus: bool,
 }
+
+fn spread_dwg_labels(points: Vec<Value>) -> Vec<Value> {
+    let mut seen = std::collections::HashSet::new();
+    let (mut first, repeated): (Vec<_>, Vec<_>) = points.into_iter().partition(|point| {
+        let p = &point["payload"];
+        let locator = &p["model_locator"];
+        if locator["reader"]["format"] != "dwg" || locator["section"] != "elements" {
+            return true;
+        }
+        let Some(sheet) = locator["drawing_sheet"]["handle"].as_str() else {
+            return true;
+        };
+        let Some((properties, text)) = p["text"]
+            .as_str()
+            .and_then(|card| card.split_once("\nproperties / text: "))
+        else {
+            return true;
+        };
+        if !properties.lines().any(|line| {
+            line.ends_with("; раздел: elements; категория: MTEXT")
+                || line.ends_with("; раздел: elements; категория: TEXT")
+        }) {
+            return true;
+        }
+        let Some(text) = text.trim_end().strip_suffix("\nvalue_semantics: saved_dwg") else {
+            return true;
+        };
+        let layer = properties
+            .lines()
+            .find_map(|line| line.strip_prefix("properties / layer: "));
+        seen.insert(
+            json!([
+                p["dataset_id"],
+                p["file_name"],
+                p["source_sha256"],
+                sheet,
+                layer,
+                text
+            ])
+            .to_string(),
+        )
+    });
+    // Duplicate labels are still addressable, but they follow distinct labels
+    // in the small model window. Each point keeps its own handle and locator.
+    first.extend(repeated);
+    first
+}
+
 fn indexed_neighbors(mut points: Vec<Value>, hydrated: &Value) -> Vec<Value> {
     let mut seen: std::collections::HashSet<_> = points.iter().map(|p| p["id"].clone()).collect();
     let mut neighbours = Vec::new();

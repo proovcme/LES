@@ -1460,8 +1460,15 @@ impl Evidence {
                     *value = global.clone();
                 }
             };
+            let rvt_counts = value["operation"] == "rvt_counts";
             for row in value["result"]["rows"].as_array_mut().into_iter().flatten() {
-                index(&mut row["source_index"]);
+                if let Some(global) = row["source_index"]
+                    .as_u64()
+                    .and_then(|n| references.get(&n))
+                {
+                    row["source_index"] = global.clone();
+                    row["citation"] = json!(format!("[Источник {global}]"));
+                }
                 for key in ["note_source_indices", "block_source_indices"] {
                     row.get_mut(key)
                         .and_then(Value::as_array_mut)
@@ -1478,6 +1485,9 @@ impl Evidence {
                 // The audit's per-insert and per-note details stay in the receipt.
                 if let Some(row) = row.as_object_mut() {
                     row.remove("notes");
+                    if rvt_counts {
+                        row.remove("instance_ids");
+                    }
                     row.retain(|_, value| !value.is_null());
                 }
             }
@@ -1543,7 +1553,7 @@ impl Evidence {
         }
         if value["tool"] == "model_inventory" && value["status"] == "ok" {
             for source in value["sources"].as_array_mut().into_iter().flatten() {
-                *source = json!({"index":source["index"],"doc_name":source["doc_name"]});
+                *source = json!({"index":source["index"],"label":source["label"],"doc_name":source["doc_name"]});
             }
         }
         if !value["execution"].is_null() {

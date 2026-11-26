@@ -278,7 +278,7 @@ pub(super) fn prepare(
                             file,
                             source_hash,
                             locator["section"].as_str().ok_or(INVALID)?,
-                            locator["native_id"].as_str().ok_or(INVALID)?,
+                            crate::engineering::indexed_record_id(locator).ok_or(INVALID)?,
                         ));
                     first["payload"]["indexed_engineering_record"] = record.clone();
                 }

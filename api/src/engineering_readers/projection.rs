@@ -102,7 +102,7 @@ impl<'a> DwgSheet<'a> {
     }
 }
 
-fn dwg_text(entry: &Value) -> Option<&str> {
+pub(super) fn dwg_text(entry: &Value) -> Option<&str> {
     text(&entry["text"]).or_else(|| text(&entry["text"]["text"]))
 }
 
@@ -149,7 +149,19 @@ pub(super) fn dwg_objects(value: &Value) -> Result<Vec<Value>> {
     let sections = &value["sections"];
     let layouts = sections["layouts"].as_array().ok_or(FAILED)?;
     let blocks = sections["blocks"].as_array().ok_or(FAILED)?;
-    let sheets = dwg_sheets(layouts, sections["elements"].as_array().ok_or(FAILED)?);
+    let elements = sections["elements"].as_array().ok_or(FAILED)?;
+    let layers = sections["layers"].as_array().ok_or(FAILED)?;
+    let sheets = dwg_sheets(layouts, elements);
+    let mut layer_handles = BTreeMap::new();
+    for layer in layers {
+        if let (Some(name), Some(handle)) = (text(&layer["name"]), text(&layer["handle"])) {
+            layer_handles
+                .entry(name)
+                .and_modify(|old| *old = "")
+                .or_insert(handle);
+        }
+    }
+    layer_handles.retain(|_, handle| !handle.is_empty());
     let mut model_owners = blocks.iter().filter_map(|block| {
         let handle = text(&block["handle"])?;
         let layout = text(&block["layout"])?;
@@ -189,6 +201,22 @@ pub(super) fn dwg_objects(value: &Value) -> Result<Vec<Value>> {
             if let Some(label) = label {
                 properties.insert("text".into(), json!(label));
             }
+            if section == "layers" {
+                properties.extend(fields(
+                    entry,
+                    &[
+                        "colorIndex",
+                        "colorName",
+                        "lineType",
+                        "lineweight",
+                        "frozen",
+                        "off",
+                        "locked",
+                        "plotFlag",
+                        "transparency",
+                    ],
+                ));
+            }
             if let Some(attributes) = entry["attribs"].as_array() {
                 let attributes: Vec<_> = attributes
                     .iter()
@@ -212,6 +240,15 @@ pub(super) fn dwg_objects(value: &Value) -> Result<Vec<Value>> {
             let mut object = json!({"object_id":format!("{section}:{handle}"),"section":section,
                 "native_id":handle,"name":name,"category":entry["type"],"properties":properties,
                 "identifiers":{"handle":handle},"value_semantics":"saved_dwg"});
+            if let Some(layer) = text(&entry["layer"]) {
+                object["dwg_layer"] = json!({"name":layer,"handle":layer_handles.get(layer)});
+            }
+            if matches!(entry["type"].as_str(), Some("TEXT" | "MTEXT")) {
+                if let Some(position) = super::dwg_tables::text_position(entry) {
+                    object["dwg_position"] =
+                        json!({"point":position,"owner_handle":entry["ownerBlockRecordSoftId"]});
+                }
+            }
             if section == "elements"
                 && matches!(entry["type"].as_str(), Some("INSERT" | "MINSERT"))
                 && model_owner.is_some_and(|owner| entry["ownerBlockRecordSoftId"] == owner)
@@ -254,6 +291,19 @@ pub(super) fn dwg_objects(value: &Value) -> Result<Vec<Value>> {
             objects.push(object);
         }
     }
+    let sheet_context = sheets
+        .into_iter()
+        .filter_map(|(owner, sheet)| sheet.map(|sheet| (owner, sheet.context())))
+        .collect();
+    let remaining = super::MAX_OBJECTS.saturating_sub(objects.len());
+    objects.extend(super::dwg_tables::objects(
+        elements,
+        layouts,
+        blocks,
+        &sheet_context,
+        &layer_handles,
+        remaining,
+    ));
     Ok(objects)
 }
 
@@ -467,6 +517,21 @@ pub(super) fn rvt_object(
         })
         .or_else(|| text(&root["m_typeName"]));
     let mut properties = fields(metadata, &["category", "family", "type", "workset"]);
+    let categories: BTreeSet<_> = metadata["raw_field_parameters"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|param| {
+            param["source_field"] == "m_categoryId"
+                && param["storage_type"] == "ElementId"
+                && matches!(param["parameter_id"].as_i64(), Some(-1140362 | -1140363))
+        })
+        .filter_map(|param| param["raw_value"].as_i64())
+        .filter(|id| !matches!(id, -1 | 0))
+        .collect();
+    if categories.len() == 1 {
+        properties.insert("rvt_category_id".into(), json!(categories.first()));
+    }
     if let Some(workset) = text(&row["workset"]["name"]) {
         properties.entry("workset").or_insert(json!(workset));
     }

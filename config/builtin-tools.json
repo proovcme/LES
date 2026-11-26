@@ -4,17 +4,22 @@
   "tools": [
     {
       "name": "model_inventory",
-      "version": "1.2.0",
+      "version": "1.4.0",
       "title": "Ведомость по моделям и чертежам",
       "category": "dataset",
-      "summary": "Read structured RVT or DWG records across the selected dataset. Use list for RVT elements and their locations or systems, vendors for a Revit vendor list, power for Revit equipment totals, dwg_blocks for DWG insert counts and recorded power, and dwg_spec to compare DWG quantities with one indexed Excel specification. Omit dataset IDs to use the chat selection. Use spec_doc_id when several books are available. Results include revision-pinned sources and pagination.",
+      "summary": "Read structured RVT or DWG records across the selected dataset. Use rvt_counts for RVT instance counts grouped by type and level. Use q for a short family/type name, or filter by saved category_id, type_id or level_id. Select doc_id if several RVT files are available. A missing category or level stays unknown. Use dwg_tables for a table printed in a DWG. Use q for a short literal value, table for a schedule title, and omit q to list all rows. Reuse next_offset and index_revision if present. Use list for RVT elements, vendors for types, power for RVT equipment totals, dwg_blocks for DWG inserts, and dwg_spec to compare a DWG with an indexed Excel specification. Omit dataset IDs to use the chat selection.",
       "input_schema": {
         "type": "object",
         "properties": {
           "dataset_id": {"type": "string", "minLength": 1, "maxLength": 512},
           "dataset_ids": {"type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 512}},
           "doc_id": {"type": "string", "minLength": 1, "maxLength": 512},
-          "mode": {"enum": ["list", "vendors", "power", "dwg_blocks", "dwg_spec"]},
+          "mode": {"enum": ["list", "vendors", "power", "rvt_counts", "dwg_blocks", "dwg_spec", "dwg_tables"]},
+          "category_id": {"type": "integer", "description": "Exact saved Revit category ID for rvt_counts, including negative built-in IDs."},
+          "type_id": {"type": "string", "minLength": 1, "maxLength": 32, "description": "Exact saved Revit type ElementId for rvt_counts."},
+          "level_id": {"type": "string", "minLength": 1, "maxLength": 32, "description": "Exact saved Revit level ElementId for rvt_counts."},
+          "table": {"type": "string", "minLength": 1, "maxLength": 256, "description": "With dwg_tables, part of a table title or its DWG handle."},
+          "sheet": {"type": "string", "minLength": 1, "maxLength": 256, "description": "With dwg_tables, the DWG layout name, for example Layout1."},
           "spec_doc_id": {"type": "string", "minLength": 1, "maxLength": 512},
           "spec_sheet": {"type": "string", "minLength": 1, "maxLength": 31},
           "row_start": {"type": "integer", "minimum": 1, "maximum": 1048576},
@@ -24,7 +29,7 @@
           "block": {"type": "string", "minLength": 1, "maxLength": 256},
           "layer": {"type": "string", "minLength": 1, "maxLength": 256},
           "lighting_only": {"type": "boolean"},
-          "limit": {"type": "integer", "minimum": 1, "maximum": 24},
+          "limit": {"type": "integer", "minimum": 1, "maximum": 64, "description": "Maximum rows per page. Up to 64 for dwg_tables and rvt_counts, up to 24 for other modes."},
           "offset": {"type": "integer", "minimum": 0, "maximum": 50000},
           "index_revision": {"type": "string", "minLength": 1, "maxLength": 512}
         },

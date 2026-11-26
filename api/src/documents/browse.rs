@@ -135,7 +135,7 @@ fn read(context: &Context, method: &Method, uri: &Uri) -> Result<Response, Strin
         if digest.is_empty() && doc["file_hash"].as_str().is_none_or(str::is_empty) {
             return Err("SOURCE_REVISION_REQUIRED".into());
         }
-        let (path, _file, _) = verified_original(context, &doc, digest)?;
+        let (path, _file, _, _) = verified_original(context, &doc, digest)?;
         open_original(&les_core::document_source::public_path(path))?;
         return Ok(crate::json_response(
             StatusCode::OK,
