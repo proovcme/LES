@@ -5,7 +5,7 @@ pub struct RuntimeFailure {
     pub message: &'static str,
 }
 impl RuntimeFailure {
-    fn new(code: &'static str, message: &'static str) -> Self {
+    pub fn new(code: &'static str, message: &'static str) -> Self {
         Self { code, message }
     }
 }
@@ -124,6 +124,83 @@ fn verified(directory: &Path) -> Result<(PathBuf, Value)> {
         return Err(invalid());
     }
     Ok((program, receipt))
+}
+
+#[cfg(windows)]
+pub fn verify_downloaded(directory: &Path, receipt_sha256: &str) -> Result<PathBuf> {
+    if crate::sha256_hex(&bytes(
+        &directory.join("skill-python-receipt.json"),
+        128 * 1024,
+    )?) != receipt_sha256
+    {
+        return Err(invalid());
+    }
+    Ok(verified(directory)?.0)
+}
+
+#[cfg(windows)]
+pub fn unpack_download(
+    mut file: File,
+    destination: &Path,
+    expected_size: u64,
+    archive_sha256: &str,
+    receipt_sha256: &str,
+) -> Result<()> {
+    use sha2::{Digest, Sha256};
+    use std::{
+        fs,
+        io::{self, Seek},
+    };
+
+    if file.metadata().map_err(|_| invalid())?.len() != expected_size {
+        return Err(invalid());
+    }
+    let mut hash = Sha256::new();
+    let mut buffer = vec![0; 128 * 1024];
+    loop {
+        let read = file.read(&mut buffer).map_err(|_| invalid())?;
+        if read == 0 {
+            break;
+        }
+        hash.update(&buffer[..read]);
+    }
+    if format!("{:x}", hash.finalize()) != archive_sha256 {
+        return Err(invalid());
+    }
+    file.rewind().map_err(|_| invalid())?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|_| invalid())?;
+    const MAX_BYTES: u64 = 512 * 1024 * 1024;
+    if archive.len() > 25_000 {
+        return Err(invalid());
+    }
+    let mut extracted = 0;
+    for index in 0..archive.len() {
+        let mut member = archive.by_index(index).map_err(|_| invalid())?;
+        let name = member.enclosed_name().ok_or_else(invalid)?;
+        if !member.is_file()
+            || name.components().any(|component| match component {
+                std::path::Component::Normal(part) => part
+                    .to_str()
+                    .is_none_or(|part| part.contains(':') || part.ends_with(['.', ' '])),
+                _ => true,
+            })
+            || member.size() > MAX_BYTES - extracted
+        {
+            return Err(invalid());
+        }
+        let path = destination.join(name);
+        fs::create_dir_all(path.parent().ok_or_else(invalid)?).map_err(|_| invalid())?;
+        let mut output = File::create_new(path).map_err(|_| invalid())?;
+        let size = member.size();
+        let written =
+            io::copy(&mut member.by_ref().take(size + 1), &mut output).map_err(|_| invalid())?;
+        if written != size {
+            return Err(invalid());
+        }
+        extracted += written;
+    }
+    verify_downloaded(destination, receipt_sha256)?;
+    Ok(())
 }
 
 /// Only builder-declared, existing directories inside the dependency tree.

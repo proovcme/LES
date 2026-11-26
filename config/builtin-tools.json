@@ -1,7 +1,55 @@
 {
   "schema": "les_tool_registry_v1",
-  "tool_count": 21,
+  "tool_count": 22,
   "tools": [
+    {
+      "name": "model_inventory",
+      "version": "1.4.0",
+      "title": "Ведомость по моделям и чертежам",
+      "category": "dataset",
+      "summary": "Read structured RVT or DWG records across the selected dataset. Use rvt_counts for RVT instance counts grouped by type and level. Use q for a short family/type name, or filter by saved category_id, type_id or level_id. Select doc_id if several RVT files are available. A missing category or level stays unknown. Use dwg_tables for a table printed in a DWG. Use q for a short literal value, table for a schedule title, and omit q to list all rows. Reuse next_offset and index_revision if present. Use list for RVT elements, vendors for types, power for RVT equipment totals, dwg_blocks for DWG inserts, and dwg_spec to compare a DWG with an indexed Excel specification. Omit dataset IDs to use the chat selection.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "dataset_id": {"type": "string", "minLength": 1, "maxLength": 512},
+          "dataset_ids": {"type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 512}},
+          "doc_id": {"type": "string", "minLength": 1, "maxLength": 512},
+          "mode": {"enum": ["list", "vendors", "power", "rvt_counts", "dwg_blocks", "dwg_spec", "dwg_tables"]},
+          "category_id": {"type": "integer", "description": "Exact saved Revit category ID for rvt_counts, including negative built-in IDs."},
+          "type_id": {"type": "string", "minLength": 1, "maxLength": 32, "description": "Exact saved Revit type ElementId for rvt_counts."},
+          "level_id": {"type": "string", "minLength": 1, "maxLength": 32, "description": "Exact saved Revit level ElementId for rvt_counts."},
+          "table": {"type": "string", "minLength": 1, "maxLength": 256, "description": "With dwg_tables, part of a table title or its DWG handle."},
+          "sheet": {"type": "string", "minLength": 1, "maxLength": 256, "description": "With dwg_tables, the DWG layout name, for example Layout1."},
+          "spec_doc_id": {"type": "string", "minLength": 1, "maxLength": 512},
+          "spec_sheet": {"type": "string", "minLength": 1, "maxLength": 31},
+          "row_start": {"type": "integer", "minimum": 1, "maximum": 1048576},
+          "row_end": {"type": "integer", "minimum": 1, "maximum": 1048576},
+          "q": {"type": "string", "minLength": 1, "maxLength": 160},
+          "system": {"type": "string", "minLength": 1, "maxLength": 160},
+          "block": {"type": "string", "minLength": 1, "maxLength": 256},
+          "layer": {"type": "string", "minLength": 1, "maxLength": 256},
+          "lighting_only": {"type": "boolean"},
+          "limit": {"type": "integer", "minimum": 1, "maximum": 64, "description": "Maximum rows per page. Up to 64 for dwg_tables and rvt_counts, up to 24 for other modes."},
+          "offset": {"type": "integer", "minimum": 0, "maximum": 50000},
+          "index_revision": {"type": "string", "minLength": 1, "maxLength": 512}
+        },
+        "additionalProperties": false,
+        "required": ["mode"]
+      },
+      "result_schema": "les_tool_result_v1",
+      "returns": "Paged model inventory with aggregates and source references",
+      "effect": "read",
+      "side_effects": "none",
+      "scopes": ["dataset"],
+      "timeout_seconds": 90,
+      "retry": "safe",
+      "idempotency": "derived",
+      "result_budget": {"max_chars": 120000, "max_items": 8192},
+      "model_owned_fields": [],
+      "provenance": "source_refs_required",
+      "approval_required": false,
+      "tags": ["dataset", "rvt", "dwg", "inventory"]
+    },
     {
       "name": "assemble_project_volume",
       "version": "1.0.0",
@@ -730,7 +778,7 @@
       "scopes": [
         "skills"
       ],
-      "timeout_seconds": 25,
+      "timeout_seconds": 120,
       "retry": "never",
       "idempotency": "none",
       "result_budget": {

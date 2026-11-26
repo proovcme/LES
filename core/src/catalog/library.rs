@@ -134,6 +134,10 @@ fn documents(conn: &Connection, args: &Args) -> Result<Value> {
         params![id, q, file_filter],
         |r| r.get::<_, i64>(0),
     )?;
+    if offset >= total {
+        return Ok(json!({"dataset_id":id,"limit":limit,"offset":offset,
+            "total":total,"documents":[]}));
+    }
     let items = rows(
         conn,
         "SELECT id, dataset_id, file_name, COALESCE(status,'') AS status, file_size,

@@ -1,4 +1,4 @@
-//! Resolve explicitly named workbooks in the selected folder before ranking their rows.
+//! Resolve explicitly named workbooks and combine their rows with corpus search.
 use super::*;
 
 fn words(value: &str) -> impl Iterator<Item = String> + '_ {
@@ -25,6 +25,7 @@ pub(super) async fn named(context: Arc<Context>, turn: &SourceContext) -> Result
         return Ok(None);
     }
     let terms: std::collections::HashSet<_> = words(question).collect();
+    let selected = selected_scoped(turn);
     let mut batches = Vec::new();
     for name in names {
         let catalog = super::super::catalog::search(
@@ -47,6 +48,7 @@ pub(super) async fn named(context: Arc<Context>, turn: &SourceContext) -> Result
                 if file.to_lowercase() != name
                     || doc["status"] != "INDEXED"
                     || !doc["id"].is_string()
+                    || (!selected.is_empty() && !selected.contains(&doc["file_name"]))
                 {
                     return None;
                 }
@@ -93,14 +95,13 @@ pub(super) async fn named(context: Arc<Context>, turn: &SourceContext) -> Result
                         super::super::workbook::read_indexed(context.clone(), turn, &first).await?
                     {
                         if let Some(mut head) = preview["result"]["passages"].as_array().cloned() {
-                            rows.retain(|p| {
-                                !head.iter().any(|h| {
+                            head.retain(|h| {
+                                !rows.iter().any(|p| {
                                     h["source"]["sheet_name"] == p["source"]["sheet_name"]
                                         && h["source"]["row"] == p["source"]["row"]
                                 })
                             });
-                            head.append(&mut rows);
-                            rows = head;
+                            rows.append(&mut head);
                         }
                     }
                 }
@@ -123,9 +124,94 @@ pub(super) async fn named(context: Arc<Context>, turn: &SourceContext) -> Result
     Ok(Some(envelope(
         "search_sources",
         "indexed_workbook_rows",
-        json!({"passages":passages,"coverage":"bounded","selection_policy":"named_workbooks"}),
+        json!({"passages":passages,"coverage":"bounded","selection_policy":{"named_workbooks":true}}),
         sources,
     )))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_named_workbook_keeps_ranked_hits_from_other_files_in_the_window() {
+        let row = |number| json!({"source":{"doc_id":"book","sheet_name":"Sheet","row":number}});
+        let draw = json!({"source":{"doc_id":"plan","model_locator":{"native_id":"A1"}}});
+        let note = json!({"source":{"doc_id":"notes"}});
+        let mut ranked = json!({"result":{"selection_policy":{"seed_limit":64},
+            "passages":[row(7),draw,note,row(9)]}});
+        let named = json!({"result":{"passages":[row(7),row(8)]}});
+
+        merge_named(&mut ranked, named);
+
+        assert_eq!(
+            ranked["result"]["passages"],
+            json!([row(7), draw, row(8), note, row(9)])
+        );
+        assert_eq!(ranked["sources"][1], draw["source"]);
+        assert_eq!(ranked["result"]["included_fragments"], 5);
+        assert_eq!(ranked["result"]["selection_policy"]["seed_limit"], 64);
+        assert_eq!(
+            ranked["result"]["selection_policy"]["named_workbooks"],
+            true
+        );
+    }
+}
+
+pub(super) fn merge_named(result: &mut Value, mut named: Value) {
+    let Some(passages) = result["result"]["passages"].as_array_mut() else {
+        return;
+    };
+    let Some(named) = named["result"]["passages"].as_array_mut() else {
+        return;
+    };
+    let named_docs: std::collections::HashSet<_> = named
+        .iter()
+        .filter_map(|passage| passage["source"]["doc_id"].as_str())
+        .collect();
+    let (other, same_book): (Vec<_>, Vec<_>) =
+        std::mem::take(passages).into_iter().partition(|passage| {
+            passage["source"]["doc_id"]
+                .as_str()
+                .is_none_or(|id| !named_docs.contains(id))
+        });
+    let same_book: Vec<_> = same_book
+        .into_iter()
+        .filter(|passage| {
+            let source = &passage["source"];
+            !named.iter().any(|row| same_row(&row["source"], source))
+        })
+        .collect();
+    // One named row and one hit from the rest of the dataset fit near the head
+    // of the model window even when a long book would fill the whole budget.
+    let count = named.len().max(other.len());
+    let mut rows = std::mem::take(named).into_iter();
+    let mut other = other.into_iter();
+    for _ in 0..count {
+        passages.extend(rows.next());
+        passages.extend(other.next());
+    }
+    passages.extend(same_book);
+    update_count(result);
+    result["result"]["selection_policy"]["named_workbooks"] = json!(true);
+}
+
+fn same_row(left: &Value, right: &Value) -> bool {
+    left["sheet_name"].is_string()
+        && left["row"].is_u64()
+        && ["doc_id", "source_sha256", "sheet_name", "row"]
+            .iter()
+            .all(|key| left[*key] == right[*key])
+}
+
+fn update_count(result: &mut Value) {
+    let passages = result["result"]["passages"].as_array().unwrap();
+    let count = passages.len();
+    result["sources"] = json!(passages
+        .iter()
+        .map(|passage| &passage["source"])
+        .collect::<Vec<_>>());
+    result["result"]["included_fragments"] = json!(count);
 }
 
 pub(super) async fn append_related(
@@ -158,11 +244,11 @@ pub(super) async fn append_related(
         {
             for passage in rows["result"]["passages"].as_array().into_iter().flatten() {
                 let source = &passage["source"];
-                if !passages.iter().chain(&extra).any(|candidate| {
-                    ["doc_id", "sheet_name", "row"]
-                        .iter()
-                        .all(|key| candidate["source"][*key] == source[*key])
-                }) {
+                if !passages
+                    .iter()
+                    .chain(&extra)
+                    .any(|candidate| same_row(&candidate["source"], source))
+                {
                     extra.push(passage.clone());
                 }
             }
@@ -171,12 +257,6 @@ pub(super) async fn append_related(
     if !extra.is_empty() {
         let position = passages.len().min(6);
         passages.splice(position..position, extra);
-        let count = passages.len();
-        let sources = json!(passages
-            .iter()
-            .map(|passage| &passage["source"])
-            .collect::<Vec<_>>());
-        result["sources"] = sources;
-        result["result"]["included_fragments"] = json!(count);
+        update_count(result);
     }
 }

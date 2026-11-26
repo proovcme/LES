@@ -14,7 +14,7 @@ make pre-push
 | `make pre-push` | Fast, offline checks, documentation, public files, and retrieval contracts. The Git hook runs it for the outgoing commit. |
 | `make verify` | API contract and test collection. Build the native core first. |
 | `make test-frontend` | Frontend types and behavior. |
-| `make test` | Python and native integration checks. Build the frontend first and provide native binaries to exercise the associated scenarios. |
+| `make test` | Python and native integration checks, including the pinned MCP SDK used by the sample servers. Build the frontend first and provide native binaries to exercise the associated scenarios. |
 | `make test-mail` | Offline mail behavior. |
 
 The full [Windows checks](../../.github/workflows/verify.yml) show which assets

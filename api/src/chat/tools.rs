@@ -1,6 +1,7 @@
 //! Trusted native tool dispatcher. Paths, scope and programs are bound by the server.
 mod access;
 mod local;
+mod skill_python;
 pub(super) mod sources;
 use super::{prepare::Prepared, Context, Result};
 use serde_json::{json, Value};
@@ -74,7 +75,7 @@ fn model_schema(contract: &Value) -> Value {
     schema
 }
 impl Tools {
-    pub async fn new(context: &Context, turn: &Prepared) -> Result<Self> {
+    pub async fn new(context: &Context, turn: &Prepared, native: bool) -> Result<Self> {
         let database = context.database.clone();
         let profile = turn.profile.clone();
         let registered = turn.session["registered"] == true && turn.profile["mode"] == "agent";
@@ -83,6 +84,14 @@ impl Tools {
         let selected_only = turn.request["selected_sources_only"] == true;
         let indexed_reader_first = prefer_indexed_reader(&sources::selected_files(turn));
         let remote = turn.egress_tag.is_some();
+        let inventory = native
+            && grounded
+            && !push
+            && profile["tools"]
+                .as_array()
+                .is_some_and(|v| v.iter().any(|name| name == "model_inventory"))
+            && sources::model_inventory::available(context, &sources::SourceContext::from(turn))
+                .await?;
         tokio::task::spawn_blocking(move||->Result<Self>{
             let result=super::unwrap(les_core::tool_registry::execute(&json!({"schema":"les.tool-registry.v1","database":database,"action":"registry"})))?;
             let allowed=profile["tools"].as_array().cloned().unwrap_or_default();
@@ -90,7 +99,8 @@ impl Tools {
                 .filter(|t|allowed.contains(&t["name"])&&(grounded||!["dataset","source"].iter().any(|c|t["category"]==*c))
                     && (!push || !["dataset","source"].iter().any(|c|t["category"]==*c))
                     && (!selected_only || (t["name"]!="web_search"&&t["name"]!="web_read"))
-                    && (!remote || ["search_sources","read_source","read_pdf_source","read_excel_source"].iter().any(|n|t["name"]==*n))).cloned().collect();
+                    && (t["name"]!="model_inventory" || inventory)
+                    && (!remote || ["search_sources","read_source","read_pdf_source","read_excel_source","model_inventory"].iter().any(|n|t["name"]==*n))).cloned().collect();
             for contract in &mut contracts {
                 if contract["name"]=="search_sources"{contract["timeout_seconds"]=json!(150);}
             }
@@ -114,6 +124,38 @@ impl Tools {
             let handle=execute(json!({"schema":"les.tool-execution.v1","action":"new","database":database,"cursor_capacity":128,"cursor_ttl_seconds":300.}))?["handle"].as_u64().ok_or("TOOL_EXECUTION_STATE_ERROR")?;
             Ok(Self{handle,contracts,mcp,access:access_name,indexed_reader_first,read_max_chars:16000,sequence:std::sync::atomic::AtomicU64::new(0),table:None,review:None})
         }).await.map_err(|_|"TOOL_REGISTRY_INVALID")?
+    }
+    pub(super) fn restrict_indexed(&mut self) -> bool {
+        self.contracts
+            .retain(|contract| contract["name"] == "model_inventory");
+        !self.contracts.is_empty()
+    }
+    pub(super) fn restrict_inventory_to_rvt_counts(&mut self) {
+        for contract in self
+            .contracts
+            .iter_mut()
+            .filter(|c| c["name"] == "model_inventory")
+        {
+            contract["input_schema"]["properties"]["mode"]["enum"] = json!(["rvt_counts"]);
+            contract["summary"] = json!("Count saved RVT instances by type and level. Use q for a short literal family/type name. Use doc_id to select a model when several are listed. Missing levels and categories remain unknown.");
+        }
+    }
+    pub(super) fn indexed_schemas(&self) -> Vec<Value> {
+        self.contracts
+            .iter()
+            .map(|c| {
+                json!({"type":"function","function":{
+                    "name":c["name"],
+                    "description":if c["input_schema"]["properties"]["mode"]["enum"] == json!(["rvt_counts"]) {
+                        c["summary"].as_str().unwrap_or_default().to_owned()
+                    } else { format!(
+                        "{} In indexed chat, use inventory for counts, lists or comparisons that need structured records. A completed rvt_counts page already groups all matching saved instances. Use another call only for missing requested data or pagination. For examples of different Revit types, use vendors without q. Answer ordinary text questions from the excerpts.",
+                        c["summary"].as_str().unwrap_or_default()
+                    ) },
+                    "parameters":c["input_schema"]
+                }})
+            })
+            .collect()
     }
     pub fn bind_table(&mut self, table: Option<Arc<super::table_document::TableTool>>) {
         if table.is_some() {
@@ -181,6 +223,7 @@ impl Tools {
                 "table_document",
                 "search_sources",
                 reader,
+                "model_inventory",
                 other_reader,
                 "agent_workspace",
             ]
@@ -190,6 +233,7 @@ impl Tools {
                 "agent_workspace",
                 "search_sources",
                 reader,
+                "model_inventory",
                 other_reader,
             ]
         };
@@ -295,6 +339,14 @@ impl Tools {
                 .cloned()
                 .ok_or("TOOL_NOT_ALLOWED")?;
             let mut args = call["args"].clone();
+            if name == "model_inventory"
+                && args.is_object()
+                && args.get("limit").is_none()
+                && args["mode"] != "dwg_tables"
+                && args["mode"] != "rvt_counts"
+            {
+                args["limit"] = json!(6);
+            }
             let pull = turn.profile["mode"] == "search"
                 && turn.scope["document_grounding_enabled"] == true
                 && turn.request["retrieval_mode"].as_str().unwrap_or("pull") == "pull";
@@ -329,7 +381,15 @@ impl Tools {
                         )
                     }
                 } else {
-                    (vec![], args["doc_name"].as_str().map(str::to_owned))
+                    let datasets = if name == "model_inventory"
+                        && args["dataset_id"].is_null()
+                        && args["dataset_ids"].is_null()
+                    {
+                        scope.as_array().cloned().unwrap_or_default()
+                    } else {
+                        vec![]
+                    };
+                    (datasets, args["doc_name"].as_str().map(str::to_owned))
                 };
             let actor = turn.request["session_id"].as_str().unwrap_or("native-chat");
             // Provider IDs are only unique within a provider response. The local
@@ -384,7 +444,14 @@ impl Tools {
                     ]
                     .contains(&name)
                 {
-                    local::run(context, turn, name, args).await
+                    local::run(
+                        context,
+                        turn,
+                        name,
+                        args,
+                        deadline.min(started + std::time::Duration::from_secs_f64(timeout)),
+                    )
+                    .await
                 } else if name == "web_search" || name == "web_read" {
                     let mut input = args;
                     input["schema"] = json!("les.web.v1");

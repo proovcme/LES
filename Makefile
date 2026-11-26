@@ -46,7 +46,7 @@ pre-push: verify-fast public-check
 test:
 	uv run python tools/build_light_frontend.py --check
 	uv run python tools/code_runtime_map.py --check
-	uv run python -m pytest --basetemp=$(PYTEST_BASETEMP)/test -q --durations=20 $(CURRENT_TESTS)
+	uv run --frozen --extra mcp python -m pytest --basetemp=$(PYTEST_BASETEMP)/test -q --durations=20 $(CURRENT_TESTS)
 
 test-mail:
 	uv run python -m pytest --basetemp=$(PYTEST_BASETEMP)/mail -q --durations=15 $(MAIL_TESTS)
@@ -77,7 +77,7 @@ public-check:
 
 package:
 	@test -n "$(DESKTOP_EXE)" -a -n "$(QDRANT_EXE)" -a -n "$(PACKAGE_DIR)" || (echo "Set DESKTOP_EXE, QDRANT_EXE and PACKAGE_DIR" && exit 2)
-	uv run python tools/build_light_package.py --output "$(PACKAGE_DIR)" --desktop-exe "$(DESKTOP_EXE)" --qdrant "$(QDRANT_EXE)"
+	uv run python tools/build_light_package.py --output "$(PACKAGE_DIR)" --desktop-exe "$(DESKTOP_EXE)" --qdrant "$(QDRANT_EXE)" $(if $(ENGINEERING_READERS),--engineering-readers "$(ENGINEERING_READERS)")
 
 validate-package:
 	@test -n "$(PACKAGE_DIR)" || (echo "Set PACKAGE_DIR" && exit 2)

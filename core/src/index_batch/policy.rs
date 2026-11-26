@@ -29,6 +29,7 @@ pub(super) fn classify(error: &Value, attempts: u64, max_attempts: u64) -> (Stri
             | "SOURCE_CHANGED_DURING_INDEXING"
             | "EMBEDDING_COUNT_MISMATCH"
             | "INDEX_SPOOL_WRITE_FAILED"
+            | "RVT_SNAPSHOT_STORAGE_FAILED"
     );
     let machine_code = !code.is_empty()
         && code.len() <= 120

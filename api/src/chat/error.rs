@@ -43,7 +43,10 @@ impl Failure {
         };
         let status = if matches!(
             code,
-            "CHAT_CANCELLED" | "CHAT_REQUEST_NOT_REPLAYABLE" | "IDEMPOTENCY_KEY_REUSED"
+            "CHAT_CANCELLED"
+                | "CHAT_REQUEST_NOT_REPLAYABLE"
+                | "IDEMPOTENCY_KEY_REUSED"
+                | "RVT_SNAPSHOT_NOT_READY"
         ) {
             StatusCode::CONFLICT
         } else if code.starts_with("CHAT_REQUEST")
@@ -53,7 +56,17 @@ impl Failure {
             || code == "CHAT_RETRIEVAL_MODE_INVALID"
             || matches!(
                 code,
-                "SOURCE_OFFSET_INVALID" | "SOURCE_SNAPSHOT_OFFSET_INVALID"
+                "SOURCE_OFFSET_INVALID"
+                    | "SOURCE_SNAPSHOT_OFFSET_INVALID"
+                    | "MODEL_INVENTORY_LIMIT"
+                    | "MODEL_INVENTORY_NO_RVT"
+                    | "MODEL_INVENTORY_NO_DWG"
+                    | "MODEL_INVENTORY_SELECT_RVT_DOCUMENT"
+                    | "DWG_SPEC_WORKBOOK_REQUIRED"
+                    | "DWG_SPEC_SINGLE_DATASET"
+                    | "DWG_SPEC_RANGE_INVALID"
+                    | "DWG_SPEC_NO_POSITIONS"
+                    | "DWG_SPEC_RECORDS_REQUIRED"
             )
         {
             StatusCode::UNPROCESSABLE_ENTITY
@@ -92,6 +105,21 @@ impl Failure {
             "CHAT_SCOPE_INVALID"=>"Не удалось определить выбранные документы. Выберите область поиска ещё раз.",
             "CHAT_RETRIEVAL_MODE_INVALID"=>"Выберите способ поиска в документах в параметрах ответа.",
             "TOOL_SCHEMA_INVALID"=>"Проверьте параметры инструмента по его описанию.",
+            "SKILL_RUNTIME_DOWNLOAD_FAILED"=>"Не удалось скачать Python. Проверьте доступ к GitHub и повторите запуск навыка.",
+            "SKILL_RUNTIME_STORAGE_FAILED"=>"Не удалось сохранить Python. Проверьте место на диске и доступ к папке данных Леса.",
+            "SKILL_RUNTIME_INVALID"=>"Не удалось проверить комплект Python для внешних навыков.",
+            "SKILL_RUNTIME_COMPONENT_MISSING"=>"Исполнитель внешних Python-навыков недоступен. Проверьте установку Леса.",
+            "RVT_SNAPSHOT_NOT_READY"=>"Снимок RVT для ведомости ещё не готов. Переиндексируйте модель в наборе документов.",
+            "RVT_SNAPSHOT_STORAGE_FAILED"=>"Не удалось прочитать сохранённый снимок RVT. Проверьте состояние каталога Леса.",
+            "MODEL_INVENTORY_LIMIT"=>"Запрос охватывает слишком много моделей или записей. Выберите один файл или меньший датасет.",
+            "MODEL_INVENTORY_NO_RVT"=>"В выбранных источниках нет файлов RVT.",
+            "MODEL_INVENTORY_NO_DWG"=>"В выбранных источниках нет файлов DWG.",
+            "MODEL_INVENTORY_SELECT_RVT_DOCUMENT"=>"В наборе несколько RVT. Выберите файл модели для ведомости.",
+            "DWG_SPEC_WORKBOOK_REQUIRED"=>"Выберите один проиндексированный Excel со спецификацией в том же наборе, что и DWG.",
+            "DWG_SPEC_SINGLE_DATASET"=>"Для сверки выберите один набор с DWG и Excel.",
+            "DWG_SPEC_RANGE_INVALID"=>"Укажите лист Excel и границы строк одной части спецификации.",
+            "DWG_SPEC_NO_POSITIONS"=>"В выбранной области Excel не найдены позиции с количеством и единицей «шт.».",
+            "DWG_SPEC_RECORDS_REQUIRED"=>"Для сверки нужны записи пространства модели. Проверьте индексацию выбранных DWG.",
             "TOOL_SCOPE_VIOLATION"=>"Документ или набор не входит в разрешённую область чтения.",
             "SOURCE_CONTINUATION_VIEW_REQUIRED" => "Для продолжения чтения передайте view_sha256 из предыдущей порции вместе с next_offset.",
             "SOURCE_VIEW_CHANGED" => "Изменился снимок прочитанного текста. Начните чтение заново; старые и новые порции нельзя объединять.",

@@ -21,6 +21,16 @@ function Install-Les([string]$Directory, [int]$Build) {
     if ($installer.ExitCode -ne 0) { throw "Setup exit code $($installer.ExitCode)." }
     $installed = Get-Content -LiteralPath (Join-Path $app 'runtime/config/version.json') -Raw | ConvertFrom-Json
     if ($installed.build_number -ne $Build) { throw "Expected installed build $Build." }
+    if ($Build -eq $expected.build_number) {
+        $descriptor = Get-Content -LiteralPath (Join-Path $app 'native/skill-python-download.json') -Raw | ConvertFrom-Json
+        $component = Join-Path $Directory "LES-Skill-Python-$Build.zip"
+        if ((Test-Path -LiteralPath (Join-Path $app 'native/skill-python')) -or
+            (-not (Test-Path -LiteralPath (Join-Path $app 'native/pdf/pdfium.dll') -PathType Leaf)) -or
+            (Get-Item -LiteralPath $component).Length -ne $descriptor.bytes -or
+            (Get-FileHash -LiteralPath $component).Hash -ne $descriptor.sha256) {
+            throw 'Candidate must install PDFium and ship the optional Python archive separately.'
+        }
+    }
 }
 
 function Invoke-InstalledLes([scriptblock]$Check) {
@@ -98,6 +108,10 @@ Invoke-InstalledLes {
     if (-not $first.history_id -or $first.history_id -ne $again.history_id -or $first.answer -ne $again.answer) {
         throw 'Installed chat did not replay the committed answer.'
     }
+}
+
+if (Test-Path -LiteralPath (Join-Path $state 'components/skill-python')) {
+    throw 'Starting the app and using chat must not provision Python.'
 }
 
 if ($Scenario -eq 'upgrade') {

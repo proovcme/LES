@@ -107,6 +107,41 @@ pub fn check_registration(request: &Value) -> Result<(), &'static str> {
     registration(&lexical_write::open(request)?, request)
 }
 
+/// Locate model-space text cards in the published lexical index, without ranking.
+pub fn dwg_note_points(
+    database: &Path,
+    collection: &str,
+    dataset: &str,
+    file: &str,
+    owner: &str,
+) -> Result<Vec<String>, &'static str> {
+    const ERROR: &str = "INDEX_READ_UNAVAILABLE";
+    const LIMIT: usize = 20_000;
+    let db = Connection::open_with_flags(database, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(|_| ERROR)?;
+    let mut query = db.prepare(
+        "SELECT point_id FROM lexical_chunks WHERE collection=?1 AND dataset_id=?2 AND doc_name=?3
+         AND instr(text, ?4)>0 AND instr(text, char(10) || 'properties / text: ')>0
+         AND instr(text, char(10) || 'value_semantics: saved_dwg')>0
+         AND (instr(text, '; категория: MTEXT' || char(10))>0
+              OR instr(text, '; категория: TEXT' || char(10))>0)
+         ORDER BY chunk_ord, point_id LIMIT ?5",
+    ).map_err(|_| ERROR)?;
+    let field = format!("\nproperties / ownerBlockRecordSoftId: {owner}\n");
+    let ids = query
+        .query_map(
+            params![collection, dataset, file, field, LIMIT as i64 + 1],
+            |row| row.get(0),
+        )
+        .map_err(|_| ERROR)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|_| ERROR)?;
+    if ids.len() > LIMIT {
+        return Err("MODEL_INVENTORY_LIMIT");
+    }
+    Ok(ids)
+}
+
 /// Resolve a clause against published headings, then page its ordinal IDs.
 pub fn clause_positions(
     database: &Path,

@@ -1275,7 +1275,6 @@
     {
       "inbound": [
         "backend/converter.py",
-        "proxy/services/asbuilt_ocr.py",
         "proxy/services/kac_pdf_service.py",
         "proxy/services/title_block_extract_service.py",
         "proxy/services/verify_service.py",
@@ -2266,13 +2265,11 @@
         "proxy/routers/workspace_memory.py",
         "proxy/security.py",
         "proxy/services/__init__.py",
-        "proxy/services/active_state_service.py",
         "proxy/services/agent_state_service.py",
         "proxy/services/agent_workspace_tools.py",
         "proxy/services/answer_contract_service.py",
         "proxy/services/answer_form_service.py",
         "proxy/services/artifact_revision_service.py",
-        "proxy/services/asbuilt_ocr.py",
         "proxy/services/auto_parse_resume_service.py",
         "proxy/services/background_summary_service.py",
         "proxy/services/bor_service.py",
@@ -2307,7 +2304,6 @@
         "proxy/services/checklist_param_rules.py",
         "proxy/services/checklist_report_service.py",
         "proxy/services/checklist_review_service.py",
-        "proxy/services/checklist_template_importer.py",
         "proxy/services/class_router_service.py",
         "proxy/services/clause_lookup_service.py",
         "proxy/services/cloud_drive_service.py",
@@ -2354,7 +2350,6 @@
         "proxy/services/forms_service.py",
         "proxy/services/freetoken_cache_profile_service.py",
         "proxy/services/generation_guard_service.py",
-        "proxy/services/glossary_chat_service.py",
         "proxy/services/graph_edges_service.py",
         "proxy/services/installed_skill_service.py",
         "proxy/services/job_service.py",
@@ -2447,7 +2442,6 @@
         "proxy/services/runtime_dispatcher.py",
         "proxy/services/saferag_service.py",
         "proxy/services/scope_service.py",
-        "proxy/services/scoped_rag_builder.py",
         "proxy/services/section_evidence_candidate.py",
         "proxy/services/semantic_cache.py",
         "proxy/services/sidecar_ops_service.py",
@@ -2459,7 +2453,6 @@
         "proxy/services/structured_extract.py",
         "proxy/services/system_dataset_service.py",
         "proxy/services/table_appendix_service.py",
-        "proxy/services/table_detect.py",
         "proxy/services/table_document_tool.py",
         "proxy/services/table_retrieval_service.py",
         "proxy/services/table_window_service.py",
@@ -2473,7 +2466,6 @@
         "proxy/services/tool_trace_policy.py",
         "proxy/services/trusted_executor_service.py",
         "proxy/services/typed_memory_projection_service.py",
-        "proxy/services/update_service.py",
         "proxy/services/verify_service.py",
         "proxy/services/version_service.py",
         "proxy/services/web_page_reader_service.py",
@@ -3805,13 +3797,11 @@
     },
     {
       "inbound": [
-        "proxy/services/active_state_service.py",
         "proxy/services/agent_state_service.py",
         "proxy/services/agent_workspace_tools.py",
         "proxy/services/answer_contract_service.py",
         "proxy/services/answer_form_service.py",
         "proxy/services/artifact_revision_service.py",
-        "proxy/services/asbuilt_ocr.py",
         "proxy/services/auto_parse_resume_service.py",
         "proxy/services/background_summary_service.py",
         "proxy/services/bor_service.py",
@@ -3846,7 +3836,6 @@
         "proxy/services/checklist_param_rules.py",
         "proxy/services/checklist_report_service.py",
         "proxy/services/checklist_review_service.py",
-        "proxy/services/checklist_template_importer.py",
         "proxy/services/class_router_service.py",
         "proxy/services/clause_lookup_service.py",
         "proxy/services/cloud_drive_service.py",
@@ -3893,7 +3882,6 @@
         "proxy/services/forms_service.py",
         "proxy/services/freetoken_cache_profile_service.py",
         "proxy/services/generation_guard_service.py",
-        "proxy/services/glossary_chat_service.py",
         "proxy/services/graph_edges_service.py",
         "proxy/services/installed_skill_service.py",
         "proxy/services/job_service.py",
@@ -3986,7 +3974,6 @@
         "proxy/services/runtime_dispatcher.py",
         "proxy/services/saferag_service.py",
         "proxy/services/scope_service.py",
-        "proxy/services/scoped_rag_builder.py",
         "proxy/services/section_evidence_candidate.py",
         "proxy/services/semantic_cache.py",
         "proxy/services/sidecar_ops_service.py",
@@ -3998,7 +3985,6 @@
         "proxy/services/structured_extract.py",
         "proxy/services/system_dataset_service.py",
         "proxy/services/table_appendix_service.py",
-        "proxy/services/table_detect.py",
         "proxy/services/table_document_tool.py",
         "proxy/services/table_retrieval_service.py",
         "proxy/services/table_window_service.py",
@@ -4012,7 +3998,6 @@
         "proxy/services/tool_trace_policy.py",
         "proxy/services/trusted_executor_service.py",
         "proxy/services/typed_memory_projection_service.py",
-        "proxy/services/update_service.py",
         "proxy/services/verify_service.py",
         "proxy/services/version_service.py",
         "proxy/services/web_page_reader_service.py",
@@ -4031,20 +4016,6 @@
       ],
       "path": "proxy/services/__init__.py",
       "status": "PRODUCT_REACHABLE",
-      "windows_runtime_explicit": false
-    },
-    {
-      "inbound": [
-        "proxy/services/scoped_rag_builder.py"
-      ],
-      "lines": 129,
-      "module": "proxy.services.active_state_service",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py"
-      ],
-      "path": "proxy/services/active_state_service.py",
-      "status": "DORMANT_CANDIDATE",
       "windows_runtime_explicit": false
     },
     {
@@ -4133,19 +4104,6 @@
       ],
       "path": "proxy/services/artifact_revision_service.py",
       "status": "PRODUCT_REACHABLE",
-      "windows_runtime_explicit": false
-    },
-    {
-      "inbound": [],
-      "lines": 159,
-      "module": "proxy.services.asbuilt_ocr",
-      "outbound": [
-        "backend/ocr_parser.py",
-        "proxy/__init__.py",
-        "proxy/services/__init__.py"
-      ],
-      "path": "proxy/services/asbuilt_ocr.py",
-      "status": "DORMANT_CANDIDATE",
       "windows_runtime_explicit": false
     },
     {
@@ -4909,7 +4867,7 @@
       "inbound": [
         "proxy/routers/checklist_review.py"
       ],
-      "lines": 1518,
+      "lines": 1517,
       "module": "proxy.services.checklist_review_service",
       "outbound": [
         "backend/rag_config.py",
@@ -4924,18 +4882,6 @@
       ],
       "path": "proxy/services/checklist_review_service.py",
       "status": "PRODUCT_REACHABLE",
-      "windows_runtime_explicit": false
-    },
-    {
-      "inbound": [],
-      "lines": 450,
-      "module": "proxy.services.checklist_template_importer",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py"
-      ],
-      "path": "proxy/services/checklist_template_importer.py",
-      "status": "DORMANT_CANDIDATE",
       "windows_runtime_explicit": false
     },
     {
@@ -5853,18 +5799,6 @@
       ],
       "path": "proxy/services/generation_guard_service.py",
       "status": "PRODUCT_REACHABLE",
-      "windows_runtime_explicit": false
-    },
-    {
-      "inbound": [],
-      "lines": 90,
-      "module": "proxy.services.glossary_chat_service",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py"
-      ],
-      "path": "proxy/services/glossary_chat_service.py",
-      "status": "DORMANT_CANDIDATE",
       "windows_runtime_explicit": false
     },
     {
@@ -7808,20 +7742,6 @@
       "windows_runtime_explicit": false
     },
     {
-      "inbound": [],
-      "lines": 111,
-      "module": "proxy.services.scoped_rag_builder",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/active_state_service.py",
-        "proxy/services/skill_snippet_registry.py"
-      ],
-      "path": "proxy/services/scoped_rag_builder.py",
-      "status": "DORMANT_CANDIDATE",
-      "windows_runtime_explicit": false
-    },
-    {
       "inbound": [
         "backend/retrieval_candidate.py",
         "tests/test_light_retrieval_candidate.py"
@@ -7892,8 +7812,7 @@
     },
     {
       "inbound": [
-        "proxy/services/prompt_registry_service.py",
-        "proxy/services/scoped_rag_builder.py"
+        "proxy/services/prompt_registry_service.py"
       ],
       "lines": 175,
       "module": "proxy.services.skill_snippet_registry",
@@ -8012,18 +7931,6 @@
       ],
       "path": "proxy/services/table_appendix_service.py",
       "status": "PRODUCT_REACHABLE",
-      "windows_runtime_explicit": false
-    },
-    {
-      "inbound": [],
-      "lines": 86,
-      "module": "proxy.services.table_detect",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py"
-      ],
-      "path": "proxy/services/table_detect.py",
-      "status": "DORMANT_CANDIDATE",
       "windows_runtime_explicit": false
     },
     {
@@ -8345,19 +8252,6 @@
       "windows_runtime_explicit": false
     },
     {
-      "inbound": [],
-      "lines": 1082,
-      "module": "proxy.services.update_service",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/version_service.py"
-      ],
-      "path": "proxy/services/update_service.py",
-      "status": "DORMANT_CANDIDATE",
-      "windows_runtime_explicit": false
-    },
-    {
       "inbound": [
         "proxy/routers/verify.py",
         "sovushka_ng.py"
@@ -8382,11 +8276,10 @@
         "proxy/services/canonical_promotion_service.py",
         "proxy/services/chat_request_service.py",
         "proxy/services/light_update_service.py",
-        "proxy/services/update_service.py",
         "tests/test_software_versions.py",
         "tools/build_tauri_app.py"
       ],
-      "lines": 342,
+      "lines": 339,
       "module": "proxy.services.version_service",
       "outbound": [
         "proxy/__init__.py",
@@ -10247,7 +10140,7 @@
     },
     {
       "inbound": [],
-      "lines": 222,
+      "lines": 221,
       "module": "tests.test_code_runtime_map",
       "outbound": [
         "tools/code_runtime_map.py"
@@ -11392,6 +11285,7 @@
         "tests/test_light_native_evidence_packet.py",
         "tests/test_light_native_folder_fields.py",
         "tests/test_light_native_model_discovery.py",
+        "tests/test_light_native_model_inventory.py",
         "tests/test_light_native_model_settings.py",
         "tests/test_light_native_numeric_evidence.py",
         "tests/test_light_native_overview.py",
@@ -11404,7 +11298,7 @@
         "tests/test_light_native_word_window.py",
         "tools/evaluate_part_reader_chat.py"
       ],
-      "lines": 429,
+      "lines": 461,
       "module": "tests.test_light_native_chat_turn",
       "outbound": [
         "backend/light_qdrant_runtime.py",
@@ -11541,7 +11435,7 @@
     },
     {
       "inbound": [],
-      "lines": 287,
+      "lines": 288,
       "module": "tests.test_light_native_document_review",
       "outbound": [
         "backend/native_core.py",
@@ -11868,6 +11762,17 @@
         "tests/test_light_native_chat_turn.py"
       ],
       "path": "tests/test_light_native_model_discovery.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [],
+      "lines": 225,
+      "module": "tests.test_light_native_model_inventory",
+      "outbound": [
+        "tests/test_light_native_chat_turn.py"
+      ],
+      "path": "tests/test_light_native_model_inventory.py",
       "status": "TEST_OR_TOOL_ONLY",
       "windows_runtime_explicit": false
     },
@@ -12651,11 +12556,12 @@
     },
     {
       "inbound": [],
-      "lines": 102,
+      "lines": 138,
       "module": "tests.test_light_skill_python_asset",
       "outbound": [
         "proxy/services/skill_compute_service.py",
         "tools/build_light_package.py",
+        "tools/light_license_audit.py",
         "tools/skill_python_asset.py"
       ],
       "path": "tests/test_light_skill_python_asset.py",
@@ -13360,6 +13266,7 @@
         "tools/build_tauri_app.py",
         "tools/code_runtime_map.py",
         "tools/documentation_contract.py",
+        "tools/engineering_reader_assets.py",
         "tools/evaluate_claim_judge.py",
         "tools/evaluate_folder_evidence.py",
         "tools/evaluate_folder_tables.py",
@@ -13476,10 +13383,11 @@
     },
     {
       "inbound": [],
-      "lines": 97,
+      "lines": 108,
       "module": "tools.build_light_installers",
       "outbound": [
-        "tools/__init__.py"
+        "tools/__init__.py",
+        "tools/build_light_package.py"
       ],
       "path": "tools/build_light_installers.py",
       "status": "TEST_OR_TOOL_ONLY",
@@ -13489,9 +13397,10 @@
       "inbound": [
         "tests/test_light_package.py",
         "tests/test_light_skill_python_asset.py",
+        "tools/build_light_installers.py",
         "tools/install_light_macos.py"
       ],
-      "lines": 347,
+      "lines": 382,
       "module": "tools.build_light_package",
       "outbound": [
         "tools/__init__.py",
@@ -13500,6 +13409,7 @@
         "tools/build_native_runtime.py",
         "tools/build_release_artifacts.py",
         "tools/build_tauri_app.py",
+        "tools/engineering_reader_assets.py",
         "tools/light_license_audit.py",
         "tools/light_runtime_assets.py",
         "tools/native_asset.py",
@@ -13659,6 +13569,19 @@
         "tools/__init__.py"
       ],
       "path": "tools/documentation_contract.py",
+      "status": "TEST_OR_TOOL_ONLY",
+      "windows_runtime_explicit": false
+    },
+    {
+      "inbound": [
+        "tools/build_light_package.py"
+      ],
+      "lines": 86,
+      "module": "tools.engineering_reader_assets",
+      "outbound": [
+        "tools/__init__.py"
+      ],
+      "path": "tools/engineering_reader_assets.py",
       "status": "TEST_OR_TOOL_ONLY",
       "windows_runtime_explicit": false
     },
@@ -14055,9 +13978,10 @@
     },
     {
       "inbound": [
+        "tests/test_light_skill_python_asset.py",
         "tools/build_light_package.py"
       ],
-      "lines": 100,
+      "lines": 110,
       "module": "tools.light_license_audit",
       "outbound": [
         "tools/__init__.py"
@@ -16157,14 +16081,14 @@
   ],
   "schema": "les.code-runtime-map.v1",
   "summary": {
-    "dormant_candidates": 7,
+    "dormant_candidates": 0,
     "parse_warnings": 0,
     "product_reachable": 417,
     "registered_api_routes": 298,
     "runtime_support": 5,
-    "test_or_tool_only": 299,
-    "tracked_python_files": 728,
-    "tracked_python_lines": 174171
+    "test_or_tool_only": 301,
+    "tracked_python_files": 723,
+    "tracked_python_lines": 172495
   },
   "warnings": []
 }

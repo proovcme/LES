@@ -18,6 +18,7 @@ mod edge;
 mod embedding_inference;
 mod embedding_worker;
 mod engineering;
+mod engineering_readers;
 mod external_embed;
 mod frontend;
 mod history;
@@ -528,7 +529,7 @@ fn main() {
             "canonical_embeddings":"rust.revision-pinned","local_onnx_embeddings":true,
             "embedded_edge":cfg!(feature="edge"),"skill_host":"rust.cpython-isolated","skill_runtime":"rust.verified-package","builtin_workbook":"rust.exact-decimal",
             "mcp_client":"rust.http-stdio","tool_execution_policy":"rust",
-            "document_conversion":"rust.supervised","document_conversion_formats":["xlsx","xlsm","xls","csv","pptx","docx","doc","txt","md","json","jsonl","pdf"],
+            "document_conversion":"rust.supervised","document_conversion_formats":["xlsx","xlsm","xls","csv","pptx","docx","doc","txt","md","json","jsonl","pdf","dwg","rvt","ifc"],
             "dataset_reader":"rust.durable-revision-pinned","dataset_reader_python_callbacks":false,
             "index_setup":"rust.durable-probe-plan","index_setup_python_callbacks":false,"lexical_schema":"rust",
             "index_batch_api":"rust.complete-or-refuse","index_batch_python_callbacks":false,

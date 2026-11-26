@@ -25,6 +25,9 @@ def native_turn(tmp_path, request):
     program=os.getenv('LES_TEST_NATIVE_API')
     if not program:pytest.skip('Build native API and set LES_TEST_NATIVE_API')
     mode = getattr(request, 'param', None)
+    component = os.getenv('LES_TEST_OPTIONAL_SKILL_ARCHIVE')
+    if mode == 'optional-skill' and not component:
+        pytest.skip('Provide the optional Python archive and colocated API descriptor')
     small = mode == 'rag-small'
     rag = mode in ('rag','rag-small')
     qdrant = os.getenv('LES_TEST_NATIVE_QDRANT')
@@ -68,13 +71,22 @@ def native_turn(tmp_path, request):
          'PYTHONHOME':str(tmp_path/'no-python'),'PYTHONPATH':str(tmp_path/'no-application'),'PATH':str(tmp_path/'no-programs')}
     for key in ('LES_LIGHT_QDRANT_URL','LES_LIGHT_QDRANT_API_KEY','LES_INTERNAL_INGEST_TOKEN','LES_NATIVE_EMBEDDING_SPEC'):env.pop(key,None)
     if os.getenv('LES_TEST_SKILL_PYTHON'):env['LES_SKILL_PYTHON']=os.environ['LES_TEST_SKILL_PYTHON']
+    if mode == 'optional-skill':
+        import zipfile
+        env.pop('LES_SKILL_PYTHON', None)
+        archive_path = Path(component)
+        with archive_path.open('rb') as archive_bytes:
+            archive_key = hashlib.file_digest(archive_bytes, 'sha256').hexdigest()
+        installed = state / 'components/skill-python' / archive_key
+        with zipfile.ZipFile(archive_path) as archive:
+            archive.extractall(installed)
     client=httpx.Client(base_url=f'http://127.0.0.1:{port}',timeout=20,trust_env=False)
     public=mode in ('public', 'rag','rag-small')
     storage = embeddings = None
     def start():
         extra=['--chat-owner','rust'] if public else ['--upstream',f'http://127.0.0.1:{free_port()}']
         p=subprocess.Popen([program,'--listen',f'127.0.0.1:{port}','--state',str(state),'--database',str(database),*extra],env=env,cwd=tmp_path,stdout=log,stderr=log,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0));children.append(p)
-        wait_for(lambda:client.get('/api/profiles').status_code==200);return p
+        wait_for(lambda:client.get('/api/profiles').status_code==200, timeout=30);return p
     try:
         if rag:
             from backend.light_qdrant_runtime import LightQdrantRuntime
@@ -271,8 +283,10 @@ def test_agent_write_uses_native_revisions_and_retry_never_repeats_the_effect(na
     assert t.client.post(PATH,json=request,headers=headers).raise_for_status().json()==response
     assert len(t.seen)==3 and revision==results[-1]['result']['revision']
 
+@pytest.mark.parametrize('native_turn', [None, 'optional-skill'], indirect=True)
 def test_external_python_skill_runs_autonomously_through_the_native_turn(native_turn):
-    if not os.getenv('LES_TEST_SKILL_PYTHON'):pytest.skip('Set LES_TEST_SKILL_PYTHON to the isolated skill runtime')
+    if not os.getenv('LES_TEST_SKILL_PYTHON') and not (native_turn.state / 'components/skill-python').exists():
+        pytest.skip('Set LES_TEST_SKILL_PYTHON to the isolated skill runtime')
     t=native_turn;library=t.state/'storage/skills';package=library/'external-fixture';package.mkdir(parents=True)
     (package/'SKILL.md').write_text('External compatibility fixture',encoding='utf-8')
     script=package/'calculate.py';script.write_text('import importlib.util\ndef calculate(value):\n    assert importlib.util.find_spec("backend") is None\n    assert importlib.util.find_spec("proxy") is None\n    return {"value":value["n"]*2}\n',encoding='utf-8')
@@ -282,6 +296,24 @@ def test_external_python_skill_runs_autonomously_through_the_native_turn(native_
     tool=result['artifact']['tool_results'][0]
     assert tool['status']=='ok' and tool['result']['succeeded']==1
     assert tool['result']['rows'][0]['result']=={'value':42} and len(t.seen)==2
+
+def test_unapproved_external_skill_does_not_provision_python(native_turn):
+    turn = native_turn
+    library = turn.state / 'storage/skills'
+    (library / 'unapproved').mkdir(parents=True)
+    (library / 'unapproved/calculate.py').write_text('def calculate(value): return value', encoding='utf-8')
+    turn.scripts.extend([
+        {'tool': 'run_skill_calculation', 'args': {
+            'skill': 'unapproved', 'path': 'calculate.py', 'items': [{'id': 'first', 'input': {}}]
+        }},
+        {'text': 'Скрипт требует разрешения.'},
+    ])
+    result = turn.client.post(PATH, json={'question': 'Выполни скрипт', 'mode': 'agent'}, headers=HEADERS).raise_for_status().json()
+    tool = result['artifact']['tool_results'][0]
+    assert tool['status'] == 'error' and tool['result']['code'] == 'SKILL_NOT_APPROVED'
+    assert not (turn.state / 'components/skill-python').exists()
+    assert not (turn.state / 'artifacts/skill-compute').exists()
+
 
 def test_original_link_supports_unindexed_files_and_exact_legacy_provenance(native_turn):
     t=native_turn;path,digest=source_pdf(t)

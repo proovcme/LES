@@ -246,7 +246,7 @@ def test_stdio_mcp_interoperates_with_existing_client(les):
                 attached = await session.call_tool("attach_folder", {"dataset_id":"user-1","path":path})
                 assert attached.structuredContent['intake_job_id'] == 'test-intake'
                 _, _, _, request = les[2][-1]
-                assert request == {"path":path,"dataset_id":"user-1","parse":True,"background":True}
+                assert request == {"path":path,"dataset_id":"user-1","parse":True,"background":True,"parse_limit":500}
                 blocked = await session.call_tool("attach_folder", {"dataset_id":"hidden","path":path})
                 assert blocked.isError and les[2][-1][0] == 'GET'
                 read = await session.call_tool("workspace_read", {"action":"read","area":"files","path":"Тест.md"})

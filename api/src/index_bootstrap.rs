@@ -298,6 +298,7 @@ pub(crate) async fn ensure(
             ("node_role", "keyword"),
             ("ancestor_ids", "keyword"),
             ("evidence_admissible", "bool"),
+            ("engineering_record_key", "keyword"),
             ("embedding_fingerprint", "keyword"),
             ("mail_account_id", "keyword"),
             ("mail_thread_key", "keyword"),

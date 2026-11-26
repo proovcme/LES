@@ -12,6 +12,7 @@ mod pagination;
 mod physical;
 mod query_cache;
 mod ready;
+mod rvt_records;
 mod trial;
 mod views;
 pub(super) fn original_reader(name: &str) -> &'static str {
@@ -309,16 +310,34 @@ pub(in crate::chat) async fn initial(context: Arc<Context>, turn: &Prepared) -> 
 /// Folder answers use the same hybrid store with bounded expansion from indexed text only.
 pub(in crate::chat) async fn indexed(context: Arc<Context>, turn: &Prepared) -> Result<Value> {
     let scope = SourceContext::from(turn);
-    if let Some(result) = indexed_workbooks::named(context.clone(), &scope).await? {
-        return Ok(result);
-    }
-    let mut result = search_view(
+    let named = indexed_workbooks::named(context.clone(), &scope).await?;
+    let ranked = search_view(
         context.clone(),
         &scope,
         json!({"q":turn.request["question"],"max_chars":10000,"limit":10}),
         ReadView::Indexed,
     )
-    .await?;
+    .await;
+    let mut result = match (ranked, named) {
+        (Ok(mut result), Some(named)) => {
+            indexed_workbooks::merge_named(&mut result, named);
+            result
+        }
+        (Ok(result), None) => result,
+        (Err(error), Some(mut named))
+            if matches!(
+                error.code.as_str(),
+                "EMBEDDING_MODEL_NOT_ASSIGNED"
+                    | "INDEX_NOT_CONFIGURED"
+                    | "UPSTREAM_UNREACHABLE"
+                    | "UPSTREAM_SERVICE_UNAVAILABLE"
+            ) =>
+        {
+            named["result"]["selection_policy"]["dataset_search_error"] = json!(error.code);
+            return Ok(named);
+        }
+        (Err(error), _) => return Err(error),
+    };
     indexed_workbooks::append_related(context, &scope, &mut result).await;
     Ok(result)
 }
@@ -500,6 +519,7 @@ async fn search_view(
             // Keep navigation in ranked order across pages, including matches
             // from the same file.
             let ranked = reading_units(raw_points);
+            let ranked = if indexed { spread_dwg_labels(ranked) } else { ranked };
             let pdf_focus = automatic_pdf && raw_points.iter().any(|p| super::pdf_focus::is_pdf(&p["payload"]));
             let navigation = navigation && !pdf_focus;
             let points: Vec<Value> = if pdf_focus {
@@ -701,6 +721,31 @@ fn pull_pdf_context_never_overrides_passage_pagination() {
 #[cfg(test)]
 mod selection_tests {
     use super::*;
+    #[test]
+    fn repeated_dwg_label_keeps_its_handle_and_follows_distinct_labels() {
+        let label = |id: &str, sheet: &str, text: &str| {
+            json!({"id":id,"payload":{
+                "dataset_id":"d","file_name":"plan.dwg","source_sha256":"r",
+                "model_locator":{"reader":{"format":"dwg"},"section":"elements",
+                                 "native_id":id,"drawing_sheet":{"handle":sheet}},
+                "text":format!("ID: {id}; раздел: elements; категория: MTEXT\nproperties / layer: Room labels\nproperties / text: {text}\nvalue_semantics: saved_dwg")
+            }})
+        };
+        let first = label("a", "layout", "Room schedule");
+        let repeat = label("b", "layout", "Room schedule");
+        let distinct = label("c", "layout", "Corridor");
+        let other_sheet = label("d", "other", "Room schedule");
+        assert_eq!(
+            spread_dwg_labels(vec![
+                first.clone(),
+                repeat.clone(),
+                distinct.clone(),
+                other_sheet.clone()
+            ]),
+            vec![first, distinct, other_sheet, repeat]
+        );
+    }
+
     #[test]
     fn projected_page_duplicates_do_not_spend_the_other_page_slot() {
         let mut first = point(1, "a", "source.pdf", "r1");
@@ -906,6 +951,54 @@ struct ReadMode<'a> {
     addressed: Vec<Value>,
     pdf_focus: bool,
 }
+
+fn spread_dwg_labels(points: Vec<Value>) -> Vec<Value> {
+    let mut seen = std::collections::HashSet::new();
+    let (mut first, repeated): (Vec<_>, Vec<_>) = points.into_iter().partition(|point| {
+        let p = &point["payload"];
+        let locator = &p["model_locator"];
+        if locator["reader"]["format"] != "dwg" || locator["section"] != "elements" {
+            return true;
+        }
+        let Some(sheet) = locator["drawing_sheet"]["handle"].as_str() else {
+            return true;
+        };
+        let Some((properties, text)) = p["text"]
+            .as_str()
+            .and_then(|card| card.split_once("\nproperties / text: "))
+        else {
+            return true;
+        };
+        if !properties.lines().any(|line| {
+            line.ends_with("; раздел: elements; категория: MTEXT")
+                || line.ends_with("; раздел: elements; категория: TEXT")
+        }) {
+            return true;
+        }
+        let Some(text) = text.trim_end().strip_suffix("\nvalue_semantics: saved_dwg") else {
+            return true;
+        };
+        let layer = properties
+            .lines()
+            .find_map(|line| line.strip_prefix("properties / layer: "));
+        seen.insert(
+            json!([
+                p["dataset_id"],
+                p["file_name"],
+                p["source_sha256"],
+                sheet,
+                layer,
+                text
+            ])
+            .to_string(),
+        )
+    });
+    // Duplicate labels are still addressable, but they follow distinct labels
+    // in the small model window. Each point keeps its own handle and locator.
+    first.extend(repeated);
+    first
+}
+
 fn indexed_neighbors(mut points: Vec<Value>, hydrated: &Value) -> Vec<Value> {
     let mut seen: std::collections::HashSet<_> = points.iter().map(|p| p["id"].clone()).collect();
     let mut neighbours = Vec::new();
@@ -1013,6 +1106,27 @@ async fn passages(
         .await?
     };
     let sections_ms = stage.elapsed().as_millis();
+    let mut hydrated = hydrated;
+    let mut related = if expand_document || indexed {
+        rvt_records::read(
+            context,
+            store,
+            collection.as_str().ok_or("INDEX_COLLECTION_MISMATCH")?,
+            &revision,
+            &points,
+            query,
+        )
+        .await?
+    } else {
+        Vec::new()
+    };
+    related.sort_by_key(|point| point["payload"]["retrieval_source_rank"].as_u64());
+    if expand_document && !related.is_empty() {
+        hydrated["sections"]
+            .as_array_mut()
+            .ok_or("INDEX_READ_INVALID")?
+            .push(json!({"points":related}));
+    }
     let (points, hydrated) = if expand_document {
         let (points, hydrated) = views::project_with_pdf_hits(points, hydrated, pdf_focus)?;
         tokio::task::spawn_blocking(move || packing::read_plan(&points, hydrated))
@@ -1047,7 +1161,10 @@ async fn passages(
     let pdf_ms = pdf_started.elapsed().as_millis();
     let packing_started = std::time::Instant::now();
     let (mut points, mut hydrated) = if indexed {
-        (indexed_neighbors(points, &hydrated), hydrated)
+        let mut points = indexed_neighbors(points, &hydrated);
+        let insertion = points.len().min(1);
+        points.splice(insertion..insertion, related.drain(..related.len().min(4)));
+        (points, hydrated)
     } else {
         views::project_with_pdf_hits(points, hydrated, pdf_focus)?
     };
@@ -1082,7 +1199,7 @@ async fn passages(
             .filter(|p| !ranked_ids.contains(&p["id"]))
             .count()
     };
-    let (selected, total) = if paginated {
+    let (mut selected, total) = if paginated {
         (
             packing::prefix(&points, max_chars, context_budget),
             points.len(),
@@ -1106,6 +1223,15 @@ async fn passages(
         .await
         .map_err(|_| "SOURCE_READ_FAILED")??
     };
+    if view == ReadView::Context && !related.is_empty() {
+        // Keep a matching type/instance record beside its search hit before
+        // the public tool's wire limit trims the remaining candidates.
+        related.truncate(2);
+        selected.retain(|point| !related.iter().any(|record| record["id"] == point["id"]));
+        let insertion = selected.len().min(1);
+        selected.splice(insertion..insertion, related);
+        selected = packing::prefix(&selected, max_chars, context_budget);
+    }
     let addressed_row_count = addressed.len();
     let selected = addressed_rows::prioritize(addressed, selected);
     let total = total + addressed_extra;

@@ -35,7 +35,7 @@ fn unit(point: &Value, rank: usize) -> Result<Value, &'static str> {
             source.insert(field.into(), p[field].clone());
         }
     }
-    if p["pdf_excerpt_line"].is_u64() {
+    if p["pdf_excerpt_line"].is_u64() || p["reading_representation"] == "indexed_rvt_record" {
         source.insert("qdrant_point_id".into(), p["retrieval_anchor_id"].clone());
     }
     let address = if p["source_unit_id"].is_u64() {
@@ -63,7 +63,7 @@ fn unit(point: &Value, rank: usize) -> Result<Value, &'static str> {
     Ok(
         serde_json::json!({"text":literal.as_ref().and_then(|u|u["text"].as_str()).unwrap_or(p["text"].as_str().unwrap_or("")),"unit_id":key(point),
         "read_identity":serde_json::json!([p["dataset_id"],p["file_name"],p["source_sha256"],address]),
-        "source":source,"source_rank":p["retrieval_source_rank"],"rank":if has_rank{serde_json::json!(rank)}else{Value::Null},"self_contained":matches!(p["reading_representation"].as_str(),Some("pdf_cells"|"pdf_excerpt"|"word_structure"|"physical_pdf_page")),"heading":heading,"group":serde_json::json!([p["dataset_id"],p["file_name"],p["source_sha256"]]).to_string(),"point":point}),
+        "source":source,"source_rank":p["retrieval_source_rank"],"rank":if has_rank{serde_json::json!(rank)}else{Value::Null},"self_contained":matches!(p["reading_representation"].as_str(),Some("pdf_cells"|"pdf_excerpt"|"word_structure"|"physical_pdf_page"|"indexed_rvt_record")),"heading":heading,"group":serde_json::json!([p["dataset_id"],p["file_name"],p["source_sha256"]]).to_string(),"point":point}),
     )
 }
 /// Rank and deduplicate hydrated evidence. Internal prefetch leaves room

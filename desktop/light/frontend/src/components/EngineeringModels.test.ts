@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import EngineeringModels from './EngineeringModels.svelte';
 import EngineeringSource from './EngineeringSource.svelte';
+import SourcePanel from './SourcePanel.svelte';
 import type { ModelLocator } from '../lib/engineering';
 let component: ReturnType<typeof mount> | undefined;
 beforeEach(() => {
@@ -13,6 +14,24 @@ afterEach(async () => { if (component) await unmount(component); document.body.r
 const settle = async () => { for (let i = 0; i < 12; i++) { await new Promise(r => setTimeout(r, 0)); flushSync(); } };
 const target: ModelLocator = { provider: 'uvyazka', project_id: 'example', dataset_id: 'snapshot', object_id: 'elements:42', native_id: '42',
   source_sha256: 'a'.repeat(64), source_name: 'Example.rvt', section: 'elements', coverage: { status: 'partial' }, approval_status: 'unreviewed' };
+
+it('opens a directly indexed model source by original revision', async () => {
+  const fetch = vi.fn(async (_url: string) => new Response(JSON.stringify({ document: { id: 'rvt-1', file_name: 'Example.rvt' } })));
+  vi.stubGlobal('fetch', fetch);
+  const hash = 'b'.repeat(64);
+  component = mount(SourcePanel, { target: document.body, props: { close: vi.fn(), source: {
+    index: 1, doc_name: 'Example.rvt', dataset_id: 'test', doc_id: 'rvt-1', source_sha256: hash,
+    quote: 'В1 1', model_locator: {
+      provider: 'les', native_id: '42', object_id: 'systems:42', source_name: 'Example.rvt',
+      source_sha256: hash, section: 'systems', approval_status: 'unreviewed', coverage: { status: 'partial' },
+    },
+  } } });
+  await settle();
+  expect(document.body.textContent).toContain('ElementId Revit 42');
+  expect(document.querySelector('a[download]')?.getAttribute('href')).toContain(`/raw?dataset_id=test&doc_name=Example.rvt&source_sha256=${hash}`);
+  expect(fetch).toHaveBeenCalledOnce();
+  expect(fetch.mock.calls[0][0]).toContain('/api/documents/by-id/rvt-1?');
+});
 
 it('connects on first open and offers installation when Windows has no Uvyazka', async () => {
   const calls: string[] = [];

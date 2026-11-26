@@ -200,11 +200,21 @@ if ($manifest.runtime_mode -eq 'rust') {
   $paths = @($files | ForEach-Object { ([string]$_.path).Replace('\','/') })
   foreach ($required in @(
       'native/runtime/les-runtime.exe', 'native/api/les-api.exe', 'native/qdrant/qdrant.exe',
-      'native/pdf/pdfium.dll', 'native/skill-python/python.exe',
-      'native/skill-python/skill-python-receipt.json', 'native/skill-python-required.json',
+      'native/pdf/pdfium.dll',
       'runtime/desktop/light/frontend/dist/index.html',
       'runtime/desktop/light/frontend/dist/build-receipt.json', 'les.cmd')) {
     if ($required -notin $paths) { throw "LES Light: в пакете отсутствует компонент $required." }
+  }
+  if ($manifest.build_number -ge 955) {
+    if ('native/skill-python-download.json' -notin $paths -or
+        ($paths | Where-Object { $_ -match '^native/skill-python(/|-required\.json$)|(^|/)pythonw?\.exe$' })) {
+      throw 'LES Light: пакет должен содержать описание компонента Python для загрузки по запросу.'
+    }
+  } else {
+    foreach ($required in @('native/skill-python/python.exe',
+        'native/skill-python/skill-python-receipt.json', 'native/skill-python-required.json')) {
+      if ($required -notin $paths) { throw "LES Light: в пакете отсутствует компонент $required." }
+    }
   }
   if ($manifest.build_number -ge 848 -and 'runtime/tools/install-les.ps1' -notin $paths) {
     throw 'LES Light: в пакете отсутствует компонент обновления.'

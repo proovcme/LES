@@ -9,6 +9,8 @@ from pathlib import Path
 import shutil
 import subprocess
 
+from tools.build_light_package import hash_file, skill_asset_path
+
 ROOT = Path(__file__).resolve().parents[1]
 INSTALLERS = ROOT / "installers/windows/light"
 
@@ -57,7 +59,14 @@ def build(payload: Path, output: Path, makensis: Path, *, edge_preview: bool = F
         "powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
         "-File", str(INSTALLERS / "package.ps1"), "-Mode", "Validate", "-Source", str(payload),
     ], check=True)
+    skill_asset = skill_asset_path(payload, package["build_number"])
+    descriptor = json.loads((payload / "native/skill-python-download.json").read_text(encoding="utf-8"))
+    if (descriptor.get("schema") != "les.skill-python-download.v1"
+            or skill_asset.stat().st_size != descriptor.get("bytes")
+            or hash_file(skill_asset) != descriptor.get("sha256")):
+        raise ValueError("Optional Python archive differs from the installer manifest")
     output.mkdir(parents=True)
+    shutil.copy2(skill_asset, output / skill_asset.name)
     offline = output / ("LES-RAG-Edge-Preview-Setup.exe" if edge_preview else "LES-RAG-Setup.exe")
     subprocess.run([
         str(makensis), "/INPUTCHARSET", "UTF8", f"/DPAYLOAD_DIR={payload}", f"/DOUTPUT_FILE={offline}",
@@ -68,7 +77,9 @@ def build(payload: Path, output: Path, makensis: Path, *, edge_preview: bool = F
     if edge_preview:
         with offline.open("rb") as stream:
             digest = hashlib.file_digest(stream, "sha256").hexdigest()
-        (output / "SHA256.txt").write_text(f"{digest}  {offline.name}\n", encoding="utf-8")
+        (output / "SHA256.txt").write_text(
+            f"{digest}  {offline.name}\n{descriptor['sha256']}  {skill_asset.name}\n", encoding="utf-8"
+        )
         return
     subprocess.run([
         str(makensis), "/INPUTCHARSET", "UTF8", f"/DOUTPUT_FILE={output / 'LES-RAG-Web-Setup.exe'}",

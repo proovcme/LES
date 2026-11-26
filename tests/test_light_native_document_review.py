@@ -48,7 +48,8 @@ def review_turn(native_turn):
         t.children[-1].kill(); t.children[-1].wait(timeout=5); t.start()
         sid = t.client.post('/api/workspace/sessions', json={'title': 'Проверка'}).raise_for_status().json()['session_id']
         request = {'question': 'Проверь раздел', 'dataset_ids': ['ds'], 'session_id': sid}
-        t.client.post(PATH, json={**request, 'question': 'Prepare'}, headers=HEADERS).raise_for_status()
+        prepared = t.client.post(PATH, json={**request, 'question': 'Prepare'}, headers=HEADERS)
+        assert prepared.is_success, prepared.text
         access = next(s['function']['name'] for s in t.seen[-1]['tools'] if s['function']['name'].startswith('use_extensions_'))
         def call(operation, **args):
             return {'tool': access, 'args': {'operation': 'call', 'name': 'document_review',
