@@ -128,7 +128,11 @@ pub fn dwg_note_points(
          ORDER BY chunk_ord, point_id LIMIT ?5",
     ).map_err(|_| ERROR)?;
     let field = format!("\nproperties / ownerBlockRecordSoftId: {owner}\n");
-    let ids = query.query_map(params![collection, dataset, file, field, LIMIT as i64 + 1], |row| row.get(0))
+    let ids = query
+        .query_map(
+            params![collection, dataset, file, field, LIMIT as i64 + 1],
+            |row| row.get(0),
+        )
         .map_err(|_| ERROR)?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(|_| ERROR)?;

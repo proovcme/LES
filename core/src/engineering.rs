@@ -26,7 +26,14 @@ pub fn record_key(dataset: &str, file: &str, sha: &str, section: &str, native_id
     indexed_record_key(RECORD_SCHEMA, dataset, file, sha, section, native_id)
 }
 
-pub fn indexed_record_key(schema: &str, dataset: &str, file: &str, sha: &str, section: &str, native_id: &str) -> String {
+pub fn indexed_record_key(
+    schema: &str,
+    dataset: &str,
+    file: &str,
+    sha: &str,
+    section: &str,
+    native_id: &str,
+) -> String {
     crate::sha256_hex(
         json!([schema, dataset, file, sha, section, native_id])
             .to_string()
