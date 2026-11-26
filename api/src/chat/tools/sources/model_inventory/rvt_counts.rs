@@ -3,57 +3,23 @@ use super::{envelope, reference, Context, Result, TOOL};
 use serde_json::{json, Value};
 use std::{collections::BTreeMap, sync::Arc};
 
-const FORMAT: &str = "les.rvt-count-records.v1";
-static READER: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-fn snapshot(context: &Context, doc: &Value, args: &Value) -> Result<(Value, Value, String)> {
-    let (path, lease, length, sha) = crate::documents::verified_original(context, doc, "")?;
-    if length > 1024 * 1024 * 1024 {
-        return Err("ENGINEERING_READER_LIMIT".into());
-    }
-    let reader = crate::engineering_readers::rvt_reader_revision()?;
-    let key = les_core::sha256_hex(json!([FORMAT, &sha, reader]).to_string().as_bytes());
+fn snapshot(context: &Context, doc: &Value, args: &Value) -> Result<(Value, String)> {
+    let saved = les_core::engineering::rvt_inventory::load(&context.database, doc)?
+        .ok_or("RVT_SNAPSHOT_NOT_READY")?;
+    let key = les_core::sha256_hex(
+        json!([
+            saved["schema"],
+            doc["file_hash"],
+            saved["reader"]["revision"]
+        ])
+        .to_string()
+        .as_bytes(),
+    );
     let revision = format!("rvt:{key}");
     if args["index_revision"].is_string() && args["index_revision"] != revision {
         return Err("INDEX_CHANGED_DURING_SEARCH".into());
     }
-    let state = &context.state_root;
-    let from_cache = || {
-        crate::derived_cache::load(state, "rvt", &key).filter(|entry| {
-            entry["schema"] == FORMAT
-                && entry["source_sha256"] == sha
-                && entry["reader"]["revision"] == reader
-                && entry["objects"].is_array()
-        })
-    };
-    let saved = if let Some(saved) = from_cache() {
-        saved
-    } else {
-        let _only_reader = READER.try_lock().map_err(|_| "RVT_READER_BUSY")?;
-        let mut decoded =
-            crate::engineering_readers::read(&json!({"owned_state":state}), &path, "rvt")?;
-        crate::documents::verified_original(context, doc, &sha)?;
-        let Value::Array(objects) = decoded["objects"].take() else {
-            return Err("ENGINEERING_READER_FAILED".into());
-        };
-        let mut records = Vec::new();
-        for object in objects
-            .into_iter()
-            .filter(|o| matches!(o["section"].as_str(), Some("elements" | "types")))
-        {
-            records.push(json!({"object_id":object["object_id"],"native_id":object["native_id"],
-                "section":object["section"],"name":object["name"],"identifiers":object["identifiers"],
-                "category_id":object["properties"]["rvt_category_id"],"model_context":object["model_context"]}));
-        }
-        let saved = json!({"schema":FORMAT,"source_sha256":sha,
-            "reader":decoded["reader"],"coverage":decoded["coverage"],"objects":records});
-        crate::derived_cache::store(state, "rvt", &key, &saved);
-        saved
-    };
-    drop(lease);
-    let mut source = doc.clone();
-    source["file_hash"] = json!(sha);
-    Ok((source, saved, revision))
+    Ok((saved, revision))
 }
 
 fn link<'a>(record: &'a Value, field: &str) -> Option<&'a Value> {
@@ -193,7 +159,7 @@ fn table(doc: Value, saved: &Value, args: &Value, revision: &str) -> Result<Valu
 
 pub(super) async fn run(context: Arc<Context>, doc: Value, args: Value) -> Result<Value> {
     tokio::task::spawn_blocking(move || {
-        let (doc, records, revision) = snapshot(&context, &doc, &args)?;
+        let (records, revision) = snapshot(&context, &doc, &args)?;
         table(doc, &records, &args, &revision)
     })
     .await

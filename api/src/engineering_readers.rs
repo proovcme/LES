@@ -430,17 +430,6 @@ fn rvt(
     ))
 }
 
-pub(crate) fn rvt_reader_revision() -> Result<&'static str> {
-    let readers = READERS
-        .get_or_init(Readers::load)
-        .as_ref()
-        .map_err(|code| *code)?;
-    if !readers.rvt {
-        return Err(UNAVAILABLE);
-    }
-    Ok(&readers.revision)
-}
-
 pub(crate) fn read(input: &Value, original: &Path, format: &str) -> Result<Value> {
     let readers = READERS
         .get_or_init(Readers::load)

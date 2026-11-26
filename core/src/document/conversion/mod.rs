@@ -362,6 +362,9 @@ fn engineering(
         hash,
         &decoded,
     )?;
+    if suffix == "rvt" {
+        crate::engineering::rvt_inventory::save(request, hash, &decoded)?;
+    }
     if request["pipeline"] == "nodes" {
         return pipeline::prepare(request, &[], path, suffix, hash, Some(&content));
     }

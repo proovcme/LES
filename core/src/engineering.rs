@@ -1,4 +1,6 @@
 //! Search projections of immutable companion snapshots. No CAD decoder or viewer state.
+pub mod rvt_inventory;
+
 use serde_json::{json, Value};
 use std::collections::HashSet;
 

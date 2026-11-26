@@ -174,7 +174,7 @@ pub async fn run(
                     "INDEX_NOT_CONFIGURED" | "INDEX_STORAGE_UNAVAILABLE" | "SOURCE_INDEX_NOT_READY"
                 ) =>
             {
-                let models = tools::sources::model_inventory::direct_rvt_documents(
+                let models = tools::sources::model_inventory::rvt_count_documents(
                     &context,
                     &tools::sources::SourceContext::from(&turn),
                 )
@@ -183,7 +183,7 @@ pub async fn run(
                     return Err(error);
                 }
                 tools.restrict_inventory_to_rvt_counts();
-                json!({"mode":"indexed","coverage":"rvt_direct_only","rvt_documents":models,
+                json!({"mode":"indexed","coverage":"rvt_snapshots_only","rvt_documents":models,
                     "text_search_error":error.code,"elapsed_ms":retrieval_started.elapsed().as_millis()})
             }
             Err(error) => return Err(error),
@@ -622,9 +622,9 @@ pub async fn run(
                 if evidence.needs_read() {
                     super::inspection::question(&mut question, evidence.retry_used());
                 }
-                if prefetch["coverage"] == "rvt_direct_only" {
+                if prefetch["coverage"] == "rvt_snapshots_only" {
                     question["available_rvt_documents"] = prefetch["rvt_documents"].clone();
-                    question["source_search_note"] = json!("Текстовый индекс недоступен. Для подсчёта по выбранной модели вызови model_inventory в режиме rvt_counts. При обычном вопросе по тексту укажи, что индекс недоступен.");
+                    question["source_search_note"] = json!("Текстовый индекс недоступен. Для подсчёта по сохранённому снимку модели вызови model_inventory в режиме rvt_counts. Если снимок ещё не готов, сообщи, что нужно переиндексировать RVT. При обычном вопросе по тексту укажи, что индекс недоступен.");
                 } else if prefetch["selection_policy"]["dataset_search_error"].is_string() {
                     question["source_search_note"] = json!("Поиск по датасету недоступен. Получены только строки названной книги. Укажи это ограничение, если сведения из других файлов не получены через инструмент.");
                 } else if prefetch["coverage"] == "no_matches" {

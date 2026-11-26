@@ -11767,7 +11767,7 @@
     },
     {
       "inbound": [],
-      "lines": 182,
+      "lines": 225,
       "module": "tests.test_light_native_model_inventory",
       "outbound": [
         "tests/test_light_native_chat_turn.py"
@@ -16088,7 +16088,7 @@
     "runtime_support": 5,
     "test_or_tool_only": 301,
     "tracked_python_files": 723,
-    "tracked_python_lines": 172452
+    "tracked_python_lines": 172495
   },
   "warnings": []
 }

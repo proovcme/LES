@@ -74,12 +74,16 @@ fn convert_document(
             .ok_or_else(|| error(INVALID))?,
     )
     .join(dataset);
-    let response=crate::worker_host::run_documents(&json!({"schema":"les.worker-host.v1","program":worker["program"],"directory":worker["directory"],
+    let mut worker_input = json!({"schema":"les.worker-host.v1","program":worker["program"],"directory":worker["directory"],
         "args":["--serve-document-formats"],"context":"les.format-dispatch.v1","timeout_ms":worker["timeout_ms"],
         "input":{"schema":"les.document-convert.v1","pipeline":"nodes","mail_index":mail_index,"path":path,"data_dir":data_dir,"owned_state":request["owned_state"],"dataset_id":dataset,"file_key":input["file_name"],
             "node_spool":input["node_spool"],"source_sha256":input["source_sha256"],"chunking":chunking,
             "minimum":worker["minimum"],"final_minimum":worker["final_minimum"],"table_row_limit":worker["table_row_limit"],"ocr":worker["ocr"],"ocr_unavailable":worker["ocr_unavailable"],
-            "pdf_page_size":worker["pdf_page_size"].as_u64().unwrap_or(1800),"pdf_page_overlap":worker["pdf_page_overlap"].as_u64().unwrap_or(150)}})).map_err(error)?;
+            "pdf_page_size":worker["pdf_page_size"].as_u64().unwrap_or(1800),"pdf_page_overlap":worker["pdf_page_overlap"].as_u64().unwrap_or(150)}});
+    if let Some(snapshot) = input.get("rvt_count_snapshot") {
+        worker_input["input"]["rvt_count_snapshot"] = snapshot.clone();
+    }
+    let response = crate::worker_host::run_documents(&worker_input).map_err(error)?;
     let value = &response["result"];
     if response["status"] != "completed" || value["status"] != "completed" {
         let code = value["code"]
@@ -294,12 +298,16 @@ pub fn run(request: &Value, bridge: impl Fn(u8, &Value) -> Result<Value>) -> Res
                         cache: spool_dir.join(format!("{id}.cache")),
                     };
                     let convert_start = Instant::now();
-                    let converted = convert_document(
-                        request,
-                        &json!({"path":path,"file_name":row["file_key"],"dataset_id":dataset,"node_spool":spools.nodes,
-                        "source_sha256":source["file_hash"],"chunking":request["chunking"]}),
-                        &bridge,
-                    )?;
+                    let mut input = json!({"path":path,"file_name":row["file_key"],"dataset_id":dataset,"node_spool":spools.nodes,
+                        "source_sha256":source["file_hash"],"chunking":request["chunking"]});
+                    if Path::new(path)
+                        .extension()
+                        .and_then(|ext| ext.to_str())
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("rvt"))
+                    {
+                        input["rvt_count_snapshot"] = json!({"database":database,"file_name":name,"registration":registration});
+                    }
+                    let converted = convert_document(request, &input, &bridge)?;
                     let raw = converted["node_state"] == "les.nodes.raw.v1";
                     let mut count = converted["count"]
                         .as_u64()

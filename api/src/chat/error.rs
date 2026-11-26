@@ -43,7 +43,10 @@ impl Failure {
         };
         let status = if matches!(
             code,
-            "CHAT_CANCELLED" | "CHAT_REQUEST_NOT_REPLAYABLE" | "IDEMPOTENCY_KEY_REUSED"
+            "CHAT_CANCELLED"
+                | "CHAT_REQUEST_NOT_REPLAYABLE"
+                | "IDEMPOTENCY_KEY_REUSED"
+                | "RVT_SNAPSHOT_NOT_READY"
         ) {
             StatusCode::CONFLICT
         } else if code.starts_with("CHAT_REQUEST")
@@ -106,11 +109,12 @@ impl Failure {
             "SKILL_RUNTIME_STORAGE_FAILED"=>"Не удалось сохранить Python. Проверьте место на диске и доступ к папке данных Леса.",
             "SKILL_RUNTIME_INVALID"=>"Не удалось проверить комплект Python для внешних навыков.",
             "SKILL_RUNTIME_COMPONENT_MISSING"=>"Исполнитель внешних Python-навыков недоступен. Проверьте установку Леса.",
+            "RVT_SNAPSHOT_NOT_READY"=>"Снимок RVT для ведомости ещё не готов. Переиндексируйте модель в наборе документов.",
+            "RVT_SNAPSHOT_STORAGE_FAILED"=>"Не удалось прочитать сохранённый снимок RVT. Проверьте состояние каталога Леса.",
             "MODEL_INVENTORY_LIMIT"=>"Запрос охватывает слишком много моделей или записей. Выберите один файл или меньший датасет.",
             "MODEL_INVENTORY_NO_RVT"=>"В выбранных источниках нет файлов RVT.",
             "MODEL_INVENTORY_NO_DWG"=>"В выбранных источниках нет файлов DWG.",
             "MODEL_INVENTORY_SELECT_RVT_DOCUMENT"=>"В наборе несколько RVT. Выберите файл модели для ведомости.",
-            "RVT_READER_BUSY"=>"ЛЕС уже читает модель RVT. Повторите запрос после завершения чтения.",
             "DWG_SPEC_WORKBOOK_REQUIRED"=>"Выберите один проиндексированный Excel со спецификацией в том же наборе, что и DWG.",
             "DWG_SPEC_SINGLE_DATASET"=>"Для сверки выберите один набор с DWG и Excel.",
             "DWG_SPEC_RANGE_INVALID"=>"Укажите лист Excel и границы строк одной части спецификации.",

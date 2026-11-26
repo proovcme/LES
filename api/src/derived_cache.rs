@@ -16,8 +16,7 @@ fn hash(s: &str) -> bool {
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 fn name(kind: &str, key: &str) -> Option<String> {
-    (matches!(kind, "word" | "picture" | "pdf" | "rvt") && hash(key))
-        .then(|| format!("{kind}-{key}.json"))
+    (matches!(kind, "word" | "picture" | "pdf") && hash(key)).then(|| format!("{kind}-{key}.json"))
 }
 fn folder(state: &Path) -> Option<PathBuf> {
     let state = state.canonicalize().ok()?;

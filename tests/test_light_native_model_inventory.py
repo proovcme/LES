@@ -27,6 +27,49 @@ def point(dataset, file, digest, section, native_id, parameters, *, typ=None, sy
                 indexed_engineering_record={"schema": SCHEMA, "name": None, "parameters": parameters})
 
 
+@pytest.mark.parametrize("native_turn", ["public"], indirect=True)
+def test_rvt_counts_reads_the_registered_snapshot_with_no_original_or_vector_index(native_turn):
+    turn = native_turn
+    url = "/api/rag/sources/call"
+    dataset = turn.client.post("/api/rag/datasets", json={"name": "RVT snapshot without Qdrant"}).raise_for_status().json()["id"]
+    digest = "a" * 64
+    with sqlite3.connect(turn.database) as db:
+        db.execute("INSERT INTO documents(id,dataset_id,file_name,status,file_hash,chunk_count,source_path) "
+                   "VALUES(?,?,?,'INDEXED',?,1,?)",
+                   ("rvt-doc", dataset, "fixture.rvt", digest, str(turn.state / "unavailable.rvt")))
+
+    def query(**options):
+        return turn.client.post(url, json={"tool":"model_inventory", "args":{
+            "dataset_id":dataset, "mode":"rvt_counts", "doc_id":"rvt-doc", "category_id":-2008099, **options,
+        }})
+
+    legacy = query()
+    assert legacy.status_code == 409 and "RVT_SNAPSHOT_NOT_READY" in legacy.text
+    snapshot = {"schema":"les.rvt-count-records.v1", "source_sha256":digest,
+                "reader":{"format":"rvt","revision":"test-reader"}, "coverage":{"status":"partial"},
+                "objects":[{"object_id":f"elements:{identifier}", "native_id":identifier,
+                            "section":"elements","category_id":category,
+                            "model_context":{"types":[{"native_id":"40","name":"Клапан"}],
+                                             "levels":[{"native_id":"12","name":"Этаж 2"}]}}
+                           for identifier, category in [("41",-2008099),("42",-2008099),("77",-2000280)]]}
+    with sqlite3.connect(turn.database) as db:
+        db.execute("CREATE TABLE les_rvt_count_snapshots(doc_id TEXT,source_sha256 TEXT,payload BLOB)")
+        db.execute("INSERT INTO les_rvt_count_snapshots VALUES(?,?,?)",
+                   ("rvt-doc", digest, json.dumps(snapshot).encode("utf-8")))
+
+    saved = query().raise_for_status().json()
+    assert saved["result"]["matched_instances"] == 2
+    assert saved["result"]["rows"][0]["instance_ids"] == ["41","42"]
+    assert saved["result"]["rows"][0]["level_name"] == "Этаж 2"
+    assert saved["sources"][0]["model_locator"]["native_id"] == "41"
+    assert saved["sources"][0]["model_locator"]["source_sha256"] == digest
+    assert query(index_revision="prior-version").status_code == 409
+    with sqlite3.connect(turn.database) as db:
+        db.execute("UPDATE documents SET file_hash=? WHERE id='rvt-doc'", ["b"*64])
+    modified = query()
+    assert modified.status_code == 409 and "RVT_SNAPSHOT_NOT_READY" in modified.text
+
+
 def parameter(name, value, **attributes):
     return dict(name=name, value=value, **attributes)
 

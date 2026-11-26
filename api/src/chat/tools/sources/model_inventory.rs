@@ -98,7 +98,7 @@ pub(in crate::chat) async fn available(context: &Context, turn: &SourceContext) 
     }).await.map_err(|_| "SOURCE_CATALOG_UNAVAILABLE")?
 }
 
-pub(in crate::chat) async fn direct_rvt_documents(
+pub(in crate::chat) async fn rvt_count_documents(
     context: &Context,
     turn: &SourceContext,
 ) -> Result<Vec<Value>> {
