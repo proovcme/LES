@@ -70,15 +70,15 @@
     catch (error) { workspace.error = errorMessage(error); }
     finally { actionBusy = false; }
   }
-  async function navigate(path: string, base = workspace.legacyURL) {
-    if (!base || disabled) return;
+  async function navigate(path: string) {
+    if (disabled) return;
     await action(async () => {
       await workspace.persist();
-      const url = new URL(path, base);
+      const url = new URL(path, location.origin);
       location.assign(url);
     });
   }
-  function openStatus() { return navigate(statusPath, location.origin); }
+  function openStatus() { return navigate(statusPath); }
   function openSource(value: Source) { sourceTrigger = document.activeElement as HTMLElement; source = value; }
   function openOrigin(value: import('./lib/contracts').SourceOrigin) {
     if (source) source = pickSourceOrigin(source, value);
@@ -95,8 +95,7 @@
     fileInput.click();
   }
   function openModels() {
-    if (workspace.nativeModelSettings) { modal = 'models'; mobileNav = false; }
-    else void navigate('/les/classic?tab=models');
+    modal = 'models'; mobileNav = false;
   }
   function dropped(event: DragEvent) {
     event.preventDefault();
@@ -127,13 +126,13 @@
       <button class="nav-item" disabled={disabled} onclick={() => { modal = 'engineering'; mobileNav = false; }}><Icon name="file" />Чертежи и модели</button>
       <button class="nav-item" disabled={disabled} onclick={() => { modal = 'profiles'; mobileNav = false; }}><Icon name="settings" />Профили чата</button>
       <button class="nav-item" disabled={disabled} onclick={() => { modal = 'mcp'; mobileNav = false; }}><Icon name="settings" />Подключения MCP</button>
-      <button class="nav-item" disabled={disabled} onclick={() => navigate('/qdrant-visualizer/index.html', location.origin)}><Icon name="tree" />Лес знаний</button>
+      <button class="nav-item" disabled={disabled} onclick={() => navigate('/qdrant-visualizer/index.html')}><Icon name="tree" />Лес знаний</button>
     </div>
     <div class="nav-footer">
       <button class="nav-item" disabled={disabled} onclick={() => { modal = 'update'; mobileNav = false; }}><Icon name="status" />Обновление</button>
       <button class="nav-item" disabled={disabled} onclick={openStatus}><Icon name="status" />Состояние</button>
-      {#if workspace.nativeModelSettings || workspace.legacyURL}
-        <button class="nav-item" disabled={disabled} onclick={openModels}><Icon name="settings" />{workspace.nativeModelSettings ? 'Модели' : 'Настройки'}</button>
+      {#if workspace.nativeModelSettings}
+        <button class="nav-item" disabled={disabled} onclick={openModels}><Icon name="settings" />Модели</button>
       {/if}
       <p>В лесу нельзя заблудиться.</p>
     </div>
@@ -142,7 +141,7 @@
     <header class="chat-header">
       <button class="mobile-menu icon-button quiet" aria-label={mobileNav ? 'Закрыть меню' : 'Открыть меню'} aria-expanded={mobileNav} onclick={() => mobileNav = !mobileNav}><Icon name={mobileNav ? 'close' : 'menu'} /></button>
       <div class="chat-heading"><h1>{workspace.session?.title || 'Новый диалог'}</h1></div>
-      <div class="model-indicator" title="Назначенная модель ответов"><span>{workspace.model?.model_id || 'Модель не назначена'}<small>{workspace.service || 'Модель ответов'}{workspace.model?.auto_refresh ? ' · проверится при отправке' : workspace.model?.status === 'blocked' ? ' · требует проверки' : ''}</small></span></div>
+      <div class="model-indicator" title="Назначенная модель ответов"><span>{workspace.model?.model_id || 'Модель не назначена'}<small>{workspace.service || 'Модель ответов'}{workspace.model?.status === 'blocked' ? ' · требует проверки' : ''}</small></span></div>
     </header>
     <div id="chat-content" class="chat-content" tabindex="-1">
       {#if workspace.notice}<p class="notice" role="status">{workspace.notice}</p>{/if}
@@ -153,7 +152,7 @@
           <div class="conversation">
             {#if !workspace.messages.length}
               <div class="empty-state"><Icon name="chat" size={28} />
-                {#if workspace.session && !workspace.model && (workspace.nativeModelSettings || workspace.legacyURL)}
+                {#if workspace.session && !workspace.model && (workspace.nativeModelSettings)}
                   <h2>Подключите модель</h2><p>Выберите локальную модель или API.<br />Затем добавьте документы и задайте вопрос.</p>
                   <button disabled={disabled} onclick={openModels}>Подключить модель</button>
                 {:else}

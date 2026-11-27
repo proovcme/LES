@@ -1,17 +1,58 @@
-"""Stage an offline skill-only interpreter from an already prepared portable Python.
-
-No downloads or package installs. Preserve the source's dependency set and licenses.
-Application source paths and automatic site/.pth startup are never added.
-"""
+"""Prepare the portable interpreter used by approved external Python skills."""
 import argparse
 from email.parser import BytesParser
 import hashlib
+import io
 import json
 import locale
 import os
 from pathlib import Path
 import re
 import shutil
+from urllib.request import urlopen
+from zipfile import ZipFile
+
+
+CONFIG = Path(__file__).resolve().parents[1] / "config"
+
+
+def _verified_archive(contract, variable, timeout):
+    local_archive = os.getenv(variable, "").strip()
+    if local_archive:
+        archive = Path(local_archive)
+        if not archive.is_file():
+            raise FileNotFoundError(f"{variable} points to a missing archive: {archive}")
+        data = archive.read_bytes()
+    else:
+        with urlopen(contract["archive_url"], timeout=timeout) as response:
+            data = response.read()
+    if hashlib.sha256(data).hexdigest() != contract["archive_sha256"].lower():
+        raise ValueError(f"Archive SHA-256 mismatch for {variable}")
+    return data
+
+
+def stage_build_inputs(directory):
+    """Stage the two pinned archives used to assemble the optional runtime."""
+    python = json.loads((CONFIG / "windows_python.json").read_text(encoding="utf-8"))
+    uv = json.loads((CONFIG / "windows_uv.json").read_text(encoding="utf-8"))
+    if python.get("schema") != "les.windows-python.v2" or uv.get("schema") != "les.windows-uv.v1":
+        raise ValueError("Unsupported Windows build input format")
+
+    python_archive = directory / python["archive_name"]
+    python_data = _verified_archive(python, "LES_WINDOWS_PYTHON_ARCHIVE", 120)
+    uv_data = _verified_archive(uv, "LES_WINDOWS_UV_ARCHIVE", 60)
+    with ZipFile(io.BytesIO(uv_data)) as archive:
+        matches = [name for name in archive.namelist() if Path(name).name == uv["binary_name"]]
+        if len(matches) != 1:
+            raise ValueError("The uv archive must contain one executable")
+        binary = archive.read(matches[0])
+    if hashlib.sha256(binary).hexdigest() != uv["binary_sha256"].lower():
+        raise ValueError("uv executable SHA-256 mismatch")
+
+    executable = directory / uv["binary_name"]
+    python_archive.write_bytes(python_data)
+    executable.write_bytes(binary)
+    return python_archive, executable
 
 
 def digest(path):

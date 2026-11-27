@@ -69,7 +69,6 @@ pub struct Stack {
     qdrant_lock: Option<File>,
     config_path: PathBuf,
     pub api: u16,
-    pub ui: u16,
     pub instance: String,
     qdrant_url: String,
     key: String,
@@ -99,7 +98,6 @@ impl Stack {
             services: Vec::new(),
             qdrant_lock: None,
             api: 0,
-            ui: 0,
             instance: String::new(),
             qdrant_url: String::new(),
             key: String::new(),
@@ -208,7 +206,7 @@ impl Stack {
     }
     pub fn start(&mut self, journal: &Journal) -> Result<String> {
         self.probe = Probe::new()?;
-        if self.config.native_api && !self.config.read_only {
+        if !self.config.read_only {
             match les_core::index_cache::remove_abandoned(&self.config.state) {
                 Ok(0) => (),
                 Ok(count) => journal.event("index_spools_removed", json!({"count":count}))?,
@@ -223,16 +221,6 @@ impl Stack {
             if self.api == 0 || !port_free(self.api) {
                 self.api = free_port()?;
             }
-            if self.config.native_only {
-                self.ui = self.api;
-            } else {
-                if self.ui == 0 || !port_free(self.ui) {
-                    self.ui = free_port()?;
-                }
-                while self.ui == self.api {
-                    self.ui = free_port()?;
-                }
-            }
             if self.config.edge_storage.is_some() {
                 self.qdrant_url = format!("http://127.0.0.1:{}", self.api);
                 self.key = control::random_id()?;
@@ -246,152 +234,32 @@ impl Stack {
                 &self.qdrant_url,
                 &self.key,
                 self.api,
-                self.ui,
                 &self.instance,
             );
-            let mut backend_port = self.api;
-            if self.config.native_api && !self.config.native_only {
-                loop {
-                    backend_port = free_port()?;
-                    if backend_port != self.api && backend_port != self.ui {
-                        break;
-                    }
-                }
+            let mut api = Command::new(self.config.native_api());
+            api.arg("--listen")
+                .arg(format!("127.0.0.1:{}", self.api))
+                .arg("--database")
+                .arg(self.config.state.join("data/meta.db"))
+                .arg("--state")
+                .arg(&self.config.state)
+                .arg("--chat-owner")
+                .arg("rust")
+                .arg("--frontend-assets")
+                .arg(self.config.native_frontend())
+                .current_dir(&self.config.state)
+                .env_clear()
+                .envs(environment)
+                .env("LES_INTERNAL_MODEL_TOKEN", control::random_id()?)
+                .env("LES_INTERNAL_INGEST_TOKEN", control::random_id()?);
+            if let Some(storage) = &self.config.edge_storage {
+                api.arg("--edge-storage").arg(storage);
             }
-            let private_tokens = if self.config.native_api {
-                Some((control::random_id()?, control::random_id()?))
-            } else {
-                None
-            };
-            let mut commands = Vec::new();
-            if let Some(python) = &self.config.python {
-                let mut api = Command::new(python);
-                api.args([
-                    "-B",
-                    "-m",
-                    "uvicorn",
-                    "proxy.app:app",
-                    "--host",
-                    "127.0.0.1",
-                    "--port",
-                    &backend_port.to_string(),
-                ]);
-                let mut ui = Command::new(python);
-                ui.arg("-B").arg(self.config.root.join("sovushka_ng.py"));
-                for command in [&mut api, &mut ui] {
-                    command
-                        .current_dir(&self.config.state)
-                        .env_clear()
-                        .envs(environment.clone());
-                }
-                if self.config.native_api {
-                    api.env(
-                        "LES_NATIVE_FORMAT_WORKER",
-                        self.config.root.parent().unwrap().join(format!(
-                            "native/api/les-api{}",
-                            std::env::consts::EXE_SUFFIX
-                        )),
-                    )
-                    .env(
-                        "LES_NATIVE_TABLE_WORKER",
-                        self.config.root.parent().unwrap().join(format!(
-                            "native/api/les-api{}",
-                            std::env::consts::EXE_SUFFIX
-                        )),
-                    );
-                }
-                if let Some((model_token, ingest_token)) = &private_tokens {
-                    api.env("LES_INTERNAL_MODEL_TOKEN", model_token)
-                        .env(
-                            "LES_INTERNAL_MODEL_URL",
-                            format!(
-                                "http://127.0.0.1:{}/api/light/internal-model-http",
-                                self.api
-                            ),
-                        )
-                        .env("LES_INTERNAL_INGEST_TOKEN", ingest_token)
-                        .env(
-                            "LES_INTERNAL_INFERENCE_URL",
-                            format!("http://127.0.0.1:{}/api/light/internal-inference", self.api),
-                        )
-                        .env(
-                            "LES_NATIVE_INDEX_URL",
-                            format!(
-                                "http://127.0.0.1:{}/api/light/internal-index-store",
-                                self.api
-                            ),
-                        );
-                    #[cfg(windows)]
-                    if let Some(python_root) = python.parent() {
-                        let pdfium = python_root.join("Lib/site-packages/pypdfium2_raw/pdfium.dll");
-                        if pdfium.is_file() {
-                            api.env("LES_NATIVE_PDFIUM", pdfium).env(
-                                "LES_NATIVE_PDF_WORKER",
-                                self.config
-                                    .root
-                                    .parent()
-                                    .unwrap()
-                                    .join("native/api/les-api.exe"),
-                            );
-                        }
-                    }
-                }
-                commands.extend([
-                    (
-                        if self.config.native_api {
-                            "legacy_api"
-                        } else {
-                            "api"
-                        },
-                        api,
-                        "logs/api-console.txt",
-                    ),
-                    ("ui", ui, "logs/ui-console.txt"),
-                ]);
-            }
-            if let Some((model_token, ingest_token)) = private_tokens {
-                let mut native = Command::new(self.config.root.parent().unwrap().join(format!(
-                    "native/api/les-api{}",
-                    std::env::consts::EXE_SUFFIX
-                )));
-                native
-                    .arg("--listen")
-                    .arg(format!("127.0.0.1:{}", self.api))
-                    .arg("--database")
-                    .arg(self.config.state.join("data/meta.db"))
-                    .arg("--state")
-                    .arg(&self.config.state)
-                    .current_dir(&self.config.state)
-                    .env_clear()
-                    .envs(environment)
-                    .env("LES_INTERNAL_MODEL_TOKEN", model_token)
-                    .env("LES_INTERNAL_INGEST_TOKEN", ingest_token);
-                if self.config.native_only {
-                    native.args(["--chat-owner", "rust"]);
-                } else {
-                    native
-                        .arg("--upstream")
-                        .arg(format!("http://127.0.0.1:{backend_port}"))
-                        .arg("--legacy-ui-url")
-                        .arg(format!("http://127.0.0.1:{}/classic", self.ui));
-                }
-                if let Some(frontend) = self.config.native_frontend() {
-                    native.arg("--frontend-assets").arg(frontend);
-                }
-                if let Some(storage) = &self.config.edge_storage {
-                    native.arg("--edge-storage").arg(storage);
-                }
-                commands.push(("api", native, "logs/api-native-console.txt"));
-            }
-            // All services start before readiness probes, preserving parallel initialization.
-            for (name, mut command, log) in commands {
-                self.services
-                    .push(Service::spawn(name, &mut command, self.log(log)?)?);
-                journal.event(
-                    "service_started",
-                    json!({"service":name,"child_pid":self.services.last().unwrap().child.id()}),
-                )?;
-            }
+            let service =
+                Service::spawn("api", &mut api, self.log("logs/api-native-console.txt")?)?;
+            let pid = service.child.id();
+            self.services.push(service);
+            journal.event("service_started", json!({"service":"api","child_pid":pid}))?;
             let deadline = Instant::now() + Duration::from_secs(75);
             loop {
                 if control::stopped() {
@@ -401,9 +269,7 @@ impl Stack {
                     break;
                 }
                 if self.probe.instance(&self.api_probe(), &self.instance)
-                    && self
-                        .probe
-                        .ui(&self.ui_probe(), &self.instance, self.config.native_only)
+                    && self.probe.ui(&self.ui_url())
                 {
                     return Ok(self.ui_url());
                 }
@@ -416,13 +282,9 @@ impl Stack {
                 control::pause(Duration::from_millis(200));
             }
             let collision = self.services.iter_mut().any(|service| {
-                service.child.try_wait().ok().flatten().is_some()
-                    && match service.name {
-                        "api" => !port_free(self.api),
-                        "ui" => !port_free(self.ui),
-                        "legacy_api" => !port_free(backend_port),
-                        _ => false,
-                    }
+                service.name == "api"
+                    && service.child.try_wait().ok().flatten().is_some()
+                    && !port_free(self.api)
             });
             self.stop(journal);
             if !collision || attempt == 2 {
@@ -431,12 +293,10 @@ impl Stack {
                     "Служба Леса завершилась при запуске. Откройте журнал запуска.",
                 ));
             }
-            // The failed pair is retired completely before any replacement starts.
             self.api = 0;
-            self.ui = 0;
             journal.event(
                 "port_collision",
-                json!({"service":"api_ui","attempt":attempt+1}),
+                json!({"service":"api","attempt":attempt+1}),
             )?;
         }
         unreachable!()
@@ -444,18 +304,8 @@ impl Stack {
     fn api_probe(&self) -> String {
         format!("http://127.0.0.1:{}/api/light/instance", self.api)
     }
-    fn ui_probe(&self) -> String {
-        if self.config.native_only {
-            return self.ui_url();
-        }
-        format!("http://127.0.0.1:{}/healthz", self.ui)
-    }
     pub fn ui_url(&self) -> String {
-        if self.config.frontend == "svelte" {
-            format!("http://127.0.0.1:{}/app/", self.api)
-        } else {
-            format!("http://127.0.0.1:{}/classic", self.ui)
-        }
+        format!("http://127.0.0.1:{}/app/", self.api)
     }
     pub fn ready_fields(&self) -> Value {
         let pid = |name| {
@@ -465,9 +315,9 @@ impl Stack {
                 .map(|service| service.child.id())
         };
         json!({"instance_id":self.instance,"ui_url":self.ui_url(),"api_url":format!("http://127.0.0.1:{}",self.api),
-            "qdrant_pid":pid("qdrant"),"api_pid":pid("api"),"ui_pid":pid("ui"),
-            "legacy_api_pid":pid("legacy_api"),"api_native":self.config.native_api,
-            "native_only":self.config.native_only,
+            "qdrant_pid":pid("qdrant"),"api_pid":pid("api"),"ui_pid":null,
+            "legacy_api_pid":null,"api_native":true,
+            "native_only":true,
             "vector_store":if self.config.edge_storage.is_some(){"edge"}else{"server"}})
     }
     fn exited(&mut self) -> Result<Option<Value>> {
@@ -489,15 +339,10 @@ impl Stack {
             return Ok(Some(failure));
         }
         let api = self.api_probe();
-        let ui = self.ui_probe();
-        Ok(self.probe.failed(
-            &api,
-            &ui,
-            &self.instance,
-            &self.qdrant_url,
-            &self.key,
-            self.config.native_only,
-        ))
+        let ui = self.ui_url();
+        Ok(self
+            .probe
+            .failed(&api, &ui, &self.instance, &self.qdrant_url, &self.key))
     }
     pub fn stop(&mut self, journal: &Journal) {
         for mut service in self.services.drain(..).rev() {

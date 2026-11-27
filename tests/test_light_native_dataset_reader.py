@@ -202,14 +202,13 @@ def test_native_reader_http_repair_failure_disconnect_and_crash_resume(case,tmp_
     registry.bind_role(ConnectionRole.ANSWER,revision.revision_id,expected_binding_revision=None,actor='admin:test')
     policy=state/'policy.json';policy.write_text(json.dumps({'schema':'les.native-auth-policy.v1','compatible':True,'trusted_role':'admin',
         'proxy_header':'x-les-role','cors_origins':[],'cors_loopback':True}),encoding='utf-8')
-    (state/'.env').write_text('',encoding='utf-8');port=free_port();upstream=free_port();token='6'*64;api=None
+    (state/'.env').write_text('',encoding='utf-8');port=free_port();token='6'*64;api=None
     def launch():
         env={**os.environ,'LES_LIGHT_QDRANT_URL':'http://127.0.0.1:1','LES_LIGHT_QDRANT_API_KEY':'reader-no-storage-access',
             'LES_INTERNAL_INGEST_TOKEN':token,'LES_STARTUP_BACKGROUND_MUTATIONS':'true','LES_ENV_PATH':str(state/'.env'),
             'PYTHONHOME':str(tmp_path/'no-python'),'PYTHONPATH':str(tmp_path/'no-application'),'PATH':str(tmp_path/'no-programs')}
         with (tmp_path/'api.log').open('ab') as log:
-            process=subprocess.Popen([program,'--listen',f'127.0.0.1:{port}','--upstream',f'http://127.0.0.1:{upstream}',
-                '--state',str(state),'--database',str(case),'--auth-policy-file',str(policy)],env=env,stdout=log,stderr=log,
+            process=subprocess.Popen([program,'--listen',f'127.0.0.1:{port}','--state',str(state),'--database',str(case),'--auth-policy-file',str(policy)],env=env,stdout=log,stderr=log,
                 creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
         wait_for(lambda:httpx.get(f'http://127.0.0.1:{port}/api/notebooks/ds/memory/reader',trust_env=False).status_code==200)
         return process
@@ -217,8 +216,16 @@ def test_native_reader_http_repair_failure_disconnect_and_crash_resume(case,tmp_
         api=launch()
         with httpx.Client(base_url=f'http://127.0.0.1:{port}',timeout=30,trust_env=False) as client:
             endpoint='/api/notebooks/ds/memory/read'
-            assert client.post('/api/light/internal-dataset-reader',json={'dataset_id':'ds'}).status_code==404
-            assert client.post('/api/light/internal-dataset-reader',json={'dataset_id':'ds'},headers={'x-les-index-token':token,'Origin':str(client.base_url)}).status_code==404
+            internal = '/api/light/internal-dataset-reader'
+            body = {'dataset_id': 'ds', 'untrusted': 'fixture' * 512}
+            browser_headers = {
+                'x-les-index-token': token,
+                'Origin': str(client.base_url).rstrip('/'),
+            }
+            # A denied POST must return its HTTP error before the next request uses the connection.
+            for _ in range(24):
+                assert client.post(internal, json=body).status_code == 404
+                assert client.post(internal, json=body, headers=browser_headers).status_code == 404
             mode['value']='repair'
             response=client.post(endpoint,json={}).raise_for_status();value=response.json()
             assert response.headers['x-les-handler']=='rust.dataset-reader'

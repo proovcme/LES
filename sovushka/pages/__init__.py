@@ -1,1 +1,0 @@
-# sovushka/pages package

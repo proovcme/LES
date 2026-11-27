@@ -85,13 +85,6 @@ class DispatcherError(RuntimeError):
         self.payload = payload or {}
 
 
-def _json_default(value: Any) -> Any:
-    try:
-        return asdict(value)
-    except TypeError:
-        return str(value)
-
-
 def _read_json(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
@@ -169,7 +162,6 @@ class RuntimeDispatcher:
         current_mode: dict[str, Any] | None = None,
         metrics_cache: dict[str, Any] | None = None,
         memory_preflight_fn: Callable[..., Any] = les_runtime_control.build_memory_preflight,
-        service_status_fn: Callable[..., Any] = les_runtime_control.all_statuses,
         popen_factory: Callable[..., Any] = subprocess.Popen,
         pid_running_fn: Callable[[int], bool] = _pid_running,
     ):
@@ -177,7 +169,6 @@ class RuntimeDispatcher:
         self.current_mode = current_mode or {}
         self.metrics_cache = metrics_cache or {}
         self.memory_preflight_fn = memory_preflight_fn
-        self.service_status_fn = service_status_fn
         self.popen_factory = popen_factory
         self.pid_running_fn = pid_running_fn
 
@@ -214,19 +205,16 @@ class RuntimeDispatcher:
         datasets: list[str] | None = None,
         min_free_gb: float = 4.0,
         max_swap_pct: float = DEFAULT_REINDEX_MAX_SWAP_PCT,
-        include_services: bool = True,
     ) -> dict[str, Any]:
         datasets = datasets or DEFAULT_DATASETS
         preflight = self._memory_preflight(min_free_gb=min_free_gb)
         memory_decision = self._memory_decision(preflight, min_free_gb=min_free_gb, max_swap_pct=max_swap_pct)
         pressure = evaluate_memory_pressure(self._metrics_for_pressure(preflight))
         reindex = self._reindex_status(datasets=datasets, min_free_gb=min_free_gb, max_swap_pct=max_swap_pct)
-        services = self._services_status() if include_services else []
         actions = {
             "can_start": (not reindex["running"]) and memory_decision["allowed"],
             "can_pause": bool(reindex["running"] and reindex.get("supports_pause")),
             "can_resume": bool((not reindex["running"]) and reindex["state_exists"] and reindex["remaining"] > 0),
-            "can_unload_mlx": True,
             "blocked_reason": "" if memory_decision["allowed"] else memory_decision["reason"],
         }
         return {
@@ -241,7 +229,7 @@ class RuntimeDispatcher:
                 "decision": memory_decision,
                 "recommendations": self._memory_recommendations(preflight, pressure.payload(), memory_decision, reindex),
             },
-            "services": services,
+            "services": [],
             "reindex": reindex,
             "actions": actions,
         }
@@ -287,7 +275,6 @@ class RuntimeDispatcher:
             datasets=datasets,
             min_free_gb=min_free_gb,
             max_swap_pct=max_swap_pct,
-            include_services=False,
         )
         if status["reindex"]["running"]:
             status["status"] = "already_running"
@@ -364,13 +351,12 @@ class RuntimeDispatcher:
             datasets=datasets,
             min_free_gb=min_free_gb,
             max_swap_pct=max_swap_pct,
-            include_services=False,
         )
         result["status"] = "resumed" if resume else "started"
         return result
 
     def pause_reindex(self, *, reason: str = "operator") -> dict[str, Any]:
-        status = self.status_payload(include_services=False)
+        status = self.status_payload()
         reindex = status["reindex"]
         if not reindex["running"]:
             raise DispatcherError(409, "guarded reindex is not running", status)
@@ -388,7 +374,7 @@ class RuntimeDispatcher:
                 "policy": "safe_boundary",
             },
         )
-        result = self.status_payload(include_services=False)
+        result = self.status_payload()
         result["status"] = "pause_requested"
         return result
 
@@ -461,7 +447,7 @@ class RuntimeDispatcher:
                 "standard guarded reindex is running; route-change apply must wait for baseline",
                 {"reindex": active_reindex, "route_changes": route_status},
             )
-        status = self.status_payload(min_free_gb=min_free_gb, max_swap_pct=max_swap_pct, include_services=False)
+        status = self.status_payload(min_free_gb=min_free_gb, max_swap_pct=max_swap_pct)
         if not dry_run and not status["memory"]["decision"]["allowed"]:
             raise DispatcherError(503, status["memory"]["decision"]["reason"], status)
 
@@ -570,13 +556,6 @@ class RuntimeDispatcher:
             "max_swap_pct": max_swap_pct,
         }
 
-    def _services_status(self) -> list[dict[str, Any]]:
-        try:
-            statuses = self.service_status_fn(["qdrant", "mlx", "proxy", "indexer", "ui"])
-        except Exception as error:
-            return [{"error": str(error)}]
-        return [json.loads(json.dumps(item, default=_json_default)) for item in statuses]
-
     def _memory_recommendations(
         self,
         preflight: Any,
@@ -592,12 +571,6 @@ class RuntimeDispatcher:
             and not getattr(process, "protected", False)
             and float(getattr(process, "rss_mb", 0.0) or 0.0) >= 500.0
         ]
-        les_heavy = [
-            process
-            for process in top
-            if getattr(process, "les_owned", False)
-            and float(getattr(process, "rss_mb", 0.0) or 0.0) >= 300.0
-        ]
         actions: list[dict[str, Any]] = []
         notes = [
             "wait_only policy: dispatcher never kills Safari, IDEs, browsers, media apps, or other user processes automatically",
@@ -611,15 +584,6 @@ class RuntimeDispatcher:
                     "reason": decision.get("reason", ""),
                 }
             )
-        if les_heavy:
-            actions.append(
-                {
-                    "kind": "unload_mlx",
-                    "label": "Unload LES-owned MLX models before more indexing or chat",
-                    "endpoint": "/api/runtime/dispatcher/mlx/unload",
-                    "reason": "MLX/model memory is the safest reclaim target because it is owned by LES",
-                }
-            )
         if user_heavy:
             actions.append(
                 {
@@ -629,27 +593,11 @@ class RuntimeDispatcher:
                     "processes": [self._process_summary(process) for process in user_heavy[:5]],
                 }
             )
-        ui_processes = [
-            process
-            for process in top
-            if getattr(process, "les_owned", False)
-            and "sovushka" in str(getattr(process, "command", "")).lower()
-            and float(getattr(process, "rss_mb", 0.0) or 0.0) >= 400.0
-        ]
-        if ui_processes:
-            actions.append(
-                {
-                    "kind": "restart_ui",
-                    "label": "Restart Sovushka UI or stay on Lite Admin before indexing",
-                    "reason": "Classic NiceGUI pages can retain client state and grow RSS",
-                    "processes": [self._process_summary(process) for process in ui_processes[:3]],
-                }
-            )
         if pressure.get("state") in {"RED", "CRITICAL"} and not actions:
             actions.append(
                 {
                     "kind": "idle_or_restart_later",
-                    "label": "Leave the machine idle; if swap does not fall after jobs finish, do a normal macOS restart",
+                    "label": "Leave the machine idle; if swap does not fall after jobs finish, restart Windows normally",
                     "reason": pressure.get("reason", ""),
                 }
             )

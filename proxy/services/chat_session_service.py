@@ -11,11 +11,6 @@ def get_session(session_id: str) -> dict | None:
     return workspace_native.call(rag_meta_db_path(), 'get', session_id=session_id)
 
 
-def get_session_project_id(session_id: str) -> int | None:
-    session = get_session(session_id)
-    return session['project_id'] if session else None
-
-
 def list_sessions(project_id: int | None = None) -> list[dict]:
     return workspace_native.call(rag_meta_db_path(), 'list', project_id=project_id)
 

@@ -2,19 +2,19 @@
 .PHONY: help version-sync verify-fast verify pre-push test test-mail test-tauri test-core test-runtime test-api frontend test-frontend public-check package validate-package
 
 PYTEST_BASETEMP ?= .test-tmp
-PKGS := backend proxy sovushka tools sovushka_ng.py proxy_server.py
+PKGS := backend proxy tools
 
 LIGHT_TESTS := $(wildcard tests/test_light_*.py)
-LIGHT_TESTS += tests/test_dataset_watch.py tests/test_dataset_deletion_service.py
-LIGHT_TESTS += tests/test_sovushka_uikit.py tests/test_forest_visualizer.py tests/test_sovushka_data_workspace.py
-LIGHT_TESTS += tests/test_answer_render_v16.py tests/test_public_error_service.py tests/test_workspace_context.py
+LIGHT_TESTS += tests/test_dataset_deletion_service.py
+LIGHT_TESTS += tests/test_forest_visualizer.py
+LIGHT_TESTS += tests/test_public_error_service.py
 LIGHT_TESTS += tests/test_converter_email.py tests/test_runtime_admission.py
 LIGHT_TESTS += tests/test_model_connection_embeddings_integration.py tests/test_qdrant_adapter_parse.py tests/test_parse_resume.py tests/test_chunking_w2.py
-LIGHT_CORE_TESTS := tests/test_answer_contract_service.py tests/test_chat_session_service.py tests/test_chat_workspace_ui.py tests/test_code_runtime_map.py tests/test_context_governor_service.py tests/test_datasets_router.py tests/test_document_explorer_service.py tests/test_documentation_contract.py tests/test_evidence_contract.py tests/test_evidence_packet_service.py tests/test_mail_router.py tests/test_memory_api.py tests/test_memory_core.py tests/test_model_capability_service.py tests/test_model_connection_chat_integration.py tests/test_model_connection_registry_service.py tests/test_model_connection_resolver_service.py tests/test_model_connection_security_service.py tests/test_model_connections_router.py tests/test_openai_compatible_transport_service.py tests/test_product_edition.py tests/test_rag_config.py tests/test_rag_rrf_readiness.py tests/test_retrieval_service.py tests/test_saferag_service.py tests/test_software_versions.py tests/test_source_excerpts.py tests/test_sovushka_model_connections.py tests/test_web_search_service.py tests/test_workspace_memory.py tests/test_workspace_memory_router.py tests/test_workspace_router.py
+LIGHT_CORE_TESTS := tests/test_answer_contract_service.py tests/test_chat_session_service.py tests/test_code_runtime_map.py tests/test_context_governor_service.py tests/test_document_explorer_service.py tests/test_documentation_contract.py tests/test_evidence_contract.py tests/test_evidence_packet_service.py tests/test_memory_core.py tests/test_model_capability_service.py tests/test_model_connection_registry_service.py tests/test_model_connection_resolver_service.py tests/test_model_connection_security_service.py tests/test_openai_compatible_transport_service.py tests/test_product_edition.py tests/test_rag_config.py tests/test_rag_rrf_readiness.py tests/test_retrieval_service.py tests/test_saferag_service.py tests/test_software_versions.py tests/test_workspace_memory.py
 CURRENT_TESTS := $(sort $(LIGHT_TESTS) $(LIGHT_CORE_TESTS))
-MAIL_TESTS := tests/test_chat_mail_query.py tests/test_converter_email.py tests/test_ezhik_imap_smoke.py tests/test_mail_ingest.py tests/test_mail_profile.py tests/test_mail_push_service.py tests/test_mail_query_service.py tests/test_mail_registry_service.py tests/test_mail_router.py tests/test_mail_threads.py tests/test_outlook_mail_poller.py
+MAIL_TESTS := tests/test_chat_mail_query.py tests/test_converter_email.py tests/test_ezhik_imap_smoke.py tests/test_mail_ingest.py tests/test_mail_profile.py tests/test_mail_push_service.py tests/test_mail_query_service.py tests/test_mail_registry_service.py tests/test_mail_threads.py tests/test_outlook_mail_poller.py
 PRE_PUSH_TESTS := tests/test_documentation_contract.py tests/test_light_git_gates.py tests/test_light_bootstrap.py
-PRE_PUSH_TESTS += tests/test_rag_config.py tests/test_rag_rrf_readiness.py tests/test_source_excerpts.py
+PRE_PUSH_TESTS += tests/test_rag_config.py tests/test_rag_rrf_readiness.py tests/test_evidence_contract.py
 
 help:
 	@echo "make pre-push         — быстрые проверки и офлайн-тесты перед пушем"

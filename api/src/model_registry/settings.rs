@@ -190,9 +190,7 @@ fn apply(
         let endpoint = crate::model_runtime::validate(url.as_str().ok_or(failed)?, local, true)
             .map_err(|_| failed)?;
         let port = endpoint.url.port_or_known_default();
-        if local == "loopback"
-            && (port == Some(context.listen_port) || port == context.upstream_port())
-        {
+        if local == "loopback" && (port == Some(context.listen_port)) {
             return Err(failed);
         }
         Ok(endpoint.url.as_str().trim_end_matches('/').to_owned())

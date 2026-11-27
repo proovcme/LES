@@ -34,13 +34,15 @@ def _call(action, db_path=None, **arguments):
                'database':str(Path(db_path if db_path is not None else rag_meta_db_path()).resolve()),
                'factory':_factory_contracts()}
     if action == 'publish_profile':
-        request['known_tools'] = sorted(_tool_names())
+        request['known_tools'] = sorted(tool["name"] for tool in _tool_registry(db_path)["tools"])
     return _unwrap(native_core.required('chat_profile', request=request))
 
 
-def _tool_names():
-    from proxy.services.tool_harness_service import harness
-    return {str(item['name']) for item in harness().registry()['tools']}
+def _tool_registry(db_path=None):
+    database = str(Path(db_path if db_path is not None else rag_meta_db_path()).resolve())
+    return _unwrap(native_core.required('tool_registry', request={
+        'schema': 'les.tool-registry.v1', 'database': database, 'action': 'registry',
+    }))
 
 
 def canonical_profile_mode(mode):
@@ -97,9 +99,8 @@ def delete_revision(kind, revision_id, *, db_path=None):
 
 
 def registry_snapshot(*, db_path=None):
-    from proxy.services.tool_harness_service import harness
     value = _call('registry', db_path)
-    value['tools'] = harness().registry()['tools']
+    value['tools'] = _tool_registry(db_path)['tools']
     return value
 
 

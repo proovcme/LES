@@ -161,7 +161,7 @@ async fn scoped_configuration(
         if !embedding {return Ok((frozen,Value::Null,String::new(),false));}
         let execution=super::super::super::unwrap(crate::library::catalog(&context.database,"model_execution_snapshot",json!({"role":"embeddings"})))?;
         if execution.is_null(){return Err("EMBEDDING_MODEL_NOT_ASSIGNED".into());}
-        if context.public_chat_rust&&execution["revision"]["locality"]=="remote"{
+        if execution["revision"]["locality"]=="remote"{
             let scope=remote_scope.as_ref().ok_or("CLOUD_EMBEDDING_SCOPE_UNVERIFIED")?;
             super::super::super::egress::check(&context,scope)?;
         }

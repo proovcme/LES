@@ -1,6 +1,6 @@
-import asyncio
 import sqlite3
 from types import SimpleNamespace
+from backend.workspace_native import catalog_call
 
 import pytest
 from proxy.services import chat_durability_service as durable
@@ -58,7 +58,6 @@ def test_final_answer_updates_exactly_one_row(history):
 
 
 def test_failure_survives_reopen_and_cannot_accept_more_tokens(history):
-    from backend.workspace_native import catalog_call
     path, request=history
     key=durable.begin(request)
     durable.checkpoint(key,'token','Неполный текст 日本語')
@@ -80,44 +79,3 @@ def test_failure_survives_reopen_and_cannot_accept_more_tokens(history):
     finally:
         durable._history_id.reset(binding)
     assert row(path)[0][2:] == ('FAILED',0)
-
-
-@pytest.mark.asyncio
-async def test_public_error_is_committed_before_delivery_and_restored_after_restart(history,monkeypatch):
-    from fastapi import HTTPException
-    from proxy.routers import chat,chat_history
-    from proxy.services import chat_request_service
-    path, request=history
-    monkeypatch.setattr(chat_history,'rag_meta_db_path',lambda:str(path))
-    async def generate(req,token_sink):
-        raise HTTPException(422,detail={'code':'PDF_PAGE_INCOMPLETE'})
-    monkeypatch.setattr(chat_request_service,'_run_chat_with_provider',generate)
-    response=await chat.chat_stream(chat.ChatRequest(**vars(request)),_user=None)
-    events=[]
-    async for event in response.body_iterator:
-        events.append(event)
-        if 'event: error' in event:
-            assert row(path)[0][2:] == ('FAILED',0)
-    assert not any('event: token' in event or 'event: final' in event for event in events)
-    durable.interrupt()
-    restored=(await chat_history.get_chat_history(session_id=request.session_id,_user=None))[-1]
-    assert restored['text']=='' and restored['meta']['partial'] is False
-    assert restored['meta']['error']['code']=='PDF_PAGE_INCOMPLETE'
-    assert 'прочитана не полностью' in restored['meta']['error']['detail']
-
-
-@pytest.mark.asyncio
-async def test_sse_disconnect_leaves_durable_text(history, monkeypatch):
-    from proxy.routers import chat
-    from proxy.services import chat_request_service
-    path, request = history
-    async def generate(req, token_sink):
-        await token_sink({'event': 'token', 'data': 'Полученный текст'})
-        await asyncio.Event().wait()
-    monkeypatch.setattr(chat_request_service, '_run_chat_with_provider', generate)
-    response = await chat.chat_stream(chat.ChatRequest(**vars(request)), _user=None)
-    await anext(response.body_iterator)
-    assert 'Полученный текст' in await anext(response.body_iterator)
-    assert row(path)[0][1] == 'Полученный текст'  # Committed before delivery.
-    await response.body_iterator.aclose()
-    assert row(path)[0][2:] == ('INTERRUPTED', 0)

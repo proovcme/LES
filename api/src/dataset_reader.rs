@@ -1,5 +1,5 @@
 //! Complete native navigation reader: durable queue -> exact model -> checked JSON -> revision-safe result.
-use crate::{auth, error, json_response, library::catalog, model_runtime, Context};
+use crate::{auth, error, json_response, library::catalog, model_runtime, transport, Context};
 use axum::{body::to_bytes, extract::Request, http::StatusCode, response::Response};
 use serde_json::{json, Value};
 use std::{fs::File, path::Path, sync::Arc, time::Duration};
@@ -46,7 +46,11 @@ pub async fn handle(context: Arc<Context>, request: Request) -> Response {
     let dataset = route(request.uri().path()).map(str::to_owned);
     let view = request.method() == "GET" && request.uri().path().ends_with("/memory/reader");
     if request.method() != "POST" && !view {
-        return error(StatusCode::METHOD_NOT_ALLOWED, "Method Not Allowed");
+        return transport::reject(
+            request,
+            error(StatusCode::METHOD_NOT_ALLOWED, "Method Not Allowed"),
+        )
+        .await;
     }
     let cors = if private {
         if context
@@ -54,13 +58,13 @@ pub async fn handle(context: Arc<Context>, request: Request) -> Response {
             .as_ref()
             .is_none_or(|s| !s.authorized_internal(request.headers()))
         {
-            return error(StatusCode::NOT_FOUND, "Not Found");
+            return transport::reject(request, error(StatusCode::NOT_FOUND, "Not Found")).await;
         }
         axum::http::HeaderMap::new()
     } else {
         match auth::authorize(&context, request.headers(), !view).await {
             Ok(v) => v,
-            Err(e) => return e,
+            Err(e) => return transport::reject(request, e).await,
         }
     };
     let bytes = match to_bytes(request.into_body(), 8192).await {
@@ -257,12 +261,7 @@ async fn execute(context: &Arc<Context>, job: &Value) -> Result<(), String> {
         .map_err(|_| "READER_SETTINGS_INVALID")?
         .clamp(256, 64000)
         .min(byte_budget);
-    let structured = les_core::model_capabilities::require(
-        &resolved.snapshot,
-        &["structured_output".into()],
-        None,
-    )
-    .is_ok();
+    let structured = resolved.require(&["structured_output".into()]).is_ok();
     let file_limit = match settings.get("LES_DATASET_READER_FILE_LIMIT", "").trim() {
         "" => 500,
         value => value
@@ -311,13 +310,12 @@ async fn execute(context: &Arc<Context>, job: &Value) -> Result<(), String> {
         let request = json!({"messages":[{"role":"user","content":prompt}],"max_output_tokens":max_tokens,
             "tools":[],"reasoning_enabled":false,"temperature":0,
             "response_format":if structured{json!({"type":"json_schema","json_schema":{"name":"les_dataset_reader","strict":true,"schema":prepared["schema"]}})}else{Value::Null}});
-        let upstream = context.upstream_port().unwrap_or(0);
         let body = resolved
             .chat(
                 &request,
                 false,
                 Duration::from_secs(180),
-                [context.listen_port, upstream],
+                context.listen_port,
                 None,
             )
             .await?;

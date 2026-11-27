@@ -10,7 +10,6 @@
   let models = $state<StatusModels | null>(null);
   let runtime = $state<RuntimeStatus | null>(null);
   let jobs = $state<StatusJob[] | null>(null);
-  let legacy = $state<string | null>(null);
   let loading = $state(true);
   let queue: IndexingJobs;
   let updated = $state<Date | null>(null);
@@ -35,10 +34,8 @@
     return params.size ? `/app/?${params}` : '/app/';
   };
   const chatHref = panelHref();
-  const legacyLink = (path: string) => legacy ? new URL(path, legacy).href : null;
-  const modelLink = $derived(legacyLink('/les/classic?tab=models') ?? panelHref('models'));
+  const modelLink = panelHref('models');
   const dataLink = panelHref('data');
-  const diagnostics = $derived(legacyLink('/les/classic?tab=state&details=1'));
   let alive = true;
 
   const check = <T,>(path: string) => request<T>(path).catch(() => null);
@@ -53,9 +50,6 @@
     updated = new Date(); loading = false;
   }
   onMount(() => {
-    void check<{ legacy_url: string | null }>('/api/light/frontend').then((value) => {
-      if (alive) legacy = value?.legacy_url ?? null;
-    });
     void refresh();
     return () => { alive = false; };
   });
@@ -68,7 +62,7 @@
     <a class="brand" href={chatHref} aria-label="Лес · к чату"><Icon name="tree" size={30} /><span>ЛЕС<small>RAG</small></span></a>
     <div class="status-actions">
       <a class="button quiet" href={chatHref}><Icon name="back" size={16} />К чату</a>
-      {#if modelLink}<a class="button quiet" href={modelLink}>Настройки</a>{/if}
+      <a class="button quiet" href={modelLink}>Настройки</a>
     </div>
   </div>
 </header>
@@ -84,7 +78,7 @@
         <div><h2>{name}</h2><p class="muted">{row.detail}</p></div>
         <div class="status-row-actions">
           <span class="status-label" data-tone={row.tone}>{row.label}</span>
-          {#if row.action === 'models' && modelLink}<a class="button quiet" href={modelLink}>Модели</a>
+          {#if row.action === 'models'}<a class="button quiet" href={modelLink}>Модели</a>
           {:else if row.action === 'data'}<a class="button quiet" href={dataLink}>Данные</a>{/if}
         </div>
       </div>
@@ -104,7 +98,6 @@
       {:else if health?.rag?.qdrant?.points != null}
         <p>Точек в индексе: {number.format(health.rag.qdrant.points)}.</p>
       {/if}
-      {#if diagnostics}<a class="button quiet" href={diagnostics}>Расширенная диагностика</a>{/if}
     </div>
   </details>
 </main>

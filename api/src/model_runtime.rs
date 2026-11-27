@@ -17,6 +17,7 @@ pub struct Resolved {
     pub profile: Value,
     pub endpoint: Endpoint,
     pub authorization: Option<String>,
+    local_answer: bool,
 }
 
 fn in_ranges(address: IpAddr, ranges: &[&str]) -> bool {
@@ -237,7 +238,8 @@ pub fn resolve(execution: &Value, role: &str, env_path: &Path) -> Result<Resolve
         "embeddings" => "embeddings",
         _ => return Err("ROLE_INVALID".into()),
     };
-    les_core::model_capabilities::require(&snapshot, &[capability.into()], None)?;
+    let local_answer = role == "answer" && revision["locality"] == "loopback";
+    require(&snapshot, &[capability.into()], local_answer)?;
     let endpoint = validate(
         revision["base_url"]
             .as_str()
@@ -282,15 +284,36 @@ pub fn resolve(execution: &Value, role: &str, env_path: &Path) -> Result<Resolve
         profile,
         endpoint,
         authorization: secret.map(|s| format!("Bearer {s}")),
+        local_answer,
     })
 }
+
+fn require(snapshot: &Value, capabilities: &[String], local_answer: bool) -> Result<(), String> {
+    // A saved observation is tied to this connection revision. For a bound
+    // loopback answer model, use its observed protocol until settings change.
+    let observed_at = if local_answer {
+        Some(
+            snapshot["observed_at"]
+                .as_str()
+                .ok_or("CAPABILITY_SNAPSHOT_INVALID")?,
+        )
+    } else {
+        None
+    };
+    les_core::model_capabilities::require(snapshot, capabilities, observed_at)
+}
+
 impl Resolved {
+    pub fn require(&self, capabilities: &[String]) -> Result<(), String> {
+        require(&self.snapshot, capabilities, self.local_answer)
+    }
+
     pub async fn chat(
         &self,
         request: &Value,
         streaming: bool,
         timeout: std::time::Duration,
-        ports: [u16; 2],
+        listener_port: u16,
         trace: Option<(i64, usize)>,
     ) -> Result<axum::body::Body, String> {
         let mut required = vec!["chat_completions".to_string()];
@@ -304,7 +327,7 @@ impl Resolved {
         if streaming && !native {
             required.push("streaming".into());
         }
-        les_core::model_capabilities::require(&self.snapshot, &required, None)?;
+        self.require(&required)?;
         let mut url = self.endpoint.url.clone();
         let base = url.path().trim_end_matches('/');
         let path = if native {
@@ -325,7 +348,7 @@ impl Resolved {
         if self.endpoint.locality == "loopback"
             && url
                 .port_or_known_default()
-                .is_some_and(|v| ports.contains(&v))
+                .is_some_and(|v| listener_port == v)
         {
             return Err("MODEL_BRIDGE_TARGET_REJECTED".into());
         }

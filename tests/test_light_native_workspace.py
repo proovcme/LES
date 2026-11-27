@@ -1,10 +1,12 @@
-"""Cross-engine database compatibility and rollback, no models or separate catalog."""
+"""Rust workspace compatibility with previously written SQLite databases."""
 import hashlib
+import json
 import sqlite3
 
 import pytest
 
-from proxy.services import chat_session_service as sessions, chat_draft_service as drafts
+from backend.workspace_native import call
+from proxy.services import chat_session_service as sessions
 
 
 @pytest.fixture
@@ -14,16 +16,37 @@ def db(tmp_path,monkeypatch,workspace_engine):
     return path
 
 
-def test_reading_other_engine_data_preserves_every_byte(db,monkeypatch):
-    from tests.oracles import chat_session_python as previous_sessions, chat_draft_python as previous_drafts
-    monkeypatch.setattr(previous_sessions,'rag_meta_db_path',lambda:str(db))
-    session=previous_sessions.create_session(title='Исходный диалог 🌲')
-    sid=session['session_id']
-    content=previous_drafts.save_draft(sid,0,'  Первая строка\n日本語\t🌲  ',{'attachment_id':'read_123456789abc','name':'  Таблица #1.xlsx'})
-    digest=hashlib.sha256(db.read_bytes()).hexdigest()
-    assert sessions.get_session(sid)==session
-    assert drafts.get_draft(sid)==content
-    assert hashlib.sha256(db.read_bytes()).hexdigest()==digest
+def test_reading_saved_session_and_draft_preserves_every_byte(db):
+    # Rows written with the previous schema before the native owner opens the file.
+    sid = 'saved-session'
+    stamp = '2026-10-04T10:17:22+03:00'
+    scope = {'scope_type': 'datasets', 'project_ids': [], 'dataset_ids': ['existing'], 'selected_sources_only': True}
+    content = {
+        'text': '  Первая строка\n日本語\t🌲  ',
+        'attachment': {'attachment_id': 'read_123456789abc', 'name': '  Таблица #1.xlsx'},
+    }
+    with sqlite3.connect(db) as conn:
+        conn.executescript("""
+            CREATE TABLE les_chat_sessions (
+                session_id TEXT PRIMARY KEY, project_id INTEGER, title TEXT NOT NULL, role TEXT NOT NULL,
+                scope_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+            CREATE INDEX idx_chat_sessions_project ON les_chat_sessions(project_id, updated_at);
+            CREATE TABLE les_chat_drafts (
+                session_id TEXT PRIMARY KEY, revision INTEGER NOT NULL,
+                content_json TEXT NOT NULL, updated_at TEXT NOT NULL);
+        """)
+        conn.execute('INSERT INTO les_chat_sessions VALUES (?, ?, ?, ?, ?, ?, ?)',
+                     (sid, 7, 'Исходный диалог 🌲', 'research', json.dumps(scope), stamp, stamp))
+        conn.execute('INSERT INTO les_chat_drafts VALUES (?, ?, ?, ?)',
+                     (sid, 3, json.dumps(content, ensure_ascii=False), stamp))
+
+    digest = hashlib.sha256(db.read_bytes()).hexdigest()
+    assert sessions.get_session(sid) == {
+        'session_id': sid, 'project_id': 7, 'title': 'Исходный диалог 🌲', 'role': 'research',
+        'scope': scope, 'created_at': stamp, 'updated_at': stamp, 'registered': True,
+    }
+    assert call(db, 'draft_get', session_id=sid) == {'revision': 3, **content}
+    assert hashlib.sha256(db.read_bytes()).hexdigest() == digest
 
 
 def test_failed_sqlite_write_rolls_back_session_and_related_effects(db):

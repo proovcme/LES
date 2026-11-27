@@ -1,4 +1,4 @@
-"""Native service ownership with an isolated test API and real native Qdrant."""
+"""Native service ownership with real Axum and Qdrant in an isolated profile."""
 import hashlib
 import json
 import os
@@ -50,68 +50,48 @@ def assert_dead(pid):
     wait_for(dead,timeout=5)
 
 
+def prepare_frontend(root):
+    frontend = root/'desktop/light/frontend/dist'
+    frontend.mkdir(parents=True)
+    page = b'<!doctype html><title>LES native fixture</title>'
+    (frontend/'index.html').write_bytes(page)
+    (frontend/'build-receipt.json').write_text(json.dumps({
+        'schema': 'les.frontend.v1', 'files': {'index.html': hashlib.sha256(page).hexdigest()},
+    }), encoding='utf-8')
+    return page
+
+
+def stage_api(root, api):
+    binary = root.parent/'native/api'/('les-api.exe' if os.name == 'nt' else 'les-api')
+    binary.parent.mkdir(parents=True)
+    try:
+        os.link(api, binary)
+    except OSError:
+        shutil.copyfile(api, binary)
+    return binary
+
+
 @pytest.fixture
 def fixture_root(tmp_path):
-    root=tmp_path/'Приложение 日本語'
-    (root/'proxy').mkdir(parents=True)
-    (root/'proxy/__init__.py').write_text('',encoding='utf-8')
-    # SQLite marker verifies reuse of exactly the same state after an API crash.
-    (root/'proxy/app.py').write_text('''import os,sqlite3,subprocess,sys,json
-from pathlib import Path
-from fastapi import FastAPI
-app=FastAPI()
-@app.get('/api/light/instance')
-def instance():return {'instance_id':os.environ['LES_LIGHT_INSTANCE_ID']}
-@app.get('/environment')
-def environment():
-    python_home=os.getenv('PYTHONHOME')
-    # The Windows venv redirector can set PYTHONHOME to its own base interpreter.
-    foreign_home=bool(python_home and Path(python_home).resolve()!=Path(sys.base_prefix).resolve())
-    return {'foreign_present':foreign_home or any(os.getenv(key) for key in ('OPENAI_API_KEY','LLM_MODEL','OLLAMA_API_KEY')),
-            'mutations':os.environ['LES_STARTUP_BACKGROUND_MUTATIONS']}
-@app.get('/skill-runtime')
-def skill_runtime():
-    program=os.environ['LES_SKILL_PYTHON']
-    code='import sys,json,importlib.util; startup_site="site" in sys.modules; import numpy,openpyxl; print(json.dumps({"site_startup":startup_site,"bytecode_writes":not sys.dont_write_bytecode,"application_imports":importlib.util.find_spec("proxy") is not None,"numpy":numpy.__version__}))'
-    result=subprocess.run([program,'-I','-S','-B','-c',code],capture_output=True,text=True,encoding='utf-8',check=True,timeout=15)
-    return {'program':program,'details':json.loads(result.stdout)}
-@app.post('/marker')
-def write_marker():
-    with sqlite3.connect(Path(os.environ['LES_STATE_ROOT'])/'data/probe.sqlite') as db:
-        db.execute('CREATE TABLE IF NOT EXISTS marker (text TEXT)')
-        db.execute('DELETE FROM marker');db.execute('INSERT INTO marker VALUES (?)',('Лес помнит 日本語',))
-    return {'saved':True}
-@app.get('/marker')
-def read_marker():
-    with sqlite3.connect(Path(os.environ['LES_STATE_ROOT'])/'data/probe.sqlite') as db:
-        return {'text':db.execute('SELECT text FROM marker').fetchone()[0]}
-@app.post('/spawn')
-def spawn():
-    child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(120)'])
-    return {'pid':child.pid}
-''',encoding='utf-8')
-    (root/'sovushka_ng.py').write_text('''import json,os
-from http.server import BaseHTTPRequestHandler,HTTPServer
-class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        data=json.dumps({'instance_id':os.environ['LES_LIGHT_INSTANCE_ID']}).encode()
-        self.send_response(200);self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data)
-    def log_message(self,*args):pass
-HTTPServer(('127.0.0.1',int(os.environ['SOVUSHKA_UI_PORT'])),Handler).serve_forever()
-''',encoding='utf-8')
+    api = os.getenv('LES_TEST_NATIVE_API')
+    if not api:
+        pytest.skip('Build the native API for the Windows service test')
+    root = tmp_path/'Приложение 日本語'
+    prepare_frontend(root)
+    stage_api(root, api)
     return root
 
 
-def command(executable,root,state,qdrant):
-    return [str(executable),'--root',str(root),'--state',str(state),'--python',sys.executable,
-            '--qdrant',str(qdrant),'--parent-pipe','--read-only']
+def command(executable, root, state, qdrant):
+    return [str(executable), '--root', str(root), '--state', str(state),
+            '--qdrant', str(qdrant), '--parent-pipe', '--read-only']
 
 
 def test_contract_distinguishes_python_paths(executable):
     result=subprocess.run([str(executable),'--contract'],check=True,capture_output=True,text=True,timeout=5)
     contract=json.loads(result.stdout)
     assert contract['engine'] == 'rust'
-    assert contract['python'] == {'native_application': False, 'external_skills': True, 'compatibility_host': True}
+    assert contract['python'] == {'native_application': False, 'external_skills': True, 'compatibility_host': False}
 
 
 def test_native_only_start_uses_rust_ui_without_python(executable,tmp_path):
@@ -119,19 +99,8 @@ def test_native_only_start_uses_rust_ui_without_python(executable,tmp_path):
     if not api:
         pytest.skip('Build the Edge API')
     root=tmp_path/'application'
-    frontend=root/'desktop/light/frontend/dist'
-    frontend.mkdir(parents=True)
-    page=b'<!doctype html><title>LES native fixture</title>'
-    (frontend/'index.html').write_bytes(page)
-    (frontend/'build-receipt.json').write_text(json.dumps({
-        'schema':'les.frontend.v1','files':{'index.html':hashlib.sha256(page).hexdigest()},
-    }),encoding='utf-8')
-    binary=tmp_path/'native/api/les-api.exe'
-    binary.parent.mkdir(parents=True)
-    try:
-        os.link(api,binary)
-    except OSError:
-        shutil.copyfile(api,binary)
+    page = prepare_frontend(root)
+    binary = stage_api(root, api)
     state=tmp_path/'state'
     state.mkdir()
     (state/'.env').write_text('MAIL_IMAP_POLL_SEC=0\n',encoding='utf-8')
@@ -185,7 +154,12 @@ def running(executable,fixture_root,tmp_path):
     qdrant=os.getenv('LES_TEST_NATIVE_QDRANT')
     if not qdrant:
         pytest.skip('Set LES_TEST_NATIVE_QDRANT for the isolated service ownership gate')
-    state=tmp_path/'Состояние леса'
+    state = tmp_path/'Состояние леса'
+    state.mkdir()
+    (state/'.env').write_text(
+        'TRUSTED_NETWORKS=127.0.0.1/32\nTRUSTED_NETWORK_ROLE=admin\nMAIL_IMAP_POLL_SEC=0\n',
+        encoding='utf-8',
+    )
     log=(tmp_path/'owner.log').open('wb')
     process=subprocess.Popen(command(executable,fixture_root,state,Path(qdrant).resolve()),
         stdin=subprocess.PIPE,stdout=log,stderr=subprocess.STDOUT,
@@ -210,8 +184,13 @@ def test_recovery_preserves_state_and_normal_stop_leaves_no_children(running):
     process,state,before=running
     assert before['launcher_engine']=='rust'
     with httpx.Client(timeout=3,trust_env=False) as client:
-        assert client.post(before['api_url']+'/marker').json()['saved']
-        assert client.get(before['api_url']+'/environment').json()=={'foreign_present':False,'mutations':'false'}
+        created = client.post(before['api_url']+'/api/workspace/sessions',
+                              json={'title': 'Лес помнит 日本語'}).raise_for_status()
+        session = created.json()['session_id']
+        environment = psutil.Process(before['api_pid']).environ()
+        assert set(environment).isdisjoint({'PYTHONHOME', 'OPENAI_API_KEY', 'LLM_MODEL'})
+        assert environment['LES_STARTUP_BACKGROUND_MUTATIONS'] == 'false'
+        assert before['ui_pid'] is None and before['legacy_api_pid'] is None
         configuration=json.loads((state/'qdrant/runtime.yaml').read_text())
         qdrant=f"http://127.0.0.1:{configuration['service']['http_port']}"
         headers={'api-key':configuration['service']['api_key']}
@@ -225,18 +204,19 @@ def test_recovery_preserves_state_and_normal_stop_leaves_no_children(running):
     after=wait_for(lambda: current if (current:=status(state/'launcher-status.json')).get('phase')=='ready'
                    and current.get('instance_id')!=before['instance_id'] else None,timeout=25)
     with httpx.Client(timeout=3,trust_env=False) as client:
-        assert client.get(after['api_url']+'/marker').json()['text']=='Лес помнит 日本語'
+        response = client.get(after['api_url']+f'/api/workspace/sessions/{session}').raise_for_status()
+        assert response.json()['title'] == 'Лес помнит 日本語'
         configuration=json.loads((state/'qdrant/runtime.yaml').read_text())
         qdrant=f"http://127.0.0.1:{configuration['service']['http_port']}"
         point=client.post(qdrant+'/collections/proof/points',headers={'api-key':configuration['service']['api_key']},
                           json={'ids':[1],'with_payload':True}).json()['result'][0]
         assert point['payload']['proof']=='Лес помнит'
-    for key in ('api_pid','ui_pid','qdrant_pid'):
+    for key in ('api_pid','qdrant_pid'):
         assert_dead(before[key])
     process.stdin.write(b'stop\n');process.stdin.flush();process.wait(timeout=10)
     terminal=status(state/'launcher-status.json')
     assert terminal['phase']=='stopped' and terminal['reason']=='desktop_stop'
-    for key in ('api_pid','ui_pid','qdrant_pid'):
+    for key in ('api_pid','qdrant_pid'):
         assert_dead(after[key])
     assert not (state/'qdrant/runtime.yaml').exists()
     assert lock.acquire();lock.release()
@@ -250,7 +230,7 @@ def test_restart_storm_has_a_terminal_reason_and_leaves_no_services(running):
     process,state,current=running
     pids=set()
     for number in range(4):
-        pids.update(current[key] for key in ('api_pid','ui_pid','qdrant_pid'))
+        pids.update(current[key] for key in ('api_pid','qdrant_pid'))
         api=psutil.Process(current['api_pid']);assert api.ppid()==process.pid
         api.kill()
         if number<3:
@@ -270,18 +250,36 @@ def test_parent_pipe_eof_is_recorded_and_stops_services(running):
     assert process.wait(timeout=10)==0
     terminal=status(state/'launcher-status.json')
     assert terminal['phase']=='stopped' and terminal['reason']=='parent_pipe_eof'
-    for key in ('api_pid','ui_pid','qdrant_pid'):
+    for key in ('api_pid','qdrant_pid'):
         assert_dead(ready[key])
 
 
 @pytest.mark.skipif(sys.platform!='win32',reason='Abrupt owner death is a Windows Job contract')
 def test_owner_crash_stops_owned_services_and_grandchildren(running):
     process,state,ready=running
-    with httpx.Client(timeout=3,trust_env=False) as client:
-        grandchild=client.post(ready['api_url']+'/spawn').json()['pid']
-    assert psutil.Process(ready['api_pid']).ppid()==process.pid
-    process.kill();process.wait(timeout=5)
-    for pid in [grandchild,ready['api_pid'],ready['ui_pid'],ready['qdrant_pid']]:
+    from concurrent.futures import ThreadPoolExecutor
+
+    marker = state/'mcp-child.pid'
+    script = state/'wait_mcp.py'
+    script.write_text(
+        'import os, time\nfrom pathlib import Path\n'
+        'Path(__file__).with_name("mcp-child.pid").write_text(str(os.getpid()))\n'
+        'time.sleep(60)\n', encoding='utf-8',
+    )
+    with httpx.Client(base_url=ready['api_url'], timeout=12, trust_env=False) as client:
+        saved = client.post('/api/mcp', json={
+            'name': 'Owned stdio', 'transport': 'stdio', 'command': sys.executable, 'args': [str(script)],
+        }).raise_for_status().json()
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            from urllib.parse import quote
+            request = pool.submit(client.post, '/api/mcp/'+quote(saved['id'], safe='')+'/probe')
+            grandchild = wait_for(lambda: marker.read_text() if marker.is_file() else None, timeout=10)
+            assert psutil.Process(ready['api_pid']).ppid() == process.pid
+            process.kill()
+            process.wait(timeout=5)
+            with pytest.raises(httpx.TransportError):
+                request.result(timeout=5)
+    for pid in [int(grandchild), ready['api_pid'], ready['qdrant_pid']]:
         assert_dead(pid)
 
 
@@ -294,14 +292,19 @@ def test_packaged_skill_interpreter_is_selected_without_app_imports_and_corrupti
     stage(target,Path(program).parent)
     (target.parent/'skill-python-required.json').write_text('{"required":true}',encoding='utf-8')
     process,state,ready=request.getfixturevalue('running')
-    with httpx.Client(timeout=20,trust_env=False) as client:
-        probe=client.get(ready['api_url']+'/skill-runtime')
-        probe.raise_for_status();value=probe.json()
-    assert Path(value['program'])==target/'python.exe'
-    assert value['details']['site_startup'] is False
-    assert value['details']['bytecode_writes'] is False
-    assert value['details']['application_imports'] is False
-    assert value['details']['numpy']
+    selected = Path(psutil.Process(ready['api_pid']).environ()['LES_SKILL_PYTHON'])
+    assert selected == target/'python.exe'
+    probe = subprocess.run([str(selected), '-I', '-S', '-B', '-c',
+        'import sys,json,importlib.util; startup_site="site" in sys.modules; '
+        'import numpy,openpyxl; print(json.dumps({"site_startup":startup_site,'
+        '"bytecode_writes":not sys.dont_write_bytecode,'
+        '"application_imports":importlib.util.find_spec("proxy") is not None,"numpy":numpy.__version__}))'],
+        capture_output=True, text=True, encoding='utf-8', check=True, timeout=20)
+    details = json.loads(probe.stdout)
+    assert details['site_startup'] is False
+    assert details['bytecode_writes'] is False
+    assert details['application_imports'] is False
+    assert details['numpy']
     process.stdin.write(b'stop\n');process.stdin.flush();process.wait(timeout=10)
     stdlib=next(target.glob('python*.zip'));stdlib.write_bytes(b'corrupt fixture')
     fresh_state=tmp_path/'must-not-start'

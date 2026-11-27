@@ -36,7 +36,10 @@ def server():
     sock = socket.socket()
     sock.bind(("127.0.0.1", 0))
     port = sock.getsockname()[1]
-    runtime = uvicorn.Server(uvicorn.Config(app.streamable_http_app(), log_level="critical"))
+    runtime = uvicorn.Server(uvicorn.Config(
+        app.streamable_http_app(), log_level="critical",
+        timeout_keep_alive=1, timeout_graceful_shutdown=2,
+    ))
     thread = threading.Thread(target=runtime.run, kwargs={"sockets": [sock]}, daemon=True)
     thread.start()
     for _ in range(250):
@@ -51,34 +54,6 @@ def server():
         thread.join(timeout=5)
         sock.close()
         assert not thread.is_alive()
-
-
-def test_real_mcp_http_catalog_allowlist_execution_disable_delete(isolated_db, server):
-    from proxy.services.tool_harness_service import ToolHarness
-    url, calls = server
-    connection = service.save("Библиотека", url)
-    found = asyncio.run(service.discover(connection["id"]))
-    assert {tool["name"] for tool in found} == {"echo", "change"}
-    assert calls == []
-    with pytest.raises(ValueError, match="чтение"):
-        asyncio.run(service.enable(connection["id"], ["change"]))
-    asyncio.run(service.enable(connection["id"], ["echo"]))
-    from proxy.services.chat_profile_service import _factory_contracts
-    assert not any(name.startswith("mcp_") for name in _factory_contracts()["agent"]["tools"])
-    harness = ToolHarness()
-    name = service.tool_name(connection["id"], "echo")
-    shortlist = harness.shortlist("Верни текст", mode="agent", allowed_tools=[name])
-    assert [tool["name"] for tool in shortlist["tools"]] == [name]
-    result = asyncio.run(harness.call_async(name, {"text": "Кедр"}))
-    assert result["status"] == "ok", result
-    assert "Кедр" in str(result["result"])
-    assert calls == ["Кедр"]
-    asyncio.run(service.enable(connection["id"], []))
-    result = asyncio.run(harness.call_async(name, {"text": "Не вызывать"}))
-    assert result["status"] != "ok"
-    assert calls == ["Кедр"]
-    service.remove(connection["id"])
-    assert service.connections() == []
 
 
 @pytest.mark.parametrize("url", ["file:///tmp/file", "http://user:password@localhost/mcp", "http://example.org/mcp", "https://example.org/mcp?key=secret", "https://example.org/mcp#fragment"])
@@ -110,7 +85,6 @@ def test_connection_refused_has_actionable_error(isolated_db):
 
 def test_real_stdio_process_and_disabled_handler(isolated_db, tmp_path):
     import sys
-    from proxy.services.tool_harness_service import ToolHarness
     script = tmp_path / "сервер с пробелами.py"
     script.write_text('from mcp.server.fastmcp import FastMCP\nfrom mcp.types import ToolAnnotations\nm = FastMCP("stdio acceptance")\n@m.tool(annotations=ToolAnnotations(readOnlyHint=True))\ndef echo(text: str) -> str:\n    return "Прочитано: " + text\nm.run()\n', encoding="utf-8")
     item = service.save("Локальный", transport="stdio", command=sys.executable, args=[str(script)])
@@ -118,11 +92,12 @@ def test_real_stdio_process_and_disabled_handler(isolated_db, tmp_path):
     assert item['url']=='stdio:'+hashlib.sha256(json.dumps({'transport':'stdio','command':item['command'],'args':item['args']},sort_keys=True).encode()).hexdigest()
     found = asyncio.run(service.discover(item["id"]))
     assert [tool["name"] for tool in found] == ["echo"]
-    asyncio.run(service.enable(item["id"], ["echo"]))
-    name = service.tool_name(item["id"], "echo")
-    result = asyncio.run(ToolHarness().call_async(name, {"text": "Берёза"}))
-    assert result["status"] == "ok", result
-    assert "Берёза" in str(result["result"])
+    expected, = asyncio.run(service.enable(item["id"], ["echo"]))["tools"]
+    result = service._native("call", connection_id=item["id"], expected=expected, arguments={"text": "Берёза"})
+    assert result["content"][0]["text"] == "Прочитано: Берёза"
+    asyncio.run(service.enable(item["id"], []))
+    with pytest.raises(ValueError):
+        service._native("call", connection_id=item["id"], expected=expected, arguments={"text": "Disabled"})
     with pytest.raises(ValueError, match="уже добавлен"):
         service.save("Дубль", transport="stdio", command=sys.executable, args=[str(script)])
     script.unlink()

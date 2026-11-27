@@ -1,0 +1,394 @@
+{
+  "schema": "les.native-api-routes.v1",
+  "probes": 272,
+  "routes": [
+    {
+      "method": "DELETE",
+      "path": "/api/auth/keys/{key_value}"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/mcp/{connection_id}"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/profiles/{kind}/{revision_id}"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/projects/{project_id}"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/projects/{project_id}/links"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/workspace/memory/{note_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/keys"
+    },
+    {
+      "method": "GET",
+      "path": "/api/chat/history"
+    },
+    {
+      "method": "GET",
+      "path": "/api/chat/learning"
+    },
+    {
+      "method": "GET",
+      "path": "/api/chat/sessions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/commands"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/by-id/{doc_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/by-id/{doc_id}/pdf-contour/pages/{page_number}/preview"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/by-id/{doc_id}/raw"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/datasets"
+    },
+    {
+      "method": "GET",
+      "path": "/api/health"
+    },
+    {
+      "method": "GET",
+      "path": "/api/jobs/summary"
+    },
+    {
+      "method": "GET",
+      "path": "/api/light/frontend"
+    },
+    {
+      "method": "GET",
+      "path": "/api/mail/accounts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/mail/messages"
+    },
+    {
+      "method": "GET",
+      "path": "/api/mail/messages/{message_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/mail/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/mail/threads"
+    },
+    {
+      "method": "GET",
+      "path": "/api/mail/threads/{thread_key}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/mcp"
+    },
+    {
+      "method": "GET",
+      "path": "/api/model-connections"
+    },
+    {
+      "method": "GET",
+      "path": "/api/model-connections/effective"
+    },
+    {
+      "method": "GET",
+      "path": "/api/model-connections/templates"
+    },
+    {
+      "method": "GET",
+      "path": "/api/profiles"
+    },
+    {
+      "method": "GET",
+      "path": "/api/profiles/revisions/{revision_id}/instructions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects"
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/{project_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects/{project_id}/links"
+    },
+    {
+      "method": "GET",
+      "path": "/api/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tools/registry"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace/agent-state"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace/memory"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace/memory/context/{session_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace/sessions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace/sessions/{session_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workspace/sessions/{session_id}/draft"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/mail/accounts/{account_id}"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/projects/{project_id}"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/workspace/memory/context/{session_id}"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/workspace/memory/{note_id}"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/workspace/sessions/{session_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/keys"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/keys/delete"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/keys/reset-device"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/keys/toggle"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/verify"
+    },
+    {
+      "method": "POST",
+      "path": "/api/chat"
+    },
+    {
+      "method": "POST",
+      "path": "/api/chat/attachments"
+    },
+    {
+      "method": "POST",
+      "path": "/api/chat/stream"
+    },
+    {
+      "method": "POST",
+      "path": "/api/documents/by-id/{doc_id}/open-native"
+    },
+    {
+      "method": "POST",
+      "path": "/api/documents/by-id/{id}/open-native"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mail/accounts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mail/accounts/{account_id}/migrate-legacy"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mail/accounts/{account_id}/sync"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mail/accounts/{account_id}/test"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mail/collector/import"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mail/collector/register-store"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mail/collector/run"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mail/import-apple-mail"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mail/import-archive"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mail/import-imap"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mail/import-local"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mail/messages/{message_id}/open"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mail/push"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mail/rebuild-threads"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mcp"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mcp/{connection_id}/probe"
+    },
+    {
+      "method": "POST",
+      "path": "/api/model-connections"
+    },
+    {
+      "method": "POST",
+      "path": "/api/model-connections/discover-local"
+    },
+    {
+      "method": "POST",
+      "path": "/api/model-connections/discover-models"
+    },
+    {
+      "method": "POST",
+      "path": "/api/model-connections/{connection_id}/disable"
+    },
+    {
+      "method": "POST",
+      "path": "/api/model-connections/{connection_id}/revisions"
+    },
+    {
+      "method": "POST",
+      "path": "/api/model-connections/{connection_id}/secret"
+    },
+    {
+      "method": "POST",
+      "path": "/api/model-connections/{connection_id}/test"
+    },
+    {
+      "method": "POST",
+      "path": "/api/notebooks/{dataset_id}/memory/read"
+    },
+    {
+      "method": "POST",
+      "path": "/api/profiles/revisions"
+    },
+    {
+      "method": "POST",
+      "path": "/api/profiles/text-revisions"
+    },
+    {
+      "method": "POST",
+      "path": "/api/profiles/{mode}/activate/{revision_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects"
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/{project_id}/links"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rag/attach"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rag/attach-folder"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rag/datasets"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rag/sources/call"
+    },
+    {
+      "method": "POST",
+      "path": "/api/tools/call"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspace/agent-state"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspace/memory/context/{session_id}/forget"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspace/memory/context/{session_id}/summarize"
+    },
+    {
+      "method": "POST",
+      "path": "/api/workspace/sessions"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/mcp/{connection_id}/tools"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/profiles/chats/{session_id}/binding"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/workspace/sessions/{session_id}/draft"
+    }
+  ]
+}

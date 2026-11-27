@@ -45,9 +45,7 @@ def test_native_publication_and_recovery_preserve_the_file_generation(tmp_path):
 
     runtime = LightQdrantRuntime(Path(qdrant), state)
     token = "1" * 64
-    listen, upstream = free_port(), free_port()
-    while upstream == listen:
-        upstream = free_port()
+    listen = free_port()
     process = None
     try:
         runtime.start()
@@ -56,8 +54,7 @@ def test_native_publication_and_recovery_preserve_the_file_generation(tmp_path):
                        "LES_STARTUP_BACKGROUND_MUTATIONS": "false"}
         def start_api():
             with (tmp_path / "api.log").open("ab") as log:
-                return subprocess.Popen([executable, "--listen", f"127.0.0.1:{listen}", "--upstream",
-                    f"http://127.0.0.1:{upstream}", "--state", str(state), "--database", str(database)],
+                return subprocess.Popen([executable, "--listen", f"127.0.0.1:{listen}", "--state", str(state), "--database", str(database)],
                     env=environment, stdout=log, stderr=subprocess.STDOUT)
 
         process = start_api()

@@ -81,11 +81,9 @@ def native_turn(tmp_path, request):
         with zipfile.ZipFile(archive_path) as archive:
             archive.extractall(installed)
     client=httpx.Client(base_url=f'http://127.0.0.1:{port}',timeout=20,trust_env=False)
-    public=mode in ('public', 'rag','rag-small')
     storage = embeddings = None
     def start():
-        extra=['--chat-owner','rust'] if public else ['--upstream',f'http://127.0.0.1:{free_port()}']
-        p=subprocess.Popen([program,'--listen',f'127.0.0.1:{port}','--state',str(state),'--database',str(database),*extra],env=env,cwd=tmp_path,stdout=log,stderr=log,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0));children.append(p)
+        p=subprocess.Popen([program,'--listen',f'127.0.0.1:{port}','--state',str(state),'--database',str(database)],env=env,cwd=tmp_path,stdout=log,stderr=log,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0));children.append(p)
         wait_for(lambda:client.get('/api/profiles').status_code==200, timeout=30);return p
     try:
         if rag:
@@ -113,7 +111,6 @@ def native_turn(tmp_path, request):
 def test_json_and_stream_share_native_turn_and_repeated_key_never_calls_model(native_turn):
     t=native_turn;request={'question':'Привет 日本語','session_id':'fixture-turn'};headers={**HEADERS,'Idempotency-Key':'once'}
     assert t.client.post(PATH,json=request).status_code==404
-    assert t.client.post('/api/chat',json=request).headers.get('x-les-handler')!='rust.chat'
     response=t.client.post(PATH,json=request,headers=headers).raise_for_status()
     assert response.headers['x-les-handler']=='rust.chat'
     result=response.json();assert result['answer']=='Ответ 日本語';assert len(t.seen)==1
@@ -265,6 +262,10 @@ def test_hard_process_stop_recovers_partial_text_without_replaying_model(native_
     with sqlite3.connect(t.database) as db:
         answer,status,artifact=db.execute("SELECT answer,crag_status,artifact_json FROM chat_history WHERE session_id='crash'").fetchone()
     assert (answer,status)==('До падения 日本語','INTERRUPTED') and 'CHAT_INTERRUPTED' in artifact
+    history = t.client.get('/api/chat/history', params={'session_id': 'crash'}).raise_for_status().json()
+    assert history[-1]['text'] == answer
+    assert history[-1]['crag'] == 'INTERRUPTED'
+    assert history[-1]['meta']['partial'] is True
 
 def test_agent_write_uses_native_revisions_and_retry_never_repeats_the_effect(native_turn):
     t=native_turn

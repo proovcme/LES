@@ -16,7 +16,6 @@ def db(tmp_path, monkeypatch, workspace_engine):
 
 def test_read_missing_is_read_only(db):
     assert service.get_session('missing') is None
-    assert service.get_session_project_id('missing') is None
     assert service.list_sessions() == []
     assert not db.exists()
 
@@ -28,7 +27,7 @@ def test_project_defaults_are_copied_and_sessions_isolated(db):
     ordinary = service.create_session()
     assert owned['scope']['dataset_ids'] == ['source-one']
     assert ordinary['scope']['scope_type'] == 'none'
-    assert service.get_session_project_id(owned['session_id']) == project['id']
+    assert service.get_session(owned['session_id'])['project_id'] == project['id']
     assert [s['session_id'] for s in service.list_sessions()] == [ordinary['session_id']]
     assert [s['session_id'] for s in service.list_sessions(project['id'])] == [owned['session_id']]
     project_service.link_entity(project['id'], 'dataset', 'later')
@@ -63,7 +62,7 @@ def test_legacy_history_is_ordinary_and_read_does_not_migrate(db):
         conn.execute("INSERT INTO chat_history VALUES (1, 'legacy', '2026-01-01', 'First question')")
     assert service.list_sessions()[0]['session_id'] == 'legacy'
     assert service.get_session('legacy')['registered'] is False
-    assert service.get_session_project_id('legacy') is None
+    assert service.get_session('legacy')['project_id'] is None
     assert service.list_sessions(123) == []
     with sqlite3.connect(db) as conn:
         assert conn.execute("SELECT name FROM sqlite_master WHERE name='les_chat_sessions'").fetchone() is None

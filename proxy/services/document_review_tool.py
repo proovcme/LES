@@ -4,11 +4,8 @@ from __future__ import annotations
 import asyncio
 from uuid import uuid4
 
-from backend.runtime_paths import mutable_path
 from backend.interface import EmbeddingContractError
 from proxy.services.document_task_store import digest
-from proxy.services.review_task_store import ReviewTaskStore
-from proxy.services.review_source_reader import ReviewSourceReader
 from proxy.services.tabular_document_service import encode
 
 TOOL_NAME = 'document_review'
@@ -132,37 +129,3 @@ class DocumentReviewTool:
                 selector['file_name'], 0.0, {**fragment['locator'],
                 'dataset_id': selector['dataset_id'], 'qdrant_point_id': fragment['id']}),)
         return result['payload']
-
-    def register(self, harness):
-        from proxy.services.tool_contract_service import ToolContract, EffectClass, ResultBudget, RetryPolicy, IdempotencyPolicy
-        from proxy.services.tool_registry_service import ToolRegistration
-        from proxy.services.tool_harness_service import _result
-        fields = self.store._call('contract')
-        fields['effect'] = EffectClass(fields['effect'])
-        fields['retry'] = RetryPolicy(fields['retry'])
-        fields['idempotency'] = IdempotencyPolicy(fields['idempotency'])
-        fields['result_budget'] = ResultBudget(**fields['result_budget'])
-        contract = ToolContract(**fields)
-
-        async def handler(arguments):
-            try:
-                payload = await self.execute(arguments)
-            except Exception:
-                self.remember(arguments, {'status': 'error', 'message': 'Проверка не сохранена; запросите status'})
-                raise
-            self.remember(arguments, payload)
-            return _result(tool=TOOL_NAME, operation=arguments['operation'], inputs=[], status='ok',
-                           result=payload, trace='scoped_review_inventory')
-        harness._registry.register(ToolRegistration(contract=contract, handler=handler))
-        return contract.public_payload()
-
-
-def bind_review_tool(req, backend, *, dataset_ids, profile_revision, model_revision, input_budget, file_names=(), available_slots=1):
-    from backend.product_edition import is_light
-    if not is_light() or not dataset_ids or not req.session_id or available_slots < 1:
-        return None
-    owner = digest({'session': req.session_id, 'project': getattr(req, 'project_id', None),
-                    'datasets': sorted(str(item) for item in dataset_ids), 'scope': getattr(req, 'scope', None),
-                    'profile': profile_revision, 'model': model_revision, 'files': sorted(file_names)})
-    return DocumentReviewTool(ReviewTaskStore(mutable_path('data/document-tasks.sqlite3')),
-                              ReviewSourceReader(backend, dataset_ids, file_names), owner, req.question, input_budget // 8)

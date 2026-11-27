@@ -92,9 +92,8 @@ pub async fn execute(
         let plan=les_core::conversation_summary::execute(&json!({"action":"plan","state":state,"turns":turns,"force":force,"input_token_limit":connection.profile["input_token_limit"]})).map_err(str::to_owned)?;
         let request=json!({"messages":plan["messages"],"max_output_tokens":650,"temperature":0,"tools":[],"reasoning_enabled":false,"response_format":null});
         let native=connection.snapshot["transport_options"]["chat_protocol"]=="native_chat_v1";
-        let streaming=native||les_core::model_capabilities::require(&connection.snapshot,&["streaming".into()],None).is_ok();
-        let upstream=context.upstream_port().unwrap_or(0);
-        let body=connection.chat(&request,streaming,Duration::from_secs(120),[context.listen_port,upstream],None).await?;
+        let streaming=native||connection.require(&["streaming".into()]).is_ok();
+        let body=connection.chat(&request,streaming,Duration::from_secs(120),context.listen_port,None).await?;
         let text=tokio::time::timeout(Duration::from_secs(180),crate::model_answer::collect(body,"SUMMARY")).await.map_err(|_|"SUMMARY_MODEL_TIMEOUT")??;
         let selected=les_core::conversation_summary::execute(&json!({"action":"select","response":text,"records":plan["records"],"finish_reason":"stop"})).map_err(str::to_owned)?;
         update(&context,sid,&state,json!({"summary":selected["summary"],"through_id":plan["through_id"],"model_revision":connection.revision["revision_id"],"last_error":""}),claim,plan["continue"]==true,"").await

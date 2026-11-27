@@ -44,23 +44,16 @@ pub async fn complete(
     let request = json!({"messages":messages,"tools":tools,"max_output_tokens":max_output,"reasoning_enabled":profile["reasoning_enabled"].as_bool().unwrap_or(false),
         "temperature":temperature,"response_format":response_format});
     let native = turn.connection.snapshot["transport_options"]["chat_protocol"] == "native_chat_v1";
-    let streamable = native
-        || les_core::model_capabilities::require(
-            &turn.connection.snapshot,
-            &["streaming".into()],
-            None,
-        )
-        .is_ok();
+    let streamable = native || turn.connection.require(&["streaming".into()]).is_ok();
     sink.model_call(model_call);
     let started = Instant::now();
-    let upstream_port = context.upstream_port().unwrap_or(0);
     let body = turn
         .connection
         .chat(
             &request,
             streamable,
             super::budget::remaining(deadline)?,
-            [context.listen_port, upstream_port],
+            context.listen_port,
             Some((journal.history,model_call)),
         )
         .await?;

@@ -42,30 +42,6 @@ def test_symlink_escape_is_rejected(tmp_path, monkeypatch):
         service.read('example', 'link.md')
 
 
-@pytest.mark.asyncio
-async def test_selected_skills_reachable_with_small_model_and_scope_enforced(tmp_path, monkeypatch):
-    from proxy.services.tool_harness_service import ToolHarness
-    monkeypatch.setenv('RAG_META_DB_PATH', str(tmp_path / 'meta.db'))
-    monkeypatch.setattr(service, 'library_root', lambda: tmp_path)
-    (tmp_path / 'example').mkdir()
-    (tmp_path / 'example/SKILL.md').write_text('description: Пример\nТекст', encoding='utf-8')
-    harness = ToolHarness()
-    selected = harness.shortlist('Навыки', mode='agent', allowed_tools=[
-        'web_read', 'filesystem_list', 'filesystem_stat', 'filesystem_read_text',
-        'list_installed_skills', 'read_installed_skill'], limit=5)
-    access = selected['tools'][0]['name']
-    assert access.startswith('use_extensions_')
-    listing = await harness.call_async(access, {'operation': 'list'})
-    assert listing['status'] == 'ok'
-    read = await harness.call_async(access, {'operation': 'call', 'name': 'read_installed_skill',
-                                            'arguments': {'skill': 'example'}})
-    assert read['status'] == 'ok'
-    assert read['result']['result']['text'].endswith('Текст')
-    denied = await harness.call_async(access, {'operation': 'call', 'name': 'filesystem_read_text',
-                                              'arguments': {'path': 'secret'}})
-    assert denied['status'] != 'ok'
-
-
 def test_skill_page_is_not_silently_cut_between_tool_rounds():
     from proxy.services.chat_prompt_support import _compact_tool_result_for_prompt
     result = {'text': 'Инструкция ' * 500, 'next_offset': 6000}

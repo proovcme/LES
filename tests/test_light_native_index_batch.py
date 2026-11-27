@@ -318,8 +318,7 @@ def test_shipping_ingestion_runs_native_coordinator_pdf_publication_cache_and_pa
         runtime.start();monkeypatch.setenv('LES_LIGHT_QDRANT_URL',runtime.url)
         environment={**os.environ,'LES_LIGHT_QDRANT_API_KEY':runtime.api_key,'LES_INTERNAL_INGEST_TOKEN':token,'LES_STARTUP_BACKGROUND_MUTATIONS':'false'}
         with (tmp_path/'batch-api.log').open('wb') as log:
-            api=subprocess.Popen([executable,'--listen',f'127.0.0.1:{port}','--upstream',f'http://127.0.0.1:{free_port()}',
-                '--state',str(state),'--database',str(database)],env=environment,stdout=log,stderr=log,
+            api=subprocess.Popen([executable,'--listen',f'127.0.0.1:{port}','--state',str(state),'--database',str(database)],env=environment,stdout=log,stderr=log,
                 creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
         endpoint=f'http://127.0.0.1:{port}/api/light/internal-index-store'
         monkeypatch.setattr(native_index_store,'_bridge',(endpoint,token))

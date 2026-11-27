@@ -41,9 +41,7 @@ pub(crate) async fn release_owned(context: Arc<Context>, revision: &str) -> Resu
             .unwrap_or(base)
     );
     url.set_path(&path);
-    if url.port_or_known_default() == Some(context.listen_port)
-        || url.port_or_known_default() == context.upstream_port()
-    {
+    if url.port_or_known_default() == Some(context.listen_port) {
         return Err("MODEL_BRIDGE_TARGET_REJECTED".into());
     }
     let reply = crate::model_http::open(
@@ -205,11 +203,10 @@ pub(crate) async fn execute(context: Arc<Context>, value: &Value) -> Result<Vec<
             )
         };
         url.set_path(&path);
-        let upstream_port = context.upstream_port().unwrap_or(0);
         if resolved.endpoint.locality == "loopback"
             && url
                 .port_or_known_default()
-                .is_some_and(|v| [context.listen_port, upstream_port].contains(&v))
+                .is_some_and(|v| context.listen_port == v)
         {
             return Err("MODEL_BRIDGE_TARGET_REJECTED".into());
         }

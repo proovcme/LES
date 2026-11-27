@@ -66,7 +66,7 @@ def test_native_http_batch_owns_conversion_embedding_publication_and_crash_resum
         (CapabilityObservation(CapabilityName.EMBEDDINGS,CapabilityState.SUPPORTED,'probe',observed),),
         observed,datetime(2099,1,1,tzinfo=timezone.utc),{'observed_context_tokens':'4096'}),actor='admin:test')
     request['embedding_execution']={'revision_id':revision.revision_id,'allow_remote':False}
-    runtime=LightQdrantRuntime(Path(qdrant),state);api=None;port=free_port();upstream=free_port();token='9'*64
+    runtime=LightQdrantRuntime(Path(qdrant),state);api=None;port=free_port();token='9'*64
     edge=tmp_path/'edge'
     if storage=='edge':
         from tests.test_light_edge_migration import source as edge_source,complete
@@ -86,7 +86,7 @@ def test_native_http_batch_owns_conversion_embedding_publication_and_crash_resum
              'LES_INTERNAL_INGEST_TOKEN':token,'LES_STARTUP_BACKGROUND_MUTATIONS':'false',
              'PYTHONHOME':str(tmp_path/'no-python'),'PYTHONPATH':str(tmp_path/'no-application'),'PATH':str(tmp_path/'no-programs')}
         env.pop('LES_NATIVE_EMBEDDING_SPEC',None)
-        args=[program,'--listen',f'127.0.0.1:{port}','--upstream',f'http://127.0.0.1:{upstream}','--state',str(state),'--database',str(database)]
+        args=[program,'--listen',f'127.0.0.1:{port}','--state',str(state),'--database',str(database)]
         if storage=='edge':args+=['--edge-storage',str(edge)]
         with (tmp_path/'api.log').open('ab') as log:
             process=subprocess.Popen(args,env=env,stdout=log,stderr=log,

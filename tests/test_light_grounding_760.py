@@ -5,14 +5,12 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
 
 from backend.document_catalog import MetaDB
 from backend.interface import Chunk
 from backend.qdrant_ingestion import QdrantIngestion
 from backend.qdrant_nodes import QdrantNodes
 from backend import qdrant_support as support
-from proxy.routers.dataset_uploads import _record_background_parse_error
 from proxy.services.chat_prompt_support import clean_visible_text, source_excerpts
 from proxy.services.kot_service import analyze_question
 from proxy.services.lexical_index_service import RetrievalTrace
@@ -179,24 +177,6 @@ def test_coverage_uses_bm25_token_boundaries(q,text,covered):
         assert result.term_coverage < 1
 
 
-@pytest.mark.asyncio
-async def test_resource_gate_preserves_pending_counts_and_does_not_consume_attempt(tmp_path):
-    db = MetaDB(str(tmp_path/'meta.db')); dataset=db.create_dataset('Synthetic')
-    with db._get_conn() as c:
-        c.execute("INSERT INTO documents(id,dataset_id,file_name,status,chunk_count,parse_attempts) VALUES('d',?,'table.csv','PENDING',3,0)",(dataset,))
-    class Backend:
-        async def mark_document_deferred(self, dataset_id, document_id, reason):
-            db.mark_document_deferred(dataset_id,document_id,reason)
-        async def mark_document_error(self,*args): pytest.fail('Resource gate is not a document failure')
-    await _record_background_parse_error(SimpleNamespace(backend=Backend()),dataset_id=dataset,
-        document_id='d',error=HTTPException(429,'Awaiting free memory'))
-    with db._get_conn() as c:
-        row=dict(c.execute("SELECT * FROM documents WHERE id='d'").fetchone())
-    assert row['status']=='PENDING' and row['stage']=='WAITING_RESOURCES'
-    assert row['chunk_count']==3 and row['parse_attempts']==0 and row['retryable']==1
-    assert db.get_pending_files(dataset)==['table.csv']
-
-
 @pytest.mark.parametrize('kind',['csv','xlsx'])
 def test_unknown_table_headers_keep_original_rows(tmp_path,kind):
     name,data=materialize({'id':'inventory','format':kind,'rows':[['Артикул','Остаток'],['U-15',23],['U-51',32]]})
@@ -226,15 +206,6 @@ def test_full_chat_fixture_and_stream_accounting():
     response=SimpleNamespace(iter_lines=lambda:iter(['event: error','data: {"code":"CHAT_MEMORY_PRESSURE"}','']))
     event,payload,_=stream_final(response)
     assert event=='error' and payload['code']=='CHAT_MEMORY_PRESSURE'
-
-
-def test_answer_footer_surfaces_observed_weak_search_without_claiming_truth():
-    from sovushka.components.chat_presentation import _operator_status_chips
-    chips=_operator_status_chips('MODEL_OUTPUT',{'retrieval_trace':{'quality_status':'weak'}},['a.md'])
-    assert any(c['label']=='Поиск дал слабые совпадения' and c['tone']=='warn' for c in chips)
-    assert chips[0]['tone']=='muted'
-    ordinary=_operator_status_chips('MODEL_OUTPUT',{'retrieval_trace':{'quality_status':'good'}},['a.md'])
-    assert not any(c['tone']=='warn' for c in ordinary)
 
 
 @pytest.mark.parametrize('cached,fresh,allowed', [(1,12,True),(12,1,False)])

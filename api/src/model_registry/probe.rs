@@ -20,7 +20,6 @@ const PROBE: &str = "LES capability check.";
 pub(crate) enum Mode {
     Manual,
     LocalEmbeddings,
-    LocalAnswer,
 }
 
 async fn exchange(
@@ -320,21 +319,7 @@ pub(crate) async fn run(
         if mode != Mode::Manual
             && (locality != "loopback" || head["value"]["revision_id"] != row["revision_id"])
         {
-            return Err(if mode == Mode::LocalAnswer {
-                "CHAT_ANSWER_MODEL_CHANGED"
-            } else {
-                "INDEX_SETUP_MODEL_CHANGED"
-            });
-        }
-        if mode == Mode::LocalAnswer {
-            let binding = crate::library::catalog(
-                &owner.database,
-                "model_execution_snapshot",
-                json!({"role":"answer"}),
-            );
-            if binding["value"]["revision"]["revision_id"] != row["revision_id"] {
-                return Err("CHAT_ANSWER_MODEL_CHANGED");
-            }
+            return Err("INDEX_SETUP_MODEL_CHANGED");
         }
         let endpoint = crate::model_runtime::validate(
             row["base_url"].as_str().ok_or("ENDPOINT_INVALID")?,
@@ -343,9 +328,7 @@ pub(crate) async fn run(
         )
         .map_err(|_| "ENDPOINT_INVALID")?;
         let port = endpoint.url.port_or_known_default();
-        if locality == "loopback"
-            && (port == Some(owner.listen_port) || port == owner.upstream_port())
-        {
+        if locality == "loopback" && (port == Some(owner.listen_port)) {
             return Err("ENDPOINT_INVALID");
         }
         let env = std::env::var_os("LES_ENV_PATH")
@@ -506,9 +489,6 @@ pub(crate) async fn run(
                         let schema = json!({"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"],"additionalProperties":false});
                         let mut body = json!({"model":model,"messages":[{"role":"user","content":"Return JSON with ok=true."}],"think":false,"stream":false,"format":schema,"options":chat_options});
                         body["options"]["num_predict"] = json!(128);
-                        if mode == Mode::LocalAnswer {
-                            body["keep_alive"] = json!(0);
-                        }
                         let ok = match exchange(&endpoint, &auth, "chat", Some(body), true).await {
                             Ok((200, raw)) => serde_json::from_slice::<Value>(&raw)
                                 .ok()
@@ -566,18 +546,13 @@ pub(crate) async fn run(
     }
     let actor = actor.to_owned();
     if mode != Mode::Manual {
-        let (required, not_ready) = if mode == Mode::LocalAnswer {
-            ("chat_completions", "CHAT_ANSWER_PROBE_FAILED")
-        } else {
-            ("embeddings", "EMBEDDING_MODEL_NOT_READY")
-        };
+        let not_ready = "EMBEDDING_MODEL_NOT_READY";
         let evidence = observations
             .iter()
-            .find(|row| row["capability"] == required)
+            .find(|row| row["capability"] == "embeddings")
             .ok_or(not_ready)?;
         if evidence["state"] != "supported" {
             return Err(match evidence["detail"].as_str() {
-                Some("UPSTREAM_TIMEOUT") if mode == Mode::LocalAnswer => "UPSTREAM_TIMEOUT",
                 Some(
                     "MODEL_ENDPOINT_UNREACHABLE" | "UPSTREAM_UNREACHABLE" | "UPSTREAM_TIMEOUT",
                 ) => "MODEL_ENDPOINT_UNREACHABLE",

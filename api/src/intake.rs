@@ -1,11 +1,6 @@
 //! Local folder registration runs outside request handling and checkpoints each batch.
-use crate::{auth, error, json_response, library::catalog, transport, Context};
-use axum::{
-    body::{to_bytes, Body},
-    extract::Request,
-    http::StatusCode,
-    response::Response,
-};
+use crate::{auth, error, json_response, library::catalog, unsupported_route, Context};
+use axum::{body::to_bytes, extract::Request, http::StatusCode, response::Response};
 use serde_json::{json, Value};
 use std::{
     collections::{BTreeMap, HashSet},
@@ -125,9 +120,8 @@ pub async fn handle(context: Arc<Context>, request: Request) -> Response {
     let Ok(body) = serde_json::from_slice::<Value>(&bytes) else {
         return error(StatusCode::UNPROCESSABLE_ENTITY, "Ожидается объект JSON.");
     };
-    // The legacy synchronous contract still returns the full preview and parse job.
     if body["background"] != true {
-        return transport::forward(context, Request::from_parts(parts, Body::from(bytes))).await;
+        return unsupported_route();
     }
     let cors = match auth::authorize(&context, &parts.headers, true).await {
         Ok(cors) => cors,
@@ -816,15 +810,13 @@ pub async fn run(context: Arc<Context>) {
         .await;
     loop {
         let database = context.database.clone();
-        let mail_state = context.public_chat_rust.then(|| context.state_root.clone());
+        let mail_state = context.state_root.clone();
         let claimed = tokio::task::spawn_blocking(move || {
-            if let Some(state) = mail_state {
-                if let Err(code) = les_core::catalog::mail::publish_pending(&state, &database) {
-                    eprintln!(
-                        "{}",
-                        json!({"event":"mail_index_queue_unavailable","code":code})
-                    );
-                }
+            if let Err(code) = les_core::catalog::mail::publish_pending(&mail_state, &database) {
+                eprintln!(
+                    "{}",
+                    json!({"event":"mail_index_queue_unavailable","code":code})
+                );
             }
             // A long import in another dataset must not starve scheduled scans.
             call(&database, "intake_watch_due", json!({}))?;

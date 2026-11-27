@@ -138,7 +138,7 @@ def test_native_folder_watch_resume_unavailability_and_publication_crash(tmp_pat
 
     runtime = None if edge else LightQdrantRuntime(Path(qdrant), state)
     embeddings = NativeBatchEmbeddings(database)
-    port, upstream = free_port(), free_port()
+    port = free_port()
     owner = gate = None
     endpoint = '/api/light/folder-watches'
     api_url = f'http://127.0.0.1:{port}'
@@ -153,8 +153,7 @@ def test_native_folder_watch_resume_unavailability_and_publication_crash(tmp_pat
         env.update(LES_LIGHT_QDRANT_URL=api_url if edge else gate.url,
                    LES_LIGHT_QDRANT_API_KEY=edge_key if edge else runtime.api_key,
                    LES_INTERNAL_INGEST_TOKEN='8'*64, LES_STARTUP_BACKGROUND_MUTATIONS='true')
-        args = [program,'--listen',f'127.0.0.1:{port}','--upstream',f'http://127.0.0.1:{upstream}',
-                '--state',str(state),'--database',str(database),'--auth-policy-file',str(auth)]
+        args = [program,'--listen',f'127.0.0.1:{port}','--state',str(state),'--database',str(database),'--auth-policy-file',str(auth)]
         if edge:
             args.extend(['--edge-storage', str(edge)])
         with (tmp_path/'api.log').open('ab') as log:

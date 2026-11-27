@@ -17,16 +17,13 @@ def profiles(tmp_path):
     executable=os.getenv('LES_TEST_NATIVE_API')
     if not executable:
         pytest.skip('Build les-api and set LES_TEST_NATIVE_API')
-    port,upstream=free_port(),free_port()
-    while port==upstream:
-        upstream=free_port()
+    port=free_port()
     state=tmp_path/'Состояние 日本語';state.mkdir()
     database=state/'meta.db'
     policy=state/'policy.json'
     policy.write_text(json.dumps({'schema':'les.native-auth-policy.v1','compatible':True,
         'trusted_role':'admin','cors_origins':[],'cors_loopback':True,'proxy_header':'x-les-trusted-network'}),encoding='utf-8')
-    command=[executable,'--listen',f'127.0.0.1:{port}','--upstream',f'http://127.0.0.1:{upstream}',
-        '--state',str(state),'--database',str(database),'--auth-policy-file',str(policy)]
+    command=[executable,'--listen',f'127.0.0.1:{port}','--state',str(state),'--database',str(database),'--auth-policy-file',str(policy)]
     children=[]
     log=(state/'api.log').open('wb')
     client=httpx.Client(base_url=f'http://127.0.0.1:{port}',trust_env=False,timeout=10)

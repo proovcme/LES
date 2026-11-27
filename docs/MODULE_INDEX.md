@@ -480,8 +480,8 @@ fallback. [Контракт](modules/native-runtime.md), [приёмка](accept
 и [границы полного удаления Python](modules/python-exit.md).
 
 Импорт без чтения PDF/Office при регистрации: `backend/external_registration.py`.
-Причины остановки: `backend/runtime_events.py`; внешний Windows-наблюдатель и
-восстановление launcher: `desktop/light/src-tauri/src/supervisor.rs`, `lifecycle.rs`.
+Причины остановки пишет `runtime/src/journal.rs`; внешний Windows-наблюдатель
+и восстановление: `desktop/light/src-tauri/src/supervisor.rs`, `lifecycle.rs`.
 [Контракт](modules/runtime-recovery.md), [приёмка 773](acceptance/runtime-recovery-773.md).
 
 Безопасный старт коллекции: [нативный bootstrap](modules/native-index-setup.md) (lease/exact count/
@@ -489,9 +489,9 @@ fallback. [Контракт](modules/native-runtime.md), [приёмка](accept
 действий, `desktop/light/src-tauri/src/close_guard.rs` и frontend/native-close —
 протокол закрытия. [Приёмка 772](acceptance/safety-ui-772.md).
 
-Кандидат интерфейса Svelte/TypeScript: `desktop/light/frontend`; статическая
-раздача `proxy/light_frontend.py`, черновики `chat_draft_service.py` и workspace
-API. Запуск Tauri с `--svelte`, прежний UI — откат. [Границы переноса](modules/svelte-desktop.md).
+Интерфейс Windows на Svelte/TypeScript: `desktop/light/frontend`. Файлы
+интерфейса проверяет и отдаёт `api/src/frontend.rs`; черновики обслуживает
+`api/src/workspace.rs`. [Границы переноса](modules/svelte-desktop.md).
 
 Rust-ядро документов: `core/src/lexical.rs`, `files.rs`, `jobs.rs`;
 `backend/native_core.py` — загрузка и ограниченный C ABI, `lexical_preparation.py`
@@ -506,7 +506,6 @@ Rust-ядро документов: `core/src/lexical.rs`, `files.rs`, `jobs.rs`
 `backend/bm25_hybrid.py` — объединение с dense, `sparse_legacy.py` — TF-откат.
 Рабочий BM25, миграция и обновление без LLM: [контракт](modules/bm25-index.md).
 Версия словаря и короткие обозначения: `backend/inference/lexical_tokens.py`.
-Уведомление об отказе с явным переходом: `sovushka/components/chat_failure_notice.py`.
 Нагрузочный стенд без моделей: `tools/benchmark_sparse_index.py`.
 Отдельный кандидат BM25 и чтения разделов: [контракт испытаний](modules/retrieval-candidate.md).
 Чтение родителей в основном чате и бюджет доказательств: [контракт](modules/chat-section-context.md).
@@ -518,11 +517,10 @@ Rust-ядро документов: `core/src/lexical.rs`, `files.rs`, `jobs.rs`
 FTS ID с Qdrant; `core/src/chat_context/coverage.rs` формирует модельную
 метаинформацию о полноте реально переданных индексированных разделов.
 
-- backend: чтение документов, OCR, индекс Qdrant и политика ресурсов.
-- proxy: API, чат, доказательства, память и подключения.
-- sovushka: интерфейс NiceGUI.
-- desktop/light: оболочка Windows.
-- tools/light_launcher.py: собственные процессы приложения.
+- `backend/` и `proxy/` содержат Python-инструменты и код для сравнительных проверок.
+- `core/` и `api/` обслуживают документы, поиск, чат, память, модели и MCP.
+- `desktop/light/` содержит оболочку Windows и интерфейс.
+- `runtime/` запускает и восстанавливает собственные процессы приложения.
 - installers/windows/light: установка и откат.
 
 Удаление набора с recovery и проверкой границы до изменений:
@@ -537,8 +535,7 @@ FTS ID с Qdrant; `core/src/chat_context/coverage.rs` формирует мод�
 `document_catalog.document_registration` — снимок идентичности и пути источника;
 ingestion повторно проверяет его под writer lease перед публикацией. Удаление или
 перерегистрация во время конвертации отменяет устаревшую работу без записи в индекс.
-PDF из цитаты: `proxy/routers/documents.py` и `proxy/services/pdf_viewer_service.py` —
-разрешение исходника по происхождению, собственный просмотр страницы без PDF-плагина.
+PDF из цитаты: `api/src/documents/browse.rs` — разрешение исходника по происхождению и проверка его редакции.
 
 Восстановление диалога: `proxy/services/chat_durability_service.py`.
 Фоновая сводка: `proxy/services/background_summary_service.py`.

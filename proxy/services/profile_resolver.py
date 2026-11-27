@@ -11,8 +11,7 @@ fallback) приводятся к ОДНОМУ результату `ProfileReso
 
 Профиль — декларативная сущность (Codex §3): не «какая модель отвечает», а какой workflow
 исполняется. Allowlist инструментов этому резолверу не принадлежит: его строит
-``chat_profile_service`` из живого ToolHarness registry, фиксирует immutable snapshot чата,
-а ``chat_evidence_application_service`` применяет при shortlist/исполнении.
+``chat_profile_service`` из реестра инструментов Rust и фиксирует неизменяемый снимок профиля чата.
 """
 
 from __future__ import annotations

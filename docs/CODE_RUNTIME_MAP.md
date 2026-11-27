@@ -2,7 +2,7 @@
 
 > Сгенерировано `tools/code_runtime_map.py`. Не редактировать вручную.
 
-Это консервативная статическая карта импортов и зарегистрированных FastAPI-маршрутов. Статус `DORMANT_CANDIDATE` означает только отсутствие доказанного пути от продуктовых entrypoint, явного runtime-helper или теста; он **не является доказательством мёртвого кода**.
+Это статическая карта отдельных Python-инструментов и тестовых зависимостей. Действующие HTTP-маршруты Windows проверяются запуском Rust API и записываются в generated/native-api-routes.json. Статус `DORMANT_CANDIDATE` показывает отсутствие найденного пути от точки входа или теста; он **не является доказательством мёртвого кода**.
 
 Полный построчный inventory находится в `docs/generated/code_runtime_map.json`.
 
@@ -10,8 +10,7 @@
 
 | Статус | Что доказано |
 | --- | --- |
-| PRODUCT_REACHABLE | Есть статический путь от боевой точки входа |
-| RUNTIME_SUPPORT | Явно перечислен как отдельный helper Windows runtime |
+| PRODUCT_REACHABLE | Есть путь от указанной точки входа Python |
 | TEST_OR_TOOL_ONLY | Тест, служебный скрипт или достигается только из такого кода |
 | DORMANT_CANDIDATE | Статический потребитель не найден; требуется ручная проверка |
 
@@ -19,69 +18,65 @@
 
 | Метрика | Значение |
 | --- | --- |
-| Python-файлов под git | 715 |
-| Строк Python | 169066 |
-| PRODUCT_REACHABLE | 414 |
-| RUNTIME_SUPPORT | 5 |
-| TEST_OR_TOOL_ONLY | 296 |
+| Python-файлов под git | 471 |
+| Строк Python | 95125 |
+| PRODUCT_REACHABLE | 100 |
+| TEST_OR_TOOL_ONLY | 371 |
 | DORMANT_CANDIDATE | 0 |
-| Зарегистрированных API-маршрутов | 285 |
+| Зарегистрированных API-маршрутов | 0 |
 | Ошибок разбора | 0 |
 
-## Крупнейшие продуктовые модули
+## Крупнейшие модули Python-совместимости
 
 | Файл | Строк | Прямых потребителей |
 | --- | --- | --- |
-| sovushka/styles.py | 3264 | 3 |
-| sovushka/pages/chat.py | 2196 | 2 |
-| proxy/services/chat_evidence_application_service.py | 2122 | 7 |
-| proxy/services/dataset_memory_service.py | 1811 | 10 |
+| proxy/services/dataset_memory_service.py | 1811 | 5 |
 | proxy/services/project_pdf_table_service.py | 1653 | 2 |
-| sovushka/pages/diag.py | 1606 | 1 |
-| proxy/services/checklist_review_service.py | 1517 | 1 |
-| proxy/routers/mail.py | 1502 | 4 |
-| proxy/services/retrieval_service.py | 1440 | 11 |
-| proxy/services/cad_bim_graph.py | 1425 | 3 |
-| proxy/services/tool_harness_service.py | 1275 | 25 |
-| proxy/services/context_memory_service.py | 1175 | 8 |
-| sovushka/pages/samovar.py | 1143 | 3 |
-| backend/document_router.py | 1118 | 10 |
-| tools/build_rag_contract_sibling.py | 1116 | 2 |
-| backend/document_catalog.py | 1068 | 19 |
-| tools/reindex_datasets_guarded.py | 1016 | 1 |
+| backend/document_router.py | 1118 | 9 |
+| backend/document_catalog.py | 1068 | 18 |
 | proxy/services/drawing_manifest_service.py | 1012 | 3 |
-| sovushka/components/header.py | 1003 | 2 |
-| proxy/routers/runtime.py | 922 | 3 |
-| proxy/services/project_pdf_extract_service.py | 915 | 4 |
-| proxy/services/document_explorer_service.py | 904 | 5 |
-| proxy/services/mail_registry_service.py | 903 | 6 |
-| tools/les_runtime_control.py | 902 | 4 |
-| proxy/services/project_document_registry_service.py | 853 | 3 |
-| backend/parquet_writer.py | 834 | 6 |
-| proxy/services/notebook_study_service.py | 833 | 3 |
-| backend/mail_profile.py | 825 | 5 |
-| proxy/services/chat_request_service.py | 800 | 5 |
-| backend/pst_reader.py | 790 | 1 |
+| proxy/services/project_pdf_extract_service.py | 915 | 3 |
+| proxy/services/mail_registry_service.py | 903 | 3 |
+| proxy/services/project_document_registry_service.py | 853 | 1 |
+| backend/parquet_writer.py | 834 | 5 |
+| backend/mail_profile.py | 825 | 4 |
+| proxy/services/openai_compatible_transport_service.py | 784 | 10 |
+| backend/qdrant_ingestion.py | 748 | 12 |
+| backend/converter.py | 647 | 13 |
+| proxy/services/lexical_index_service.py | 631 | 29 |
+| proxy/services/electrical_schematic_service.py | 622 | 1 |
+| backend/qdrant_support.py | 568 | 26 |
+| proxy/services/project_table_registry_service.py | 564 | 1 |
+| proxy/services/pd_rd_manifest_service.py | 559 | 4 |
+| backend/qdrant_nodes.py | 536 | 11 |
+| proxy/services/electrical_materials_service.py | 528 | 1 |
+| backend/mail_ingest.py | 510 | 6 |
+| proxy/services/electrical_evidence_summary_service.py | 484 | 1 |
+| backend/mail_threads.py | 483 | 3 |
+| proxy/services/runtime_admission.py | 451 | 11 |
+| proxy/services/model_capability_service.py | 440 | 4 |
+| backend/rag_config.py | 419 | 49 |
+| proxy/services/pdf_contour_service.py | 408 | 3 |
+| proxy/services/kot_service.py | 396 | 7 |
+| backend/embedding_client.py | 375 | 11 |
+| backend/native_core.py | 357 | 97 |
 
 ## Чат Light: фактические потребители
 
-### `proxy/routers/chat.py`
+### `proxy/services/retrieval_service.py`
 
-Статус: `PRODUCT_REACHABLE`; строк: 469.
+Статус: `TEST_OR_TOOL_ONLY`; строк: 1440.
 
 | Импортируемый символ | Потребители |
 | --- | --- |
-| `ChatRouterState` | `proxy/app.py` |
-| `_active_dispatcher_reindex_jobs` | `proxy/routers/workspace_memory.py` |
-| `_generation_token_budget` | `tests/test_source_excerpts.py` |
-| `_llm_runtime` | `proxy/routers/settings.py` |
-| `_local_context_budget` | `tests/test_source_excerpts.py` |
-| `clean_visible_text` | `tests/test_source_excerpts.py` |
-| `ensure_chat_history_schema` | `proxy/app.py` |
-| `get_chat_state` | `proxy/routers/workspace_memory.py`<br>`proxy/services/source_adapters.py` |
-| `router` | `proxy/app.py`<br>`tests/test_light_router_boundary.py` |
-| `set_chat_state` | `proxy/app.py` |
-| `source_excerpts` | `tests/test_source_excerpts.py` |
+| `CURRENT` | `tests/test_retrieval_service.py` |
+| `classify_query` | `tests/test_retrieval_service.py` |
+| `expand_retrieval_query` | `tests/test_retrieval_service.py` |
+| `hybrid_backend` | `proxy/services/table_appendix_service.py`<br>`tests/test_retrieval_service.py` |
+| `infer_dataset_filter` | `tests/test_retrieval_service.py` |
+| `required_reranker_policy` | `tests/test_retrieval_service.py` |
+| `resolve_dataset_ids` | `tests/test_retrieval_service.py` |
+| `retrieve_chat_chunks` | `tests/test_light_index_recovery.py`<br>`tests/test_light_rerank_audit.py`<br>`tests/test_retrieval_service.py`<br>`tools/evaluate_rag_pipeline.py` |
 
 ## Кандидаты на проверку
 

@@ -94,15 +94,6 @@ def test_context_drops_complete_sources_and_exposes_only_visible_proof():
     assert len(sources) == 2
 
 
-def test_direct_rerank_rejects_unbounded_or_nonfinite_input():
-    from proxy.routers.rerank import RerankRequest
-    from pydantic import ValidationError
-    with pytest.raises(ValidationError):
-        RerankRequest(query='q', chunks=[{'text':'a'}]*65)
-    with pytest.raises(ValidationError):
-        RerankRequest(query='q', chunks=[{'text':'a','score':float('nan')}])
-
-
 @pytest.mark.parametrize('failure', ['embedding', 'upsert'])
 def test_reindex_failure_keeps_previous_generation(tmp_path, monkeypatch, failure):
     from backend import qdrant_support as support
@@ -148,15 +139,6 @@ def test_retire_previous_is_scoped_to_file_dataset_and_keeps_new_ids():
     client.close()
 
 
-@pytest.mark.parametrize('current,expected', [('', 'failed question'), ('next question', 'next question')])
-def test_failed_chat_restores_draft_without_overwriting_new_input(current, expected):
-    from sovushka.pages.chat import _restore_failed_question
-    input=SimpleNamespace(value=current)
-    input.set_value=lambda value:setattr(input,'value',value)
-    saved=[]
-    _restore_failed_question(input,SimpleNamespace(save=saved.append),'failed question')
-    assert input.value==expected
-    assert saved==(['failed question'] if not current else [])
 def test_chat_context_preserves_hybrid_order_over_lexical_keyword_density():
     from types import SimpleNamespace
     from proxy.services.saferag_service import rank_chunks_for_question, concentrate_sources

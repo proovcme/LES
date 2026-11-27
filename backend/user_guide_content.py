@@ -1,10 +1,41 @@
-"""Searchable, offline user guide built from the shared component registry."""
-from __future__ import annotations
+"""Shared text for the offline guide, model help and published manual."""
 
-from nicegui import ui
+LOCAL_GUIDE = """Откройте **«Модели» → «Найти на компьютере»**. ЛЕС найдёт запущенные локальные сервисы на стандартных адресах и покажет доступные модели. Выберите модель, её задачу и нажмите **«Проверить и подключить»**.
 
-from sovushka.uikit.components import action_button, panel, section_heading, text_field
-from sovushka.components.model_connection_help import LOCAL_GUIDE, CLOUD_GUIDE, TROUBLESHOOTING
+Если Ollama не найдена, установите её по ссылке ниже и запустите из меню «Пуск». Если список пуст, загрузите модель в приложении Ollama и повторите поиск.
+
+Поддерживается обнаружение Ollama, FreeToken, llama.cpp, LM Studio и совместимых серверов на стандартных локальных портах. Для другого адреса используйте «Подключить API» или профиль нужного движка.
+
+Для FreeToken запустите модель и её сервер в FreeToken Desktop. В Лесе
+откройте **Модели → FreeToken**. По умолчанию Лес читает список моделей на
+`http://127.0.0.1:1919/v1`. Если в FreeToken задан другой порт или ключ,
+укажите их и нажмите **Получить модели**. Сохраните подключение и нажмите
+**Назначить для чата**. Модель поиска назначается отдельно. [Документация FreeToken](https://github.com/FlashML-org/FreeToken/blob/main/docs/quickstart.md)
+
+Для llama.cpp запустите `llama-server` с нужной моделью и откройте
+**Модели → llama.cpp**. Подставляется адрес `http://127.0.0.1:9931/v1`.
+«Найти на компьютере» проверяет также порт 8080. Если сервер запущен с
+другим портом, укажите его в форме. [Документация llama-server](https://github.com/ggml-org/llama.cpp/tree/master/tools/server)
+
+Модель для чата и модель для поиска назначаются отдельно. До подтверждения модель не назначается и документы ей не передаются. Ручные параметры доступны в «Дополнительной настройке»."""
+
+CLOUD_GUIDE = """1. В личном кабинете выбранного сервиса откройте документацию совместимого API, список моделей и раздел ключей доступа.
+2. Нажмите «Подключить API». Укажите адрес API из документации провайдера и ключ, нажмите «Получить модели». Если сервис не отдаёт список, введите имя модели вручную. Адрес обычного сайта с чатом не является адресом API.
+3. Выберите модель и её задачу, нажмите «Проверить и подключить». ЛЕС проверит подключение и сохранит выбранное назначение.
+
+Схема адреса: `https://api.example.com/v1` — это пример, его нужно заменить адресом своего сервиса. Идентификатор модели тоже берётся у провайдера.
+
+При облачном подключении запросы и переданные модели фрагменты документов уходят выбранному провайдеру. Условия оплаты и обработки данных определяет этот сервис."""
+
+TROUBLESHOOTING = """**Сервис не отвечает:** убедитесь, что Ollama запущена, а адрес и порт совпадают с её настройками. Для другой машины используйте её адрес, а не 127.0.0.1.
+
+**Модель не найдена:** откройте «Найти на компьютере» и обновите список. Если список пуст — загрузите модель в приложении вашего локального сервиса.
+
+**Неверный ключ / нет доступа:** замените ключ в подключении и проверьте его права у провайдера. Не отправляйте ключ в чат или журнал.
+
+**Медленно или не хватает памяти:** закройте тяжёлые приложения, уменьшите контекст в дополнительных параметрах либо выберите меньшую модель.
+
+**Чат работает, поиск — нет:** проверьте отдельное подключение эмбеддингов, его назначение и состояние индекса документов."""
 
 
 ARTICLES = (
@@ -44,33 +75,3 @@ ARTICLES = (
     ("remove", "Установка и удаление", "Как удалить LES RAG", "Используйте **Параметры Windows → Приложения → LES RAG → Удалить** либо ярлык удаления. По умолчанию документы, почта и настройки сохраняются. Отмечайте пункт удаления всех данных только если они больше не нужны: это действие нельзя отменить."),
     ("status", "О версии", "Выпуски LES RAG", "Номер сборки виден в разделе «Обновление». Установщики и сведения об изменениях: [GitHub Releases](https://github.com/proovcme/LES/releases/latest)."),
 )
-
-
-def matching_articles(query: str):
-    words = query.casefold().split()
-    return [article for article in ARTICLES if all(word in " ".join(article[1:]).casefold() for word in words)]
-
-
-def open_user_guide():
-    with ui.dialog() as dialog, panel(classes="sov-light-guide"):
-        with ui.row().classes("w-full items-start justify-between flex-nowrap"):
-            section_heading("Руководство LES RAG", "Короткие ответы о работе с приложением. Доступно без интернета.")
-            action_button(icon="o_close", icon_only=True, aria_label="Закрыть руководство", variant="quiet", on_click=dialog.close)
-        search = text_field(label="Найти в руководстве", placeholder="Например: почта, источник, модель", clearable=True, classes="w-full")
-        with ui.scroll_area().classes("sov-light-guide-body"):
-            results = ui.column().classes("w-full gap-2")
-
-        def render():
-            results.clear()
-            matches = matching_articles(search.value or "")
-            with results:
-                if not matches:
-                    ui.label("Ничего не найдено. Попробуйте короткое слово: почта, модель или документ.")
-                for article_id, category, title, body in matches:
-                    with ui.expansion(title, caption=category, value=bool(search.value) or article_id == "start").classes("w-full"):
-                        ui.markdown(body).classes("sov-light-guide-text")
-
-        search.on_value_change(lambda _: render())
-        render()
-    dialog.open()
-    return dialog

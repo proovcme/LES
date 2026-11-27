@@ -66,16 +66,11 @@ impl Reply {
 pub struct Bridge {
     token: String,
     listener_port: u16,
-    upstream_port: u16,
     client: reqwest::Client,
 }
 
 impl Bridge {
-    pub fn new(
-        token: String,
-        listener_port: u16,
-        upstream_port: u16,
-    ) -> Result<Self, &'static str> {
+    pub fn new(token: String, listener_port: u16) -> Result<Self, &'static str> {
         if token.len() != 64 || !token.bytes().all(|byte| byte.is_ascii_hexdigit()) {
             return Err("Invalid internal model HTTP token");
         }
@@ -96,7 +91,6 @@ impl Bridge {
         Ok(Self {
             token,
             listener_port,
-            upstream_port,
             client,
         })
     }
@@ -131,7 +125,7 @@ impl Bridge {
             || !(matches!(url.path(), "/api/chat" | "/api/embed")
                 || url.path().ends_with("/embeddings")
                 || url.path().ends_with("/chat/completions"))
-            || [self.listener_port, self.upstream_port].contains(&url.port_or_known_default()?)
+            || self.listener_port == url.port_or_known_default()?
         {
             return None;
         }
@@ -318,7 +312,7 @@ impl Bridge {
         let Some(port) = target.port_or_known_default() else {
             return invalid();
         };
-        if locality == "loopback" && [self.listener_port, self.upstream_port].contains(&port) {
+        if locality == "loopback" && self.listener_port == port {
             return invalid();
         }
         let Some(raw_addresses) = get("x-les-chat-addresses") else {
@@ -421,11 +415,8 @@ impl Bridge {
         else {
             return invalid();
         };
-        let Ok(call) = external_embed::Call::new(
-            target,
-            request.headers(),
-            [self.listener_port, self.upstream_port],
-        ) else {
+        let Ok(call) = external_embed::Call::new(target, request.headers(), self.listener_port)
+        else {
             return invalid();
         };
         if request

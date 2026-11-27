@@ -23,7 +23,7 @@
     { id: 'local_fallback', label: 'Резервная локальная модель' },
   ];
   let data = $state<Registry | null>(null);
-  let effective = $state<Partial<Record<Role,{ model_id: string | null; status: string; auto_refresh?: boolean } | null>>>({});
+  let effective = $state<Partial<Record<Role,{ model_id: string | null; status: string } | null>>>({});
   let busy = $state('');
   let status = $state('');
   let error = $state('');
@@ -152,7 +152,7 @@
   function label(role: Role) {
     if (!data?.bindings[role]) return 'Не назначено';
     const row = effective[role];
-    return row?.model_id ? row.model_id + (row.auto_refresh ? ' · проверится при отправке' : row.status === 'blocked' ? ' · требует проверки' : '') : 'Подключение недоступно';
+    return row?.model_id ? row.model_id + (row.status === 'blocked' ? ' · требует проверки' : '') : 'Подключение недоступно';
   }
 </script>
 

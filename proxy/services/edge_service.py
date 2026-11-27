@@ -27,7 +27,7 @@ _NTD_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Source ID элемента BIM (та же идиома, что в cad_bim_highlight).
+# Source ID элемента BIM.
 _SOURCE_ID_RE = re.compile(r"Source ID(?:\s*/\s*GlobalId)?\s*:\s*(\S+)", re.IGNORECASE)
 
 

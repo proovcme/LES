@@ -3,8 +3,6 @@ import pytest
 
 from proxy.services.tabular_document_service import read_table, encode
 from proxy.services.table_window_service import read_window, read_cell
-from proxy.services.table_document_tool import TableDocumentTool
-from proxy.services.document_task_store import DocumentTaskStore
 
 
 def table(tmp_path):
@@ -53,30 +51,3 @@ def test_long_cell_char_cursors_and_formula_cache_are_literal(tmp_path):
         read_cell(document, sheet=sheet, coordinate='E1', field='value')
     with pytest.raises(ValueError):
         read_window(document, sheet=sheet, row_start=True)
-
-
-def test_tool_reads_bound_snapshot_without_changing_progress(tmp_path):
-    document = table(tmp_path); store = DocumentTaskStore(tmp_path/'tasks.db')
-    task = store.open('owner', 'Проверка', document)
-    tool = TableDocumentTool(store, 'owner', task, document, 6000)
-    original = tool.state()
-    page = tool.execute({'operation': 'read_window', 'sheet': document['sheets'][0]['name']})
-    assert page['source_sha256'] == document['sha256']
-    assert tool.state() == original
-    with pytest.raises(ValueError):
-        tool.execute({'operation': 'read_cell', 'task_id': 'foreign', 'sheet': 'Лист с пробелами', 'coordinate': 'A2'})
-
-
-def test_addressed_read_preserves_the_open_row_packet_for_record(tmp_path):
-    path = tmp_path/'short.csv'; path.write_text('Name;Value\nItem;0', encoding='utf-8')
-    document = read_table(path); store = DocumentTaskStore(tmp_path/'tasks.db')
-    task = store.open('owner', 'Проверка', document)
-    tool = TableDocumentTool(store, 'owner', task, document, 6000)
-    packet = tool.execute({'operation': 'next'})
-    tool.execute({'operation': 'read_cell', 'sheet': 'CSV', 'coordinate': 'B2'})
-    assert tool.current['packet_id'] == packet['packet_id']
-    assert tool.current['addressed_read']['text'] == '0'
-    result = tool.execute({'operation': 'record', 'decisions': [
-        {'row_id': row['id'], 'status': 'reviewed', 'note': 'Прочитано', 'cells': [row['cells'][0]['coordinate']]}
-        for row in packet['rows']]})
-    assert result['coverage_complete']

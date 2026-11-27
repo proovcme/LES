@@ -1,7 +1,6 @@
 """Real read-only paths, Unicode windows, bounded traversal and source hashes."""
 import hashlib
 import os
-from pathlib import Path
 
 import pytest
 from backend import native_core
@@ -17,7 +16,7 @@ def files(tmp_path):
     return root,run
 
 
-def test_read_hash_search_unicode_and_python_harness_use_the_same_native_owner(files,monkeypatch):
+def test_read_hash_and_search_preserve_unicode_and_source(files):
     root,run=files
     text='Начало строки. Straße 日本語. Конец строки.'
     path=root/'Файл Straße с пробелами.txt';path.write_text(text,encoding='utf-8')
@@ -33,12 +32,6 @@ def test_read_hash_search_unicode_and_python_harness_use_the_same_native_owner(f
     assert found['value']['result']['count']==1
     assert 'Straße 日本語' in found['value']['result']['hits'][0]['snippet']
     assert found['value']['result']['scan_truncated'] is False
-    from proxy.services import tool_harness_service as harness
-    monkeypatch.setattr(harness,'_allowed_roots',lambda:{'docs':root})
-    actual=harness._tool_filesystem_read_text({'path':path.name})
-    assert actual['status']=='ok' and actual['result']['text']==text
-    assert actual['sources'][0]['path']==path.name
-    assert actual['contract_check']['ok'] is True
     assert path.read_bytes()==before and path.stat().st_mtime_ns==stamp
 
 
@@ -58,19 +51,6 @@ def test_limits_missing_and_invalid_utf8_are_explicit(files):
     assert run('read_text',path='large.txt')['code']=='FILESYSTEM_TEXT_LIMIT'
     assert run('stat',path='missing.txt')['value']['status']=='missing'
     assert run('read_text',root='unknown',path='broken.txt')['code']=='FILESYSTEM_SCOPE_DENIED'
-
-
-def test_file_tool_failure_keeps_reason_and_stops_answer_generation(files,monkeypatch):
-    root,_=files
-    from proxy.services import tool_harness_service as harness
-    from proxy.services.pdf_source_evidence_service import require_source_read_success
-    monkeypatch.setattr(harness,'_allowed_roots',lambda:{'docs':root})
-    failed=harness._tool_filesystem_read_text({'path':'../outside.txt'})
-    assert failed['status']=='error'
-    assert failed['result']['code']=='FILESYSTEM_SCOPE_DENIED'
-    with pytest.raises(Exception) as error:
-        require_source_read_success(failed)
-    assert error.value.detail['code']=='FILESYSTEM_SCOPE_DENIED'
 
 
 def test_recursive_listing_and_search_never_follow_a_junction_outside_the_allowed_root(files,tmp_path):

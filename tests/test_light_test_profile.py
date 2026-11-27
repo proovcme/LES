@@ -17,8 +17,8 @@ def test_light_gate_keeps_chat_rag_memory_and_packaging_without_estimate_suites(
                                 env={key:value for key,value in os.environ.items()
                                      if key not in {'MAKEFLAGS','MFLAGS','MAKEOVERRIDES','PYTEST_BASETEMP'}}).stdout
         for required in ("test_light_package.py", "test_light_router_boundary.py",
-                         "test_light_chat_evidence.py", "test_retrieval_service.py",
-                         "test_memory_core.py", "test_model_connection_chat_integration.py"):
+                         "test_light_native_public_chat.py", "test_light_native_retrieval_modes.py",
+                         "test_memory_core.py", "test_light_native_model_runtime.py"):
             assert required.encode('ascii') in output
         assert b"test_smeta_chat_application_service.py" not in output
         assert b"test_rim_session.py" not in output

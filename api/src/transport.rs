@@ -1,11 +1,8 @@
-use crate::{error, Context};
 use axum::{
-    body::Body,
     extract::Request,
-    http::{header, HeaderMap, StatusCode},
+    http::{header, HeaderMap},
     response::Response,
 };
-use std::sync::Arc;
 
 /// Finish a rejected HTTP/1 request without dropping a small unread incoming
 /// body. Otherwise Windows can reset the socket before the response is read.
@@ -112,90 +109,12 @@ pub fn clean(headers: &HeaderMap, request: bool) -> HeaderMap {
     result
 }
 
-fn upstream_headers(headers: &HeaderMap) -> HeaderMap {
-    let mut result = clean(headers, true);
-    // The address is fixed separately. Preserve the validated public Host so
-    // generated document/preview links keep the browser's same origin.
-    if let Some(host) = headers.get(header::HOST) {
-        result.insert(header::HOST, host.clone());
-    }
-    result
-}
-
-pub async fn forward(context: Arc<Context>, request: Request) -> Response {
-    let Some(origin) = context.upstream.as_ref() else {
-        return crate::json_response(
-            StatusCode::NOT_IMPLEMENTED,
-            serde_json::json!({"code":"NATIVE_ROUTE_NOT_AVAILABLE",
-                "detail":"Этот раздел ещё недоступен без прежнего сервера Леса."}),
-            "rust.api",
-        );
-    };
-    let (parts, body) = request.into_parts();
-    let endpoint = format!(
-        "{}{}",
-        origin.as_str().trim_end_matches('/'),
-        parts
-            .uri
-            .path_and_query()
-            .map(|p| p.as_str())
-            .unwrap_or("/")
-    );
-    let upstream = context
-        .client
-        .request(parts.method, endpoint)
-        .headers(upstream_headers(&parts.headers))
-        .body(reqwest::Body::wrap_stream(body.into_data_stream()))
-        .send()
-        .await;
-    let Ok(upstream) = upstream else {
-        return error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "Служба Леса недоступна. Дождитесь восстановления и повторите действие.",
-        );
-    };
-    let status = upstream.status();
-    let mut headers = clean(upstream.headers(), false);
-    // Preserve redirects without exposing the internal server as the new origin.
-    if let Some(location) = headers
-        .get(header::LOCATION)
-        .and_then(|v| v.to_str().ok())
-        .map(str::to_string)
-    {
-        if let Ok(url) = reqwest::Url::parse(&location) {
-            let public_origin = parts
-                .headers
-                .get(header::HOST)
-                .and_then(|host| host.to_str().ok())
-                .and_then(|host| reqwest::Url::parse(&format!("http://{host}")).ok());
-            if url.origin() == origin.origin()
-                || public_origin.is_some_and(|public| url.origin() == public.origin())
-            {
-                let mut relative = url.path().to_owned();
-                if let Some(query) = url.query() {
-                    relative.push('?');
-                    relative.push_str(query);
-                }
-                if let Some(fragment) = url.fragment() {
-                    relative.push('#');
-                    relative.push_str(fragment);
-                }
-                if let Ok(value) = relative.parse() {
-                    headers.insert(header::LOCATION, value);
-                }
-            }
-        }
-    }
-    headers.insert("x-les-handler", "legacy.proxy".parse().unwrap());
-    let mut response = Response::new(Body::from_stream(upstream.bytes_stream()));
-    *response.status_mut() = status;
-    *response.headers_mut() = headers;
-    response
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error;
+    use axum::{body::Body, http::StatusCode};
+    use std::sync::Arc;
     #[tokio::test]
     async fn early_rejection_drains_small_bodies_but_bounds_slow_and_large_inputs() {
         use std::sync::atomic::{AtomicBool, Ordering};

@@ -59,12 +59,12 @@ def collection(tmp_path):
             storage.calls.append('delete');storage.exists=False;storage.points.clear()
             self.reply(200,{'status':'ok','result':True})
     server=ThreadingHTTPServer(('127.0.0.1',0),Handler);thread=Thread(target=server.serve_forever,daemon=True);thread.start()
-    port,upstream=free_port(),free_port();token='a'*64
+    port=free_port();token='a'*64
     environment={k:v for k,v in os.environ.items() if not k.startswith(('RAG_','EMBED','COREML_EMBED_','TRUSTED_','CORS_')) and k not in ['LES_NATIVE_EMBEDDING_SPEC','LES_ENV_PATH','LES_EMBED_PROFILE','BGE_MODEL']}
     environment.update(LES_LIGHT_QDRANT_URL=f'http://127.0.0.1:{server.server_port}',LES_LIGHT_QDRANT_API_KEY='setup-test',
         LES_INTERNAL_INGEST_TOKEN=token,LES_ENV_PATH=str(state/'.env'),LES_STARTUP_BACKGROUND_MUTATIONS='false',
         PYTHONHOME=str(tmp_path/'no-python'),PYTHONPATH=str(tmp_path/'no-app'),PATH=str(tmp_path/'no-programs'))
-    command=[program,'--listen',f'127.0.0.1:{port}','--upstream',f'http://127.0.0.1:{upstream}','--state',str(state),'--database',str(database)]
+    command=[program,'--listen',f'127.0.0.1:{port}','--state',str(state),'--database',str(database)]
     process=None
     with (tmp_path/'api.log').open('ab') as log,httpx.Client(base_url=f'http://127.0.0.1:{port}',trust_env=False,timeout=20) as client:
         def start():

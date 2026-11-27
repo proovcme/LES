@@ -4,15 +4,11 @@ use std::{env, path::PathBuf};
 pub struct Config {
     pub root: PathBuf,
     pub state: PathBuf,
-    pub python: Option<PathBuf>,
     pub skill_python: PathBuf,
     pub qdrant: PathBuf,
-    pub frontend: String,
     pub read_only: bool,
     pub parent_pipe: bool,
     pub browser: bool,
-    pub native_api: bool,
-    pub native_only: bool,
     pub edge_storage: Option<PathBuf>,
 }
 
@@ -31,11 +27,14 @@ impl Failure {
 pub type Result<T> = std::result::Result<T, Failure>;
 
 impl Config {
-    pub fn native_frontend(&self) -> Option<PathBuf> {
-        let root = self.root.join("desktop/light/frontend/dist");
-        (self.native_api
-            && (self.frontend == "svelte" || root.join("build-receipt.json").is_file()))
-        .then_some(root)
+    pub fn native_api(&self) -> PathBuf {
+        self.root
+            .with_file_name("native")
+            .join(format!("api/les-api{}", std::env::consts::EXE_SUFFIX))
+    }
+
+    pub fn native_frontend(&self) -> PathBuf {
+        self.root.join("desktop/light/frontend/dist")
     }
 
     pub fn parse(arguments: impl IntoIterator<Item = String>) -> Result<Self> {
@@ -98,14 +97,8 @@ impl Config {
         };
         let root = path("--root")?;
         let state = path("--state")?;
-        let native_only = flags.contains("--native-only");
-        let python = if native_only {
-            None
-        } else {
-            Some(path("--python")?)
-        };
         let qdrant = path("--qdrant")?;
-        if native_only && values.contains_key("--python") {
+        if values.contains_key("--python") {
             return Err(Failure::new(
                 "NATIVE_ONLY_PYTHON_ARGUMENT",
                 "Для внешних навыков укажите --skill-python.",
@@ -121,86 +114,49 @@ impl Config {
                 "Нужен полный путь к отдельной папке индекса Edge.",
             ));
         }
-        let frontend = values.remove("--frontend").unwrap_or_else(|| {
-            if native_only {
-                "svelte".into()
-            } else {
-                "classic".into()
-            }
-        });
-        if !matches!(frontend.as_str(), "classic" | "svelte") {
-            return Err(Failure::new(
-                "FRONTEND_INVALID",
-                "Неизвестный интерфейс Леса.",
-            ));
-        }
-        if native_only && frontend != "svelte" {
+        if values
+            .get("--frontend")
+            .is_some_and(|value| value != "svelte")
+        {
             return Err(Failure::new(
                 "NATIVE_ONLY_FRONTEND_REQUIRED",
                 "Нативному запуску нужен интерфейс Svelte.",
             ));
         }
-        if !root.is_dir()
-            || python.as_ref().is_some_and(|p| !p.is_file())
-            || (edge_storage.is_none() && !qdrant.is_file())
-            || (!native_only && !root.join("proxy/app.py").is_file())
-        {
+        if !root.is_dir() || (edge_storage.is_none() && !qdrant.is_file()) {
             return Err(Failure::new(
                 "RUNTIME_MISSING",
                 "В установке не хватает компонентов. Восстановите Лес; документы сохранятся.",
             ));
         }
-        if frontend == "svelte"
-            && !root
-                .join("desktop/light/frontend/dist/index.html")
-                .is_file()
-        {
+        let skill_python = crate::skill_runtime::select(
+            &root,
+            std::path::Path::new(""),
+            values.remove("--skill-python").map(PathBuf::from),
+        )?;
+        let config = Self {
+            root,
+            state,
+            skill_python,
+            qdrant,
+            read_only: flags.contains("--read-only"),
+            parent_pipe: flags.contains("--parent-pipe"),
+            browser: flags.contains("--browser"),
+            edge_storage,
+        };
+        if !config.native_frontend().join("index.html").is_file() {
             return Err(Failure::new(
                 "FRONTEND_MISSING",
-                "В установке отсутствует новый интерфейс. Восстановите приложение.",
+                "В установке отсутствует интерфейс. Восстановите приложение.",
             ));
         }
-        let native_api = native_only || flags.contains("--native-api");
-        if edge_storage.is_some() && !native_api {
-            return Err(Failure::new(
-                "EDGE_NATIVE_API_REQUIRED",
-                "Edge требует нативный API Леса.",
-            ));
-        }
-        if native_api
-            && !root.parent().is_some_and(|parent| {
-                parent
-                    .join(format!(
-                        "native/api/les-api{}",
-                        std::env::consts::EXE_SUFFIX
-                    ))
-                    .is_file()
-            })
-        {
+        if !config.native_api().is_file() {
             return Err(Failure::new(
                 "NATIVE_API_MISSING",
                 "В установке отсутствует нативный API. Восстановите приложение.",
             ));
         }
-        let skill_python = crate::skill_runtime::select(
-            &root,
-            python.as_deref().unwrap_or(std::path::Path::new("")),
-            values.remove("--skill-python").map(PathBuf::from),
-        )?;
-        Ok(Self {
-            root,
-            state,
-            python,
-            skill_python,
-            qdrant,
-            frontend,
-            read_only: flags.contains("--read-only"),
-            parent_pipe: flags.contains("--parent-pipe"),
-            browser: flags.contains("--browser"),
-            native_api,
-            native_only,
-            edge_storage,
-        })
+        Ok(config)
     }
 }
 
@@ -209,7 +165,6 @@ pub fn child_environment(
     qdrant_url: &str,
     key: &str,
     api: u16,
-    ui: u16,
     instance: &str,
 ) -> Vec<(String, String)> {
     const SYSTEM: &[&str] = &[
@@ -245,9 +200,6 @@ pub fn child_environment(
     let state = config.state.to_string_lossy().into_owned();
     let api = format!("http://127.0.0.1:{api}");
     for (name, value) in [
-        ("PYTHONPATH", root.clone()),
-        ("PYTHONUTF8", "1".into()),
-        ("PYTHONNOUSERSITE", "1".into()),
         ("LES_PRODUCT_EDITION", "light".into()),
         ("LES_STATE_ROOT", state.clone()),
         ("LES_WINDOWS_STATE_ROOT", state),
@@ -271,21 +223,6 @@ pub fn child_environment(
         ("LES_LIGHT_INSTANCE_ID", instance.into()),
         ("PROXY_URL", api.clone()),
         ("LES_PROXY_URL", api.clone()),
-        (
-            "LES_LIGHT_LEGACY_UI_URL",
-            format!("http://127.0.0.1:{ui}/classic"),
-        ),
-        ("LES_LIGHT_SVELTE_URL", format!("{api}/app/")),
-        (
-            "LES_NATIVE_FRONTEND",
-            config.native_frontend().is_some().to_string(),
-        ),
-        ("SOVUSHKA_UI_PORT", ui.to_string()),
-        ("SOVUSHKA_UI_HOST", "127.0.0.1".into()),
-        (
-            "NICEGUI_STORAGE_PATH",
-            config.state.join(".nicegui").to_string_lossy().into_owned(),
-        ),
         ("LES_STARTUP_MODEL_WARMUP", "false".into()),
         (
             "LES_STARTUP_BACKGROUND_MUTATIONS",
@@ -293,20 +230,6 @@ pub fn child_environment(
         ),
         ("LES_FORMAT_WORKER_MODE", "native".into()),
     ] {
-        if config.native_only
-            && matches!(
-                name,
-                "PYTHONPATH"
-                    | "PYTHONUTF8"
-                    | "PYTHONNOUSERSITE"
-                    | "LES_LIGHT_LEGACY_UI_URL"
-                    | "SOVUSHKA_UI_PORT"
-                    | "SOVUSHKA_UI_HOST"
-                    | "NICEGUI_STORAGE_PATH"
-            )
-        {
-            continue;
-        }
         result.push((name.into(), value));
     }
     if let Some(storage) = &config.edge_storage {
@@ -327,47 +250,19 @@ pub fn child_environment(
             readers.to_string_lossy().into_owned(),
         ));
     }
+    let native_api = config.native_api().to_string_lossy().into_owned();
     #[cfg(windows)]
-    if config.native_api {
-        let native = config.root.parent().unwrap().join("native/pdf/pdfium.dll");
-        let compatible = config
-            .python
-            .as_deref()
-            .and_then(std::path::Path::parent)
-            .map(|p| p.join("Lib/site-packages/pypdfium2_raw/pdfium.dll"));
-        if let Some(asset) = std::iter::once(native)
-            .chain(compatible)
-            .find(|p| p.is_file())
-        {
+    {
+        let pdfium = config.root.with_file_name("native").join("pdf/pdfium.dll");
+        if pdfium.is_file() {
             result.push((
                 "LES_NATIVE_PDFIUM".into(),
-                asset.to_string_lossy().into_owned(),
+                pdfium.to_string_lossy().into_owned(),
             ));
-            result.push((
-                "LES_NATIVE_PDF_WORKER".into(),
-                config
-                    .root
-                    .parent()
-                    .unwrap()
-                    .join("native/api/les-api.exe")
-                    .to_string_lossy()
-                    .into_owned(),
-            ));
+            result.push(("LES_NATIVE_PDF_WORKER".into(), native_api.clone()));
         }
     }
-    result.push((
-        "LES_NATIVE_MCP_WORKER".into(),
-        config
-            .root
-            .parent()
-            .unwrap()
-            .join(format!(
-                "native/api/les-api{}",
-                std::env::consts::EXE_SUFFIX
-            ))
-            .to_string_lossy()
-            .into_owned(),
-    ));
+    result.push(("LES_NATIVE_MCP_WORKER".into(), native_api.clone()));
     if !config.skill_python.as_os_str().is_empty() {
         result.push((
             "LES_SKILL_PYTHON".into(),
@@ -375,24 +270,12 @@ pub fn child_environment(
         ));
     }
     let embedding = config.state.join("models/embeddings/active.json");
-    if config.native_api && embedding.is_file() {
+    if embedding.is_file() {
         result.push((
             "LES_NATIVE_EMBEDDING_SPEC".into(),
             embedding.to_string_lossy().into_owned(),
         ));
-        result.push((
-            "LES_NATIVE_EMBEDDING_WORKER".into(),
-            config
-                .root
-                .parent()
-                .unwrap()
-                .join(format!(
-                    "native/api/les-api{}",
-                    std::env::consts::EXE_SUFFIX
-                ))
-                .to_string_lossy()
-                .into_owned(),
-        ));
+        result.push(("LES_NATIVE_EMBEDDING_WORKER".into(), native_api));
     }
     result
 }
