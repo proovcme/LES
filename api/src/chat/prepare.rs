@@ -23,9 +23,10 @@ pub async fn prepare(
     caller: Option<String>,
 ) -> Result<Prepared> {
     let owner = context.clone();
-    let mut turn = tokio::task::spawn_blocking(move || prepare_sync(&owner, input, caller.as_deref()))
-        .await
-        .map_err(|_| "CHAT_PREPARATION_FAILED")??;
+    let mut turn =
+        tokio::task::spawn_blocking(move || prepare_sync(&owner, input, caller.as_deref()))
+            .await
+            .map_err(|_| "CHAT_PREPARATION_FAILED")??;
     if let Some(id) = turn.request["attachment_id"].as_str() {
         let attachment =
             crate::attachments::bound(context, id.to_owned(), turn.attachment_owner.clone())

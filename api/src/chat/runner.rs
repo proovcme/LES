@@ -524,7 +524,10 @@ pub async fn run(
                         )
                     })
                     .flatten();
-                let structured = turn.connection.require(&["structured_output".into()]).is_ok();
+                let structured = turn
+                    .connection
+                    .require(&["structured_output".into()])
+                    .is_ok();
                 let user_question = turn.request["question"].as_str().unwrap_or("");
                 let folder_pdf_table = folder_question
                     && lookup.is_none()
