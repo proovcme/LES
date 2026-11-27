@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import json
-from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
@@ -435,11 +434,3 @@ def test_promotion_acceptance_is_admin_only_and_never_changes_route(api, monkeyp
     assert response.status_code == 200
     assert response.json()["route_mode_changed"] is False
     assert "report" not in response.json()
-
-
-def test_router_is_registered_in_application() -> None:
-    source = Path(routes.__file__).parents[1] / "app.py"
-    text = source.read_text(encoding="utf-8")
-
-    assert "model_connections_router" in text
-    assert "include_router(model_connections_router)" in text

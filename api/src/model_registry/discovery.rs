@@ -75,9 +75,7 @@ async fn list(
     .map_err(|_| "DISCOVERY_BUSY")??;
     let (endpoint, secret) = endpoint;
     let port = endpoint.url.port_or_known_default();
-    if endpoint.locality == "loopback"
-        && (port == Some(context.listen_port) || port == context.upstream_port())
-    {
+    if endpoint.locality == "loopback" && (port == Some(context.listen_port)) {
         return Err("DISCOVERY_SELF_TARGET");
     }
     let base = endpoint.url.path().trim_end_matches('/');

@@ -5,7 +5,6 @@ import json
 import pytest
 from backend.converter import convert_to_markdown
 from backend.text_decoding import decode_document_text
-from sovushka.answer_render import citation_drawer_item, source_chip
 
 
 @pytest.mark.parametrize('encoding', ['utf-8', 'utf-8-sig', 'utf-16', 'utf-32'])
@@ -21,10 +20,6 @@ def test_unicode_bom_languages_spaces_and_exact_original(tmp_path, encoding, suf
     assert text in converted
     assert path.read_bytes() == original
     assert list(path.parent.iterdir()) == [path]
-    assert source_chip({'doc_name': str(path)})['file'] == path.name
-    item = citation_drawer_item({'doc_id': 'id & + # % 中文', 'doc_name': path.name})
-    assert '%23' in item['open_url'] and '%25' in item['open_url']
-    assert '# %' not in item['open_url']
 
 
 @pytest.mark.parametrize('encoding,text', [

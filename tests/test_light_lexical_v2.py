@@ -66,24 +66,3 @@ def test_fts_short_queries_find_existing_raw_text_and_respect_scope(tmp_path, la
         for i, scope in enumerate(['chosen', 'other'])])
     hits = db.search(label.lower(), collection='docs', dataset_ids=['chosen'])
     assert [hit.meta['point_id'] for hit in hits] == ['0']
-
-
-def test_failure_notice_preserves_reading_position_until_user_requests_focus(monkeypatch):
-    from nicegui import Client, ui
-    from nicegui.page import page
-    from sovushka.components.chat_failure_notice import ChatFailureNotice
-    scripts = []
-    monkeypatch.setattr(ui, 'run_javascript', scripts.append)
-    with Client(page('/failure-notice')):
-        notice = ChatFailureNotice()
-        bubble = ui.column()
-        assert not notice.row.visible
-        notice.show(bubble)
-        assert notice.row.visible and not scripts
-        assert bubble._props['tabindex'] == '-1'
-        notice.reveal()
-        assert f'c{bubble.id}' in scripts[0] and 'preventScroll' in scripts[0]
-        notice.clear()
-        assert not notice.row.visible and notice.bubble is None
-        notice.reveal()
-        assert len(scripts) == 1

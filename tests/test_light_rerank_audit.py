@@ -148,15 +148,6 @@ def test_retire_previous_is_scoped_to_file_dataset_and_keeps_new_ids():
     client.close()
 
 
-@pytest.mark.parametrize('current,expected', [('', 'failed question'), ('next question', 'next question')])
-def test_failed_chat_restores_draft_without_overwriting_new_input(current, expected):
-    from sovushka.pages.chat import _restore_failed_question
-    input=SimpleNamespace(value=current)
-    input.set_value=lambda value:setattr(input,'value',value)
-    saved=[]
-    _restore_failed_question(input,SimpleNamespace(save=saved.append),'failed question')
-    assert input.value==expected
-    assert saved==(['failed question'] if not current else [])
 def test_chat_context_preserves_hybrid_order_over_lexical_keyword_density():
     from types import SimpleNamespace
     from proxy.services.saferag_service import rank_chunks_for_question, concentrate_sources

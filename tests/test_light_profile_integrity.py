@@ -62,13 +62,6 @@ def test_multiple_skill_total_budget(tmp_path):
         profiles.publish_profile_revision(mode="agent", name="Лимит", prompt_revision_id=p["revision_id"], skill_revision_id=a["revision_id"], additional_skill_revision_ids=[b["revision_id"]], tools=[], model_policy={}, rag_policy={}, db_path=db)
 
 
-def test_visible_statuses_are_human_labels():
-    from sovushka.answer_render import evidence_badges, answer_status
-    badges = evidence_badges({"RETRIEVED": 1, "BLOCKED": 2})
-    assert [item["label"] for item in badges] == ["Найдено", "Недоступно"]
-    assert answer_status("private_internal_failure")["label"] == "Статус не определён"
-
-
 @pytest.mark.parametrize('legacy',[False,True])
 def test_factory_upgrade_preserves_existing_revision_and_binding(tmp_path,monkeypatch,legacy):
     import json

@@ -13,7 +13,6 @@ export class Workspace {
   attachment = $state<Attachment | null>(null);
   model = $state<ModelRole | null>(null);
   service = $state('');
-  legacyURL = $state<string | null>(null);
   loading = $state(true);
   busy = $state(false);
   contextChanging = $state(false);
@@ -71,7 +70,7 @@ export class Workspace {
     this.initializing = true; this.loading = true;
     try {
       const results = await Promise.allSettled([
-        request<{ legacy_url: string | null; indexed_attachments?: boolean; native_model_settings?: boolean; native_mail?: boolean }>('/api/light/frontend'),
+        request<{ indexed_attachments?: boolean; native_model_settings?: boolean; native_mail?: boolean }>('/api/light/frontend'),
         request<{ roles: { answer: ModelRole | null } }>('/api/model-connections/effective'),
         request<{ datasets: Dataset[] }>('/api/documents/datasets'),
         this.refreshSessions(),
@@ -80,7 +79,6 @@ export class Workspace {
       if (!this.alive) return;
       const [config, models, datasets] = results;
       if (config.status === 'fulfilled') {
-        this.legacyURL = config.value.legacy_url;
         this.indexedAttachments = config.value.indexed_attachments === true;
         this.nativeModelSettings = config.value.native_model_settings === true;
         this.nativeMail = config.value.native_mail === true;

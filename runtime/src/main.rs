@@ -185,7 +185,7 @@ fn main() {
         println!(
             "{}",
             json!({"schema":"les.native-runtime.v1","engine":"rust",
-            "python":{"native_application":false,"external_skills":true,"compatibility_host":true},
+            "python":{"native_application":false,"external_skills":true,"compatibility_host":false},
             "services":["qdrant","api","ui"],"parent_pipe":true,"state_lock":"file-exclusive",
             "native_cli":true,"native_mcp_stdio":true})
         );

@@ -53,14 +53,13 @@ pub async fn complete(
         .is_ok();
     sink.model_call(model_call);
     let started = Instant::now();
-    let upstream_port = context.upstream_port().unwrap_or(0);
     let body = turn
         .connection
         .chat(
             &request,
             streamable,
             super::budget::remaining(deadline)?,
-            [context.listen_port, upstream_port],
+            context.listen_port,
             Some((journal.history,model_call)),
         )
         .await?;

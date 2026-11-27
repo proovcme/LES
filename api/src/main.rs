@@ -59,7 +59,6 @@ pub struct Context {
     pub listen_port: u16,
     pub database: PathBuf,
     pub state_root: PathBuf,
-    pub upstream: Option<reqwest::Url>,
     pub client: reqwest::Client,
     pub workspace_slots: Arc<tokio::sync::Semaphore>,
     pub attachment_slots: Arc<tokio::sync::Semaphore>,
@@ -67,20 +66,12 @@ pub struct Context {
     pub upload_owner: tokio::sync::OnceCell<std::fs::File>,
     pub auth_policy: tokio::sync::OnceCell<auth::Policy>,
     pub frontend: Option<frontend::Frontend>,
-    pub legacy_ui_url: Option<String>,
     pub local_model: Option<local_model::Bridge>,
     pub intake: Option<intake::Service>,
     pub reader: Option<dataset_reader::Service>,
     pub index_store: Option<index_store::Store>,
     pub chat: tokio::sync::OnceCell<chat::Service>,
-    pub public_chat_rust: bool,
 }
-impl Context {
-    pub fn upstream_port(&self) -> Option<u16> {
-        self.upstream.as_ref().and_then(reqwest::Url::port)
-    }
-}
-
 pub fn json_response(status: StatusCode, value: Value, engine: &str) -> Response {
     let mut response = (
         status,
@@ -96,14 +87,19 @@ pub fn json_response(status: StatusCode, value: Value, engine: &str) -> Response
 pub fn error(status: StatusCode, detail: &str) -> Response {
     json_response(status, json!({"detail":detail}), "rust.workspace")
 }
+fn unsupported_route() -> Response {
+    json_response(
+        StatusCode::NOT_IMPLEMENTED,
+        json!({"code":"NATIVE_ROUTE_NOT_AVAILABLE", "detail":"Этот маршрут недоступен в Лесе."}),
+        "rust.api",
+    )
+}
 
 async fn dispatch(State(context): State<Arc<Context>>, request: Request) -> Response {
     if !transport::local_browser(request.headers()) {
         return error(StatusCode::FORBIDDEN, "Local LES browser access required");
     }
-    if context.upstream.is_none()
-        && request.uri().path() == "/api/light/instance"
-        && request.method() == axum::http::Method::GET
+    if request.uri().path() == "/api/light/instance" && request.method() == axum::http::Method::GET
     {
         let instance_id = std::env::var("LES_LIGHT_INSTANCE_ID").unwrap_or_default();
         return json_response(
@@ -112,7 +108,7 @@ async fn dispatch(State(context): State<Arc<Context>>, request: Request) -> Resp
             "rust.launcher",
         );
     }
-    if context.upstream.is_none() && request.method() == axum::http::Method::GET {
+    if request.method() == axum::http::Method::GET {
         match request.uri().path() {
             "/api/status" => return status::runtime(context, request.headers()).await,
             "/api/health" => return status::health(&context).await,
@@ -193,45 +189,35 @@ async fn dispatch(State(context): State<Arc<Context>>, request: Request) -> Resp
     ) {
         return chat::sources_api::handle(context, request).await;
     }
-    if context.public_chat_rust && chat::http::public_path(request.uri().path()) {
+    if chat::http::public_path(request.uri().path()) {
         return chat::http::handle_public(context, request).await;
     }
-    if context.public_chat_rust
-        && context.upstream.is_none()
-        && mail::handles(request.method().as_str(), request.uri().path())
-    {
+    if mail::handles(request.method().as_str(), request.uri().path()) {
         return mail::handle(context, request).await;
     }
     if request.uri().path() == engineering::PATH {
         return engineering::handle(context, request).await;
     }
-    if context.public_chat_rust && attachments::public_path(request.uri().path()) {
+    if attachments::public_path(request.uri().path()) {
         return attachments::handle_public(context, request).await;
     }
     if let Some(frontend) = &context.frontend {
         if let Some(response) = frontend
             .serve(&request)
             .or_else(|| self::frontend::forest(&request))
-            .or_else(|| self::frontend::classic_link(&request, context.legacy_ui_url.as_deref()))
+            .or_else(|| self::frontend::classic_link(&request))
         {
             return response;
         }
     }
     if request.uri().path() == "/api/light/frontend" && request.method() == axum::http::Method::GET
     {
-        return frontend::configuration(
-            &context,
-            request.headers(),
-            context.legacy_ui_url.as_deref(),
-        )
-        .await;
+        return frontend::configuration(&context, request.headers()).await;
     }
     if let Some(route) = auth_keys::route(request.method(), request.uri().path()) {
         return auth_keys::handle(context, request, route).await;
     }
-    if context.public_chat_rust
-        && model_registry::settings::handles(request.method().as_str(), request.uri().path())
-    {
+    if model_registry::settings::handles(request.method().as_str(), request.uri().path()) {
         return model_registry::settings::handle(context, request).await;
     }
     if model_registry::handles(request.method().as_str(), request.uri().path()) {
@@ -246,7 +232,7 @@ async fn dispatch(State(context): State<Arc<Context>>, request: Request) -> Resp
     if history::handles(request.method().as_str(), request.uri().path()) {
         return history::handle(context, request).await;
     }
-    if context.public_chat_rust && documents::browse::handles(&request) {
+    if documents::browse::handles(&request) {
         return documents::browse::handle(context, request).await;
     }
     if matches!(request.method().as_str(), "GET" | "HEAD")
@@ -280,7 +266,7 @@ async fn dispatch(State(context): State<Arc<Context>>, request: Request) -> Resp
     {
         return agent_state::handle(context, request).await;
     }
-    transport::forward(context, request).await
+    transport::reject(request, unsupported_route()).await
 }
 
 fn configuration() -> Result<(std::net::SocketAddr, Context), &'static str> {
@@ -290,11 +276,9 @@ fn configuration() -> Result<(std::net::SocketAddr, Context), &'static str> {
         if !matches!(
             key.as_str(),
             "--listen"
-                | "--upstream"
                 | "--database"
                 | "--state"
                 | "--frontend-assets"
-                | "--legacy-ui-url"
                 | "--auth-policy-file"
                 | "--edge-storage"
                 | "--chat-owner"
@@ -306,11 +290,12 @@ fn configuration() -> Result<(std::net::SocketAddr, Context), &'static str> {
             return Err("Duplicate native API argument");
         }
     }
-    let public_chat_rust = match values.get("--chat-owner").map(String::as_str) {
-        None | Some("legacy") => false,
-        Some("rust") => true,
-        _ => return Err("Invalid public chat owner"),
-    };
+    if values
+        .get("--chat-owner")
+        .is_some_and(|owner| owner != "rust")
+    {
+        return Err("Invalid public chat owner");
+    }
     let listen: std::net::SocketAddr = values
         .get("--listen")
         .ok_or("Native API address missing")?
@@ -318,27 +303,6 @@ fn configuration() -> Result<(std::net::SocketAddr, Context), &'static str> {
         .map_err(|_| "Invalid native API address")?;
     if listen.ip() != std::net::Ipv4Addr::LOCALHOST || listen.port() == 0 {
         return Err("Native API requires explicit IPv4 loopback port");
-    }
-    let upstream = values
-        .get("--upstream")
-        .map(|value| reqwest::Url::parse(value))
-        .transpose()
-        .map_err(|_| "Invalid legacy API address")?;
-    if upstream.is_none() && !public_chat_rust {
-        return Err("Legacy API address missing");
-    }
-    if upstream.as_ref().is_some_and(|upstream| {
-        upstream.scheme() != "http"
-            || upstream.host_str() != Some("127.0.0.1")
-            || upstream.port().is_none()
-            || upstream.path() != "/"
-            || !upstream.username().is_empty()
-            || upstream.password().is_some()
-            || upstream.query().is_some()
-            || upstream.fragment().is_some()
-            || upstream.port() == Some(listen.port())
-    }) {
-        return Err("Legacy API requires a separate owned loopback address");
     }
     let database = PathBuf::from(
         values
@@ -356,20 +320,10 @@ fn configuration() -> Result<(std::net::SocketAddr, Context), &'static str> {
         .get("--frontend-assets")
         .map(|path| frontend::Frontend::load(std::path::Path::new(path)))
         .transpose()?;
-    let legacy_ui_url = values
-        .get("--legacy-ui-url")
-        .map(|url| frontend::legacy_url(url))
-        .transpose()?;
     let token = std::env::var(local_model::TOKEN_ENV).ok();
     let local_model = token
         .as_ref()
-        .map(|token| {
-            local_model::Bridge::new(
-                token.clone(),
-                listen.port(),
-                upstream.as_ref().and_then(reqwest::Url::port).unwrap_or(0),
-            )
-        })
+        .map(|token| local_model::Bridge::new(token.clone(), listen.port()))
         .transpose()?;
     let ingest_token = std::env::var("LES_INTERNAL_INGEST_TOKEN").ok();
     if ingest_token.as_ref().is_some_and(|token| {
@@ -427,7 +381,6 @@ fn configuration() -> Result<(std::net::SocketAddr, Context), &'static str> {
             listen_port: listen.port(),
             database,
             state_root,
-            upstream,
             client,
             workspace_slots: Arc::new(tokio::sync::Semaphore::new(16)),
             attachment_slots: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -435,13 +388,11 @@ fn configuration() -> Result<(std::net::SocketAddr, Context), &'static str> {
             upload_owner: tokio::sync::OnceCell::new(),
             auth_policy,
             frontend,
-            legacy_ui_url,
             local_model,
             intake,
             reader,
             index_store,
             chat: tokio::sync::OnceCell::new(),
-            public_chat_rust,
         },
     ))
 }
@@ -523,7 +474,7 @@ fn main() {
         println!(
             "{}",
             json!({"schema":"les.native-api.v1","native":["workspace.sessions","workspace.drafts","projects.crud","projects.links","workspace.notes.read_edit_delete","conversation.context","workspace.agent_state","auth.keys","auth.verify"],
-            "legacy_proxy_remaining":true,"authentication_owner":"rust.local_policy","streaming_proxy":true,
+            "legacy_proxy_remaining":false,"authentication_owner":"rust.local_policy","streaming_proxy":false,
             "frontend_assets":"rust.verified-manifest","local_model_http":"rust.private-loopback",
             "local_model_stream":"ollama-chat.v1","local_model_embeddings":"ollama-embed.v1",
             "canonical_embeddings":"rust.revision-pinned","local_onnx_embeddings":true,
@@ -551,14 +502,10 @@ fn main() {
             .build()?;
         runtime.block_on(async {
             let listener = tokio::net::TcpListener::bind(listen).await?;
-            if context.public_chat_rust && context.upstream.is_none() {
-                mail::recover(&context.state_root);
-            }
+            mail::recover(&context.state_root);
             let context = Arc::new(context);
             pdf_ocr::cleanup(&context.state_root);
-            if context.public_chat_rust && context.upstream.is_none() {
-                tokio::spawn(mail::schedule(context.clone()));
-            }
+            tokio::spawn(mail::schedule(context.clone()));
             tokio::spawn(conversation::resume(context.clone()));
             let background = context.clone();
             if context.reader.is_some() {

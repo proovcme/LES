@@ -52,7 +52,7 @@ for line in sys.stdin:
     def invoke(action='ping', timeout=5000, **data):
         return native_core.call('worker_run', request={
             'schema': 'les.worker-host.v1', 'program': sys.executable,
-            'args': ['-B', '-u', str(script)], 'directory': str(tmp_path),
+            'args': ['-X', 'utf8', '-B', '-u', str(script)], 'directory': str(tmp_path),
             'context': 'fixture', 'timeout_ms': timeout, 'input': {'action': action, **data}})
     return invoke
 
@@ -105,16 +105,6 @@ def test_warm_reuse_and_explicit_stop(worker):
     native_core.call('worker_stop')
     assert_dead(first['worker_pid'])
     assert worker()['worker_pid'] != first['worker_pid']
-
-
-def test_api_shutdown_closes_worker_before_interpreter_thread_join(worker):
-    from proxy.app import create_app
-    from backend.format_process import stop
-    application=create_app()
-    result=worker()
-    assert stop in application.router.on_shutdown
-    stop()
-    assert_dead(result['worker_pid'])
 
 
 @pytest.mark.parametrize(('action', 'code'), [

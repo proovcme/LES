@@ -290,7 +290,7 @@ impl Resolved {
         request: &Value,
         streaming: bool,
         timeout: std::time::Duration,
-        ports: [u16; 2],
+        listener_port: u16,
         trace: Option<(i64, usize)>,
     ) -> Result<axum::body::Body, String> {
         let mut required = vec!["chat_completions".to_string()];
@@ -325,7 +325,7 @@ impl Resolved {
         if self.endpoint.locality == "loopback"
             && url
                 .port_or_known_default()
-                .is_some_and(|v| ports.contains(&v))
+                .is_some_and(|v| listener_port == v)
         {
             return Err("MODEL_BRIDGE_TARGET_REJECTED".into());
         }

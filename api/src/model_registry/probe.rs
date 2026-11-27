@@ -343,9 +343,7 @@ pub(crate) async fn run(
         )
         .map_err(|_| "ENDPOINT_INVALID")?;
         let port = endpoint.url.port_or_known_default();
-        if locality == "loopback"
-            && (port == Some(owner.listen_port) || port == owner.upstream_port())
-        {
+        if locality == "loopback" && (port == Some(owner.listen_port)) {
             return Err("ENDPOINT_INVALID");
         }
         let env = std::env::var_os("LES_ENV_PATH")

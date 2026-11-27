@@ -136,37 +136,3 @@ def test_internal_preprocessing_files_are_not_documents():
     assert is_temporary_source_name('folder/.pdf_preprocess_state.json')
     assert is_temporary_source_name('folder/_les_dataset_profile.json')
     assert not is_temporary_source_name('folder/Заметка.txt')
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize('outcome', ['saved', 'conflict'])
-async def test_memory_editor_preserves_text_on_failure_and_uses_revision(monkeypatch, outcome, tmp_path):
-    from nicegui import ui, core
-    monkeypatch.setattr(core, 'loop', asyncio.get_running_loop())
-    monkeypatch.setattr(ui, 'timer', lambda *_args, **_kwargs: SimpleNamespace(activate=lambda: None, deactivate=lambda: None))
-    from nicegui.client import Client
-    from nicegui.page import page
-    from sovushka.components import conversation_memory as component
-    state = dict(service.catalog_call(str(tmp_path/'missing.db'), 'context_get', session_id='fixture'), remembered_turns=8, summarized_turns=0)
-    calls = []
-    async def get(route): return dict(state)
-    async def patch(route, body):
-        calls.append(body)
-        if outcome == 'conflict': return None
-        state.update(summary=body['summary'], revision=1)
-        return dict(state)
-    monkeypatch.setattr(component, 'api_get', get)
-    monkeypatch.setattr(component, 'api_patch', patch)
-    with Client(page('/__memory')) as client:
-        await component.build_conversation_memory('chat #1')
-        field = next(e for e in client.elements.values() if e._props.get('label') == 'Что ЛЕС помнит о разговоре')
-        field.set_value('Моя правка')
-        button = next(e for e in client.elements.values() if isinstance(e, ui.button) and e.text == 'Сохранить память')
-        listener = next(iter(button._event_listeners.values())).handler
-        result = listener(SimpleNamespace(sender=button, client=client, args={}))
-        if hasattr(result, '__await__'): await result
-        for _ in range(8): await asyncio.sleep(0)
-        assert calls[0]['expected_revision'] == 0 and calls[0]['summary'] == 'Моя правка'
-        assert field.value == 'Моя правка' and button.enabled
-        texts = [str(getattr(e, 'text', '')) for e in client.elements.values()]
-        assert any('не подтверждены' in text for text in texts) == (outcome == 'conflict')

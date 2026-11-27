@@ -1,4 +1,4 @@
-"""Pinned registry, credentials, payload and embedding execution remain native with backend stopped."""
+"""Pinned registry, credentials, payload and embedding execution remain native through the native API."""
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -13,7 +13,7 @@ from proxy.services import local_model_http
 
 
 @pytest.mark.parametrize('native',[False,True])
-def test_embedding_registry_credentials_protocol_and_failure_without_backend(gateway,native):
+def test_embedding_registry_credentials_protocol_and_failure_on_native_api(gateway,native):
     client,database,folder=gateway
     seen=[]
     class Model(BaseHTTPRequestHandler):
@@ -39,8 +39,6 @@ def test_embedding_registry_credentials_protocol_and_failure_without_backend(gat
             {'observed_context_tokens':'8192',**({'embedding_protocol':'native_embedding_v1'} if native else {})}),actor='admin:test')
         state=folder/'state'; state.mkdir(exist_ok=True)
         EnvironmentSecretStore(state/'.env',environ={}).replace('env:OPENAI_API_KEY','fixture-embedding-secret',actor='admin:test')
-        assert client.post('/test-stop-upstream').status_code==200
-        wait_for(lambda:client.get('/api/light/instance').status_code==503)
         path='/api/light/internal-inference/embeddings'
         body={'schema':'les.embedding-inference.v1','revision_id':revision.revision_id,'inputs':['Кабель 日本語'],
               'timeout_seconds':30,'release_after':True,'model':'must-not-override-registry'}

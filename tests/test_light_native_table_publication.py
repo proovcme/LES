@@ -37,13 +37,12 @@ def test_table_artifacts_publish_with_index_and_old_blob_survives_revision(tmp_p
     monkeypatch.setattr(QdrantIngestion,'_convert_file',lambda *_:pytest.fail('Retained Python conversion called'))
     monkeypatch.setattr(support,'route_document',lambda *_:pytest.fail('Retained classifier called'))
     embeddings=NativeBatchEmbeddings(database)
-    runtime=LightQdrantRuntime(Path(qdrant),state);api=None;listen=free_port();upstream=free_port();token='9'*64
+    runtime=LightQdrantRuntime(Path(qdrant),state);api=None;listen=free_port();token='9'*64
     try:
         runtime.start();monkeypatch.setenv('LES_LIGHT_QDRANT_URL',runtime.url)
         env={**os.environ,'LES_LIGHT_QDRANT_API_KEY':runtime.api_key,'LES_INTERNAL_INGEST_TOKEN':token,'LES_STARTUP_BACKGROUND_MUTATIONS':'false'}
         with (tmp_path/'api.log').open('wb') as log:
-            api=subprocess.Popen([api_program,'--listen',f'127.0.0.1:{listen}','--upstream',f'http://127.0.0.1:{upstream}',
-                '--state',str(state),'--database',str(database)],env=env,stdout=log,stderr=log)
+            api=subprocess.Popen([api_program,'--listen',f'127.0.0.1:{listen}','--state',str(state),'--database',str(database)],env=env,stdout=log,stderr=log)
         with httpx.Client(base_url=f'http://127.0.0.1:{listen}',trust_env=False,timeout=20) as client,closing(QdrantClient(url=runtime.url,api_key=runtime.api_key,check_compatibility=False)) as vectors:
             wait_for(lambda:client.post('/api/light/internal-index-store').status_code==404)
             vectors.create_collection('docs',vectors_config={'dense':models.VectorParams(size=2,distance=models.Distance.COSINE)},

@@ -55,7 +55,7 @@ fn allowed(address: IpAddr, locality: &str) -> bool {
 }
 
 impl Call {
-    pub fn new(url: Url, headers: &HeaderMap, ports: [u16; 2]) -> Result<Self, &'static str> {
+    pub fn new(url: Url, headers: &HeaderMap, listener_port: u16) -> Result<Self, &'static str> {
         let get = |key: &str| {
             headers
                 .get(key)
@@ -70,7 +70,7 @@ impl Call {
             || url.password().is_some()
             || url.query().is_some()
             || url.fragment().is_some()
-            || ports.contains(&port) && locality == "loopback"
+            || listener_port == port && locality == "loopback"
             || headers.contains_key(ollama_embed::LIMITS_HEADER)
                 && headers.contains_key("x-les-chat-limits")
         {

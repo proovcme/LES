@@ -137,7 +137,7 @@ async fn refresh_local_answer(context: Arc<Context>, sink: &Sink) -> Result<()> 
 }
 pub(crate) fn answer(context: &Context) -> Result<model_runtime::Resolved> {
     let execution = answer_execution(context)?;
-    if context.public_chat_rust && execution["revision"]["locality"] == "remote" {
+    if execution["revision"]["locality"] == "remote" {
         return Err("CLOUD_SUMMARY_LOCAL_ONLY".into());
     }
     resolve_answer(context, &execution)
@@ -289,7 +289,7 @@ fn prepare_sync(context: &Context, mut request: Value, caller: Option<&str>) -> 
     {
         return Err("CHAT_SCOPE_EMPTY".into());
     }
-    let egress_tag = if context.public_chat_rust && execution["revision"]["locality"] == "remote" {
+    let egress_tag = if execution["revision"]["locality"] == "remote" {
         Some(super::egress::admit(
             context,
             &request,

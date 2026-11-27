@@ -5,8 +5,8 @@ from io import BytesIO
 import json
 from types import SimpleNamespace
 
-import pytest
 from fastapi import UploadFile
+import pytest
 from starlette.requests import Request
 
 
@@ -79,32 +79,6 @@ def test_mail_has_a_dedicated_offline_and_windows_static_release_gate():
     assert "test_outlook_mail_poller.py" in makefile
     assert "def stage_mail_collector" in release
     assert "native/mail/LesLightMailPoller.exe" in release
-
-
-def test_mail_ui_is_read_only_and_scopes_chat_to_the_mailbox_dataset():
-    header = (ROOT / "sovushka/components/header.py").read_text(encoding="utf-8")
-    page = (ROOT / "sovushka/pages/mail.py").read_text(encoding="utf-8")
-    shell = (ROOT / "sovushka_ng.py").read_text(encoding="utf-8")
-
-    assert 'tab_refs["mail"] = ui.tab("Почта"' in header
-    assert '[(tab_mail, lambda: build_mail())] if tab_mail else []' in shell
-    assert '[(tab_mail_settings, lambda: build_mail_settings())] if tab_mail_settings else []' in shell
-    assert "/api/mail/accounts" in page
-    assert "/api/mail/messages" in page
-    assert "Открыть в Outlook" in page
-    assert 'f"ds:{account[\'dataset_id\']}"' in page
-    assert '"target_file"' in page
-    assert "Ответить" not in page
-    assert "Переслать" not in page
-    assert "Забрать новые письма" in page
-    assert "/api/mail/collector/run" in page
-    router = (ROOT / "proxy/routers/mail.py").read_text(encoding="utf-8")
-    collector_run = router.split('@router.post("/collector/run")', maxsplit=1)[1].split(
-        '@router.post("/messages/{message_id}/open")', maxsplit=1
-    )[0]
-    assert "subprocess.Popen" in collector_run
-    assert "schtasks" not in collector_run
-    assert "/api/mail/accounts/{account_id}/sync" in page or "/sync" in page
 
 
 @pytest.mark.asyncio

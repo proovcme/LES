@@ -12,7 +12,7 @@ from proxy.services.chat_evidence_tools import web_source_map_from_tool_results
 from proxy.services.chat_capability_scope_service import filter_profile_tools
 
 
-def test_native_search_through_chat_tool_keeps_exact_sources_without_backend(gateway, monkeypatch):
+def test_native_search_through_chat_tool_keeps_exact_sources_on_native_api(gateway, monkeypatch):
     client, _, _ = gateway
     seen = []
     class Search(BaseHTTPRequestHandler):
@@ -34,8 +34,6 @@ def test_native_search_through_chat_tool_keeps_exact_sources_without_backend(gat
     try:
         monkeypatch.setattr(local_model_http, '_bridge', (str(client.base_url.join('/api/light/internal-model-http')), MODEL_BRIDGE_TOKEN))
         config = WebResearchConfig('extended', f'http://127.0.0.1:{server.server_port}', '', '')
-        assert client.post('/test-stop-upstream').status_code == 200
-        wait_for(lambda: client.get('/api/light/instance').status_code == 503)
         harness = ToolHarness(); harness._web_config = config
         result = harness.call('web_search', {'q': 'ГОСТ 123 日本語 4.2', 'limit': 4})
         assert result['status'] == 'ok', result

@@ -4,8 +4,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
 from fastapi import HTTPException
+import pytest
 
 from backend.document_catalog import MetaDB
 from backend.interface import Chunk
@@ -226,15 +226,6 @@ def test_full_chat_fixture_and_stream_accounting():
     response=SimpleNamespace(iter_lines=lambda:iter(['event: error','data: {"code":"CHAT_MEMORY_PRESSURE"}','']))
     event,payload,_=stream_final(response)
     assert event=='error' and payload['code']=='CHAT_MEMORY_PRESSURE'
-
-
-def test_answer_footer_surfaces_observed_weak_search_without_claiming_truth():
-    from sovushka.components.chat_presentation import _operator_status_chips
-    chips=_operator_status_chips('MODEL_OUTPUT',{'retrieval_trace':{'quality_status':'weak'}},['a.md'])
-    assert any(c['label']=='Поиск дал слабые совпадения' and c['tone']=='warn' for c in chips)
-    assert chips[0]['tone']=='muted'
-    ordinary=_operator_status_chips('MODEL_OUTPUT',{'retrieval_trace':{'quality_status':'good'}},['a.md'])
-    assert not any(c['tone']=='warn' for c in ordinary)
 
 
 @pytest.mark.parametrize('cached,fresh,allowed', [(1,12,True),(12,1,False)])

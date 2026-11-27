@@ -32,14 +32,7 @@ class DatasetRouterState:
 
     @property
     def backend(self):
-        res = self.rag_backend() if callable(self.rag_backend) else self.rag_backend
-        if res is None:
-            try:
-                import proxy.app as _papp
-                return _papp.rag_backend
-            except Exception:
-                pass
-        return res
+        return self.rag_backend() if callable(self.rag_backend) else self.rag_backend
 
 
 _state: DatasetRouterState | None = None
@@ -52,12 +45,6 @@ def set_dataset_state(state: DatasetRouterState) -> None:
 
 def get_dataset_state() -> DatasetRouterState:
     global _state
-    if _state is None:
-        try:
-            from proxy.app import configure_router_state
-            configure_router_state()
-        except Exception:
-            pass
     if _state is None:
         from proxy.services.job_service import job_service
         _state = DatasetRouterState(

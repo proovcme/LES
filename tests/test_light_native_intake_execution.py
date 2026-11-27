@@ -224,7 +224,7 @@ def test_cold_native_intake_model_guard_pdf_and_owner_death(tmp_path,storage,fre
     revision=embeddings.embedder._resolve_embedding_connection().revision_id
     with sqlite3.connect(database) as db:db.execute("DELETE FROM les_model_role_bindings WHERE role='embeddings'")
     runtime = LightQdrantRuntime(Path(qdrant), state) if storage == 'server' else None
-    port=free_port();upstream=free_port();token='8'*64;edge=tmp_path/'edge'
+    port=free_port();token='8'*64;edge=tmp_path/'edge'
     if storage=='edge' and not fresh:
         from tests.test_light_edge_migration import source as edge_source, complete
         data,manifest,rows=edge_source(tmp_path,count=1)
@@ -240,8 +240,7 @@ def test_cold_native_intake_model_guard_pdf_and_owner_death(tmp_path,storage,fre
             LES_INTERNAL_INGEST_TOKEN=token,LES_STARTUP_BACKGROUND_MUTATIONS='true',
             LES_NATIVE_PDFIUM=str(Path(pypdfium2_raw.__file__).with_name('pdfium.dll')),
             PYTHONHOME=str(tmp_path/'no-python'),PYTHONPATH=str(tmp_path/'no-app'),PATH=str(tmp_path/'no-programs'))
-        args=[program,'--listen',f'127.0.0.1:{port}','--upstream',f'http://127.0.0.1:{upstream}',
-            '--state',str(state),'--database',str(database),'--auth-policy-file',str(auth)]
+        args=[program,'--listen',f'127.0.0.1:{port}','--state',str(state),'--database',str(database),'--auth-policy-file',str(auth)]
         if storage=='edge':args+=['--edge-storage',str(edge)]
         with (tmp_path/'api.log').open('ab') as log:
             process=subprocess.Popen(args,env=env,stdout=log,stderr=log,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))

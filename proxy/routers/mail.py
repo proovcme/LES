@@ -956,13 +956,6 @@ async def mail_status(_user=Depends(require_user)):
     datasets = await state.backend.list_datasets()
     dataset = next((item for item in datasets if item.name == MAIL_DATASET_NAME), None)
     imap_settings = imap_settings_from_env()
-    autosync: dict[str, Any] = {}
-    try:  # статус внутреннего IMAP-поллера (proxy.app.mail_autosync) — ленивый импорт без циклов
-        import os as _os
-        from proxy.app import mail_autosync as _autosync
-        autosync = {**_autosync, "poll_sec": int(_os.getenv("MAIL_IMAP_POLL_SEC", "180") or "180")}
-    except Exception:
-        pass
     registry = get_mail_registry()
     accounts = registry.list_accounts()
     spool_pending = sum(1 for _ in _mail_state_root().glob("*/spool/*.json"))
@@ -973,7 +966,7 @@ async def mail_status(_user=Depends(require_user)):
         "dataset": asdict(dataset) if dataset else None,
         "supported": [".eml", ".emlx", ".msg"],
         "imap": imap_settings.public_payload(),
-        "autosync": autosync,
+        "autosync": {},
         "apple_mail": apple_mail_public_payload(),
         "accounts": accounts,
         "summary": {

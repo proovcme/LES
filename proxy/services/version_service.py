@@ -38,19 +38,14 @@ _RUNTIME_ROOT = Path(os.getenv("LES_RUNTIME_HOME", "").strip() or _CODE_ROOT)
 CREATE_NO_WINDOW = 0x08000000
 
 # критичные файлы, по которым ловим расхождение repo↔runtime (хэш, не полный diff).
-# v0.22: + GUI-файлы (sovushka) — иначе deploy stamp слеп к фронт-правкам и не флипается в stale.
 _CRITICAL_FILES = (
     "backend/interface.py",
     "backend/rag_config.py",
     "backend/qdrant_adapter.py",
     "backend/document_router.py",
-    "proxy/app.py",
-    "proxy/routers/external_radar.py",
     "proxy/routers/datasets.py",
     "proxy/routers/chat.py",
-    "proxy/routers/tools.py",
     "proxy/routers/runtime.py",
-    "proxy/routers/notebooks.py",
     "proxy/services/doc_extract_service.py",
     "proxy/services/evidence_packet_service.py",
     "proxy/services/extract_service.py",
@@ -65,9 +60,6 @@ _CRITICAL_FILES = (
     "proxy/services/prompt_registry_service.py",
     "proxy/services/project_summary_service.py",
     "proxy/services/saferag_service.py",
-    "proxy/services/external_radar_service.py",
-    "proxy/services/doc_review_service.py",
-    "proxy/services/doc_review_retrieval_service.py",
     "proxy/services/document_explorer_service.py",
     "proxy/services/tool_harness_service.py",
     "proxy/services/les_module_service.py",
@@ -90,13 +82,6 @@ _CRITICAL_FILES = (
     "proxy/services/version_service.py",
     "proxy/services/workflow_plan_service.py",
     "proxy/routers/chat_history.py",
-    "sovushka/pages/chat.py",
-    "sovushka/pages/documents.py",
-    "sovushka/pages/instrumenty.py",
-    "sovushka/components/header.py",
-    "sovushka/answer_render.py",
-    "sovushka/styles.py",
-    "sovushka_ng.py",
 )
 # безопасные флаги (булевы, без секретов)
 _SAFE_FLAGS = (

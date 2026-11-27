@@ -60,14 +60,11 @@ def test_cold_recovery_without_python_backend(tmp_path, phase):
     policy.write_text(json.dumps({'schema': 'les.native-auth-policy.v1', 'compatible': True,
         'trusted_role': 'admin', 'cors_origins': [], 'cors_loopback': True,
         'proxy_header': 'x-les-trusted-network'}), encoding='utf-8')
-    port, dead_backend = free_port(), free_port()
-    while port == dead_backend:
-        dead_backend = free_port()
+    port = free_port()
     log_path = state / 'api.log'
     with log_path.open('wb') as log, httpx.Client(base_url=f'http://127.0.0.1:{port}',
             headers={'api-key': 'edge-test'}, trust_env=False, timeout=10) as http:
-        owner = subprocess.Popen([api, '--listen', f'127.0.0.1:{port}', '--upstream',
-            f'http://127.0.0.1:{dead_backend}', '--database', str(database), '--state', str(state),
+        owner = subprocess.Popen([api, '--listen', f'127.0.0.1:{port}', '--database', str(database), '--state', str(state),
             '--edge-storage', str(target), '--auth-policy-file', str(policy)],
             env={**os.environ, 'LES_INTERNAL_INGEST_TOKEN': 'a' * 64,
                  'LES_LIGHT_QDRANT_API_KEY': 'edge-test'}, stdout=log, stderr=subprocess.STDOUT,

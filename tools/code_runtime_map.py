@@ -18,8 +18,6 @@ from typing import Iterable
 
 SCHEMA = "les.code-runtime-map.v1"
 PRODUCT_ENTRYPOINTS = (
-    "proxy/app.py",
-    "sovushka_ng.py",
     "lemonade_host.py",
     "tools/light_document_worker.py",  # Python compatibility format worker.
 )
@@ -304,8 +302,8 @@ def render_markdown(inventory: dict) -> str:
         "",
         "> Сгенерировано `tools/code_runtime_map.py`. Не редактировать вручную.",
         "",
-        "Это статическая карта Python-кода, включая совместимые FastAPI-маршруты. "
-        "Windows-приложение запускает Rust API. "
+        "Это статическая карта отдельных Python-инструментов и тестовых зависимостей. "
+        "Действующие HTTP-маршруты Windows проверяются запуском Rust API и записываются в generated/native-api-routes.json. "
         "Статус `DORMANT_CANDIDATE` показывает отсутствие найденного пути от точки входа или теста; "
         "он **не является доказательством мёртвого кода**.",
         "",

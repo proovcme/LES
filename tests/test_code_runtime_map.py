@@ -43,8 +43,8 @@ def inventory() -> dict:
 def test_runtime_map_distinguishes_product_runtime_and_tool_only_code(inventory: dict):
     modules = _modules_by_path(inventory)
 
-    assert modules["proxy/app.py"]["status"] == "PRODUCT_REACHABLE"
-    assert modules["proxy/routers/chat.py"]["status"] == "PRODUCT_REACHABLE"
+    assert "proxy/app.py" not in modules
+    assert modules["proxy/routers/chat.py"]["status"] == "TEST_OR_TOOL_ONLY"
     assert not any("smeta" in path for path, item in modules.items()
                    if item["status"] == "PRODUCT_REACHABLE")
     assert modules["tools/skill_python_asset.py"]["status"] == "TEST_OR_TOOL_ONLY"
@@ -53,8 +53,9 @@ def test_runtime_map_distinguishes_product_runtime_and_tool_only_code(inventory:
 
 
 def test_runtime_map_exposes_chat_without_estimate_routes(inventory: dict):
-    paths = {route["path"] for route in inventory["routes"]}
-    assert "/api/chat" in paths
+    native = json.loads((ROOT / "docs/generated/native-api-routes.json").read_text(encoding="utf-8"))
+    paths = {route["path"] for route in native["routes"]}
+    assert {"/api/chat", "/api/chat/stream", "/api/commands"} <= paths
     assert not any(path.startswith(("/api/smeta-", "/api/rim")) for path in paths)
     assert "proxy/routers/chat.py" in inventory["focus"]
 
@@ -70,8 +71,9 @@ def test_runtime_map_is_conservative_and_deterministically_sorted(inventory: dic
     assert route_keys == sorted(route_keys)
     # The public Light tree deliberately excludes archived full-product tests.
     assert inventory["summary"]["tracked_python_files"] >= inventory["summary"]["product_reachable"]
-    assert {"proxy/app.py", "proxy/routers/chat.py", "sovushka_ng.py"}.issubset(paths)
-    assert inventory["summary"]["product_reachable"] > 100
+    assert "proxy/routers/chat.py" in paths
+    assert {"proxy/app.py", "sovushka_ng.py"}.isdisjoint(paths)
+    assert not any(path.startswith("sovushka/") for path in paths)
     assert inventory["summary"]["dormant_candidates"] == sum(item["status"] == "DORMANT_CANDIDATE" for item in inventory["modules"])
     markdown = render_markdown(inventory)
     assert "не является доказательством мёртвого кода" in markdown
@@ -83,11 +85,11 @@ def test_runtime_map_is_conservative_and_deterministically_sorted(inventory: dic
     ) == inventory
 
 
-def test_light_mail_surface_is_reachable_after_activation(
+def test_legacy_mail_helper_is_available_for_test_fixtures(
     inventory: dict,
 ):
     modules = _modules_by_path(inventory)
-    assert modules["sovushka/pages/mail.py"]["status"] == "PRODUCT_REACHABLE"
+    assert modules["proxy/routers/mail.py"]["status"] == "TEST_OR_TOOL_ONLY"
     for retired in (
         "proxy/legacy_app.py",
         "test_auth.py",
@@ -104,14 +106,12 @@ def test_retired_one_off_operator_scripts_do_not_reenter_tool_inventory(
     modules = _modules_by_path(inventory)
 
     for supported in (
-        "proxy/routers/checklist_review.py",
-        "sovushka/pages/samovar.py",
         "tools/ezhik_imap_smoke.py",
-        "tools/light_launcher.py",
     ):
         assert supported in modules
 
     for retired in (
+        "tools/light_launcher.py",
         "tools/checklist_review_smoke.py",
         "tools/ezhik_mail_smoke.py",
         "tools/rag_batch_parse.py",
@@ -126,7 +126,8 @@ def test_api_surface_keeps_profiles_and_internal_extraction_without_duplicate_pu
     inventory: dict,
 ):
     modules = _modules_by_path(inventory)
-    routes = {(item["method"], item["path"]) for item in inventory["routes"]}
+    native = json.loads((ROOT / "docs/generated/native-api-routes.json").read_text(encoding="utf-8"))
+    routes = {(item["method"], item["path"]) for item in native["routes"]}
 
     assert "proxy/services/prompt_registry_service.py" in modules
     assert "proxy/services/extract_service.py" in modules
@@ -143,13 +144,6 @@ def test_unconsumed_experimental_api_is_retired_without_removing_active_workflow
 ):
     modules = _modules_by_path(inventory)
     paths = {item["path"] for item in inventory["routes"]}
-
-    for active_prefix in (
-        "/api/tasks",
-        "/api/notes",
-        "/api/filemap",
-    ):
-        assert any(path == active_prefix or path.startswith(f"{active_prefix}/") for path in paths)
 
     for retired_prefix in (
         "/api/bor",

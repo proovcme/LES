@@ -1,5 +1,5 @@
-import pytest
 from fastapi import HTTPException
+import pytest
 from proxy.services.dataset_watch_service import DatasetWatcher
 
 
@@ -71,23 +71,6 @@ async def test_observation_without_auto_index_never_mutates_dataset(tmp_path):
     await watch.tick(check, forbidden_sync, now=100)
     await watch.tick(check, forbidden_sync, now=200)
     assert watch.status("ds")["watch"]["status"] == "changes"
-
-
-@pytest.mark.asyncio
-async def test_watch_ui_renders_file_names_as_text(monkeypatch):
-    from nicegui import Client
-    from nicegui.page import page
-    from sovushka.components import dataset_watch
-
-    async def get(_):
-        return {"watch": {"status": "changes", "enabled": True}, "events": [{"at": 1, "message": "Добавлен", "file_name": "<script>.txt"}]}
-
-    monkeypatch.setattr(dataset_watch, "api_get", get)
-    with Client(page("/__watch_test")) as client:
-        await dataset_watch.open_dataset_watch("ds", "C:/Docs")
-        texts = [getattr(element, "text", "") for element in client.elements.values()]
-        assert "Наблюдение за файлами" in texts
-        assert any("<script>.txt" in text for text in texts)
 
 
 @pytest.mark.asyncio

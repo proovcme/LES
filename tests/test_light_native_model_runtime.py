@@ -67,8 +67,6 @@ def test_effective_roles_are_native_and_remain_exact_when_a_head_changes(gateway
     role=client.get('/api/model-connections/effective').raise_for_status()
     assert role.headers['x-les-handler']=='rust.model-registry'
     assert role.json()['roles']['answer']['input_token_limit']==24000
-    assert client.post('/test-stop-upstream').status_code==200
-    wait_for(lambda:client.get('/api/light/instance').status_code==503)
     revised=registry.revise_connection(first.connection_id,expected_revision_id=first.revision_id,
                                        actor='admin:test',model_id='unassigned:other')
     answer=client.get('/api/model-connections/effective').raise_for_status().json()['roles']['answer']
@@ -80,7 +78,7 @@ def test_effective_roles_are_native_and_remain_exact_when_a_head_changes(gateway
     assert 'secret_ref' not in json.dumps(blocked)
 
 
-def test_canonical_inference_owns_role_secret_payload_and_stream_without_backend(gateway):
+def test_canonical_inference_owns_role_secret_payload_and_stream_on_native_api(gateway):
     client,database,folder=gateway
     seen=[]
     class Model(BaseHTTPRequestHandler):
@@ -113,8 +111,6 @@ def test_canonical_inference_owns_role_secret_payload_and_stream_without_backend
         registry.save_capability_snapshot(snapshot,actor='admin:test')
         state=folder/'state';state.mkdir(exist_ok=True)
         EnvironmentSecretStore(state/'.env',environ={}).replace('env:OPENAI_API_KEY','fixture-native-owned-key',actor='admin:test')
-        assert client.post('/test-stop-upstream').status_code==200
-        wait_for(lambda:client.get('/api/light/instance').status_code==503)
         path='/api/light/internal-inference'
         payload={'schema':'les.inference.v1','role':'answer','request':{
             'messages':[{'role':'user','content':'Прочитай страницу 日本語'}],'max_output_tokens':256,'model':'must-not-override-registry'}}
@@ -172,8 +168,6 @@ async def test_existing_chat_transport_is_only_a_revision_client(gateway,monkeyp
         (folder/'state').mkdir(exist_ok=True)
         EnvironmentSecretStore(folder/'state/.env',environ={}).replace('env:OPENAI_API_KEY','fixture-owned-key',actor='admin:test')
         monkeypatch.setattr(local_model_http,'_inference',(str(client.base_url.join('/api/light/internal-inference')),MODEL_BRIDGE_TOKEN))
-        assert client.post('/test-stop-upstream').status_code==200
-        wait_for(lambda:client.get('/api/light/instance').status_code==503)
         def forbidden_http(request):raise AssertionError('Python provider transport was used')
         class NoPythonSecrets:
             def resolve(self,*args):raise AssertionError('Python resolved a provider credential')

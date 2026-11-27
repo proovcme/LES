@@ -271,7 +271,7 @@ fn forest_response(request: &Request, bytes: Bytes, kind: &'static str) -> Respo
     response
 }
 
-pub fn classic_link(request: &Request, legacy: Option<&str>) -> Option<Response> {
+pub fn classic_link(request: &Request) -> Option<Response> {
     let path = request.uri().path();
     if request.method() != Method::GET || !matches!(path, "/classic" | "/les/classic") {
         return None;
@@ -279,11 +279,6 @@ pub fn classic_link(request: &Request, legacy: Option<&str>) -> Option<Response>
     let query = request.uri().query().unwrap_or_default();
     let destination = if path == "/classic" && (query.is_empty() || query == "tab=chat") {
         "/app/".parse().ok()?
-    } else if let Some(legacy) = legacy {
-        let mut url = reqwest::Url::parse(legacy).ok()?;
-        url.set_path(path);
-        url.set_query((!query.is_empty()).then_some(query));
-        url.as_str().parse().ok()?
     } else {
         match (path, query) {
             ("/classic", "tab=data") => "/app/?panel=data",
@@ -301,35 +296,17 @@ pub fn classic_link(request: &Request, legacy: Option<&str>) -> Option<Response>
     Some(result)
 }
 
-pub fn legacy_url(raw: &str) -> Result<String, &'static str> {
-    const INVALID_URL: &str = "LEGACY_UI_ADDRESS_INVALID";
-    let url = reqwest::Url::parse(raw).map_err(|_| INVALID_URL)?;
-    if url.scheme() != "http"
-        || url.host_str() != Some("127.0.0.1")
-        || url.port().is_none()
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || url.path() != "/classic"
-        || url.query().is_some()
-        || url.fragment().is_some()
-    {
-        return Err(INVALID_URL);
-    }
-    Ok(url.to_string())
-}
-
-pub async fn configuration(context: &Context, headers: &HeaderMap, url: Option<&str>) -> Response {
+pub async fn configuration(context: &Context, headers: &HeaderMap) -> Response {
     let cors = match auth::authorize(context, headers, false).await {
         Ok(cors) => cors,
         Err(response) => return response,
     };
-    let mut configuration = json!({"legacy_url":url});
-    if context.public_chat_rust {
-        configuration["indexed_attachments"] =
-            json!(context.intake.is_some() && context.index_store.is_some());
-        configuration["native_model_settings"] = json!(true);
-        configuration["native_mail"] = json!(context.upstream.is_none());
-    }
+    let configuration = json!({
+        "legacy_url":null,
+        "indexed_attachments":context.intake.is_some() && context.index_store.is_some(),
+        "native_model_settings":true,
+        "native_mail":true,
+    });
     let mut response = json_response(StatusCode::OK, configuration, "rust.frontend");
     response
         .headers_mut()

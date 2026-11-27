@@ -18,11 +18,6 @@ import pytest
     "proxy/routers/dataset_uploads.py",
     "proxy/routers/dataset_parse.py",
     "proxy/routers/dataset_search.py",
-    "sovushka/components/chat_artifacts.py",
-    "sovushka/components/chat_rendering.py",
-    "sovushka/components/document_browser.py",
-    "sovushka/components/document_views.py",
-    "sovushka/components/document_presentation.py",
 ])
 def test_extracted_module_has_no_unresolved_globals(path):
     table = symtable.symtable(Path(path).read_text(encoding="utf-8"), path, "exec")
