@@ -1495,7 +1495,6 @@
         "backend/native_parquet.py",
         "backend/qdrant_support.py",
         "proxy/routers/chat.py",
-        "proxy/routers/chat_history.py",
         "proxy/routers/dataset_catalog.py",
         "proxy/routers/dataset_external.py",
         "proxy/routers/dataset_parse.py",
@@ -1537,7 +1536,6 @@
         "proxy/services/semantic_cache.py",
         "proxy/services/system_dataset_service.py",
         "proxy/services/task_service.py",
-        "tests/oracles/chat_session_python.py",
         "tests/oracles/context_python.py",
         "tests/oracles/memory_python.py",
         "tests/oracles/project_python.py",
@@ -1883,10 +1881,7 @@
     },
     {
       "inbound": [
-        "proxy/routers/chat_history.py",
         "proxy/routers/jobs.py",
-        "proxy/routers/workspace.py",
-        "proxy/services/chat_draft_service.py",
         "proxy/services/chat_durability_service.py",
         "proxy/services/chat_persistence_service.py",
         "proxy/services/chat_session_service.py",
@@ -1902,7 +1897,8 @@
         "tests/test_light_native_api.py",
         "tests/test_light_native_dataset_reader.py",
         "tests/test_light_native_intake.py",
-        "tests/test_light_native_intake_execution.py"
+        "tests/test_light_native_intake_execution.py",
+        "tests/test_light_native_workspace.py"
       ],
       "lines": 49,
       "module": "backend.workspace_native",
@@ -1939,7 +1935,6 @@
         "proxy/routers/__init__.py",
         "proxy/routers/agent_state.py",
         "proxy/routers/chat.py",
-        "proxy/routers/chat_history.py",
         "proxy/routers/dataset_catalog.py",
         "proxy/routers/dataset_cloud.py",
         "proxy/routers/dataset_document_ops.py",
@@ -1958,7 +1953,6 @@
         "proxy/routers/rerank.py",
         "proxy/routers/runtime.py",
         "proxy/routers/settings.py",
-        "proxy/routers/workspace.py",
         "proxy/routers/workspace_memory.py",
         "proxy/security.py",
         "proxy/services/__init__.py",
@@ -1980,7 +1974,6 @@
         "proxy/services/chat_attachment_read_service.py",
         "proxy/services/chat_attachment_service.py",
         "proxy/services/chat_capability_scope_service.py",
-        "proxy/services/chat_draft_service.py",
         "proxy/services/chat_durability_service.py",
         "proxy/services/chat_evidence_application_service.py",
         "proxy/services/chat_evidence_context.py",
@@ -2345,7 +2338,6 @@
       "inbound": [
         "proxy/routers/agent_state.py",
         "proxy/routers/chat.py",
-        "proxy/routers/chat_history.py",
         "proxy/routers/dataset_catalog.py",
         "proxy/routers/dataset_cloud.py",
         "proxy/routers/dataset_document_ops.py",
@@ -2364,7 +2356,6 @@
         "proxy/routers/rerank.py",
         "proxy/routers/runtime.py",
         "proxy/routers/settings.py",
-        "proxy/routers/workspace.py",
         "proxy/routers/workspace_memory.py"
       ],
       "lines": 2,
@@ -2459,26 +2450,6 @@
         "proxy/services/semantic_cache.py"
       ],
       "path": "proxy/routers/chat.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "tests/test_light_durable_chat.py",
-        "tests/test_light_frontend_drafts.py"
-      ],
-      "lines": 184,
-      "module": "proxy.routers.chat_history",
-      "outbound": [
-        "backend/rag_config.py",
-        "backend/workspace_native.py",
-        "proxy/__init__.py",
-        "proxy/routers/__init__.py",
-        "proxy/security.py",
-        "proxy/services/chat_persistence_service.py",
-        "proxy/services/context_memory_service.py",
-        "proxy/services/saferag_service.py"
-      ],
-      "path": "proxy/routers/chat_history.py",
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
@@ -2912,24 +2883,6 @@
     },
     {
       "inbound": [
-        "tests/test_light_frontend_drafts.py",
-        "tests/test_workspace_router.py"
-      ],
-      "lines": 90,
-      "module": "proxy.routers.workspace",
-      "outbound": [
-        "backend/workspace_native.py",
-        "proxy/__init__.py",
-        "proxy/routers/__init__.py",
-        "proxy/security.py",
-        "proxy/services/chat_draft_service.py",
-        "proxy/services/chat_session_service.py"
-      ],
-      "path": "proxy/routers/workspace.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
         "tests/test_light_conversation_context.py",
         "tests/test_workspace_memory_router.py"
       ],
@@ -2954,7 +2907,6 @@
       "inbound": [
         "proxy/routers/agent_state.py",
         "proxy/routers/chat.py",
-        "proxy/routers/chat_history.py",
         "proxy/routers/dataset_catalog.py",
         "proxy/routers/dataset_cloud.py",
         "proxy/routers/dataset_document_ops.py",
@@ -2973,7 +2925,6 @@
         "proxy/routers/rerank.py",
         "proxy/routers/runtime.py",
         "proxy/routers/settings.py",
-        "proxy/routers/workspace.py",
         "proxy/routers/workspace_memory.py",
         "tests/test_light_conversation_context.py",
         "tests/test_memory_api.py",
@@ -3010,7 +2961,6 @@
         "proxy/services/chat_attachment_read_service.py",
         "proxy/services/chat_attachment_service.py",
         "proxy/services/chat_capability_scope_service.py",
-        "proxy/services/chat_draft_service.py",
         "proxy/services/chat_durability_service.py",
         "proxy/services/chat_evidence_application_service.py",
         "proxy/services/chat_evidence_context.py",
@@ -3509,24 +3459,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/workspace.py",
-        "tests/conftest.py",
-        "tests/test_light_frontend_drafts.py",
-        "tests/test_light_native_workspace.py"
-      ],
-      "lines": 12,
-      "module": "proxy.services.chat_draft_service",
-      "outbound": [
-        "backend/workspace_native.py",
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/chat_session_service.py"
-      ],
-      "path": "proxy/services/chat_draft_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
         "proxy/routers/chat.py",
         "proxy/services/chat_persistence_service.py",
         "tests/test_light_durable_chat.py"
@@ -3736,7 +3668,6 @@
     {
       "inbound": [
         "proxy/routers/chat.py",
-        "proxy/routers/chat_history.py",
         "proxy/services/chat_request_service.py",
         "tests/test_light_durable_chat.py",
         "tests/test_light_execution_receipts.py",
@@ -3941,27 +3872,22 @@
     {
       "inbound": [
         "backend/workspace_native.py",
-        "proxy/routers/workspace.py",
         "proxy/routers/workspace_memory.py",
-        "proxy/services/chat_draft_service.py",
         "proxy/services/chat_durability_service.py",
         "proxy/services/conversation_context_service.py",
         "proxy/services/typed_memory_projection_service.py",
-        "tests/conftest.py",
         "tests/oracles/context_python.py",
         "tests/test_chat_session_service.py",
         "tests/test_light_agent_workspace.py",
         "tests/test_light_conversation_context.py",
         "tests/test_light_durable_chat.py",
-        "tests/test_light_frontend_drafts.py",
         "tests/test_light_native_harness_loop.py",
         "tests/test_light_native_intake.py",
         "tests/test_light_native_workspace.py",
         "tests/test_workspace_context.py",
-        "tests/test_workspace_memory_router.py",
-        "tests/test_workspace_router.py"
+        "tests/test_workspace_memory_router.py"
       ],
-      "lines": 30,
+      "lines": 25,
       "module": "proxy.services.chat_session_service",
       "outbound": [
         "backend/rag_config.py",
@@ -4076,7 +4002,6 @@
     {
       "inbound": [
         "proxy/routers/chat.py",
-        "proxy/routers/chat_history.py",
         "proxy/routers/dataset_catalog.py",
         "proxy/services/chat_persistence_service.py",
         "proxy/services/chat_request_service.py",
@@ -6445,7 +6370,6 @@
     {
       "inbound": [
         "proxy/routers/chat.py",
-        "proxy/routers/chat_history.py",
         "proxy/services/chat_durability_service.py",
         "proxy/services/chat_evidence_application_service.py",
         "proxy/services/chat_persistence_service.py",
@@ -6954,7 +6878,7 @@
         "proxy/services/light_update_service.py",
         "tests/test_software_versions.py"
       ],
-      "lines": 323,
+      "lines": 322,
       "module": "proxy.services.version_service",
       "outbound": [
         "proxy/__init__.py",
@@ -7143,17 +7067,13 @@
     },
     {
       "inbound": [],
-      "lines": 122,
+      "lines": 111,
       "module": "tests.conftest",
       "outbound": [
         "backend/native_core.py",
-        "proxy/services/chat_draft_service.py",
-        "proxy/services/chat_session_service.py",
         "proxy/services/conversation_context_service.py",
         "proxy/services/memory_service.py",
         "proxy/services/project_service.py",
-        "tests/oracles/chat_draft_python.py",
-        "tests/oracles/chat_session_python.py",
         "tests/oracles/context_python.py",
         "tests/oracles/memory_python.py",
         "tests/oracles/project_python.py"
@@ -7187,8 +7107,6 @@
     {
       "inbound": [
         "tests/oracles/bm25_store_779.py",
-        "tests/oracles/chat_draft_python.py",
-        "tests/oracles/chat_session_python.py",
         "tests/oracles/context_governor_779.py",
         "tests/oracles/context_python.py",
         "tests/oracles/execution_receipts_780.py",
@@ -7219,35 +7137,6 @@
         "tests/oracles/__init__.py"
       ],
       "path": "tests/oracles/bm25_store_779.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "tests/conftest.py",
-        "tests/test_light_native_workspace.py"
-      ],
-      "lines": 40,
-      "module": "tests.oracles.chat_draft_python",
-      "outbound": [
-        "tests/oracles/__init__.py",
-        "tests/oracles/chat_session_python.py"
-      ],
-      "path": "tests/oracles/chat_draft_python.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "tests/conftest.py",
-        "tests/oracles/chat_draft_python.py",
-        "tests/test_light_native_workspace.py"
-      ],
-      "lines": 193,
-      "module": "tests.oracles.chat_session_python",
-      "outbound": [
-        "backend/rag_config.py",
-        "tests/oracles/__init__.py"
-      ],
-      "path": "tests/oracles/chat_session_python.py",
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
@@ -7437,7 +7326,7 @@
     },
     {
       "inbound": [],
-      "lines": 110,
+      "lines": 109,
       "module": "tests.test_chat_session_service",
       "outbound": [
         "proxy/services/chat_session_service.py",
@@ -7932,7 +7821,6 @@
       "outbound": [
         "backend/workspace_native.py",
         "proxy/routers/chat.py",
-        "proxy/routers/chat_history.py",
         "proxy/services/chat_durability_service.py",
         "proxy/services/chat_persistence_service.py",
         "proxy/services/chat_request_service.py",
@@ -8053,19 +7941,6 @@
         "tools/build_light_frontend.py"
       ],
       "path": "tests/test_light_frontend_assets.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [],
-      "lines": 96,
-      "module": "tests.test_light_frontend_drafts",
-      "outbound": [
-        "proxy/routers/chat_history.py",
-        "proxy/routers/workspace.py",
-        "proxy/services/chat_draft_service.py",
-        "proxy/services/chat_session_service.py"
-      ],
-      "path": "tests/test_light_frontend_drafts.py",
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
@@ -8304,7 +8179,7 @@
         "tests/test_light_native_table_publication.py",
         "tests/test_light_native_word_window.py"
       ],
-      "lines": 831,
+      "lines": 911,
       "module": "tests.test_light_native_api",
       "outbound": [
         "backend/workspace_native.py",
@@ -8429,7 +8304,7 @@
         "tests/test_light_native_word_window.py",
         "tools/evaluate_part_reader_chat.py"
       ],
-      "lines": 458,
+      "lines": 462,
       "module": "tests.test_light_native_chat_turn",
       "outbound": [
         "backend/light_qdrant_runtime.py",
@@ -9254,13 +9129,11 @@
     },
     {
       "inbound": [],
-      "lines": 68,
+      "lines": 91,
       "module": "tests.test_light_native_workspace",
       "outbound": [
-        "proxy/services/chat_draft_service.py",
-        "proxy/services/chat_session_service.py",
-        "tests/oracles/chat_draft_python.py",
-        "tests/oracles/chat_session_python.py"
+        "backend/workspace_native.py",
+        "proxy/services/chat_session_service.py"
       ],
       "path": "tests/test_light_native_workspace.py",
       "status": "TEST_OR_TOOL_ONLY"
@@ -10143,17 +10016,6 @@
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
-      "inbound": [],
-      "lines": 43,
-      "module": "tests.test_workspace_router",
-      "outbound": [
-        "proxy/routers/workspace.py",
-        "proxy/services/chat_session_service.py"
-      ],
-      "path": "tests/test_workspace_router.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
       "inbound": [
         "tools/backup_suharik.py",
         "tools/benchmark_native_core.py",
@@ -10970,9 +10832,9 @@
     "parse_warnings": 0,
     "product_reachable": 101,
     "registered_api_routes": 9,
-    "test_or_tool_only": 485,
-    "tracked_python_files": 586,
-    "tracked_python_lines": 128524
+    "test_or_tool_only": 478,
+    "tracked_python_files": 579,
+    "tracked_python_lines": 127955
   },
   "warnings": []
 }

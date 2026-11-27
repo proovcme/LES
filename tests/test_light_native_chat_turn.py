@@ -262,6 +262,10 @@ def test_hard_process_stop_recovers_partial_text_without_replaying_model(native_
     with sqlite3.connect(t.database) as db:
         answer,status,artifact=db.execute("SELECT answer,crag_status,artifact_json FROM chat_history WHERE session_id='crash'").fetchone()
     assert (answer,status)==('До падения 日本語','INTERRUPTED') and 'CHAT_INTERRUPTED' in artifact
+    history = t.client.get('/api/chat/history', params={'session_id': 'crash'}).raise_for_status().json()
+    assert history[-1]['text'] == answer
+    assert history[-1]['crag'] == 'INTERRUPTED'
+    assert history[-1]['meta']['partial'] is True
 
 def test_agent_write_uses_native_revisions_and_retry_never_repeats_the_effect(native_turn):
     t=native_turn

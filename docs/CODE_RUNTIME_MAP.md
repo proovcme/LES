@@ -18,10 +18,10 @@
 
 | Метрика | Значение |
 | --- | --- |
-| Python-файлов под git | 586 |
-| Строк Python | 128524 |
+| Python-файлов под git | 579 |
+| Строк Python | 127955 |
 | PRODUCT_REACHABLE | 101 |
-| TEST_OR_TOOL_ONLY | 485 |
+| TEST_OR_TOOL_ONLY | 478 |
 | DORMANT_CANDIDATE | 0 |
 | Зарегистрированных API-маршрутов | 9 |
 | Ошибок разбора | 0 |
@@ -55,7 +55,7 @@
 | backend/mail_threads.py | 483 | 4 |
 | proxy/services/runtime_admission.py | 451 | 16 |
 | proxy/services/model_capability_service.py | 440 | 6 |
-| backend/rag_config.py | 419 | 63 |
+| backend/rag_config.py | 419 | 61 |
 | proxy/services/pdf_contour_service.py | 408 | 5 |
 | proxy/services/kot_service.py | 396 | 10 |
 | lemonade_host.py | 381 | 0 |

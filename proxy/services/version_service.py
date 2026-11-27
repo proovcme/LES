@@ -81,7 +81,6 @@ _CRITICAL_FILES = (
     "proxy/services/electrical_evidence_summary_service.py",
     "proxy/services/version_service.py",
     "proxy/services/workflow_plan_service.py",
-    "proxy/routers/chat_history.py",
 )
 # безопасные флаги (булевы, без секретов)
 _SAFE_FLAGS = (

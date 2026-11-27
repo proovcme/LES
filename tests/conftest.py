@@ -73,24 +73,13 @@ os.environ.setdefault("RAG_TOKENIZER_LOCAL_FILES_ONLY", "true")
 os.environ.setdefault("LES_FORMAT_WORKER_MODE", "inline")  # Unit mocks stay local; worker gates explicitly select native.
 
 
-@pytest.fixture(params=['inline', 'native'])
-def workspace_engine(request, monkeypatch):
-    if request.param == 'native':
-        if not os.getenv('LES_CORE_LIBRARY'):
-            pytest.skip('Build the native core and set LES_CORE_LIBRARY for workspace parity')
-        from backend import native_core
-        monkeypatch.setenv('LES_CORE_MODE', 'native')
-        assert native_core.supports('workspace')
-    else:
-        from proxy.services import chat_session_service as sessions, chat_draft_service as drafts
-        from tests.oracles import chat_session_python as previous_sessions, chat_draft_python as previous_drafts
-        monkeypatch.setattr(previous_sessions, 'rag_meta_db_path', lambda: sessions.rag_meta_db_path())
-        monkeypatch.setattr(previous_sessions, 'SessionConflictError', sessions.SessionConflictError)
-        for name in ('get_session', 'get_session_project_id', 'list_sessions', 'create_session', 'update_session'):
-            monkeypatch.setattr(sessions, name, getattr(previous_sessions, name))
-        for name in ('get_draft', 'save_draft'):
-            monkeypatch.setattr(drafts, name, getattr(previous_drafts, name))
-    return request.param
+@pytest.fixture
+def workspace_engine(monkeypatch):
+    if not os.getenv('LES_CORE_LIBRARY'):
+        pytest.skip('Build the native core and set LES_CORE_LIBRARY for workspace tests')
+    from backend import native_core
+    monkeypatch.setenv('LES_CORE_MODE', 'native')
+    assert native_core.supports('workspace')
 
 
 @pytest.fixture(params=['inline', 'native'])

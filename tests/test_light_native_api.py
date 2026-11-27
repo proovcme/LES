@@ -427,21 +427,101 @@ def test_native_key_management_preserves_roles_and_serializes_device_binding(gat
         assert client.delete(f'{keys}/{quote(protected_key, safe="")}').json()['status'] == 'deleted'
 
 
-def test_native_http_drafts_cas_validation_and_cors(gateway):
-    client,_,_=gateway
-    created=client.post('/api/workspace/sessions',json={}).json();sid=created['session_id']
-    path=f'/api/workspace/sessions/{sid}/draft'
-    content={'revision':0,'text':'  日本語 и пробелы 🌲\n\t','attachment':None}
-    response=client.put(path,json=content,headers={'Origin':'http://127.0.0.1:8181'})
-    assert response.status_code==200 and response.json()=={**content,'revision':1}
-    assert response.headers['access-control-allow-origin']=='http://127.0.0.1:8181'
-    assert client.put(path,json=content).status_code==409
-    assert client.get(path).json()['text']==content['text']
-    for change in [{'scope':{'scope_type':'none','dataset_ids':['foreign']}},{'project_id':4}]:
-        assert client.patch(f'/api/workspace/sessions/{sid}',json=change).status_code==422
-    assert client.post('/api/workspace/sessions',json={'session_id':sid}).status_code==409
-    assert client.post('/api/workspace/sessions',json={'project_id':999}).status_code==404
-    assert client.put(path,json={**content,'revision':1,'text':'x'*20001}).status_code==422
+def test_native_workspace_and_draft_roundtrip(gateway):
+    client, _, _ = gateway
+    sessions = '/api/workspace/sessions'
+    created = client.post(sessions, json={'title': 'Первый диалог'}).raise_for_status().json()
+    sid = created['session_id']
+    session = f'{sessions}/{sid}'
+    draft = f'{session}/draft'
+
+    assert client.get(sessions).raise_for_status().json()['sessions'][0] == created
+    updated = client.patch(session, json={'title': 'Второй диалог'}).raise_for_status().json()
+    assert updated['title'] == 'Второй диалог'
+    assert client.get(session).raise_for_status().json() == updated
+    assert client.get(draft).raise_for_status().json() == {'revision': 0, 'text': '', 'attachment': None}
+
+    content = {
+        'revision': 0, 'text': '  日本語 и пробелы 🌲\n\t',
+        'attachment': {'attachment_id': 'read_123456789abc', 'name': 'Исходная таблица.xlsx'},
+    }
+    response = client.put(draft, json=content, headers={'Origin': 'http://127.0.0.1:8181'}).raise_for_status()
+    saved = {**content, 'revision': 1}
+    assert response.json() == saved
+    assert response.headers['access-control-allow-origin'] == 'http://127.0.0.1:8181'
+    assert client.put(draft, json=content).status_code == 409
+    assert client.get(draft).raise_for_status().json() == saved
+    assert client.get(session).raise_for_status().json() == updated
+    empty = {'revision': 1, 'text': '', 'attachment': None}
+    assert client.put(draft, json=empty).raise_for_status().json() == {**empty, 'revision': 2}
+    assert client.get(draft).raise_for_status().json() == {**empty, 'revision': 2}
+
+
+def test_native_workspace_rejects_invalid_ownership_and_payloads(gateway):
+    client, database, _ = gateway
+    sessions = '/api/workspace/sessions'
+    missing = f'{sessions}/missing'
+    assert client.get(missing).status_code == 404
+    assert client.get(f'{missing}/draft').status_code == 404
+    assert not database.exists()
+    sid = client.post(sessions, json={}).raise_for_status().json()['session_id']
+    session = f'{sessions}/{sid}'
+    draft = f'{session}/draft'
+
+    for change in [{'scope': {'scope_type': 'none', 'dataset_ids': ['foreign']}}, {'project_id': 4}]:
+        assert client.patch(session, json=change).status_code == 422
+    assert client.post(sessions, json={'session_id': sid}).status_code == 409
+    assert client.post(sessions, json={'project_id': 999}).status_code == 404
+    assert client.post(sessions, json={'session_id': '../bad'}).status_code == 422
+
+    payload = {'revision': 0, 'text': 'Проверка'}
+    for change in [
+        {'revision': -1}, {'text': 'x' * 20001},
+        {'attachment': {'attachment_id': '../secret', 'name': 'X'}}, {'source_path': 'private'},
+    ]:
+        assert client.put(draft, json={**payload, **change}).status_code == 422
+    assert client.put(f'{missing}/draft', json=payload).status_code == 404
+    assert client.get(draft).raise_for_status().json() == {'revision': 0, 'text': '', 'attachment': None}
+
+
+def test_native_session_history_and_draft_routes_require_authentication(gateway):
+    client, database, _ = gateway
+    sessions = '/api/workspace/sessions'
+    session = f'{sessions}/missing'
+    with httpx.Client(base_url=client.base_url, trust_env=False) as anonymous:
+        for method, path in [
+            ('GET', sessions), ('POST', sessions), ('GET', session), ('PATCH', session),
+            ('GET', f'{session}/draft'), ('PUT', f'{session}/draft'),
+            ('GET', '/api/chat/history'), ('GET', '/api/chat/sessions'), ('GET', '/api/chat/learning'),
+        ]:
+            assert anonymous.request(method, path).status_code == 401
+    assert not database.exists()
+
+
+def test_failed_draft_write_leaves_saved_text_and_returns_recovery_message(gateway):
+    client, database, _ = gateway
+    sid = client.post('/api/workspace/sessions', json={}).raise_for_status().json()['session_id']
+    draft = f'/api/workspace/sessions/{sid}/draft'
+    saved = client.put(draft, json={'revision': 0, 'text': 'Сохранённый текст'}).raise_for_status().json()
+    with sqlite3.connect(database) as db:
+        db.executescript("""
+            CREATE TRIGGER reject_draft_update BEFORE UPDATE ON les_chat_drafts BEGIN
+                SELECT RAISE(ABORT, 'fixture refusal');
+            END;
+        """)
+
+    response = client.put(draft, json={'revision': 1, 'text': 'Новый текст'})
+    assert response.status_code == 503
+    assert 'Текст остаётся в этом окне' in response.json()['detail']
+    assert client.get(draft).raise_for_status().json() == saved
+
+
+def test_native_history_returns_an_error_when_storage_cannot_be_opened(gateway):
+    client, database, _ = gateway
+    database.mkdir()
+    result = client.get('/api/chat/history', params={'session_id': 'known'})
+    assert result.status_code == 503
+    assert 'Переписка не удалена' in result.json()['detail']
 
 
 def test_native_database_wait_does_not_block_http_event_loop(gateway):
