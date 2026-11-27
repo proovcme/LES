@@ -89,11 +89,10 @@ def _http_json(url: str, timeout: float = 5.0) -> tuple[int, dict | None, str]:
 
 
 def check_ports(report: DoctorReport) -> None:
-    """Порты сервисов: proxy :8050, sovushka :8051, mlx :8080, qdrant :6333."""
+    """Порты сервисов: proxy :8050, sovushka :8051, qdrant :6333."""
     targets = [
         ("proxy", 8050),
         ("sovushka", 8051),
-        ("mlx", 8080),
         ("qdrant", 6333),
     ]
     for label, port in targets:
@@ -179,56 +178,6 @@ def check_gpu(report: DoctorReport) -> None:
     report.add(Check("GPU / Metal", "warn", f"платформа {system}/{machine} — ускорителя нет", value="cpu"))
 
 
-def check_inference(report: DoctorReport) -> None:
-    """MLX-инференс :8080 — main-модель и эмбеддер."""
-    mlx_url = os.getenv("MLX_URL", "http://127.0.0.1:8080").rstrip("/")
-    code, data, err = _http_json(f"{mlx_url}/api/health")
-    if data is None:
-        cause = err or f"HTTP {code}" if code else "нет ответа"
-        report.add(
-            Check(
-                "MLX инференс :8080",
-                "fail",
-                f"UNREACHABLE ({cause})",
-                value="DOWN",
-            )
-        )
-        report.add(Check("Эмбеддер", "fail", "недоступен (MLX-host не отвечает)", value="DOWN"))
-        return
-
-    main = data.get("main_model")
-    if isinstance(main, dict):
-        path = str(main.get("path", "?")).split("/")[-1]
-        loaded = bool(main.get("loaded"))
-    else:
-        path, loaded = "?", bool(main)
-    report.add(
-        Check(
-            "MLX инференс :8080",
-            "ok" if loaded else "warn",
-            f"main-модель {path} ({'загружена' if loaded else 'ленивая, не в памяти'})",
-            value="loaded" if loaded else "lazy",
-        )
-    )
-
-    embed = data.get("embed_model")
-    if isinstance(embed, dict):
-        embed_loaded = bool(embed.get("loaded"))
-        embed_path = str(embed.get("path", "")).split("/")[-1]
-    else:
-        embed_loaded = bool(embed)
-        embed_path = ""
-    suffix = f" {embed_path}" if embed_path else ""
-    report.add(
-        Check(
-            "Эмбеддер",
-            "ok",
-            f"доступен{suffix} ({'в памяти' if embed_loaded else 'ленивый'})",
-            value="loaded" if embed_loaded else "lazy",
-        )
-    )
-
-
 def check_proxy(report: DoctorReport) -> None:
     """Proxy :8050 — API-шлюз."""
     proxy_url = "http://127.0.0.1:8050"
@@ -246,8 +195,8 @@ def check_proxy(report: DoctorReport) -> None:
 
 def check_providers(report: DoctorReport) -> None:
     """Конфигурация провайдеров: активный LLM-провайдер + наличие облачных ключей."""
-    active = os.getenv("LES_LLM_PROVIDER") or os.getenv("LLM_PROVIDER") or "mlx"
-    report.add(Check("LLM-провайдер (активный)", "ok", f"{active}", value=active))
+    active = os.getenv("LES_LLM_PROVIDER") or os.getenv("LLM_PROVIDER")
+    report.add(Check("LLM-провайдер", "ok" if active else "warn", active or "не задан в окружении", value=active))
     for name, key_env, model_env in CLOUD_PROVIDERS:
         has_key = bool(os.getenv(key_env, "").strip())
         model = os.getenv(model_env, "").strip()
@@ -335,7 +284,6 @@ def build_report() -> DoctorReport:
         check_ram,
         check_disk,
         check_gpu,
-        check_inference,
         check_proxy,
         check_providers,
         check_collections,

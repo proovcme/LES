@@ -97,7 +97,6 @@ _CRITICAL_FILES = (
     "sovushka/answer_render.py",
     "sovushka/styles.py",
     "sovushka_ng.py",
-    "mlx_host.py",
 )
 # безопасные флаги (булевы, без секретов)
 _SAFE_FLAGS = (

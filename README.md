@@ -48,4 +48,4 @@ API, CLI и MCP используют общий поиск и позволяют
 - **Windows x64.** [Сетевой и полный установщики](https://github.com/proovcme/LES/releases), [установка и управление из терминала](docs/public/les-light/README.md#установка). Для установки WebView2, если его ещё нет, нужен интернет. Установщик без подписи издателя.
 - **Модели.** Подключите локальную Ollama или совместимый OpenAI API. Модели ответа и поиска назначаются отдельно. Docker не нужен.
 - **Приложение.** Чат Svelte, API и фоновые службы Rust. В Windows Python загружается при первом запуске одобренного скрипта внешнего навыка. В окне доступны проекты, память, профили чата, MCP и обновления.
-- **Интеграции.** [MCP, API и CLI](docs/public/les-light/README.md#для-интеграций) · [macOS preview](docs/MACOS_PREVIEW.md) · [Ограничения и бэклог](docs/BACKLOG.md) · [Лицензия](LICENSE).
+- **Интеграции.** [MCP, API и CLI](docs/public/les-light/README.md#для-интеграций) · [Ограничения и бэклог](docs/BACKLOG.md) · [Лицензия](LICENSE).

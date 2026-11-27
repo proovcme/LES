@@ -20,9 +20,8 @@ SCHEMA = "les.code-runtime-map.v1"
 PRODUCT_ENTRYPOINTS = (
     "proxy_server.py",
     "sovushka_ng.py",
-    "mlx_host.py",
     "lemonade_host.py",
-    "tools/light_document_worker.py",  # Native host launches this through -m.
+    "tools/light_document_worker.py",  # Python compatibility format worker.
 )
 FOCUS_MODULES = ("proxy/routers/chat.py",)
 ROUTE_METHODS = {"delete", "get", "head", "options", "patch", "post", "put"}

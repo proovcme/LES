@@ -463,10 +463,6 @@ def stage_runtime(
             continue
         if relative.parts[:2] == ("desktop", "tauri"):
             continue
-        if target_platform.startswith("win") and relative.parts[:2] == ("installers", "macos"):
-            continue
-        if target_platform == "darwin" and relative.parts[:2] == ("installers", "windows"):
-            continue
         target = runtime / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
@@ -487,12 +483,6 @@ def stage_runtime(
         count += stage_windows_python(runtime)
         count += stage_windows_uv_cache(runtime, archive_path=windows_uv_cache_archive)
         count += stage_windows_deploy_stamp(runtime)
-    bootstrap = RESOURCES / "bootstrap.sh"
-    if target_platform == "darwin":
-        shutil.copy2(ROOT / "installers/macos/app/bootstrap.sh", bootstrap)
-        bootstrap.chmod(0o755)
-    else:
-        bootstrap.unlink(missing_ok=True)
     return count
 
 
@@ -539,39 +529,15 @@ def build(
     npm = npm_executable()
     subprocess.run([npm, "install"], cwd=TAURI_ROOT, check=True)
     command = [npm, "run", "tauri", "--", "build"]
-    tauri_bundles = bundles
-    if os.sys.platform == "darwin" and bundles:
-        requested = [item.strip() for item in bundles.split(",") if item.strip()]
-        # Sign the .app ourselves before creating the canonical DMG. A DMG made
-        # by Tauri before ad-hoc signing contains a bundle Gatekeeper rejects.
-        requested = [item for item in requested if item != "dmg"]
-        if "app" not in requested:
-            requested.append("app")
-        tauri_bundles = ",".join(requested)
-    if tauri_bundles:
-        command.extend(["--bundles", tauri_bundles])
+    if bundles:
+        command.extend(["--bundles", bundles])
     env = dict(os.environ)
     env["PATH"] = f"{Path.home() / '.cargo/bin'}:{env.get('PATH', '')}"
     subprocess.run(command, cwd=TAURI_ROOT, env=env, check=True)
     bundle_root = SRC_TAURI / "target" / "release" / "bundle"
     dist = ROOT / "dist"
     dist.mkdir(exist_ok=True)
-    if os.sys.platform == "darwin":
-        apps = sorted((bundle_root / "macos").glob("*.app"))
-        if apps:
-            subprocess.run(
-                ["codesign", "--force", "--deep", "--sign", "-", str(apps[-1])],
-                check=True,
-            )
-            target_app = dist / "LES.app"
-            if target_app.exists():
-                shutil.rmtree(target_app)
-            shutil.copytree(apps[-1], target_app, symlinks=True)
-            if bundles and "dmg" in bundles.split(","):
-                from tools.build_macos_dmg import build_dmg
-
-                build_dmg(version, sign=False)
-    elif os.sys.platform.startswith("win"):
+    if os.sys.platform.startswith("win"):
         installers = sorted((bundle_root / "nsis").glob("*.exe"))
         if installers:
             shutil.copy2(installers[-1], dist / "LES-Setup.exe")
@@ -583,7 +549,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", default=str(contract["product_version"]))
     parser.add_argument("--build-number", type=int, default=int(contract["build_number"]))
-    parser.add_argument("--bundles", default=None, help="Tauri bundle list, e.g. app,dmg or nsis")
+    parser.add_argument("--bundles", default=None, help="Tauri bundle list, e.g. nsis")
     args = parser.parse_args()
     print(build(args.version, args.bundles, build_number=args.build_number))
     return 0

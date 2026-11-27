@@ -5,8 +5,8 @@
   единый OpenAI-совместимый `/v1/chat/completions`);
 - embed: `backend/qdrant_adapter.EmbedClient` (MLX `/v1/embeddings`);
 - validator: rules (`backend.inference.validator`) → MLX `/api/validate` / облачный LLM;
-- rerank: `mlx_host.CrossEncoderReranker` (`/v1/rerank`, W2.2);
-- ocr: `backend/ocr_parser.MLXVisualOCRParser`.
+- rerank: клиент совместимого сервиса `/v1/rerank` или локальный Windows-реранкер;
+- ocr: Windows OCR, Tesseract или OpenAI-совместимый vision API.
 
 Используются как `typing.Protocol` (structural) — существующие классы им
 соответствуют без наследования. Цель — единая точка типизации/документации
@@ -60,6 +60,6 @@ class RerankProvider(Protocol):
 
 @runtime_checkable
 class OCRProvider(Protocol):
-    """Визуальный OCR. Текущая реализация — MLX GLM-OCR / Tesseract-фолбэк."""
+    """Визуальный OCR. Windows OCR или явно настроенный внешний читатель."""
 
     def ocr_page(self, image: Any, prompt: str = ...) -> str: ...

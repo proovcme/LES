@@ -72,7 +72,7 @@ CODE_FILES = {"sovushka_ng.py", "pyproject.toml", "uv.lock", "tools/__init__.py"
               "proxy/services/tabular_document_service.py",
               "sovushka/components/mcp_connections.py", "sovushka/components/light_shell.py"}
 CONFIG_FILES = {"extraction-errors.json", "version.json", "light-runtime.json", "windows_python.json", "windows_uv.json", "model-connection-templates.json", "execution-presets.json", "chat-profile-defaults.json"}
-PUBLIC_ASSETS = {"tools/light_macos_ocr.swift",
+PUBLIC_ASSETS = {
     "qdrant_visualizer/index.html", "qdrant_visualizer/forest.js",
     "qdrant_visualizer/search.html", "qdrant_visualizer/search.js",
     "qdrant_visualizer/forest-model.js", "qdrant_visualizer/forest-scene.js", "qdrant_visualizer/forest.css",
