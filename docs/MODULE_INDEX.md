@@ -535,8 +535,7 @@ FTS ID с Qdrant; `core/src/chat_context/coverage.rs` формирует мод�
 `document_catalog.document_registration` — снимок идентичности и пути источника;
 ingestion повторно проверяет его под writer lease перед публикацией. Удаление или
 перерегистрация во время конвертации отменяет устаревшую работу без записи в индекс.
-PDF из цитаты: `proxy/routers/documents.py` и `proxy/services/pdf_viewer_service.py` —
-разрешение исходника по происхождению, собственный просмотр страницы без PDF-плагина.
+PDF из цитаты: `api/src/documents/browse.rs` — разрешение исходника по происхождению и проверка его редакции.
 
 Восстановление диалога: `proxy/services/chat_durability_service.py`.
 Фоновая сводка: `proxy/services/background_summary_service.py`.

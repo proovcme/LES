@@ -261,12 +261,7 @@ async fn execute(context: &Arc<Context>, job: &Value) -> Result<(), String> {
         .map_err(|_| "READER_SETTINGS_INVALID")?
         .clamp(256, 64000)
         .min(byte_budget);
-    let structured = les_core::model_capabilities::require(
-        &resolved.snapshot,
-        &["structured_output".into()],
-        None,
-    )
-    .is_ok();
+    let structured = resolved.require(&["structured_output".into()]).is_ok();
     let file_limit = match settings.get("LES_DATASET_READER_FILE_LIMIT", "").trim() {
         "" => 500,
         value => value

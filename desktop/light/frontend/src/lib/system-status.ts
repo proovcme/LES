@@ -3,7 +3,7 @@ export interface Health {
   rag?: { status?: string; dense_available?: boolean; qdrant?: { ok?: boolean; points?: number; evidence_points?: number } };
 }
 export interface StatusModels {
-  roles: { answer?: { model_id: string; status?: string; auto_refresh?: boolean } | null; embeddings?: { model_id: string; status?: string } | null };
+  roles: { answer?: { model_id: string; status?: string } | null; embeddings?: { model_id: string; status?: string } | null };
 }
 export interface RuntimeStatus {
   chat_admission?: { allowed: boolean; reason?: string; memory?: { ram_free_gb?: number | null } };
@@ -21,7 +21,6 @@ export function chatStatus(models: StatusModels | null, runtime: RuntimeStatus |
   if (!models) return { label: 'Не проверено', detail: 'Не удалось получить настройки модели.', tone: 'unknown' };
   const model = models.roles.answer;
   if (!model) return { label: 'Нужна модель', detail: 'Назначьте модель для ответов.', tone: 'attention', action: 'models' };
-  if (model.auto_refresh) return { label: 'Проверится при отправке', detail: model.model_id, tone: 'unknown' };
   if (model.status === 'blocked') return { label: 'Проверьте модель', detail: model.model_id, tone: 'attention', action: 'models' };
   if (runtime?.chat_admission?.allowed === false) return { label: 'Временно недоступен',
     detail: runtime.chat_admission.reason || 'Лес пока не может начать ответ.', tone: 'attention' };

@@ -178,8 +178,7 @@ pub async fn handle(context: Arc<Context>, request: Request) -> Response {
                                     Err(code)=>{
                                         let r=&execution["revision"];
                                         let code = code.split(':').next().unwrap_or(&code);
-                                        json!({"connection_id":r["connection_id"],"revision_id":r["revision_id"],"display_name":r["display_name"],"model_id":r["model_id"],"locality":r["locality"],"status":"blocked","code":code,
-                                            "auto_refresh":role=="answer"&&crate::chat::prepare::can_refresh_answer(r,code)})
+                                        json!({"connection_id":r["connection_id"],"revision_id":r["revision_id"],"display_name":r["display_name"],"model_id":r["model_id"],"locality":r["locality"],"status":"blocked","code":code,"auto_refresh":false})
                                     }
                                 }
                             };

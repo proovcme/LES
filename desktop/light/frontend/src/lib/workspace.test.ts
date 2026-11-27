@@ -99,14 +99,15 @@ it('does not send to an unassigned model or change bindings', async () => {
   expect(vi.mocked(fetch).mock.calls.some(([path]) => path === '/api/chat/stream' || String(path).includes('/roles/'))).toBe(false);
 });
 
-it('sends the question when the API can refresh the existing local model', async () => {
+it('keeps the draft when a connection requires a check in settings', async () => {
   await workspace.initialize();
   workspace.model = { model_id: 'demo-model', connection_id: 'demo-connection',
-    status: 'blocked', code: 'CAPABILITY_SNAPSHOT_STALE', auto_refresh: true };
+    status: 'blocked', code: 'CAPABILITY_SNAPSHOT_MISSING' };
   workspace.text = 'Вопрос';
   await workspace.send();
-  expect(vi.mocked(fetch).mock.calls.filter(([path]) => path === '/api/chat/stream')).toHaveLength(1);
-  expect(workspace.messages.at(-1)?.text).toBe('Ответ');
+  expect(vi.mocked(fetch).mock.calls.filter(([path]) => path === '/api/chat/stream')).toHaveLength(0);
+  expect(workspace.text).toBe('Вопрос');
+  expect(workspace.error).toContain('недоступна');
 });
 
 it('flushes the latest characters before the 400ms autosave delay on normal close', async () => {

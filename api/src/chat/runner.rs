@@ -40,7 +40,7 @@ pub async fn run(
     }
     let mut turn = super::budget::until(
         deadline,
-        prepare::prepare(context.clone(), request.clone(), caller, sink),
+        prepare::prepare(context.clone(), request.clone(), caller),
     )
     .await?;
     let retrieval_mode = if turn.scope["document_grounding_enabled"] == true {
@@ -70,9 +70,7 @@ pub async fn run(
     .map_err(|_| "MODEL_QUEUE_TIMEOUT")?
     .map_err(|_| "MODEL_QUEUE_TIMEOUT")?;
     let indexed = retrieval_mode == "indexed";
-    let native =
-        les_core::model_capabilities::require(&turn.connection.snapshot, &["tools".into()], None)
-            .is_ok();
+    let native = turn.connection.require(&["tools".into()]).is_ok();
     if indexed
         && (!native
             || !turn.attachment.is_null()
@@ -526,12 +524,7 @@ pub async fn run(
                         )
                     })
                     .flatten();
-                let structured = les_core::model_capabilities::require(
-                    &turn.connection.snapshot,
-                    &["structured_output".into()],
-                    None,
-                )
-                .is_ok();
+                let structured = turn.connection.require(&["structured_output".into()]).is_ok();
                 let user_question = turn.request["question"].as_str().unwrap_or("");
                 let folder_pdf_table = folder_question
                     && lookup.is_none()

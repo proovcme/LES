@@ -745,8 +745,6 @@ def test_native_model_listing_and_history_migration(gateway):
         ConnectionLocality, ConnectionRole,
     )
     from proxy.services.model_connection_registry_service import ModelConnectionRegistry
-    from proxy.routers.model_connections import _admin_projection
-    from proxy.services.model_secret_service import EnvironmentSecretStore
     client, database, folder = gateway
     native_trust(folder)
     # This fixture owns its keys and model registry; it never reads the working LES.
@@ -768,15 +766,23 @@ def test_native_model_listing_and_history_migration(gateway):
     registry.save_capability_snapshot(CapabilitySnapshot('cap:fixture',revision.revision_id,(
         CapabilityObservation(CapabilityName.CHAT_COMPLETIONS,CapabilityState.SUPPORTED,'probe',observed,'http_200'),
     ),observed,observed+timedelta(days=1),{}),actor='admin:test')
-    secrets = EnvironmentSecretStore(env_path, environ={})
-    expected = _admin_projection(revision, registry=registry, secret_store=secrets).model_dump()
     templates = client.get('/api/model-connections/templates').raise_for_status()
     assert templates.headers['x-les-handler']=='rust.model-registry'
     assert any(t['template_id']=='ollama' for t in templates.json()['templates'])
     listing=client.get('/api/model-connections').raise_for_status()
     assert listing.headers['x-les-handler']=='rust.model-registry'
     assert listing.headers['cache-control']=='no-store'
-    assert listing.json()['connections']==[expected]
+    model, = listing.json()['connections']
+    assert model == {
+        'connection_id': revision.connection_id, 'revision_id': revision.revision_id, 'revision_no': 1,
+        'display_name': 'Модель 日本語 🌲', 'model_id': 'fixture:9b',
+        'base_url': 'http://127.0.0.1:11434/v1', 'protocol': revision.protocol,
+        'locality': 'loopback', 'requested_context_tokens': 24576, 'extension_type': 'ollama',
+        'enabled': True, 'created_at': revision.created_at, 'created_by': 'admin:test',
+        'secret_status': 'configured',
+        'capabilities': [{'name': 'chat_completions', 'state': 'supported', 'evidence_source': 'probe',
+                          'observed_at': observed.isoformat(), 'detail': 'http_200'}],
+    }
     assert listing.json()['bindings']['answer']['connection_revision_id']==revision.revision_id
     assert 'secret_ref' not in listing.text and 'fixture-never-return-this' not in listing.text
     assert client.get('/api/model-connections',headers={'X-API-Key':'user-fixture'}).status_code==403

@@ -141,7 +141,7 @@
     <header class="chat-header">
       <button class="mobile-menu icon-button quiet" aria-label={mobileNav ? 'Закрыть меню' : 'Открыть меню'} aria-expanded={mobileNav} onclick={() => mobileNav = !mobileNav}><Icon name={mobileNav ? 'close' : 'menu'} /></button>
       <div class="chat-heading"><h1>{workspace.session?.title || 'Новый диалог'}</h1></div>
-      <div class="model-indicator" title="Назначенная модель ответов"><span>{workspace.model?.model_id || 'Модель не назначена'}<small>{workspace.service || 'Модель ответов'}{workspace.model?.auto_refresh ? ' · проверится при отправке' : workspace.model?.status === 'blocked' ? ' · требует проверки' : ''}</small></span></div>
+      <div class="model-indicator" title="Назначенная модель ответов"><span>{workspace.model?.model_id || 'Модель не назначена'}<small>{workspace.service || 'Модель ответов'}{workspace.model?.status === 'blocked' ? ' · требует проверки' : ''}</small></span></div>
     </header>
     <div id="chat-content" class="chat-content" tabindex="-1">
       {#if workspace.notice}<p class="notice" role="status">{workspace.notice}</p>{/if}

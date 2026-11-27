@@ -1,12 +1,10 @@
 {
   "entrypoints": [
-    "lemonade_host.py",
     "tools/light_document_worker.py"
   ],
   "focus": {
     "proxy/services/retrieval_service.py": {
       "direct_importers": [
-        "proxy/routers/dataset_search.py",
         "proxy/services/table_appendix_service.py",
         "tests/test_light_index_recovery.py",
         "tests/test_light_pipeline_trial.py",
@@ -21,7 +19,6 @@
           "tests/test_retrieval_service.py"
         ],
         "classify_query": [
-          "proxy/routers/dataset_search.py",
           "tests/test_retrieval_service.py"
         ],
         "expand_retrieval_query": [
@@ -38,11 +35,9 @@
           "tests/test_retrieval_service.py"
         ],
         "resolve_dataset_ids": [
-          "proxy/routers/dataset_search.py",
           "tests/test_retrieval_service.py"
         ],
         "retrieve_chat_chunks": [
-          "proxy/routers/dataset_search.py",
           "tests/test_light_index_recovery.py",
           "tests/test_light_rerank_audit.py",
           "tests/test_retrieval_service.py",
@@ -90,7 +85,6 @@
         "backend/mail_ingest.py",
         "backend/mail_profile.py",
         "backend/mail_threads.py",
-        "backend/metrics_collector.py",
         "backend/msg_reader.py",
         "backend/native_core.py",
         "backend/native_document_conversion.py",
@@ -100,12 +94,10 @@
         "backend/native_parquet.py",
         "backend/native_table_rows.py",
         "backend/ocr_parser.py",
-        "backend/olm_reader.py",
         "backend/parquet_writer.py",
         "backend/parse_admission.py",
         "backend/pdf_reader.py",
         "backend/product_edition.py",
-        "backend/pst_reader.py",
         "backend/qdrant_adapter.py",
         "backend/qdrant_collection.py",
         "backend/qdrant_ingestion.py",
@@ -115,7 +107,6 @@
         "backend/qdrant_support.py",
         "backend/rag_config.py",
         "backend/rag_hierarchy.py",
-        "backend/reranker.py",
         "backend/retrieval_candidate.py",
         "backend/runtime_memory.py",
         "backend/runtime_paths.py",
@@ -199,9 +190,7 @@
         "backend/qdrant_support.py",
         "proxy/services/chat_attachment_read_service.py",
         "proxy/services/chat_folder_service.py",
-        "proxy/services/les_md_service.py",
         "tests/test_converter_email.py",
-        "tests/test_datasets_router.py",
         "tests/test_light_grounding_760.py",
         "tests/test_light_native_document.py",
         "tests/test_light_native_format_conversion.py",
@@ -232,7 +221,6 @@
     {
       "inbound": [
         "backend/qdrant_support.py",
-        "tests/test_dataset_watch.py",
         "tests/test_light_code_review.py",
         "tests/test_light_collection_safety.py",
         "tests/test_light_document_review.py",
@@ -274,7 +262,6 @@
         "backend/native_document_conversion.py",
         "backend/qdrant_support.py",
         "backend/smart_index.py",
-        "proxy/routers/dataset_uploads.py",
         "tests/test_light_ingestion_races.py",
         "tests/test_light_native_workbook.py",
         "tests/test_mail_registry_service.py",
@@ -353,8 +340,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/dataset_external.py",
-        "tests/test_datasets_router.py",
         "tests/test_light_format_worker.py"
       ],
       "lines": 37,
@@ -430,9 +415,6 @@
     },
     {
       "inbound": [
-        "backend/metrics_collector.py",
-        "backend/reranker.py",
-        "proxy/routers/runtime.py",
         "proxy/services/local_model_http.py"
       ],
       "lines": 48,
@@ -465,7 +447,6 @@
         "backend/qdrant_retrieval.py",
         "proxy/services/chat_section_context_service.py",
         "proxy/services/dataset_deletion_service.py",
-        "proxy/services/document_clause_service.py",
         "proxy/services/retrieval_service.py",
         "proxy/services/review_source_reader.py",
         "tests/test_light_audit_regressions.py",
@@ -617,8 +598,7 @@
     },
     {
       "inbound": [
-        "backend/inference/__init__.py",
-        "lemonade_host.py"
+        "backend/inference/__init__.py"
       ],
       "lines": 140,
       "module": "backend.inference.validator",
@@ -640,10 +620,7 @@
         "backend/qdrant_support.py",
         "backend/sparse_index.py",
         "backend/sparse_legacy.py",
-        "proxy/routers/dataset_cloud.py",
-        "proxy/routers/dataset_parse.py",
         "proxy/services/chat_section_context_service.py",
-        "proxy/services/document_clause_service.py",
         "proxy/services/document_review_tool.py",
         "proxy/services/lexical_evidence_service.py",
         "proxy/services/lexical_index_service.py",
@@ -739,7 +716,6 @@
     {
       "inbound": [
         "backend/light_qdrant_runtime.py",
-        "proxy/services/dataset_watch_service.py",
         "proxy/services/light_update_service.py",
         "tests/test_light_native_runtime.py"
       ],
@@ -754,8 +730,6 @@
     {
       "inbound": [
         "backend/qdrant_support.py",
-        "proxy/routers/dataset_external.py",
-        "proxy/routers/runtime.py",
         "proxy/services/dataset_deletion_service.py",
         "proxy/services/rag_catalog_recovery_service.py",
         "proxy/services/rag_readiness_service.py",
@@ -799,8 +773,6 @@
     },
     {
       "inbound": [
-        "backend/reranker.py",
-        "proxy/routers/rerank.py",
         "tests/test_light_rerank_audit.py"
       ],
       "lines": 180,
@@ -828,13 +800,11 @@
     {
       "inbound": [
         "backend/mail_threads.py",
-        "proxy/routers/mail.py",
         "proxy/services/mail_query_service.py",
         "proxy/services/mail_sync_service.py",
         "tests/test_light_mail_unicode.py",
         "tests/test_mail_ingest.py",
-        "tests/test_mail_registry_service.py",
-        "tests/test_mail_router.py"
+        "tests/test_mail_registry_service.py"
       ],
       "lines": 510,
       "module": "backend.mail_ingest",
@@ -851,7 +821,6 @@
       "inbound": [
         "backend/converter.py",
         "backend/qdrant_support.py",
-        "proxy/routers/mail.py",
         "tests/test_light_pdf_readers.py",
         "tests/test_mail_profile.py"
       ],
@@ -867,7 +836,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/mail.py",
         "proxy/services/mail_query_service.py",
         "proxy/services/mail_registry_service.py",
         "tests/test_mail_threads.py"
@@ -882,20 +850,6 @@
       ],
       "path": "backend/mail_threads.py",
       "status": "PRODUCT_REACHABLE"
-    },
-    {
-      "inbound": [
-        "proxy/routers/runtime.py",
-        "tests/test_light_system_memory.py"
-      ],
-      "lines": 131,
-      "module": "backend.metrics_collector",
-      "outbound": [
-        "backend/__init__.py",
-        "backend/http_client_policy.py"
-      ],
-      "path": "backend/metrics_collector.py",
-      "status": "TEST_OR_TOOL_ONLY"
     },
     {
       "inbound": [
@@ -973,7 +927,6 @@
         "proxy/services/trusted_executor_service.py",
         "tests/conftest.py",
         "tests/oracles/job_policy.py",
-        "tests/test_datasets_router.py",
         "tests/test_light_collection_safety.py",
         "tests/test_light_core_jobs_files.py",
         "tests/test_light_engineering_snapshots.py",
@@ -1078,7 +1031,6 @@
         "backend/qdrant_collection.py",
         "backend/qdrant_ingestion.py",
         "backend/qdrant_retrieval.py",
-        "proxy/routers/jobs.py",
         "proxy/services/chat_section_context_service.py",
         "proxy/services/dataset_memory_service.py",
         "proxy/services/job_service.py",
@@ -1149,18 +1101,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/mail.py"
-      ],
-      "lines": 133,
-      "module": "backend.olm_reader",
-      "outbound": [
-        "backend/__init__.py"
-      ],
-      "path": "backend/olm_reader.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
         "backend/qdrant_support.py",
         "proxy/services/bor_service.py",
         "tests/oracles/table_rows_828.py",
@@ -1180,8 +1120,7 @@
     },
     {
       "inbound": [
-        "proxy/services/dataset_parse_service.py",
-        "tests/test_datasets_router.py"
+        "proxy/services/dataset_parse_service.py"
       ],
       "lines": 16,
       "module": "backend.parse_admission",
@@ -1221,10 +1160,6 @@
         "backend/document_catalog.py",
         "backend/light_qdrant_connection.py",
         "backend/qdrant_adapter.py",
-        "proxy/routers/dataset_catalog.py",
-        "proxy/routers/dataset_document_ops.py",
-        "proxy/routers/dataset_uploads.py",
-        "proxy/routers/mail.py",
         "proxy/services/chat_attachment_read_service.py",
         "proxy/services/dataset_deletion_service.py",
         "proxy/services/dataset_parse_service.py",
@@ -1247,21 +1182,8 @@
     },
     {
       "inbound": [
-        "proxy/routers/mail.py"
-      ],
-      "lines": 790,
-      "module": "backend.pst_reader",
-      "outbound": [
-        "backend/__init__.py"
-      ],
-      "path": "backend/pst_reader.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/routers/dataset_external.py",
         "tests/test_chunking_w2.py",
-        "tests/test_datasets_router.py",
+        "tests/test_light_code_review.py",
         "tests/test_light_conversation_context.py",
         "tests/test_light_import_responsiveness.py",
         "tests/test_light_rerank_audit.py",
@@ -1428,7 +1350,6 @@
         "backend/qdrant_integrity.py",
         "backend/qdrant_nodes.py",
         "backend/qdrant_retrieval.py",
-        "proxy/routers/documents.py",
         "tests/test_light_audit_regressions.py",
         "tests/test_light_format_worker.py",
         "tests/test_light_grounding_760.py",
@@ -1478,17 +1399,9 @@
         "backend/format_process.py",
         "backend/native_parquet.py",
         "backend/qdrant_support.py",
-        "proxy/routers/dataset_catalog.py",
-        "proxy/routers/dataset_external.py",
-        "proxy/routers/dataset_parse.py",
-        "proxy/routers/dataset_search.py",
-        "proxy/routers/dataset_watch.py",
-        "proxy/routers/jobs.py",
-        "proxy/routers/runtime.py",
         "proxy/services/agent_state_service.py",
         "proxy/services/auto_parse_resume_service.py",
         "proxy/services/cad_bim_graph.py",
-        "proxy/services/canonical_promotion_service.py",
         "proxy/services/chat_durability_service.py",
         "proxy/services/chat_persistence_service.py",
         "proxy/services/chat_profile_service.py",
@@ -1503,7 +1416,6 @@
         "proxy/services/field_intake_service.py",
         "proxy/services/graph_edges_service.py",
         "proxy/services/job_service.py",
-        "proxy/services/les_md_service.py",
         "proxy/services/lexical_index_service.py",
         "proxy/services/mcp_connection_service.py",
         "proxy/services/memory_service.py",
@@ -1556,21 +1468,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/dataset_search.py",
-        "proxy/routers/rerank.py"
-      ],
-      "lines": 450,
-      "module": "backend.reranker",
-      "outbound": [
-        "backend/__init__.py",
-        "backend/http_client_policy.py",
-        "backend/local_reranker.py"
-      ],
-      "path": "backend/reranker.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
         "tests/test_light_retrieval_candidate.py",
         "tools/evaluate_retrieval_candidate.py"
       ],
@@ -1610,21 +1507,15 @@
         "backend/pdf_reader.py",
         "backend/qdrant_support.py",
         "backend/windows_ocr.py",
-        "proxy/routers/dataset_catalog.py",
-        "proxy/routers/mail.py",
-        "proxy/routers/runtime.py",
         "proxy/services/bor_service.py",
         "proxy/services/candidate_acceptance_service.py",
         "proxy/services/chat_attachment_service.py",
         "proxy/services/chat_folder_service.py",
         "proxy/services/context_memory_service.py",
         "proxy/services/dataset_contracts.py",
-        "proxy/services/dataset_watch_service.py",
         "proxy/services/document_original_service.py",
-        "proxy/services/forms_service.py",
         "proxy/services/installed_skill_service.py",
         "proxy/services/light_update_service.py",
-        "proxy/services/list_office_service.py",
         "proxy/services/mail_query_service.py",
         "proxy/services/mail_sync_service.py",
         "proxy/services/normcontrol_service.py",
@@ -1633,8 +1524,7 @@
         "proxy/services/project_pdf_extract_service.py",
         "proxy/services/project_table_registry_service.py",
         "proxy/services/rag_advanced_policy_service.py",
-        "proxy/services/table_document_tool.py",
-        "proxy/storage/file_storage.py"
+        "proxy/services/table_document_tool.py"
       ],
       "lines": 31,
       "module": "backend.runtime_paths",
@@ -1648,10 +1538,6 @@
       "inbound": [
         "backend/document_catalog.py",
         "backend/external_scan.py",
-        "proxy/routers/dataset_catalog.py",
-        "proxy/routers/dataset_external.py",
-        "proxy/routers/dataset_parse.py",
-        "proxy/routers/dataset_watch.py",
         "proxy/services/chat_folder_service.py",
         "proxy/services/document_explorer_service.py",
         "proxy/services/graph_edges_service.py",
@@ -1744,10 +1630,8 @@
     {
       "inbound": [
         "backend/runtime_memory.py",
-        "proxy/routers/runtime.py",
         "proxy/services/runtime_admission.py",
-        "tests/test_light_resource_memory.py",
-        "tests/test_light_system_memory.py"
+        "tests/test_light_resource_memory.py"
       ],
       "lines": 16,
       "module": "backend.system_memory",
@@ -1778,7 +1662,6 @@
     },
     {
       "inbound": [
-        "proxy/security.py",
         "tests/test_light_native_trust.py"
       ],
       "lines": 28,
@@ -1852,7 +1735,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/jobs.py",
         "proxy/services/chat_durability_service.py",
         "proxy/services/chat_persistence_service.py",
         "proxy/services/chat_session_service.py",
@@ -1882,16 +1764,6 @@
       "status": "PRODUCT_REACHABLE"
     },
     {
-      "inbound": [],
-      "lines": 381,
-      "module": "lemonade_host",
-      "outbound": [
-        "backend/inference/validator.py"
-      ],
-      "path": "lemonade_host.py",
-      "status": "PRODUCT_REACHABLE"
-    },
-    {
       "inbound": [
         "proxy/config.py",
         "proxy/light_boundary.py",
@@ -1902,25 +1774,6 @@
         "proxy/memory_core/contracts.py",
         "proxy/memory_core/store.py",
         "proxy/memory_core/validation.py",
-        "proxy/routers/__init__.py",
-        "proxy/routers/dataset_catalog.py",
-        "proxy/routers/dataset_cloud.py",
-        "proxy/routers/dataset_document_ops.py",
-        "proxy/routers/dataset_external.py",
-        "proxy/routers/dataset_parse.py",
-        "proxy/routers/dataset_search.py",
-        "proxy/routers/dataset_uploads.py",
-        "proxy/routers/dataset_watch.py",
-        "proxy/routers/datasets.py",
-        "proxy/routers/documents.py",
-        "proxy/routers/forms.py",
-        "proxy/routers/jobs.py",
-        "proxy/routers/mail.py",
-        "proxy/routers/memory.py",
-        "proxy/routers/model_connections.py",
-        "proxy/routers/rerank.py",
-        "proxy/routers/runtime.py",
-        "proxy/security.py",
         "proxy/services/__init__.py",
         "proxy/services/agent_state_service.py",
         "proxy/services/answer_contract_service.py",
@@ -1930,7 +1783,6 @@
         "proxy/services/bound_document_tools.py",
         "proxy/services/cad_bim_graph.py",
         "proxy/services/candidate_acceptance_service.py",
-        "proxy/services/canonical_promotion_service.py",
         "proxy/services/canonical_route_service.py",
         "proxy/services/chat_attachment_read_service.py",
         "proxy/services/chat_attachment_service.py",
@@ -1946,7 +1798,6 @@
         "proxy/services/chat_runtime.py",
         "proxy/services/chat_section_context_service.py",
         "proxy/services/chat_session_service.py",
-        "proxy/services/cloud_drive_service.py",
         "proxy/services/command_service.py",
         "proxy/services/context_governor_service.py",
         "proxy/services/context_memory_service.py",
@@ -1956,13 +1807,10 @@
         "proxy/services/dataset_memory_service.py",
         "proxy/services/dataset_parse_service.py",
         "proxy/services/dataset_runtime.py",
-        "proxy/services/dataset_watch_service.py",
         "proxy/services/decision_service.py",
-        "proxy/services/deterministic_policy_service.py",
         "proxy/services/doc_extract_service.py",
         "proxy/services/doc_router.py",
         "proxy/services/doc_type_classifier.py",
-        "proxy/services/document_clause_service.py",
         "proxy/services/document_explorer_service.py",
         "proxy/services/document_original_service.py",
         "proxy/services/document_review_tool.py",
@@ -1976,10 +1824,8 @@
         "proxy/services/evidence_contract.py",
         "proxy/services/evidence_packet_service.py",
         "proxy/services/execution_receipt_service.py",
-        "proxy/services/extract_service.py",
         "proxy/services/field_intake_service.py",
         "proxy/services/file_viewer_service.py",
-        "proxy/services/forms_service.py",
         "proxy/services/generation_guard_service.py",
         "proxy/services/graph_edges_service.py",
         "proxy/services/installed_skill_service.py",
@@ -1987,13 +1833,10 @@
         "proxy/services/kac_pdf_service.py",
         "proxy/services/kac_service.py",
         "proxy/services/kot_service.py",
-        "proxy/services/les_md_service.py",
         "proxy/services/les_module_service.py",
         "proxy/services/lexical_evidence_service.py",
         "proxy/services/lexical_index_service.py",
         "proxy/services/light_update_service.py",
-        "proxy/services/list_office_agent_service.py",
-        "proxy/services/list_office_service.py",
         "proxy/services/llm_transport_profile_service.py",
         "proxy/services/local_model_http.py",
         "proxy/services/mail_push_service.py",
@@ -2003,7 +1846,6 @@
         "proxy/services/mcp_connection_service.py",
         "proxy/services/memory_port.py",
         "proxy/services/memory_rag_adapter.py",
-        "proxy/services/memory_runtime_service.py",
         "proxy/services/memory_service.py",
         "proxy/services/memory_worker_service.py",
         "proxy/services/model_capability_refresh_service.py",
@@ -2012,13 +1854,11 @@
         "proxy/services/model_connection_registry_service.py",
         "proxy/services/model_connection_resolver_service.py",
         "proxy/services/model_connection_security_service.py",
-        "proxy/services/model_engine_extension_service.py",
         "proxy/services/model_execution_preset_service.py",
         "proxy/services/model_reasoning_service.py",
         "proxy/services/model_resource_service.py",
         "proxy/services/model_secret_service.py",
         "proxy/services/model_streaming_service.py",
-        "proxy/services/native_open_service.py",
         "proxy/services/native_research_loop_service.py",
         "proxy/services/native_tool_message_service.py",
         "proxy/services/normcontrol_service.py",
@@ -2036,7 +1876,6 @@
         "proxy/services/project_document_registry_service.py",
         "proxy/services/project_pdf_extract_service.py",
         "proxy/services/project_pdf_table_service.py",
-        "proxy/services/project_registry_chat_service.py",
         "proxy/services/project_service.py",
         "proxy/services/project_table_registry_service.py",
         "proxy/services/prompt_registry_service.py",
@@ -2047,7 +1886,6 @@
         "proxy/services/rag_catalog_recovery_service.py",
         "proxy/services/rag_pipeline_status_service.py",
         "proxy/services/rag_readiness_service.py",
-        "proxy/services/request_idempotency_service.py",
         "proxy/services/request_memory_service.py",
         "proxy/services/resource_governor.py",
         "proxy/services/retrieval_candidate_service.py",
@@ -2059,12 +1897,9 @@
         "proxy/services/runtime_admission.py",
         "proxy/services/runtime_dispatcher.py",
         "proxy/services/saferag_service.py",
-        "proxy/services/scope_service.py",
         "proxy/services/section_evidence_candidate.py",
-        "proxy/services/sidecar_ops_service.py",
         "proxy/services/skill_snippet_registry.py",
         "proxy/services/source_locator_service.py",
-        "proxy/services/structured_extract.py",
         "proxy/services/system_dataset_service.py",
         "proxy/services/table_appendix_service.py",
         "proxy/services/table_document_tool.py",
@@ -2079,9 +1914,7 @@
         "proxy/services/trusted_executor_service.py",
         "proxy/services/version_service.py",
         "proxy/services/workbook_total_service.py",
-        "proxy/services/workflow_plan_service.py",
-        "proxy/storage/__init__.py",
-        "proxy/storage/file_storage.py"
+        "proxy/services/workflow_plan_service.py"
       ],
       "lines": 2,
       "module": "proxy",
@@ -2093,21 +1926,10 @@
       "inbound": [
         "backend/embedding_client.py",
         "proxy/memory_core/store.py",
-        "proxy/routers/dataset_cloud.py",
-        "proxy/routers/dataset_external.py",
-        "proxy/routers/dataset_search.py",
-        "proxy/routers/dataset_uploads.py",
-        "proxy/routers/mail.py",
-        "proxy/routers/model_connections.py",
-        "proxy/routers/runtime.py",
-        "proxy/security.py",
         "proxy/services/chat_inference_service.py",
-        "proxy/services/cloud_drive_service.py",
         "proxy/services/job_service.py",
-        "proxy/storage/file_storage.py",
         "tests/oracles/context_python.py",
-        "tests/oracles/job_store.py",
-        "tests/test_model_connections_router.py"
+        "tests/oracles/job_store.py"
       ],
       "lines": 168,
       "module": "proxy.config",
@@ -2133,7 +1955,6 @@
     {
       "inbound": [
         "proxy/config.py",
-        "proxy/routers/runtime.py",
         "proxy/services/chat_inference_service.py",
         "proxy/services/resource_governor.py"
       ],
@@ -2165,9 +1986,7 @@
     },
     {
       "inbound": [
-        "proxy/routers/memory.py",
         "proxy/services/memory_rag_adapter.py",
-        "proxy/services/memory_runtime_service.py",
         "tests/test_memory_core.py"
       ],
       "lines": 76,
@@ -2206,9 +2025,7 @@
         "proxy/memory_core/validation.py",
         "proxy/services/memory_port.py",
         "proxy/services/memory_rag_adapter.py",
-        "proxy/services/memory_runtime_service.py",
         "proxy/services/memory_worker_service.py",
-        "tests/test_memory_api.py",
         "tests/test_memory_core.py"
       ],
       "lines": 120,
@@ -2225,11 +2042,8 @@
         "proxy/memory_core/__init__.py",
         "proxy/memory_core/config.py",
         "proxy/memory_core/conflicts.py",
-        "proxy/routers/memory.py",
         "proxy/services/memory_rag_adapter.py",
-        "proxy/services/memory_runtime_service.py",
         "proxy/services/memory_worker_service.py",
-        "tests/test_memory_api.py",
         "tests/test_memory_core.py"
       ],
       "lines": 566,
@@ -2261,472 +2075,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/dataset_catalog.py",
-        "proxy/routers/dataset_cloud.py",
-        "proxy/routers/dataset_document_ops.py",
-        "proxy/routers/dataset_external.py",
-        "proxy/routers/dataset_parse.py",
-        "proxy/routers/dataset_search.py",
-        "proxy/routers/dataset_uploads.py",
-        "proxy/routers/dataset_watch.py",
-        "proxy/routers/datasets.py",
-        "proxy/routers/documents.py",
-        "proxy/routers/forms.py",
-        "proxy/routers/jobs.py",
-        "proxy/routers/mail.py",
-        "proxy/routers/memory.py",
-        "proxy/routers/model_connections.py",
-        "proxy/routers/rerank.py",
-        "proxy/routers/runtime.py"
-      ],
-      "lines": 2,
-      "module": "proxy.routers",
-      "outbound": [
-        "proxy/__init__.py"
-      ],
-      "path": "proxy/routers/__init__.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/routers/datasets.py",
-        "tests/test_datasets_router.py",
-        "tests/test_document_explorer_service.py"
-      ],
-      "lines": 457,
-      "module": "proxy.routers.dataset_catalog",
-      "outbound": [
-        "backend/product_edition.py",
-        "backend/rag_config.py",
-        "backend/runtime_paths.py",
-        "backend/smart_index.py",
-        "proxy/__init__.py",
-        "proxy/routers/__init__.py",
-        "proxy/security.py",
-        "proxy/services/context_memory_service.py",
-        "proxy/services/dataset_contracts.py",
-        "proxy/services/dataset_deletion_service.py",
-        "proxy/services/dataset_memory_service.py",
-        "proxy/services/dataset_runtime.py",
-        "proxy/services/dataset_watch_service.py",
-        "proxy/services/lexical_index_service.py",
-        "proxy/services/rag_catalog_guard_service.py",
-        "proxy/services/rag_readiness_service.py",
-        "proxy/storage/file_storage.py"
-      ],
-      "path": "proxy/routers/dataset_catalog.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/routers/datasets.py"
-      ],
-      "lines": 187,
-      "module": "proxy.routers.dataset_cloud",
-      "outbound": [
-        "backend/interface.py",
-        "proxy/__init__.py",
-        "proxy/config.py",
-        "proxy/routers/__init__.py",
-        "proxy/routers/dataset_external.py",
-        "proxy/security.py",
-        "proxy/services/cloud_drive_service.py",
-        "proxy/services/dataset_contracts.py",
-        "proxy/services/dataset_runtime.py",
-        "proxy/storage/file_storage.py"
-      ],
-      "path": "proxy/routers/dataset_cloud.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/routers/datasets.py",
-        "tests/test_datasets_router.py"
-      ],
-      "lines": 305,
-      "module": "proxy.routers.dataset_document_ops",
-      "outbound": [
-        "backend/product_edition.py",
-        "proxy/__init__.py",
-        "proxy/routers/__init__.py",
-        "proxy/routers/dataset_parse.py",
-        "proxy/security.py",
-        "proxy/services/dataset_contracts.py",
-        "proxy/services/dataset_runtime.py",
-        "proxy/services/graph_edges_service.py",
-        "proxy/services/project_document_registry_service.py",
-        "proxy/services/project_pdf_extract_service.py",
-        "proxy/services/project_table_registry_service.py",
-        "proxy/services/sidecar_ops_service.py"
-      ],
-      "path": "proxy/routers/dataset_document_ops.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/routers/dataset_cloud.py",
-        "proxy/routers/datasets.py",
-        "tests/test_dataset_watch.py",
-        "tests/test_datasets_router.py",
-        "tests/test_light_import_responsiveness.py"
-      ],
-      "lines": 684,
-      "module": "proxy.routers.dataset_external",
-      "outbound": [
-        "backend/external_scan.py",
-        "backend/light_qdrant_connection.py",
-        "backend/qdrant_adapter.py",
-        "backend/rag_config.py",
-        "backend/smart_index.py",
-        "proxy/__init__.py",
-        "proxy/config.py",
-        "proxy/routers/__init__.py",
-        "proxy/security.py",
-        "proxy/services/dataset_contracts.py",
-        "proxy/services/dataset_parse_service.py",
-        "proxy/services/dataset_runtime.py",
-        "proxy/services/lexical_index_service.py",
-        "proxy/storage/file_storage.py"
-      ],
-      "path": "proxy/routers/dataset_external.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/routers/dataset_document_ops.py",
-        "proxy/routers/datasets.py",
-        "tests/test_datasets_router.py"
-      ],
-      "lines": 394,
-      "module": "proxy.routers.dataset_parse",
-      "outbound": [
-        "backend/interface.py",
-        "backend/rag_config.py",
-        "backend/smart_index.py",
-        "proxy/__init__.py",
-        "proxy/routers/__init__.py",
-        "proxy/security.py",
-        "proxy/services/dataset_contracts.py",
-        "proxy/services/dataset_parse_service.py",
-        "proxy/services/dataset_runtime.py",
-        "proxy/storage/file_storage.py"
-      ],
-      "path": "proxy/routers/dataset_parse.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/routers/datasets.py",
-        "tests/test_datasets_router.py",
-        "tests/test_light_audit_regressions.py"
-      ],
-      "lines": 225,
-      "module": "proxy.routers.dataset_search",
-      "outbound": [
-        "backend/rag_config.py",
-        "backend/reranker.py",
-        "proxy/__init__.py",
-        "proxy/config.py",
-        "proxy/routers/__init__.py",
-        "proxy/security.py",
-        "proxy/services/chat_section_context_service.py",
-        "proxy/services/dataset_contracts.py",
-        "proxy/services/dataset_runtime.py",
-        "proxy/services/retrieval_service.py"
-      ],
-      "path": "proxy/routers/dataset_search.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/routers/datasets.py",
-        "tests/test_datasets_router.py",
-        "tests/test_light_grounding_760.py"
-      ],
-      "lines": 357,
-      "module": "proxy.routers.dataset_uploads",
-      "outbound": [
-        "backend/document_router.py",
-        "backend/product_edition.py",
-        "proxy/__init__.py",
-        "proxy/config.py",
-        "proxy/routers/__init__.py",
-        "proxy/security.py",
-        "proxy/services/candidate_acceptance_service.py",
-        "proxy/services/chat_attachment_read_service.py",
-        "proxy/services/chat_attachment_service.py",
-        "proxy/services/chat_folder_service.py",
-        "proxy/services/dataset_contracts.py",
-        "proxy/services/dataset_parse_service.py",
-        "proxy/services/dataset_runtime.py",
-        "proxy/services/request_idempotency_service.py",
-        "proxy/storage/file_storage.py"
-      ],
-      "path": "proxy/routers/dataset_uploads.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/routers/datasets.py",
-        "tests/test_datasets_router.py"
-      ],
-      "lines": 376,
-      "module": "proxy.routers.dataset_watch",
-      "outbound": [
-        "backend/rag_config.py",
-        "backend/smart_index.py",
-        "proxy/__init__.py",
-        "proxy/routers/__init__.py",
-        "proxy/security.py",
-        "proxy/services/dataset_contracts.py",
-        "proxy/services/dataset_parse_service.py",
-        "proxy/services/dataset_runtime.py"
-      ],
-      "path": "proxy/routers/dataset_watch.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/routers/mail.py",
-        "proxy/services/dataset_watch_service.py",
-        "tests/test_datasets_router.py",
-        "tests/test_document_explorer_service.py",
-        "tests/test_mail_router.py",
-        "tests/test_model_connection_embeddings_integration.py"
-      ],
-      "lines": 194,
-      "module": "proxy.routers.datasets",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/routers/__init__.py",
-        "proxy/routers/dataset_catalog.py",
-        "proxy/routers/dataset_cloud.py",
-        "proxy/routers/dataset_document_ops.py",
-        "proxy/routers/dataset_external.py",
-        "proxy/routers/dataset_parse.py",
-        "proxy/routers/dataset_search.py",
-        "proxy/routers/dataset_uploads.py",
-        "proxy/routers/dataset_watch.py",
-        "proxy/security.py",
-        "proxy/services/dataset_contracts.py",
-        "proxy/services/dataset_parse_service.py",
-        "proxy/services/dataset_runtime.py"
-      ],
-      "path": "proxy/routers/datasets.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "tests/test_document_explorer_service.py"
-      ],
-      "lines": 376,
-      "module": "proxy.routers.documents",
-      "outbound": [
-        "backend/qdrant_support.py",
-        "proxy/__init__.py",
-        "proxy/routers/__init__.py",
-        "proxy/security.py",
-        "proxy/services/document_clause_service.py",
-        "proxy/services/document_explorer_service.py",
-        "proxy/services/document_original_service.py",
-        "proxy/services/file_viewer_service.py",
-        "proxy/services/native_open_service.py",
-        "proxy/services/pdf_contour_service.py",
-        "proxy/services/pdf_viewer_service.py"
-      ],
-      "path": "proxy/routers/documents.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "tests/test_light_forms_boundary.py"
-      ],
-      "lines": 167,
-      "module": "proxy.routers.forms",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/routers/__init__.py",
-        "proxy/security.py",
-        "proxy/services/forms_service.py",
-        "proxy/services/list_office_agent_service.py",
-        "proxy/services/list_office_service.py"
-      ],
-      "path": "proxy/routers/forms.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/routers/runtime.py"
-      ],
-      "lines": 134,
-      "module": "proxy.routers.jobs",
-      "outbound": [
-        "backend/native_index_store.py",
-        "backend/rag_config.py",
-        "backend/workspace_native.py",
-        "proxy/__init__.py",
-        "proxy/routers/__init__.py",
-        "proxy/security.py",
-        "proxy/services/runtime_dispatcher.py"
-      ],
-      "path": "proxy/routers/jobs.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "tests/test_light_mail_isolation.py",
-        "tests/test_mail_router.py",
-        "tests/test_outlook_mail_poller.py"
-      ],
-      "lines": 1495,
-      "module": "proxy.routers.mail",
-      "outbound": [
-        "backend/mail_ingest.py",
-        "backend/mail_profile.py",
-        "backend/mail_threads.py",
-        "backend/olm_reader.py",
-        "backend/product_edition.py",
-        "backend/pst_reader.py",
-        "backend/runtime_paths.py",
-        "proxy/__init__.py",
-        "proxy/config.py",
-        "proxy/routers/__init__.py",
-        "proxy/routers/datasets.py",
-        "proxy/security.py",
-        "proxy/services/mail_push_service.py",
-        "proxy/services/mail_registry_service.py",
-        "proxy/services/mail_sync_service.py",
-        "proxy/services/runtime_dispatcher.py"
-      ],
-      "path": "proxy/routers/mail.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "tests/test_light_memory_boundary.py",
-        "tests/test_memory_api.py"
-      ],
-      "lines": 153,
-      "module": "proxy.routers.memory",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/memory_core/config.py",
-        "proxy/memory_core/store.py",
-        "proxy/routers/__init__.py",
-        "proxy/security.py",
-        "proxy/services/memory_runtime_service.py"
-      ],
-      "path": "proxy/routers/memory.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "tests/test_light_native_api.py",
-        "tests/test_model_connections_router.py"
-      ],
-      "lines": 695,
-      "module": "proxy.routers.model_connections",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/config.py",
-        "proxy/routers/__init__.py",
-        "proxy/security.py",
-        "proxy/services/canonical_promotion_service.py",
-        "proxy/services/model_capability_service.py",
-        "proxy/services/model_connection_contracts.py",
-        "proxy/services/model_connection_registry_service.py",
-        "proxy/services/model_connection_resolver_service.py",
-        "proxy/services/model_connection_security_service.py",
-        "proxy/services/model_engine_extension_service.py",
-        "proxy/services/model_secret_service.py"
-      ],
-      "path": "proxy/routers/model_connections.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "tests/test_light_rerank_audit.py"
-      ],
-      "lines": 100,
-      "module": "proxy.routers.rerank",
-      "outbound": [
-        "backend/local_reranker.py",
-        "backend/reranker.py",
-        "proxy/__init__.py",
-        "proxy/routers/__init__.py",
-        "proxy/security.py",
-        "proxy/services/resource_governor.py"
-      ],
-      "path": "proxy/routers/rerank.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "tests/test_light_runtime_identity.py",
-        "tests/test_light_system_memory.py"
-      ],
-      "lines": 922,
-      "module": "proxy.routers.runtime",
-      "outbound": [
-        "backend/http_client_policy.py",
-        "backend/light_qdrant_connection.py",
-        "backend/metrics_collector.py",
-        "backend/rag_config.py",
-        "backend/runtime_paths.py",
-        "backend/system_memory.py",
-        "proxy/__init__.py",
-        "proxy/config.py",
-        "proxy/local_model_registry.py",
-        "proxy/routers/__init__.py",
-        "proxy/routers/jobs.py",
-        "proxy/security.py",
-        "proxy/services/model_connection_contracts.py",
-        "proxy/services/model_connection_registry_service.py",
-        "proxy/services/project_service.py",
-        "proxy/services/resource_governor.py",
-        "proxy/services/runtime_admission.py",
-        "proxy/services/runtime_dispatcher.py",
-        "proxy/services/scope_service.py",
-        "proxy/services/version_service.py",
-        "tools/backup_suharik.py"
-      ],
-      "path": "proxy/routers/runtime.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/routers/dataset_catalog.py",
-        "proxy/routers/dataset_cloud.py",
-        "proxy/routers/dataset_document_ops.py",
-        "proxy/routers/dataset_external.py",
-        "proxy/routers/dataset_parse.py",
-        "proxy/routers/dataset_search.py",
-        "proxy/routers/dataset_uploads.py",
-        "proxy/routers/dataset_watch.py",
-        "proxy/routers/datasets.py",
-        "proxy/routers/documents.py",
-        "proxy/routers/forms.py",
-        "proxy/routers/jobs.py",
-        "proxy/routers/mail.py",
-        "proxy/routers/memory.py",
-        "proxy/routers/model_connections.py",
-        "proxy/routers/rerank.py",
-        "proxy/routers/runtime.py",
-        "tests/test_memory_api.py",
-        "tests/test_model_connections_router.py"
-      ],
-      "lines": 230,
-      "module": "proxy.security",
-      "outbound": [
-        "backend/trust_core.py",
-        "proxy/__init__.py",
-        "proxy/config.py"
-      ],
-      "path": "proxy/security.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
         "proxy/services/agent_state_service.py",
         "proxy/services/answer_contract_service.py",
         "proxy/services/auto_parse_resume_service.py",
@@ -2735,7 +2083,6 @@
         "proxy/services/bound_document_tools.py",
         "proxy/services/cad_bim_graph.py",
         "proxy/services/candidate_acceptance_service.py",
-        "proxy/services/canonical_promotion_service.py",
         "proxy/services/canonical_route_service.py",
         "proxy/services/chat_attachment_read_service.py",
         "proxy/services/chat_attachment_service.py",
@@ -2751,7 +2098,6 @@
         "proxy/services/chat_runtime.py",
         "proxy/services/chat_section_context_service.py",
         "proxy/services/chat_session_service.py",
-        "proxy/services/cloud_drive_service.py",
         "proxy/services/command_service.py",
         "proxy/services/context_governor_service.py",
         "proxy/services/context_memory_service.py",
@@ -2761,13 +2107,10 @@
         "proxy/services/dataset_memory_service.py",
         "proxy/services/dataset_parse_service.py",
         "proxy/services/dataset_runtime.py",
-        "proxy/services/dataset_watch_service.py",
         "proxy/services/decision_service.py",
-        "proxy/services/deterministic_policy_service.py",
         "proxy/services/doc_extract_service.py",
         "proxy/services/doc_router.py",
         "proxy/services/doc_type_classifier.py",
-        "proxy/services/document_clause_service.py",
         "proxy/services/document_explorer_service.py",
         "proxy/services/document_original_service.py",
         "proxy/services/document_review_tool.py",
@@ -2781,10 +2124,8 @@
         "proxy/services/evidence_contract.py",
         "proxy/services/evidence_packet_service.py",
         "proxy/services/execution_receipt_service.py",
-        "proxy/services/extract_service.py",
         "proxy/services/field_intake_service.py",
         "proxy/services/file_viewer_service.py",
-        "proxy/services/forms_service.py",
         "proxy/services/generation_guard_service.py",
         "proxy/services/graph_edges_service.py",
         "proxy/services/installed_skill_service.py",
@@ -2792,13 +2133,10 @@
         "proxy/services/kac_pdf_service.py",
         "proxy/services/kac_service.py",
         "proxy/services/kot_service.py",
-        "proxy/services/les_md_service.py",
         "proxy/services/les_module_service.py",
         "proxy/services/lexical_evidence_service.py",
         "proxy/services/lexical_index_service.py",
         "proxy/services/light_update_service.py",
-        "proxy/services/list_office_agent_service.py",
-        "proxy/services/list_office_service.py",
         "proxy/services/llm_transport_profile_service.py",
         "proxy/services/local_model_http.py",
         "proxy/services/mail_push_service.py",
@@ -2808,7 +2146,6 @@
         "proxy/services/mcp_connection_service.py",
         "proxy/services/memory_port.py",
         "proxy/services/memory_rag_adapter.py",
-        "proxy/services/memory_runtime_service.py",
         "proxy/services/memory_service.py",
         "proxy/services/memory_worker_service.py",
         "proxy/services/model_capability_refresh_service.py",
@@ -2817,13 +2154,11 @@
         "proxy/services/model_connection_registry_service.py",
         "proxy/services/model_connection_resolver_service.py",
         "proxy/services/model_connection_security_service.py",
-        "proxy/services/model_engine_extension_service.py",
         "proxy/services/model_execution_preset_service.py",
         "proxy/services/model_reasoning_service.py",
         "proxy/services/model_resource_service.py",
         "proxy/services/model_secret_service.py",
         "proxy/services/model_streaming_service.py",
-        "proxy/services/native_open_service.py",
         "proxy/services/native_research_loop_service.py",
         "proxy/services/native_tool_message_service.py",
         "proxy/services/normcontrol_service.py",
@@ -2841,7 +2176,6 @@
         "proxy/services/project_document_registry_service.py",
         "proxy/services/project_pdf_extract_service.py",
         "proxy/services/project_pdf_table_service.py",
-        "proxy/services/project_registry_chat_service.py",
         "proxy/services/project_service.py",
         "proxy/services/project_table_registry_service.py",
         "proxy/services/prompt_registry_service.py",
@@ -2852,7 +2186,6 @@
         "proxy/services/rag_catalog_recovery_service.py",
         "proxy/services/rag_pipeline_status_service.py",
         "proxy/services/rag_readiness_service.py",
-        "proxy/services/request_idempotency_service.py",
         "proxy/services/request_memory_service.py",
         "proxy/services/resource_governor.py",
         "proxy/services/retrieval_candidate_service.py",
@@ -2864,12 +2197,9 @@
         "proxy/services/runtime_admission.py",
         "proxy/services/runtime_dispatcher.py",
         "proxy/services/saferag_service.py",
-        "proxy/services/scope_service.py",
         "proxy/services/section_evidence_candidate.py",
-        "proxy/services/sidecar_ops_service.py",
         "proxy/services/skill_snippet_registry.py",
         "proxy/services/source_locator_service.py",
-        "proxy/services/structured_extract.py",
         "proxy/services/system_dataset_service.py",
         "proxy/services/table_appendix_service.py",
         "proxy/services/table_document_tool.py",
@@ -3000,7 +2330,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/dataset_uploads.py",
         "proxy/services/chat_request_contracts.py"
       ],
       "lines": 65,
@@ -3016,29 +2345,9 @@
     },
     {
       "inbound": [
-        "proxy/routers/model_connections.py"
-      ],
-      "lines": 203,
-      "module": "proxy.services.canonical_promotion_service",
-      "outbound": [
-        "backend/rag_config.py",
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/canonical_route_service.py",
-        "proxy/services/model_connection_contracts.py",
-        "proxy/services/version_service.py",
-        "tools/live_workbook_acceptance.py"
-      ],
-      "path": "proxy/services/canonical_promotion_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
         "proxy/services/candidate_acceptance_service.py",
-        "proxy/services/canonical_promotion_service.py",
         "proxy/services/chat_inference_service.py",
-        "tests/test_light_admission.py",
-        "tests/test_model_connections_router.py"
+        "tests/test_light_admission.py"
       ],
       "lines": 300,
       "module": "proxy.services.canonical_route_service",
@@ -3054,8 +2363,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/dataset_uploads.py",
-        "tests/test_datasets_router.py",
         "tests/test_light_code_review.py",
         "tests/test_light_document_tasks.py"
       ],
@@ -3074,11 +2381,9 @@
     },
     {
       "inbound": [
-        "proxy/routers/dataset_uploads.py",
         "proxy/services/chat_attachment_read_service.py",
         "proxy/services/chat_folder_service.py",
         "proxy/services/table_document_tool.py",
-        "tests/test_datasets_router.py",
         "tests/test_light_chat_folder.py",
         "tests/test_light_document_tasks.py"
       ],
@@ -3137,7 +2442,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/dataset_uploads.py",
         "tests/test_light_chat_folder.py"
       ],
       "lines": 56,
@@ -3287,7 +2591,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/dataset_search.py",
         "proxy/services/document_review_tool.py",
         "proxy/services/native_research_loop_service.py",
         "tests/test_light_chat_sections.py",
@@ -3335,20 +2638,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/dataset_cloud.py"
-      ],
-      "lines": 528,
-      "module": "proxy.services.cloud_drive_service",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/config.py",
-        "proxy/services/__init__.py"
-      ],
-      "path": "proxy/services/cloud_drive_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
         "tests/test_light_commands_boundary.py"
       ],
       "lines": 14,
@@ -3386,7 +2675,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/dataset_catalog.py",
         "proxy/services/chat_persistence_service.py",
         "proxy/services/notebook_service.py"
       ],
@@ -3430,18 +2718,8 @@
     },
     {
       "inbound": [
-        "proxy/routers/dataset_catalog.py",
-        "proxy/routers/dataset_cloud.py",
-        "proxy/routers/dataset_document_ops.py",
-        "proxy/routers/dataset_external.py",
-        "proxy/routers/dataset_parse.py",
-        "proxy/routers/dataset_search.py",
-        "proxy/routers/dataset_uploads.py",
-        "proxy/routers/dataset_watch.py",
-        "proxy/routers/datasets.py",
         "proxy/services/auto_parse_resume_service.py",
-        "proxy/services/dataset_parse_service.py",
-        "tests/test_datasets_router.py"
+        "proxy/services/dataset_parse_service.py"
       ],
       "lines": 194,
       "module": "proxy.services.dataset_contracts",
@@ -3455,7 +2733,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/dataset_catalog.py",
         "tests/test_dataset_deletion_service.py",
         "tests/test_light_ingestion_races.py"
       ],
@@ -3475,7 +2752,6 @@
     {
       "inbound": [
         "backend/qdrant_support.py",
-        "proxy/routers/dataset_catalog.py",
         "proxy/services/dataset_parse_service.py",
         "proxy/services/notebook_service.py",
         "tests/test_light_native_dataset_reader.py",
@@ -3497,13 +2773,7 @@
     },
     {
       "inbound": [
-        "proxy/routers/dataset_external.py",
-        "proxy/routers/dataset_parse.py",
-        "proxy/routers/dataset_uploads.py",
-        "proxy/routers/dataset_watch.py",
-        "proxy/routers/datasets.py",
         "proxy/services/auto_parse_resume_service.py",
-        "tests/test_datasets_router.py",
         "tests/test_light_auto_parse_resume.py",
         "tests/test_light_resource_memory.py",
         "tests/test_model_connection_embeddings_integration.py"
@@ -3530,20 +2800,7 @@
     },
     {
       "inbound": [
-        "proxy/routers/dataset_catalog.py",
-        "proxy/routers/dataset_cloud.py",
-        "proxy/routers/dataset_document_ops.py",
-        "proxy/routers/dataset_external.py",
-        "proxy/routers/dataset_parse.py",
-        "proxy/routers/dataset_search.py",
-        "proxy/routers/dataset_uploads.py",
-        "proxy/routers/dataset_watch.py",
-        "proxy/routers/datasets.py",
-        "proxy/services/dataset_parse_service.py",
-        "proxy/services/document_clause_service.py",
-        "tests/test_datasets_router.py",
-        "tests/test_light_import_responsiveness.py",
-        "tests/test_mail_router.py"
+        "proxy/services/dataset_parse_service.py"
       ],
       "lines": 58,
       "module": "proxy.services.dataset_runtime",
@@ -3553,25 +2810,6 @@
         "proxy/services/job_service.py"
       ],
       "path": "proxy/services/dataset_runtime.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/routers/dataset_catalog.py",
-        "tests/test_dataset_watch.py",
-        "tests/test_light_code_review.py"
-      ],
-      "lines": 170,
-      "module": "proxy.services.dataset_watch_service",
-      "outbound": [
-        "backend/light_processes.py",
-        "backend/runtime_paths.py",
-        "proxy/__init__.py",
-        "proxy/routers/datasets.py",
-        "proxy/services/__init__.py",
-        "proxy/storage/file_storage.py"
-      ],
-      "path": "proxy/services/dataset_watch_service.py",
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
@@ -3592,20 +2830,6 @@
     },
     {
       "inbound": [
-        "proxy/services/scope_service.py"
-      ],
-      "lines": 113,
-      "module": "proxy.services.deterministic_policy_service",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py"
-      ],
-      "path": "proxy/services/deterministic_policy_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/services/sidecar_ops_service.py",
         "proxy/services/version_service.py"
       ],
       "lines": 333,
@@ -3632,8 +2856,7 @@
     },
     {
       "inbound": [
-        "proxy/services/project_document_registry_service.py",
-        "proxy/services/sidecar_ops_service.py"
+        "proxy/services/project_document_registry_service.py"
       ],
       "lines": 60,
       "module": "proxy.services.doc_type_classifier",
@@ -3646,28 +2869,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/documents.py"
-      ],
-      "lines": 58,
-      "module": "proxy.services.document_clause_service",
-      "outbound": [
-        "backend/index_replacement.py",
-        "backend/interface.py",
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/dataset_runtime.py",
-        "proxy/services/document_explorer_service.py",
-        "proxy/services/lexical_evidence_service.py",
-        "proxy/services/source_locator_service.py"
-      ],
-      "path": "proxy/services/document_clause_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/routers/documents.py",
-        "proxy/services/document_clause_service.py",
-        "proxy/services/list_office_agent_service.py",
         "tests/test_document_explorer_service.py"
       ],
       "lines": 904,
@@ -3686,7 +2887,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/documents.py",
         "proxy/services/pdf_table_continuation_service.py",
         "proxy/services/table_retrieval_service.py"
       ],
@@ -3774,7 +2974,6 @@
     {
       "inbound": [
         "proxy/services/decision_service.py",
-        "proxy/services/forms_service.py",
         "proxy/services/memory_service.py",
         "proxy/services/ontology_service.py",
         "proxy/services/project_service.py",
@@ -3888,21 +3087,6 @@
     },
     {
       "inbound": [
-        "proxy/services/list_office_agent_service.py"
-      ],
-      "lines": 228,
-      "module": "proxy.services.extract_service",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/structured_extract.py"
-      ],
-      "path": "proxy/services/extract_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/services/forms_service.py",
         "proxy/services/project_service.py",
         "tests/oracles/project_python.py"
       ],
@@ -3918,8 +3102,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/documents.py",
-        "proxy/services/native_open_service.py",
         "tests/test_light_native_document.py",
         "tests/test_light_native_workbook.py",
         "tests/test_light_table_retrieval.py"
@@ -3934,25 +3116,6 @@
         "proxy/services/tabular_document_service.py"
       ],
       "path": "proxy/services/file_viewer_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/routers/forms.py",
-        "proxy/services/list_office_agent_service.py",
-        "proxy/services/list_office_service.py"
-      ],
-      "lines": 371,
-      "module": "proxy.services.forms_service",
-      "outbound": [
-        "backend/runtime_paths.py",
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/edge_service.py",
-        "proxy/services/field_intake_service.py",
-        "proxy/services/project_service.py"
-      ],
-      "path": "proxy/services/forms_service.py",
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
@@ -3976,7 +3139,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/dataset_document_ops.py",
         "tests/test_forest_visualizer.py"
       ],
       "lines": 211,
@@ -4011,8 +3173,7 @@
       "inbound": [
         "proxy/services/dataset_runtime.py",
         "tests/test_light_auto_parse_resume.py",
-        "tests/test_light_core_jobs_files.py",
-        "tests/test_light_import_responsiveness.py"
+        "tests/test_light_core_jobs_files.py"
       ],
       "lines": 63,
       "module": "proxy.services.job_service",
@@ -4076,22 +3237,6 @@
     },
     {
       "inbound": [
-        "tests/test_datasets_router.py"
-      ],
-      "lines": 411,
-      "module": "proxy.services.les_md_service",
-      "outbound": [
-        "backend/converter.py",
-        "backend/rag_config.py",
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/project_service.py"
-      ],
-      "path": "proxy/services/les_md_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
         "proxy/services/prompt_registry_service.py",
         "proxy/services/skill_snippet_registry.py"
       ],
@@ -4106,7 +3251,6 @@
     },
     {
       "inbound": [
-        "proxy/services/document_clause_service.py",
         "proxy/services/retrieval_service.py",
         "tests/test_light_lexical_evidence.py"
       ],
@@ -4125,8 +3269,6 @@
         "backend/document_catalog.py",
         "backend/native_index_store.py",
         "backend/qdrant_integrity.py",
-        "proxy/routers/dataset_catalog.py",
-        "proxy/routers/dataset_external.py",
         "proxy/services/context_memory_service.py",
         "proxy/services/document_explorer_service.py",
         "proxy/services/graph_edges_service.py",
@@ -4136,9 +3278,9 @@
         "proxy/services/rag_readiness_service.py",
         "proxy/services/retrieval_quality_service.py",
         "proxy/services/retrieval_service.py",
-        "tests/test_datasets_router.py",
         "tests/test_document_explorer_service.py",
         "tests/test_light_audit_regressions.py",
+        "tests/test_light_code_review.py",
         "tests/test_light_grounding_760.py",
         "tests/test_light_index_recovery.py",
         "tests/test_light_lexical_v2.py",
@@ -4186,37 +3328,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/forms.py"
-      ],
-      "lines": 366,
-      "module": "proxy.services.list_office_agent_service",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/document_explorer_service.py",
-        "proxy/services/extract_service.py",
-        "proxy/services/forms_service.py"
-      ],
-      "path": "proxy/services/list_office_agent_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/routers/forms.py"
-      ],
-      "lines": 227,
-      "module": "proxy.services.list_office_service",
-      "outbound": [
-        "backend/runtime_paths.py",
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/forms_service.py"
-      ],
-      "path": "proxy/services/list_office_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
         "proxy/services/chat_prompt_support.py",
         "proxy/services/model_connection_resolver_service.py",
         "proxy/services/openai_compatible_transport_service.py",
@@ -4258,7 +3369,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/mail.py",
         "tests/test_mail_push_service.py"
       ],
       "lines": 108,
@@ -4290,10 +3400,8 @@
     {
       "inbound": [
         "backend/qdrant_nodes.py",
-        "proxy/routers/mail.py",
         "proxy/services/mail_sync_service.py",
-        "tests/test_mail_registry_service.py",
-        "tests/test_mail_router.py"
+        "tests/test_mail_registry_service.py"
       ],
       "lines": 903,
       "module": "proxy.services.mail_registry_service",
@@ -4308,7 +3416,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/mail.py",
         "tests/test_light_mail_unicode.py",
         "tests/test_mail_registry_service.py"
       ],
@@ -4344,7 +3451,6 @@
     {
       "inbound": [
         "proxy/services/memory_rag_adapter.py",
-        "proxy/services/memory_runtime_service.py",
         "tests/test_memory_core.py"
       ],
       "lines": 84,
@@ -4359,7 +3465,6 @@
     },
     {
       "inbound": [
-        "proxy/services/memory_runtime_service.py",
         "tests/test_memory_core.py"
       ],
       "lines": 184,
@@ -4374,25 +3479,6 @@
         "proxy/services/memory_port.py"
       ],
       "path": "proxy/services/memory_rag_adapter.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/routers/memory.py"
-      ],
-      "lines": 64,
-      "module": "proxy.services.memory_runtime_service",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/memory_core/config.py",
-        "proxy/memory_core/contracts.py",
-        "proxy/memory_core/store.py",
-        "proxy/services/__init__.py",
-        "proxy/services/memory_port.py",
-        "proxy/services/memory_rag_adapter.py",
-        "proxy/services/memory_worker_service.py"
-      ],
-      "path": "proxy/services/memory_runtime_service.py",
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
@@ -4420,7 +3506,6 @@
     },
     {
       "inbound": [
-        "proxy/services/memory_runtime_service.py",
         "tests/test_memory_core.py"
       ],
       "lines": 109,
@@ -4455,7 +3540,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/model_connections.py",
         "proxy/services/chat_inference_service.py",
         "proxy/services/model_connection_resolver_service.py",
         "tests/test_light_embedding_762.py",
@@ -4478,9 +3562,6 @@
     {
       "inbound": [
         "backend/embedding_client.py",
-        "proxy/routers/model_connections.py",
-        "proxy/routers/runtime.py",
-        "proxy/services/canonical_promotion_service.py",
         "proxy/services/canonical_route_service.py",
         "proxy/services/chat_inference_service.py",
         "proxy/services/local_model_http.py",
@@ -4511,13 +3592,11 @@
         "tests/test_light_native_retrieval_modes.py",
         "tests/test_light_reasoning_761.py",
         "tests/test_light_resource_memory.py",
-        "tests/test_light_runtime_identity.py",
         "tests/test_model_capability_service.py",
         "tests/test_model_connection_embeddings_integration.py",
         "tests/test_model_connection_registry_service.py",
         "tests/test_model_connection_resolver_service.py",
         "tests/test_model_connection_security_service.py",
-        "tests/test_model_connections_router.py",
         "tests/test_openai_compatible_transport_service.py",
         "tools/evaluate_part_reader_chat.py"
       ],
@@ -4534,8 +3613,6 @@
       "inbound": [
         "backend/embedding_client.py",
         "backend/workspace_native.py",
-        "proxy/routers/model_connections.py",
-        "proxy/routers/runtime.py",
         "proxy/services/chat_inference_service.py",
         "proxy/services/model_capability_service.py",
         "proxy/services/model_connection_resolver_service.py",
@@ -4551,11 +3628,9 @@
         "tests/test_light_native_embedding_inference.py",
         "tests/test_light_native_intake_execution.py",
         "tests/test_light_native_model_runtime.py",
-        "tests/test_light_runtime_identity.py",
         "tests/test_model_capability_service.py",
         "tests/test_model_connection_registry_service.py",
-        "tests/test_model_connection_resolver_service.py",
-        "tests/test_model_connections_router.py"
+        "tests/test_model_connection_resolver_service.py"
       ],
       "lines": 203,
       "module": "proxy.services.model_connection_registry_service",
@@ -4572,7 +3647,6 @@
     {
       "inbound": [
         "backend/embedding_client.py",
-        "proxy/routers/model_connections.py",
         "proxy/services/canonical_route_service.py",
         "proxy/services/chat_inference_service.py",
         "proxy/services/dataset_parse_service.py",
@@ -4604,11 +3678,9 @@
     },
     {
       "inbound": [
-        "proxy/routers/model_connections.py",
         "proxy/services/local_model_http.py",
         "proxy/services/model_capability_service.py",
         "proxy/services/model_connection_resolver_service.py",
-        "proxy/services/model_engine_extension_service.py",
         "proxy/services/openai_compatible_transport_service.py",
         "tests/test_model_connection_security_service.py",
         "tests/test_openai_compatible_transport_service.py"
@@ -4622,20 +3694,6 @@
       ],
       "path": "proxy/services/model_connection_security_service.py",
       "status": "PRODUCT_REACHABLE"
-    },
-    {
-      "inbound": [
-        "proxy/routers/model_connections.py"
-      ],
-      "lines": 183,
-      "module": "proxy.services.model_engine_extension_service",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/model_connection_security_service.py"
-      ],
-      "path": "proxy/services/model_engine_extension_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
     },
     {
       "inbound": [
@@ -4685,7 +3743,6 @@
         "proxy/services/runtime_admission.py",
         "tests/test_light_admission.py",
         "tests/test_light_grounding_760.py",
-        "tests/test_light_runtime_identity.py",
         "tests/test_runtime_admission.py",
         "tools/rag_trial_model.py"
       ],
@@ -4703,18 +3760,15 @@
     {
       "inbound": [
         "backend/embedding_client.py",
-        "proxy/routers/model_connections.py",
         "proxy/services/chat_inference_service.py",
         "proxy/services/model_capability_service.py",
         "proxy/services/model_connection_resolver_service.py",
         "proxy/services/openai_compatible_transport_service.py",
         "tests/native_batch_fixtures.py",
         "tests/oracles/context_python.py",
-        "tests/test_light_native_api.py",
         "tests/test_light_native_embedding_inference.py",
         "tests/test_light_native_model_runtime.py",
         "tests/test_model_connection_resolver_service.py",
-        "tests/test_model_connections_router.py",
         "tests/test_openai_compatible_transport_service.py"
       ],
       "lines": 61,
@@ -4741,20 +3795,6 @@
       ],
       "path": "proxy/services/model_streaming_service.py",
       "status": "PRODUCT_REACHABLE"
-    },
-    {
-      "inbound": [
-        "proxy/routers/documents.py"
-      ],
-      "lines": 118,
-      "module": "proxy.services.native_open_service",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/file_viewer_service.py"
-      ],
-      "path": "proxy/services/native_open_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
     },
     {
       "inbound": [
@@ -4902,7 +3942,6 @@
     {
       "inbound": [
         "backend/qdrant_nodes.py",
-        "proxy/routers/documents.py",
         "tests/test_light_native_document.py",
         "tests/test_light_pdf_readers.py"
       ],
@@ -4953,7 +3992,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/documents.py",
         "tests/test_light_pdf_readers.py"
       ],
       "lines": 189,
@@ -4993,7 +4031,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/dataset_document_ops.py",
         "proxy/services/project_pdf_extract_service.py"
       ],
       "lines": 853,
@@ -5012,7 +4049,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/dataset_document_ops.py",
         "proxy/services/dataset_memory_service.py",
         "proxy/services/project_document_registry_service.py",
         "proxy/services/project_table_registry_service.py"
@@ -5053,26 +4089,7 @@
     },
     {
       "inbound": [
-        "proxy/services/scope_service.py"
-      ],
-      "lines": 78,
-      "module": "proxy.services.project_registry_chat_service",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/project_service.py"
-      ],
-      "path": "proxy/services/project_registry_chat_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/routers/runtime.py",
-        "proxy/services/forms_service.py",
         "proxy/services/graph_edges_service.py",
-        "proxy/services/les_md_service.py",
-        "proxy/services/project_registry_chat_service.py",
-        "proxy/services/scope_service.py",
         "tests/conftest.py",
         "tests/test_chat_session_service.py",
         "tests/test_forest_visualizer.py",
@@ -5099,7 +4116,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/dataset_document_ops.py",
         "proxy/services/project_pdf_extract_service.py"
       ],
       "lines": 564,
@@ -5183,8 +4199,7 @@
     },
     {
       "inbound": [
-        "backend/qdrant_collection.py",
-        "proxy/routers/dataset_catalog.py"
+        "backend/qdrant_collection.py"
       ],
       "lines": 175,
       "module": "proxy.services.rag_catalog_guard_service",
@@ -5229,7 +4244,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/dataset_catalog.py",
         "proxy/services/rag_pipeline_status_service.py",
         "tests/test_light_search_readiness.py"
       ],
@@ -5244,19 +4258,6 @@
         "proxy/services/rag_advanced_policy_service.py"
       ],
       "path": "proxy/services/rag_readiness_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/routers/dataset_uploads.py"
-      ],
-      "lines": 197,
-      "module": "proxy.services.request_idempotency_service",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py"
-      ],
-      "path": "proxy/services/request_idempotency_service.py",
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
@@ -5283,8 +4284,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/rerank.py",
-        "proxy/routers/runtime.py",
         "proxy/services/dataset_parse_service.py",
         "proxy/services/runtime_admission.py",
         "proxy/services/runtime_dispatcher.py",
@@ -5335,7 +4334,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/dataset_search.py",
         "proxy/services/table_appendix_service.py",
         "tests/test_light_index_recovery.py",
         "tests/test_light_pipeline_trial.py",
@@ -5415,7 +4413,6 @@
     {
       "inbound": [
         "backend/runtime_memory.py",
-        "proxy/routers/runtime.py",
         "proxy/services/dataset_parse_service.py",
         "proxy/services/generation_guard_service.py",
         "proxy/services/request_memory_service.py",
@@ -5441,9 +4438,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/jobs.py",
-        "proxy/routers/mail.py",
-        "proxy/routers/runtime.py",
         "proxy/services/chat_runtime.py"
       ],
       "lines": 721,
@@ -5483,23 +4477,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/runtime.py"
-      ],
-      "lines": 299,
-      "module": "proxy.services.scope_service",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/deterministic_policy_service.py",
-        "proxy/services/project_registry_chat_service.py",
-        "proxy/services/project_service.py",
-        "proxy/services/system_dataset_service.py"
-      ],
-      "path": "proxy/services/scope_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
         "backend/retrieval_candidate.py",
         "tests/test_light_retrieval_candidate.py"
       ],
@@ -5510,21 +4487,6 @@
         "proxy/services/__init__.py"
       ],
       "path": "proxy/services/section_evidence_candidate.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/routers/dataset_document_ops.py"
-      ],
-      "lines": 502,
-      "module": "proxy.services.sidecar_ops_service",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/doc_extract_service.py",
-        "proxy/services/doc_type_classifier.py"
-      ],
-      "path": "proxy/services/sidecar_ops_service.py",
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
@@ -5543,7 +4505,6 @@
     },
     {
       "inbound": [
-        "proxy/services/document_clause_service.py",
         "proxy/services/evidence_packet_service.py",
         "proxy/services/saferag_service.py",
         "tests/test_light_native_document.py"
@@ -5560,23 +4521,9 @@
     },
     {
       "inbound": [
-        "proxy/services/extract_service.py"
-      ],
-      "lines": 261,
-      "module": "proxy.services.structured_extract",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py"
-      ],
-      "path": "proxy/services/structured_extract.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
         "backend/document_catalog.py",
         "backend/smart_index.py",
         "proxy/services/document_explorer_service.py",
-        "proxy/services/scope_service.py",
         "tools/build_rag_contract_sibling.py"
       ],
       "lines": 103,
@@ -5773,12 +4720,10 @@
     },
     {
       "inbound": [
-        "proxy/routers/runtime.py",
-        "proxy/services/canonical_promotion_service.py",
         "proxy/services/light_update_service.py",
         "tests/test_software_versions.py"
       ],
-      "lines": 315,
+      "lines": 309,
       "module": "proxy.services.version_service",
       "outbound": [
         "proxy/__init__.py",
@@ -5816,38 +4761,6 @@
         "proxy/services/__init__.py"
       ],
       "path": "proxy/services/workflow_plan_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/storage/file_storage.py"
-      ],
-      "lines": 1,
-      "module": "proxy.storage",
-      "outbound": [
-        "proxy/__init__.py"
-      ],
-      "path": "proxy/storage/__init__.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/routers/dataset_catalog.py",
-        "proxy/routers/dataset_cloud.py",
-        "proxy/routers/dataset_external.py",
-        "proxy/routers/dataset_parse.py",
-        "proxy/routers/dataset_uploads.py",
-        "proxy/services/dataset_watch_service.py"
-      ],
-      "lines": 147,
-      "module": "proxy.storage.file_storage",
-      "outbound": [
-        "backend/runtime_paths.py",
-        "proxy/__init__.py",
-        "proxy/config.py",
-        "proxy/storage/__init__.py"
-      ],
-      "path": "proxy/storage/file_storage.py",
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
@@ -6132,7 +5045,7 @@
     },
     {
       "inbound": [],
-      "lines": 216,
+      "lines": 213,
       "module": "tests.test_code_runtime_map",
       "outbound": [
         "tools/code_runtime_map.py"
@@ -6178,53 +5091,9 @@
     },
     {
       "inbound": [],
-      "lines": 232,
-      "module": "tests.test_dataset_watch",
-      "outbound": [
-        "backend/document_catalog.py",
-        "proxy/routers/dataset_external.py",
-        "proxy/services/dataset_watch_service.py"
-      ],
-      "path": "tests/test_dataset_watch.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [],
-      "lines": 1819,
-      "module": "tests.test_datasets_router",
-      "outbound": [
-        "backend/converter.py",
-        "backend/external_scan.py",
-        "backend/native_core.py",
-        "backend/parse_admission.py",
-        "backend/qdrant_adapter.py",
-        "proxy/routers/dataset_catalog.py",
-        "proxy/routers/dataset_document_ops.py",
-        "proxy/routers/dataset_external.py",
-        "proxy/routers/dataset_parse.py",
-        "proxy/routers/dataset_search.py",
-        "proxy/routers/dataset_uploads.py",
-        "proxy/routers/dataset_watch.py",
-        "proxy/routers/datasets.py",
-        "proxy/services/chat_attachment_read_service.py",
-        "proxy/services/chat_attachment_service.py",
-        "proxy/services/dataset_contracts.py",
-        "proxy/services/dataset_parse_service.py",
-        "proxy/services/dataset_runtime.py",
-        "proxy/services/les_md_service.py",
-        "proxy/services/lexical_index_service.py"
-      ],
-      "path": "tests/test_datasets_router.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [],
-      "lines": 514,
+      "lines": 286,
       "module": "tests.test_document_explorer_service",
       "outbound": [
-        "proxy/routers/dataset_catalog.py",
-        "proxy/routers/datasets.py",
-        "proxy/routers/documents.py",
         "proxy/services/document_explorer_service.py",
         "proxy/services/lexical_index_service.py"
       ],
@@ -6313,7 +5182,7 @@
     },
     {
       "inbound": [],
-      "lines": 194,
+      "lines": 159,
       "module": "tests.test_light_audit_regressions",
       "outbound": [
         "backend/index_replacement.py",
@@ -6323,11 +5192,9 @@
         "backend/qdrant_retrieval.py",
         "backend/qdrant_support.py",
         "proxy/light_boundary.py",
-        "proxy/routers/dataset_search.py",
         "proxy/services/kot_service.py",
         "proxy/services/lexical_index_service.py",
-        "proxy/services/retrieval_quality_service.py",
-        "tests/test_light_chat_sections.py"
+        "proxy/services/retrieval_quality_service.py"
       ],
       "path": "tests/test_light_audit_regressions.py",
       "status": "TEST_OR_TOOL_ONLY"
@@ -6410,7 +5277,6 @@
     },
     {
       "inbound": [
-        "tests/test_light_audit_regressions.py",
         "tests/test_light_lexical_evidence.py"
       ],
       "lines": 270,
@@ -6454,14 +5320,15 @@
     },
     {
       "inbound": [],
-      "lines": 60,
+      "lines": 112,
       "module": "tests.test_light_code_review",
       "outbound": [
         "backend/document_catalog.py",
         "backend/embedding_client.py",
         "backend/interface.py",
+        "backend/qdrant_adapter.py",
         "proxy/services/chat_attachment_read_service.py",
-        "proxy/services/dataset_watch_service.py"
+        "proxy/services/lexical_index_service.py"
       ],
       "path": "tests/test_light_code_review.py",
       "status": "TEST_OR_TOOL_ONLY"
@@ -6633,7 +5500,7 @@
     },
     {
       "inbound": [],
-      "lines": 37,
+      "lines": 29,
       "module": "tests.test_light_extracted_bindings",
       "outbound": [],
       "path": "tests/test_light_extracted_bindings.py",
@@ -6671,16 +5538,6 @@
     },
     {
       "inbound": [],
-      "lines": 45,
-      "module": "tests.test_light_forms_boundary",
-      "outbound": [
-        "proxy/routers/forms.py"
-      ],
-      "path": "tests/test_light_forms_boundary.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [],
       "lines": 61,
       "module": "tests.test_light_frontend_assets",
       "outbound": [
@@ -6699,7 +5556,7 @@
     },
     {
       "inbound": [],
-      "lines": 260,
+      "lines": 240,
       "module": "tests.test_light_grounding_760",
       "outbound": [
         "backend/converter.py",
@@ -6708,7 +5565,6 @@
         "backend/qdrant_ingestion.py",
         "backend/qdrant_nodes.py",
         "backend/qdrant_support.py",
-        "proxy/routers/dataset_uploads.py",
         "proxy/services/chat_prompt_support.py",
         "proxy/services/kot_service.py",
         "proxy/services/lexical_index_service.py",
@@ -6735,15 +5591,12 @@
     },
     {
       "inbound": [],
-      "lines": 115,
+      "lines": 60,
       "module": "tests.test_light_import_responsiveness",
       "outbound": [
         "backend/document_catalog.py",
         "backend/qdrant_adapter.py",
-        "backend/qdrant_support.py",
-        "proxy/routers/dataset_external.py",
-        "proxy/services/dataset_runtime.py",
-        "proxy/services/job_service.py"
+        "backend/qdrant_support.py"
       ],
       "path": "tests/test_light_import_responsiveness.py",
       "status": "TEST_OR_TOOL_ONLY"
@@ -6831,16 +5684,6 @@
     },
     {
       "inbound": [],
-      "lines": 46,
-      "module": "tests.test_light_mail_isolation",
-      "outbound": [
-        "proxy/routers/mail.py"
-      ],
-      "path": "tests/test_light_mail_isolation.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [],
       "lines": 20,
       "module": "tests.test_light_mail_unicode",
       "outbound": [
@@ -6870,16 +5713,6 @@
         "tools/light_mcp_server.py"
       ],
       "path": "tests/test_light_mcp_server.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [],
-      "lines": 31,
-      "module": "tests.test_light_memory_boundary",
-      "outbound": [
-        "proxy/routers/memory.py"
-      ],
-      "path": "tests/test_light_memory_boundary.py",
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
@@ -6922,16 +5755,14 @@
         "tests/test_light_native_table_publication.py",
         "tests/test_light_native_word_window.py"
       ],
-      "lines": 915,
+      "lines": 921,
       "module": "tests.test_light_native_api",
       "outbound": [
         "backend/workspace_native.py",
-        "proxy/routers/model_connections.py",
         "proxy/services/chat_evidence_context.py",
         "proxy/services/model_connection_contracts.py",
         "proxy/services/model_connection_registry_service.py",
-        "proxy/services/model_execution_preset_service.py",
-        "proxy/services/model_secret_service.py"
+        "proxy/services/model_execution_preset_service.py"
       ],
       "path": "tests/test_light_native_api.py",
       "status": "TEST_OR_TOOL_ONLY"
@@ -7696,7 +6527,7 @@
     },
     {
       "inbound": [],
-      "lines": 1168,
+      "lines": 1178,
       "module": "tests.test_light_native_retrieval_modes",
       "outbound": [
         "proxy/services/model_connection_contracts.py",
@@ -7988,14 +6819,13 @@
     },
     {
       "inbound": [],
-      "lines": 159,
+      "lines": 150,
       "module": "tests.test_light_rerank_audit",
       "outbound": [
         "backend/index_replacement.py",
         "backend/local_reranker.py",
         "backend/qdrant_adapter.py",
         "backend/qdrant_support.py",
-        "proxy/routers/rerank.py",
         "proxy/services/chat_evidence_context.py",
         "proxy/services/context_governor_service.py",
         "proxy/services/dataset_memory_service.py",
@@ -8077,19 +6907,6 @@
     },
     {
       "inbound": [],
-      "lines": 83,
-      "module": "tests.test_light_runtime_identity",
-      "outbound": [
-        "proxy/routers/runtime.py",
-        "proxy/services/model_connection_contracts.py",
-        "proxy/services/model_connection_registry_service.py",
-        "proxy/services/model_resource_service.py"
-      ],
-      "path": "tests/test_light_runtime_identity.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [],
       "lines": 38,
       "module": "tests.test_light_search_readiness",
       "outbound": [
@@ -8131,18 +6948,6 @@
         "tools/skill_python_asset.py"
       ],
       "path": "tests/test_light_skill_python_asset.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [],
-      "lines": 54,
-      "module": "tests.test_light_system_memory",
-      "outbound": [
-        "backend/metrics_collector.py",
-        "backend/system_memory.py",
-        "proxy/routers/runtime.py"
-      ],
-      "path": "tests/test_light_system_memory.py",
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
@@ -8282,39 +7087,12 @@
     },
     {
       "inbound": [],
-      "lines": 500,
-      "module": "tests.test_mail_router",
-      "outbound": [
-        "backend/mail_ingest.py",
-        "proxy/routers/datasets.py",
-        "proxy/routers/mail.py",
-        "proxy/services/dataset_runtime.py",
-        "proxy/services/mail_registry_service.py"
-      ],
-      "path": "tests/test_mail_router.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [],
       "lines": 97,
       "module": "tests.test_mail_threads",
       "outbound": [
         "backend/mail_threads.py"
       ],
       "path": "tests/test_mail_threads.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [],
-      "lines": 83,
-      "module": "tests.test_memory_api",
-      "outbound": [
-        "proxy/memory_core/contracts.py",
-        "proxy/memory_core/store.py",
-        "proxy/routers/memory.py",
-        "proxy/security.py"
-      ],
-      "path": "tests/test_memory_api.py",
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
@@ -8352,14 +7130,13 @@
       "inbound": [
         "tests/test_light_native_embeddings.py"
       ],
-      "lines": 251,
+      "lines": 236,
       "module": "tests.test_model_connection_embeddings_integration",
       "outbound": [
         "backend/embedding_client.py",
         "backend/interface.py",
         "backend/product_edition.py",
         "backend/qdrant_adapter.py",
-        "proxy/routers/datasets.py",
         "proxy/services/dataset_parse_service.py",
         "proxy/services/model_connection_contracts.py",
         "proxy/services/model_connection_resolver_service.py",
@@ -8404,22 +7181,6 @@
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
-      "inbound": [],
-      "lines": 436,
-      "module": "tests.test_model_connections_router",
-      "outbound": [
-        "proxy/config.py",
-        "proxy/routers/model_connections.py",
-        "proxy/security.py",
-        "proxy/services/canonical_route_service.py",
-        "proxy/services/model_connection_contracts.py",
-        "proxy/services/model_connection_registry_service.py",
-        "proxy/services/model_secret_service.py"
-      ],
-      "path": "tests/test_model_connections_router.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
       "inbound": [
         "tests/test_light_embedding_762.py"
       ],
@@ -8439,11 +7200,9 @@
     },
     {
       "inbound": [],
-      "lines": 234,
+      "lines": 53,
       "module": "tests.test_outlook_mail_poller",
-      "outbound": [
-        "proxy/routers/mail.py"
-      ],
+      "outbound": [],
       "path": "tests/test_outlook_mail_poller.py",
       "status": "TEST_OR_TOOL_ONLY"
     },
@@ -8634,9 +7393,7 @@
       "status": "PRODUCT_REACHABLE"
     },
     {
-      "inbound": [
-        "proxy/routers/runtime.py"
-      ],
+      "inbound": [],
       "lines": 174,
       "module": "tools.backup_suharik",
       "outbound": [
@@ -8782,7 +7539,7 @@
       "inbound": [
         "tests/test_code_runtime_map.py"
       ],
-      "lines": 407,
+      "lines": 406,
       "module": "tools.code_runtime_map",
       "outbound": [
         "tools/__init__.py"
@@ -9163,9 +7920,7 @@
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
-      "inbound": [
-        "proxy/services/canonical_promotion_service.py"
-      ],
+      "inbound": [],
       "lines": 696,
       "module": "tools.live_workbook_acceptance",
       "outbound": [
@@ -9328,71 +8083,16 @@
       "status": "TEST_OR_TOOL_ONLY"
     }
   ],
-  "routes": [
-    {
-      "handler": "health",
-      "method": "GET",
-      "path": "/api/health",
-      "source": "lemonade_host.py"
-    },
-    {
-      "handler": "host_memory",
-      "method": "GET",
-      "path": "/api/host_memory",
-      "source": "lemonade_host.py"
-    },
-    {
-      "handler": "api_ps",
-      "method": "GET",
-      "path": "/api/ps",
-      "source": "lemonade_host.py"
-    },
-    {
-      "handler": "switch_model",
-      "method": "POST",
-      "path": "/api/switch_model",
-      "source": "lemonade_host.py"
-    },
-    {
-      "handler": "unload_all",
-      "method": "POST",
-      "path": "/api/unload_all",
-      "source": "lemonade_host.py"
-    },
-    {
-      "handler": "validate_answer",
-      "method": "POST",
-      "path": "/api/validate",
-      "source": "lemonade_host.py"
-    },
-    {
-      "handler": "chat_completions",
-      "method": "POST",
-      "path": "/v1/chat/completions",
-      "source": "lemonade_host.py"
-    },
-    {
-      "handler": "embeddings",
-      "method": "POST",
-      "path": "/v1/embeddings",
-      "source": "lemonade_host.py"
-    },
-    {
-      "handler": "rerank_endpoint",
-      "method": "POST",
-      "path": "/v1/rerank",
-      "source": "lemonade_host.py"
-    }
-  ],
+  "routes": [],
   "schema": "les.code-runtime-map.v1",
   "summary": {
     "dormant_candidates": 0,
     "parse_warnings": 0,
-    "product_reachable": 101,
-    "registered_api_routes": 9,
-    "test_or_tool_only": 424,
-    "tracked_python_files": 525,
-    "tracked_python_lines": 112810
+    "product_reachable": 100,
+    "registered_api_routes": 0,
+    "test_or_tool_only": 371,
+    "tracked_python_files": 471,
+    "tracked_python_lines": 95125
   },
   "warnings": []
 }

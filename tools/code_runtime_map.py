@@ -18,7 +18,6 @@ from typing import Iterable
 
 SCHEMA = "les.code-runtime-map.v1"
 PRODUCT_ENTRYPOINTS = (
-    "lemonade_host.py",
     "tools/light_document_worker.py",  # Python compatibility format worker.
 )
 FOCUS_MODULES = ("proxy/services/retrieval_service.py",)

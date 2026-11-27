@@ -1130,8 +1130,18 @@ def test_word_filtered_compound_match_is_not_reported_as_a_complete_document(nat
 
 
 @pytest.mark.parametrize('native_turn', ['rag'], indirect=True)
-def test_indexed_turn_keeps_source_cards_without_reopening_pdf_or_requiring_labels(native_turn, tmp_path):
+@pytest.mark.parametrize('expired', [False, True])
+def test_indexed_turn_keeps_source_cards_without_reopening_pdf_or_requiring_labels(native_turn, tmp_path, expired):
     t = native_turn
+    if expired:
+        with sqlite3.connect(t.database) as database:
+            updated = database.execute(
+                'UPDATE les_model_capability_snapshots SET observed_at=?, expires_at=? WHERE connection_revision_id=?',
+                ('2000-01-01T00:00:00+00:00', '2000-01-02T00:00:00+00:00', t.revision.revision_id),
+            )
+            assert updated.rowcount == 1
+    effective = t.client.get('/api/model-connections/effective').raise_for_status().json()['roles']['answer']
+    assert effective['revision_id'] == t.revision.revision_id and effective.get('status') != 'blocked'
     folder = tmp_path / 'indexed-documents'
     folder.mkdir()
     path = write_pdf(folder / 'Pressure.pdf', [b'BT /F1 12 Tf 50 700 Td (Control pressure 17.35 kPa) Tj ET'])

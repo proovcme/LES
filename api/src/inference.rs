@@ -71,7 +71,7 @@ pub async fn handle(context: Arc<Context>, request: Request) -> Response {
             }).await.map_err(|_|"MODEL_RUNTIME_UNAVAILABLE".to_string())??;
             if resolved.endpoint.locality=="remote" && value["allow_remote"]!=true {return Err("CLOUD_CONSENT_REQUIRED".into());}
             let native=resolved.snapshot["transport_options"]["chat_protocol"]=="native_chat_v1";
-            let observed_stream=les_core::model_capabilities::require(&resolved.snapshot,&["streaming".into()],None).is_ok();
+            let observed_stream=resolved.require(&["streaming".into()]).is_ok();
             if value["require_stream"]==true && !observed_stream {return Err("CAPABILITY_REQUIRED: streaming".into());}
             let streaming=streaming && (native || observed_stream);
             let body=resolved.chat(&value["request"],streaming,Duration::from_secs(seconds),context.listen_port,None).await?;

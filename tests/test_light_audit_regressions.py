@@ -1,5 +1,4 @@
 """Generation integrity, concurrent reads and macOS service ownership."""
-import asyncio
 import os
 from pathlib import Path
 import subprocess
@@ -10,7 +9,6 @@ from types import SimpleNamespace
 
 import psutil
 import pytest
-from fastapi import HTTPException
 
 from backend import qdrant_support as support
 from backend.index_replacement import ReplacementJournal
@@ -110,39 +108,6 @@ async def test_empty_lexical_query_keeps_dense_channel(tmp_path, monkeypatch, te
     assert requests[0]['query'] == [1., 0.]
     assert 'prefetch' not in requests[0]
     assert chunks[0].meta['_retrieval_channels'] == ['dense']
-
-
-@pytest.mark.asyncio
-async def test_api_context_rejects_replaced_point_at_same_ordinal(tmp_path):
-    from tests.test_light_chat_sections import backend, point, chunk
-    from proxy.routers.dataset_search import _read_context
-    p = point('January 2031.'); seed = chunk(p)
-    b = await backend(tmp_path, [p])
-    try:
-        await b.aclient.set_payload('docs', payload={'text': 'December 2042.'}, points=[p.id])
-        with pytest.raises(HTTPException) as error:
-            await _read_context(b, [seed], ['ds'], 8)
-        assert error.value.status_code == 409
-    finally:
-        await b.aclient.close()
-
-
-@pytest.mark.asyncio
-async def test_api_context_budget_keeps_complete_fragments_and_provenance(tmp_path):
-    from tests.test_light_chat_sections import backend, point, chunk
-    from proxy.routers.dataset_search import _read_context
-    seed = point('January 2031.')
-    huge = point('Exception ' * 1000, 1)
-    b = await backend(tmp_path, [seed, huge])
-    try:
-        expanded, _ = await _read_context(b, [chunk(seed)], ['ds'], 8, max_chars=200)
-        assert len(expanded[0].content) <= 200
-        fragments = expanded[0].meta['context_fragments']
-        assert len(fragments) == 1 and fragments[0]['content'] == seed.payload['text']
-        assert fragments[0]['metadata']['qdrant_point_id'] == seed.id
-        assert expanded[0].meta['context_omitted_fragments'] == 1
-    finally:
-        await b.aclient.close()
 
 
 def test_irrelevant_single_result_is_not_good():

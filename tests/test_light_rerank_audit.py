@@ -94,15 +94,6 @@ def test_context_drops_complete_sources_and_exposes_only_visible_proof():
     assert len(sources) == 2
 
 
-def test_direct_rerank_rejects_unbounded_or_nonfinite_input():
-    from proxy.routers.rerank import RerankRequest
-    from pydantic import ValidationError
-    with pytest.raises(ValidationError):
-        RerankRequest(query='q', chunks=[{'text':'a'}]*65)
-    with pytest.raises(ValidationError):
-        RerankRequest(query='q', chunks=[{'text':'a','score':float('nan')}])
-
-
 @pytest.mark.parametrize('failure', ['embedding', 'upsert'])
 def test_reindex_failure_keeps_previous_generation(tmp_path, monkeypatch, failure):
     from backend import qdrant_support as support

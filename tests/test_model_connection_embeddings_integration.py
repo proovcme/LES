@@ -230,21 +230,6 @@ def test_production_adapter_wires_both_embedders_to_explicit_role(tmp_path, monk
     assert all(call["connection_mode"]==expected for call in calls)
 
 
-@pytest.mark.asyncio
-async def test_light_admission_blocks_before_health_or_model_call(monkeypatch):
-    from backend import product_edition
-    from proxy.routers import datasets
-    from fastapi import HTTPException
-    monkeypatch.setattr(product_edition, "is_light", lambda:True)
-    def missing():
-        raise ModelConnectionResolutionError("ROLE_BINDING_MISSING: embeddings")
-    backend=SimpleNamespace(embed_parse=SimpleNamespace(connection_mode="active", _resolve_embedding_connection=missing))
-    with pytest.raises(HTTPException) as error:
-        await ds_dataset_parse_service.assert_parse_admission(SimpleNamespace(backend=backend))
-    assert error.value.status_code==409
-    assert "назначьте" in error.value.detail
-
-
 @pytest.fixture(autouse=True)
 def isolated_qdrant_identity(monkeypatch):
     monkeypatch.setenv("LES_LIGHT_QDRANT_URL", "http://127.0.0.1:6333")

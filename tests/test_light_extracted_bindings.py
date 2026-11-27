@@ -9,14 +9,6 @@ import pytest
 @pytest.mark.parametrize("path", [
     "proxy/services/dataset_runtime.py",
     "proxy/services/dataset_parse_service.py",
-    "proxy/routers/dataset_catalog.py",
-    "proxy/routers/dataset_document_ops.py",
-    "proxy/routers/dataset_watch.py",
-    "proxy/routers/dataset_external.py",
-    "proxy/routers/dataset_cloud.py",
-    "proxy/routers/dataset_uploads.py",
-    "proxy/routers/dataset_parse.py",
-    "proxy/routers/dataset_search.py",
 ])
 def test_extracted_module_has_no_unresolved_globals(path):
     table = symtable.symtable(Path(path).read_text(encoding="utf-8"), path, "exec")

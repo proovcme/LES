@@ -85,11 +85,9 @@ def test_runtime_map_is_conservative_and_deterministically_sorted(inventory: dic
     ) == inventory
 
 
-def test_legacy_mail_helper_is_available_for_test_fixtures(
-    inventory: dict,
-):
+def test_legacy_http_handlers_are_absent(inventory: dict):
     modules = _modules_by_path(inventory)
-    assert modules["proxy/routers/mail.py"]["status"] == "TEST_OR_TOOL_ONLY"
+    assert not any(path.startswith("proxy/routers/") for path in modules)
     for retired in (
         "proxy/legacy_app.py",
         "test_auth.py",
@@ -122,7 +120,7 @@ def test_retired_one_off_operator_scripts_do_not_reenter_tool_inventory(
         assert retired not in modules
 
 
-def test_api_surface_keeps_profiles_and_internal_extraction_without_duplicate_public_controls(
+def test_api_surface_keeps_profiles_without_retired_public_controls(
     inventory: dict,
 ):
     modules = _modules_by_path(inventory)
@@ -130,7 +128,6 @@ def test_api_surface_keeps_profiles_and_internal_extraction_without_duplicate_pu
     routes = {(item["method"], item["path"]) for item in native["routes"]}
 
     assert "proxy/services/prompt_registry_service.py" in modules
-    assert "proxy/services/extract_service.py" in modules
     assert ("GET", "/api/profiles") in routes
 
     assert ("GET", "/api/prompts") not in routes

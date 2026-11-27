@@ -297,8 +297,7 @@ export class Workspace {
   async send(): Promise<void> {
     if (this.busy || this.contextChanging || this.uploading || this.closing || !this.session || !this.text.trim()) return;
     if (this.text.length > 20000) { this.error = 'Вопрос длиннее 20 000 символов. Сократите его или прикрепите файл.'; return; }
-    const autoRefresh = this.model?.auto_refresh === true;
-    if (!this.model || (this.model.status === 'blocked' && !autoRefresh)) {
+    if (!this.model || this.model.status === 'blocked') {
       this.error = 'Модель для ответов не назначена или недоступна. Откройте подключения и выберите модель.'; return;
     }
     this.busy = true; this.error = ''; this.status = 'Передаю вопрос…'; this.elapsed = 0;
@@ -376,7 +375,6 @@ export class Workspace {
       }
     } finally {
       clearInterval(clock); this.busy = false; this.controller = undefined;
-      if (autoRefresh) void this.refreshModel().catch(() => undefined);
       if (acknowledged) void this.persist().catch(() => undefined);
       this.finishGeneration?.(); this.finishGeneration = undefined; this.generationFinished = undefined;
     }
