@@ -18,7 +18,7 @@ from typing import Iterable
 
 SCHEMA = "les.code-runtime-map.v1"
 PRODUCT_ENTRYPOINTS = (
-    "proxy_server.py",
+    "proxy/app.py",
     "sovushka_ng.py",
     "lemonade_host.py",
     "tools/light_document_worker.py",  # Python compatibility format worker.
@@ -194,15 +194,6 @@ def _imported_symbol_consumers(
     return {name: sorted(paths) for name, paths in sorted(consumers.items())}
 
 
-def _explicit_runtime_modules(root: Path, module_to_path: dict[str, str]) -> set[str]:
-    manifest_path = root / "config" / "windows_runtime_manifest.json"
-    if not manifest_path.exists():
-        return set()
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    paths = {str(path).replace("\\", "/") for path in manifest.get("include_files", [])}
-    return {module for module, path in module_to_path.items() if path in paths}
-
-
 def build_inventory(root: Path) -> dict:
     root = root.resolve()
     paths = _tracked_python_files(root)
@@ -229,7 +220,6 @@ def build_inventory(root: Path) -> dict:
     product_reachable = _reachable(product_roots, graph)
     test_roots = [module for module, path in module_to_path.items() if path.startswith("tests/")]
     test_reachable = _reachable(test_roots, graph)
-    explicit_runtime = _explicit_runtime_modules(root, module_to_path)
     inbound: dict[str, set[str]] = {module: set() for module in known_modules}
     for source, targets in graph.items():
         for target in targets:
@@ -241,8 +231,6 @@ def build_inventory(root: Path) -> dict:
         module = path_to_module[path]
         if module in product_reachable:
             status = "PRODUCT_REACHABLE"
-        elif module in explicit_runtime:
-            status = "RUNTIME_SUPPORT"
         elif (
             path.startswith(("tests/", "tools/", "scripts/", "legacy/scripts/"))
             or PurePosixPath(path).name.startswith("test_")
@@ -260,7 +248,6 @@ def build_inventory(root: Path) -> dict:
                 "lines": line_counts[path],
                 "inbound": sorted(module_to_path[item] for item in inbound[module]),
                 "outbound": sorted(module_to_path[item] for item in graph[module]),
-                "windows_runtime_explicit": module in explicit_runtime,
             }
         )
 
@@ -290,7 +277,6 @@ def build_inventory(root: Path) -> dict:
             "tracked_python_files": len(paths),
             "tracked_python_lines": sum(line_counts.values()),
             "product_reachable": counts["PRODUCT_REACHABLE"],
-            "runtime_support": counts["RUNTIME_SUPPORT"],
             "test_or_tool_only": counts["TEST_OR_TOOL_ONLY"],
             "dormant_candidates": counts["DORMANT_CANDIDATE"],
             "registered_api_routes": len(routes),
@@ -318,9 +304,10 @@ def render_markdown(inventory: dict) -> str:
         "",
         "> Сгенерировано `tools/code_runtime_map.py`. Не редактировать вручную.",
         "",
-        "Это консервативная статическая карта импортов и зарегистрированных FastAPI-маршрутов. "
-        "Статус `DORMANT_CANDIDATE` означает только отсутствие доказанного пути от продуктовых entrypoint, "
-        "явного runtime-helper или теста; он **не является доказательством мёртвого кода**.",
+        "Это статическая карта Python-кода, включая совместимые FastAPI-маршруты. "
+        "Windows-приложение запускает Rust API. "
+        "Статус `DORMANT_CANDIDATE` показывает отсутствие найденного пути от точки входа или теста; "
+        "он **не является доказательством мёртвого кода**.",
         "",
         "Полный построчный inventory находится в `docs/generated/code_runtime_map.json`.",
         "",
@@ -331,8 +318,7 @@ def render_markdown(inventory: dict) -> str:
         _markdown_table(
             ["Статус", "Что доказано"],
             [
-                ("PRODUCT_REACHABLE", "Есть статический путь от боевой точки входа"),
-                ("RUNTIME_SUPPORT", "Явно перечислен как отдельный helper Windows runtime"),
+                ("PRODUCT_REACHABLE", "Есть путь от указанной точки входа Python"),
                 ("TEST_OR_TOOL_ONLY", "Тест, служебный скрипт или достигается только из такого кода"),
                 ("DORMANT_CANDIDATE", "Статический потребитель не найден; требуется ручная проверка"),
             ],
@@ -350,7 +336,6 @@ def render_markdown(inventory: dict) -> str:
                 ("Python-файлов под git", summary["tracked_python_files"]),
                 ("Строк Python", summary["tracked_python_lines"]),
                 ("PRODUCT_REACHABLE", summary["product_reachable"]),
-                ("RUNTIME_SUPPORT", summary["runtime_support"]),
                 ("TEST_OR_TOOL_ONLY", summary["test_or_tool_only"]),
                 ("DORMANT_CANDIDATE", summary["dormant_candidates"]),
                 ("Зарегистрированных API-маршрутов", summary["registered_api_routes"]),
@@ -358,7 +343,7 @@ def render_markdown(inventory: dict) -> str:
             ],
         )
     )
-    lines.extend(["", "## Крупнейшие продуктовые модули", ""])
+    lines.extend(["", "## Крупнейшие модули Python-совместимости", ""])
     largest = sorted(
         (item for item in modules if item["status"] == "PRODUCT_REACHABLE"),
         key=lambda item: (-item["lines"], item["path"]),

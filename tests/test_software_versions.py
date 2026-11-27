@@ -5,7 +5,6 @@ import tomllib
 from pathlib import Path
 
 from proxy.services import version_service
-from tools import build_tauri_app
 from tools import sync_version_contract
 
 
@@ -17,9 +16,7 @@ def test_single_product_version_contract_is_consistent():
     assert contract["product_version"] == version_service.PRODUCT_VERSION
     assert contract["build_number"] == version_service.BUILD_NUMBER
     assert contract["desktop_version"] == version_service.DESKTOP_VERSION
-    assert build_tauri_app.desktop_semver(
-        contract["product_version"], contract["build_number"], edition=contract.get("product_edition", "full")
-    ) == contract["desktop_version"]
+    assert sync_version_contract.load_contract()["desktop_version"] == contract["desktop_version"]
     assert f'version = "{contract["product_version"]}"' in (ROOT / "pyproject.toml").read_text()
     for relative in ('desktop/light/src-tauri/Cargo.toml', 'desktop/light/src-tauri/Cargo.lock'):
         assert f'version = "{contract["desktop_version"]}"' in (ROOT / relative).read_text(encoding='utf-8-sig')

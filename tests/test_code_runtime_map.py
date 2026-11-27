@@ -47,8 +47,9 @@ def test_runtime_map_distinguishes_product_runtime_and_tool_only_code(inventory:
     assert modules["proxy/routers/chat.py"]["status"] == "PRODUCT_REACHABLE"
     assert not any("smeta" in path for path, item in modules.items()
                    if item["status"] == "PRODUCT_REACHABLE")
-    assert modules["tools/windows_update_engine.py"]["status"] == "RUNTIME_SUPPORT"
-    assert modules["tools/build_tauri_app.py"]["status"] == "TEST_OR_TOOL_ONLY"
+    assert modules["tools/skill_python_asset.py"]["status"] == "TEST_OR_TOOL_ONLY"
+    assert {"tools/windows_runtime.py", "tools/windows_update_engine.py",
+            "tools/windows_prebundle_smoke.py", "tools/build_tauri_app.py"}.isdisjoint(modules)
 
 
 def test_runtime_map_exposes_chat_without_estimate_routes(inventory: dict):

@@ -3,7 +3,7 @@ import argparse
 import json
 from pathlib import Path
 
-from sovushka.components.light_guide import ARTICLES
+from backend.user_guide_content import ARTICLES
 
 
 ROOT = Path(__file__).resolve().parents[1]

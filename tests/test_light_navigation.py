@@ -67,10 +67,8 @@ def test_progress_never_invents_a_percentage_and_keeps_terminal_status():
         assert not panel.bar.visible
 
 
-def test_shared_navigation_script_is_in_both_shells_and_package():
+def test_classic_shell_references_the_navigation_script():
     assert 'navigation.js' in Path('sovushka_ng.py').read_text(encoding='utf-8')
-    assert 'navigation.js' in Path('qdrant_visualizer/index.html').read_text(encoding='utf-8')
-    assert 'qdrant_visualizer/navigation.js' in Path('tools/build_light_package.py').read_text(encoding='utf-8')
 
 
 def test_return_to_svelte_is_a_separate_link_and_accepts_only_owned_loopback(monkeypatch):

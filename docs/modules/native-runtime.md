@@ -82,10 +82,11 @@ SHA binary, digest исходников/lock/version и remap путей. Пак
 [Проверки и ограничения](../acceptance/native-runtime-775.md),
 [граница автономных навыков](python-exit.md).
 
-Для будущего API фиксируется исходный контракт 265 method/path пар и схем:
-`tools/native_api_contract.py`, `docs/generated/native-api-baseline.json`.
-Снятие выполняется в отдельном временном состоянии без секретов/моделей пользователя;
-OpenAPI-проверка не заменяет поведенческие тесты сохранённых сценариев.
+Исходный контракт совместимого FastAPI зафиксирован в
+`docs/generated/native-api-baseline.json`. С 958 `tools/native_api_contract.py`
+запускает Rust API в отдельном временном профиле и сверяет его ответы с
+`docs/generated/native-api-routes.json`. Сценарии чата с моделью, поиска,
+цитирования и обновления проверяются отдельно.
 
 Кандидат 776: `--native-api` запускает также `native/api/les-api.exe`, прежний API
 получает отдельный внутренний порт и имя `legacy_api`. Статус содержит

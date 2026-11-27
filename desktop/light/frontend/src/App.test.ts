@@ -280,3 +280,94 @@ it('keeps dialog controls keyboard-native and closes through the dialog close ev
   document.querySelector<HTMLDialogElement>('dialog')!.close(); await settle(() => !document.querySelector('dialog'));
   expect(document.querySelector<HTMLTextAreaElement>('#question')?.value).toBe('Мой черновик');
 });
+
+
+function visibleButton(scope: ParentNode, label: string) {
+  const button = [...scope.querySelectorAll('button')].find((item) => item.textContent?.trim() === label);
+  if (!button) throw new Error(`Missing button: ${label}`);
+  return button;
+}
+
+const savedMcp = { id: 'test', name: 'Учебный MCP', transport: 'http', url: 'http://localhost/mcp', tools: [] };
+
+async function openMcp() {
+  await settle(() => !workspace.loading);
+  visibleButton(document, 'Подключения MCP').click();
+  await settle(() => !!document.querySelector('dialog option[value="test"]'));
+  return document.querySelector<HTMLDialogElement>('dialog')!;
+}
+
+function selectSavedMcp(dialog: HTMLDialogElement) {
+  const select = dialog.querySelector<HTMLSelectElement>('select')!;
+  select.value = savedMcp.id;
+  select.dispatchEvent(new Event('change', { bubbles: true }));
+  flushSync();
+}
+
+it('keeps the MCP draft after a save error and allows closing after a failed probe', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
+    if (path === '/api/mcp' && !init?.method) return json({ connections: [savedMcp] });
+    if (init?.method === 'POST' && (path === '/api/mcp' || path === '/api/mcp/test/probe')) {
+      return new Response(JSON.stringify({ detail: 'Проверьте адрес' }), { status: 503 });
+    }
+    throw new Error(`Unexpected request: ${path}`);
+  }));
+  const dialog = await openMcp();
+  const fields = [...dialog.querySelectorAll<HTMLInputElement>('form input')];
+  for (const [field, value] of [[fields[0], 'Несохранённое имя'], [fields[1], 'http://localhost/draft']] as const) {
+    field.value = value;
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  dialog.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await settle(() => dialog.querySelector('[role=alert]')?.textContent?.includes('Проверьте адрес') === true);
+  expect(fields.map((field) => field.value)).toEqual(['Несохранённое имя', 'http://localhost/draft']);
+
+  selectSavedMcp(dialog);
+  visibleButton(dialog, 'Проверить и получить инструменты').click();
+  await settle(() => vi.mocked(fetch).mock.calls.some(([path]) => path === '/api/mcp/test/probe')
+    && dialog.querySelector('[role=alert]')?.textContent?.includes('Проверьте адрес') === true);
+  dialog.querySelector<HTMLButtonElement>('[aria-label="Закрыть и вернуться"]')!.click();
+  await settle(() => !document.querySelector('dialog'));
+});
+
+it('cancels MCP deletion without a network request', async () => {
+  const transport = vi.fn(async () => json({ connections: [savedMcp] }));
+  vi.stubGlobal('fetch', transport);
+  const dialog = await openMcp();
+  selectSavedMcp(dialog);
+  visibleButton(dialog, 'Удалить подключение').click();
+  await settle(() => dialog.textContent?.includes('Подтвердить удаление') === true);
+  const requestCount = transport.mock.calls.length;
+  visibleButton(dialog, 'Отмена').click();
+  await settle(() => !dialog.textContent?.includes('Подтвердить удаление'));
+  expect(transport).toHaveBeenCalledTimes(requestCount);
+  expect(dialog.textContent).toContain(savedMcp.name);
+});
+
+it('keeps the available tools when saving a profile with a removed MCP tool', async () => {
+  const revision = { revision_id: 'saved', name: 'Учебный профиль', revision_no: 1, is_factory: false,
+    mode: 'agent', prompt_revision_id: 'prompt', skill_revision_id: 'skill',
+    tools: ['mcp_removed', 'read_source'], model_policy: {}, rag_policy: {} };
+  const submitted: Record<string, unknown>[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
+    if (path === '/api/profiles') return json({
+      profiles: [{ mode: 'agent', label: 'Агент', active_revision_id: 'saved', active: revision, revisions: [revision] }],
+      prompt_revisions: [{ revision_id: 'prompt', name: 'Инструкция', revision_no: 1 }],
+      skill_revisions: [{ revision_id: 'skill', name: 'Навык', revision_no: 1 }],
+      tools: [{ name: 'read_source', title: 'Читать источник' }],
+    });
+    if (path === '/api/profiles/revisions' && init?.method === 'POST') {
+      submitted.push(JSON.parse(String(init.body)));
+      return json({ ...revision, revision_id: 'created', tools: ['read_source'] });
+    }
+    throw new Error(`Unexpected request: ${path}`);
+  }));
+  await settle(() => !workspace.loading);
+  visibleButton(document, 'Профили чата').click();
+  await settle(() => document.querySelector('dialog')?.textContent?.includes('Недоступные инструменты') === true);
+  const dialog = document.querySelector<HTMLDialogElement>('dialog')!;
+  visibleButton(dialog, 'Сохранить новую редакцию').click();
+  await settle(() => dialog.textContent?.includes('Новая редакция сохранена.') === true);
+  expect(submitted).toHaveLength(1);
+  expect(submitted[0]).toMatchObject({ source_revision_id: 'saved', tools: ['read_source'] });
+});

@@ -235,6 +235,10 @@ def test_native_shell_and_assets_work_after_upstream_stops(gateway):
     forest = client.get('/qdrant-visualizer/index.html')
     assert forest.headers['x-les-handler'] == 'rust.frontend'
     assert 'data-native-forest="true"' in forest.text
+    assert 'navigation.js' in forest.text
+    navigation = client.get('/qdrant-visualizer/navigation.js').raise_for_status()
+    assert navigation.headers['x-les-handler'] == 'rust.frontend'
+    assert navigation.content == Path('qdrant_visualizer/navigation.js').read_bytes()
     assert client.head('/qdrant-visualizer/forest-scene.js').status_code == 200
     assert client.get('/qdrant-visualizer/private.txt').status_code == 404
     assert client.get('/classic?tab=chat').headers['location'] == '/app/'

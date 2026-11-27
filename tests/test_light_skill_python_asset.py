@@ -136,3 +136,53 @@ def test_windows_payload_pins_separate_python_and_keeps_native_pdfium(tmp_path):
     assert descriptor['receipt_sha256'] == digest(runtime / 'skill-python-receipt.json')
     with ZipFile(component) as archive:
         assert {'python.exe', 'skill-python-receipt.json', 'THIRD_PARTY_NOTICES/Python-LICENSE.txt'} <= set(archive.namelist())
+
+
+def test_build_inputs_check_both_archives_and_uv_binary(tmp_path, monkeypatch):
+    from tools import skill_python_asset as assets
+
+    config = tmp_path / "contracts"
+    config.mkdir()
+    monkeypatch.setattr(assets, "CONFIG", config)
+    python_zip = tmp_path / "python-source.zip"
+    uv_zip = tmp_path / "uv-source.zip"
+    with ZipFile(python_zip, "w") as archive:
+        archive.writestr("python.exe", b"portable interpreter")
+    with ZipFile(uv_zip, "w") as archive:
+        archive.writestr("uv-x86_64/uv.exe", b"pinned uv")
+    monkeypatch.setenv("LES_WINDOWS_PYTHON_ARCHIVE", str(python_zip))
+    monkeypatch.setenv("LES_WINDOWS_UV_ARCHIVE", str(uv_zip))
+
+    expected_uv = tmp_path / "expected-uv.exe"
+    expected_uv.write_bytes(b"pinned uv")
+    python_contract = {
+        "schema": "les.windows-python.v2", "archive_name": "python.zip",
+        "archive_sha256": digest(python_zip),
+    }
+    uv_contract = {
+        "schema": "les.windows-uv.v1", "binary_name": "uv.exe",
+        "archive_sha256": digest(uv_zip), "binary_sha256": digest(expected_uv),
+    }
+    (config / "windows_python.json").write_text(json.dumps(python_contract), encoding="utf-8")
+    uv_config = config / "windows_uv.json"
+    uv_config.write_text(json.dumps(uv_contract), encoding="utf-8")
+    output = tmp_path / "output"
+    output.mkdir()
+    staged_python, staged_uv = assets.stage_build_inputs(output)
+    assert staged_python == output / "python.zip"
+    assert staged_python.read_bytes() == python_zip.read_bytes()
+    assert staged_uv == output / "uv.exe"
+    assert staged_uv.read_bytes() == expected_uv.read_bytes()
+
+    refused = tmp_path / "refused"
+    refused.mkdir()
+    uv_config.write_text(json.dumps({**uv_contract, "binary_sha256": "0" * 64}), encoding="utf-8")
+    with pytest.raises(ValueError, match="uv executable SHA-256"):
+        assets.stage_build_inputs(refused)
+    uv_zip.write_bytes(b"modified")
+    with pytest.raises(ValueError, match="LES_WINDOWS_UV_ARCHIVE"):
+        assets.stage_build_inputs(refused)
+    python_zip.write_bytes(b"modified")
+    with pytest.raises(ValueError, match="LES_WINDOWS_PYTHON_ARCHIVE"):
+        assets.stage_build_inputs(refused)
+    assert list(refused.iterdir()) == []

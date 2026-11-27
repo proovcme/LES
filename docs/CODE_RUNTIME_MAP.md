@@ -2,7 +2,7 @@
 
 > Сгенерировано `tools/code_runtime_map.py`. Не редактировать вручную.
 
-Это консервативная статическая карта импортов и зарегистрированных FastAPI-маршрутов. Статус `DORMANT_CANDIDATE` означает только отсутствие доказанного пути от продуктовых entrypoint, явного runtime-helper или теста; он **не является доказательством мёртвого кода**.
+Это статическая карта Python-кода, включая совместимые FastAPI-маршруты. Windows-приложение запускает Rust API. Статус `DORMANT_CANDIDATE` показывает отсутствие найденного пути от точки входа или теста; он **не является доказательством мёртвого кода**.
 
 Полный построчный inventory находится в `docs/generated/code_runtime_map.json`.
 
@@ -10,8 +10,7 @@
 
 | Статус | Что доказано |
 | --- | --- |
-| PRODUCT_REACHABLE | Есть статический путь от боевой точки входа |
-| RUNTIME_SUPPORT | Явно перечислен как отдельный helper Windows runtime |
+| PRODUCT_REACHABLE | Есть путь от указанной точки входа Python |
 | TEST_OR_TOOL_ONLY | Тест, служебный скрипт или достигается только из такого кода |
 | DORMANT_CANDIDATE | Статический потребитель не найден; требуется ручная проверка |
 
@@ -19,16 +18,15 @@
 
 | Метрика | Значение |
 | --- | --- |
-| Python-файлов под git | 715 |
-| Строк Python | 169066 |
+| Python-файлов под git | 706 |
+| Строк Python | 165309 |
 | PRODUCT_REACHABLE | 414 |
-| RUNTIME_SUPPORT | 5 |
-| TEST_OR_TOOL_ONLY | 296 |
+| TEST_OR_TOOL_ONLY | 292 |
 | DORMANT_CANDIDATE | 0 |
 | Зарегистрированных API-маршрутов | 285 |
 | Ошибок разбора | 0 |
 
-## Крупнейшие продуктовые модули
+## Крупнейшие модули Python-совместимости
 
 | Файл | Строк | Прямых потребителей |
 | --- | --- | --- |
@@ -55,7 +53,7 @@
 | proxy/services/project_pdf_extract_service.py | 915 | 4 |
 | proxy/services/document_explorer_service.py | 904 | 5 |
 | proxy/services/mail_registry_service.py | 903 | 6 |
-| tools/les_runtime_control.py | 902 | 4 |
+| tools/les_runtime_control.py | 902 | 2 |
 | proxy/services/project_document_registry_service.py | 853 | 3 |
 | backend/parquet_writer.py | 834 | 6 |
 | proxy/services/notebook_study_service.py | 833 | 3 |

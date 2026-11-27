@@ -113,7 +113,7 @@ SERVICES: dict[str, ServiceDef] = {
         agent_plist="me.ovc.les.proxy.plist",
         port=8050,
         health_url="http://127.0.0.1:8050/api/health",
-        process_tokens=("uvicorn", "proxy_server:app"),
+        process_tokens=("uvicorn", "proxy.app:app"),
     ),
     "indexer": ServiceDef(
         key="indexer",

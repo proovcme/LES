@@ -2,7 +2,7 @@
 .PHONY: help version-sync verify-fast verify pre-push test test-mail test-tauri test-core test-runtime test-api frontend test-frontend public-check package validate-package
 
 PYTEST_BASETEMP ?= .test-tmp
-PKGS := backend proxy sovushka tools sovushka_ng.py proxy_server.py
+PKGS := backend proxy sovushka tools sovushka_ng.py
 
 LIGHT_TESTS := $(wildcard tests/test_light_*.py)
 LIGHT_TESTS += tests/test_dataset_watch.py tests/test_dataset_deletion_service.py
