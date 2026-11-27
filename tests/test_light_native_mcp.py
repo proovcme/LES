@@ -13,7 +13,6 @@ from test_light_mcp_connections import server
 def test_native_settings_and_cached_tool_revocation_without_backend(profiles, server, monkeypatch):
     client,database,_=profiles
     from proxy.services import mcp_connection_service as service
-    from proxy.services.tool_harness_service import ToolHarness
     monkeypatch.setattr(service,'rag_meta_db_path',lambda:database)
     monkeypatch.setenv('LES_NATIVE_MCP_WORKER',os.environ['LES_TEST_NATIVE_API'])
     created=client.post('/api/mcp',json={'name':'Native','url':server[0]}).raise_for_status()
@@ -23,20 +22,20 @@ def test_native_settings_and_cached_tool_revocation_without_backend(profiles, se
     assert len(client.post(f'/api/mcp/{key}/probe').raise_for_status().json()['tools'])==2
     assert client.put(f'/api/mcp/{key}/tools',json={'names':['change']}).status_code==409
     client.put(f'/api/mcp/{key}/tools',json={'names':['echo']}).raise_for_status()
-    name=service.tool_name(key,'echo'); harness=ToolHarness()
-    result=asyncio.run(harness.call_async(name,{'text':'Native read'}))
-    assert result['status']=='ok',result
+    expected, = client.get('/api/mcp').raise_for_status().json()['connections'][0]['tools']
+    result = service._native('call', connection_id=key, expected=expected, arguments={'text': 'Native read'})
+    assert not result.get('isError')
     assert server[1]==['Native read']
     renamed=client.put(f'/api/mcp/{key}',json={'name':'Renamed','url':server[0]}).raise_for_status().json()
     assert renamed['id']==key and renamed['name']=='Renamed'
     assert [tool['name'] for tool in renamed['tools']]==['echo']
     moved=client.put(f'/api/mcp/{key}',json={'name':'Renamed','url':server[0]+'/new'}).raise_for_status().json()
     assert moved['id']==key and moved['tools']==[]
-    denied=asyncio.run(harness.call_async(name,{'text':'old tool must stay disabled'}))
-    assert denied['status']!='ok' and server[1]==['Native read']
+    with pytest.raises(ValueError):
+        service._native('call', connection_id=key, expected=expected, arguments={'text': 'old tool must stay disabled'})
     client.delete(f'/api/mcp/{key}').raise_for_status()
-    denied=asyncio.run(harness.call_async(name,{'text':'must not reach server'}))
-    assert denied['status']!='ok'
+    with pytest.raises(ValueError):
+        service._native('call', connection_id=key, expected=expected, arguments={'text': 'must not reach server'})
     assert server[1]==['Native read']
     assert client.get('/api/mcp').json()=={'connections':[]}
 

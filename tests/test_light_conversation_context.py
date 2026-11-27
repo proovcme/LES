@@ -1,4 +1,3 @@
-import asyncio
 import sqlite3
 from types import SimpleNamespace
 
@@ -100,24 +99,6 @@ def test_summary_batch_does_not_claim_unread_turns():
     assert through == 1 and 'xxxx' not in text
     with pytest.raises(ValueError, match='слишком длинное'):
         service.summary_batch(rows[1:], '', max_chars=100)
-
-
-def test_context_api_validates_scope_and_concurrent_edits(conversation):
-    from fastapi import FastAPI
-    from fastapi.testclient import TestClient
-    from proxy.routers.workspace_memory import router
-    from proxy.security import require_user
-    sid, _ = conversation
-    app = FastAPI()
-    app.include_router(router)
-    app.dependency_overrides[require_user] = lambda: {'role': 'user'}
-    with TestClient(app) as client:
-        url = f'/api/workspace/memory/context/{sid}'
-        assert client.get(url).json()['remembered_turns'] == 8
-        assert client.patch(url, json={'expected_revision': 0, 'summary': 'Edited'}).json()['summary'] == 'Edited'
-        assert client.patch(url, json={'expected_revision': 0, 'summary': 'Stale'}).status_code == 409
-        assert client.post(url + '/forget', json={'expected_revision': 1}).json()['cutoff_id'] == 8
-        assert client.get('/api/workspace/memory/context/missing').status_code == 404
 
 
 @pytest.mark.parametrize('text,expected', [('Короткая заметка: встреча в библиотеке 17 мая.', 1), ('Шум', 0)])

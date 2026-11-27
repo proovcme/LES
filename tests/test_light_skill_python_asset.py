@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 from zipfile import ZipFile
 import pytest
 from tools.skill_python_asset import stage,digest
@@ -85,21 +84,6 @@ def test_safe_dependency_paths_are_declared_without_executing_startup_hooks(tmp_
     assert receipt['module_roots']==['Lib/site-packages','Lib/site-packages/win32','Lib/site-packages/win32/lib']
     assert receipt['dll_roots']==['Lib/site-packages/pywin32_system32']
     assert (target/'python313._pth').read_text()=='python313.zip\n.\nLib/site-packages\n'
-
-
-def test_compatibility_bootstrap_uses_the_same_rust_selector_and_refuses_bad_asset(tmp_path,monkeypatch):
-    import os
-    if not os.getenv('LES_CORE_LIBRARY'):pytest.skip('Native selector asset required')
-    from proxy.services import skill_compute_service as service
-    root=tmp_path/'payload/runtime';root.mkdir(parents=True)
-    target=root.parent/'native/skill-python'
-    stage(target,source(tmp_path/'source'))
-    monkeypatch.setattr(service,'__file__',str(root/'proxy/services/skill_compute_service.py'))
-    monkeypatch.delenv('LES_SKILL_PYTHON',raising=False)
-    assert Path(service._program())==target/'python.exe'
-    (target/'python313._pth').write_text('python313.zip\n.\n../runtime\nimport site\n',encoding='utf-8')
-    with pytest.raises(service.SkillExecutionError) as fault:service._program()
-    assert fault.value.code=='SKILL_RUNTIME_INVALID'
 
 
 def test_windows_payload_pins_separate_python_and_keeps_native_pdfium(tmp_path):

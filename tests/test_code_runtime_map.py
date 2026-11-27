@@ -44,7 +44,7 @@ def test_runtime_map_distinguishes_product_runtime_and_tool_only_code(inventory:
     modules = _modules_by_path(inventory)
 
     assert "proxy/app.py" not in modules
-    assert modules["proxy/routers/chat.py"]["status"] == "TEST_OR_TOOL_ONLY"
+    assert "proxy/routers/chat.py" not in modules
     assert not any("smeta" in path for path, item in modules.items()
                    if item["status"] == "PRODUCT_REACHABLE")
     assert modules["tools/skill_python_asset.py"]["status"] == "TEST_OR_TOOL_ONLY"
@@ -57,7 +57,7 @@ def test_runtime_map_exposes_chat_without_estimate_routes(inventory: dict):
     paths = {route["path"] for route in native["routes"]}
     assert {"/api/chat", "/api/chat/stream", "/api/commands"} <= paths
     assert not any(path.startswith(("/api/smeta-", "/api/rim")) for path in paths)
-    assert "proxy/routers/chat.py" in inventory["focus"]
+    assert "proxy/services/retrieval_service.py" in inventory["focus"]
 
 
 def test_runtime_map_is_conservative_and_deterministically_sorted(inventory: dict):
@@ -71,13 +71,13 @@ def test_runtime_map_is_conservative_and_deterministically_sorted(inventory: dic
     assert route_keys == sorted(route_keys)
     # The public Light tree deliberately excludes archived full-product tests.
     assert inventory["summary"]["tracked_python_files"] >= inventory["summary"]["product_reachable"]
-    assert "proxy/routers/chat.py" in paths
+    assert "proxy/services/retrieval_service.py" in paths
     assert {"proxy/app.py", "sovushka_ng.py"}.isdisjoint(paths)
     assert not any(path.startswith("sovushka/") for path in paths)
     assert inventory["summary"]["dormant_candidates"] == sum(item["status"] == "DORMANT_CANDIDATE" for item in inventory["modules"])
     markdown = render_markdown(inventory)
     assert "не является доказательством мёртвого кода" in markdown
-    assert "proxy/routers/chat.py" in markdown
+    assert "proxy/services/retrieval_service.py" in markdown
     assert "DORMANT_CANDIDATE" in markdown
     assert (ROOT / "docs" / "CODE_RUNTIME_MAP.md").read_text(encoding="utf-8") == markdown
     assert json.loads(

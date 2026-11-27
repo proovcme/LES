@@ -147,26 +147,7 @@ MODE_LABELS: dict[str, str] = {
     "free": "Свободный ответ",
 }
 
-# Only prompts with a verified production call-site belong in the editable
-# registry. UI modes may route to these generators, but they do not own another
-# hidden system prompt.
-PROMPT_RUNTIME_USES: dict[str, list[str]] = {
-    "rag": [
-        "proxy.services.chat_evidence_application_service: grounded answer and strict retry",
-    ],
-    "smeta_direct": [
-        "proxy.routers.chat:_smeta_model_first_answer",
-    ],
-    "smeta_harness": [
-        "proxy.services.estimate_harness_service: batch planning and execution",
-    ],
-    "review": [
-        "proxy.routers.chat:_run_attachment_mode",
-    ],
-    "free": [
-    ],
-}
-
+PROMPT_RUNTIME_USES: dict[str, list[str]] = {}
 
 _FALLBACK_SMETA_ROLE_PACK: dict[str, Any] = {
     "schema": "les.prompt.role_pack.v1",

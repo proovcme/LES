@@ -1,8 +1,8 @@
-"""The explicit Light tool registry keeps estimate write operations out."""
-from proxy.services.tool_registry_service import canonical_tool_registry
+"""The Windows tool registry excludes inherited estimate write operations."""
+from tests.test_light_native_chat_profiles import profiles
 
 
-def test_light_tool_registry_does_not_offer_workbook_builders():
-    names = {item.contract.name for item in canonical_tool_registry().registrations()}
-    assert "build_lsr_workbook" not in names
-    assert "build_vor_workbook" not in names
+def test_light_tool_registry_does_not_offer_workbook_builders(profiles):
+    client, _, _ = profiles
+    names = {tool['name'] for tool in client.get('/api/tools/registry').raise_for_status().json()['tools']}
+    assert {'build_lsr_workbook', 'build_vor_workbook'}.isdisjoint(names)

@@ -4,39 +4,49 @@
     "tools/light_document_worker.py"
   ],
   "focus": {
-    "proxy/routers/chat.py": {
+    "proxy/services/retrieval_service.py": {
       "direct_importers": [
-        "proxy/routers/settings.py",
-        "proxy/routers/workspace_memory.py",
-        "tests/test_light_chat_evidence.py",
-        "tests/test_light_durable_chat.py",
-        "tests/test_light_stream_lifecycle.py",
-        "tests/test_model_connection_chat_integration.py",
-        "tests/test_source_excerpts.py"
+        "proxy/routers/dataset_search.py",
+        "proxy/services/table_appendix_service.py",
+        "tests/test_light_index_recovery.py",
+        "tests/test_light_pipeline_trial.py",
+        "tests/test_light_rerank_audit.py",
+        "tests/test_retrieval_service.py",
+        "tools/evaluate_rag_pipeline.py"
       ],
-      "lines": 469,
+      "lines": 1440,
       "status": "TEST_OR_TOOL_ONLY",
       "symbols": {
-        "_active_dispatcher_reindex_jobs": [
-          "proxy/routers/workspace_memory.py"
+        "CURRENT": [
+          "tests/test_retrieval_service.py"
         ],
-        "_generation_token_budget": [
-          "tests/test_source_excerpts.py"
+        "classify_query": [
+          "proxy/routers/dataset_search.py",
+          "tests/test_retrieval_service.py"
         ],
-        "_llm_runtime": [
-          "proxy/routers/settings.py"
+        "expand_retrieval_query": [
+          "tests/test_retrieval_service.py"
         ],
-        "_local_context_budget": [
-          "tests/test_source_excerpts.py"
+        "hybrid_backend": [
+          "proxy/services/table_appendix_service.py",
+          "tests/test_retrieval_service.py"
         ],
-        "clean_visible_text": [
-          "tests/test_source_excerpts.py"
+        "infer_dataset_filter": [
+          "tests/test_retrieval_service.py"
         ],
-        "get_chat_state": [
-          "proxy/routers/workspace_memory.py"
+        "required_reranker_policy": [
+          "tests/test_retrieval_service.py"
         ],
-        "source_excerpts": [
-          "tests/test_source_excerpts.py"
+        "resolve_dataset_ids": [
+          "proxy/routers/dataset_search.py",
+          "tests/test_retrieval_service.py"
+        ],
+        "retrieve_chat_chunks": [
+          "proxy/routers/dataset_search.py",
+          "tests/test_light_index_recovery.py",
+          "tests/test_light_rerank_audit.py",
+          "tests/test_retrieval_service.py",
+          "tools/evaluate_rag_pipeline.py"
         ]
       }
     }
@@ -190,7 +200,6 @@
         "proxy/services/chat_attachment_read_service.py",
         "proxy/services/chat_folder_service.py",
         "proxy/services/les_md_service.py",
-        "proxy/services/tool_harness_service.py",
         "tests/test_converter_email.py",
         "tests/test_datasets_router.py",
         "tests/test_light_grounding_760.py",
@@ -424,10 +433,7 @@
         "backend/metrics_collector.py",
         "backend/reranker.py",
         "proxy/routers/runtime.py",
-        "proxy/services/local_model_http.py",
-        "proxy/services/web_page_reader_service.py",
-        "proxy/services/web_research_config_service.py",
-        "proxy/services/web_search_service.py"
+        "proxy/services/local_model_http.py"
       ],
       "lines": 48,
       "module": "backend.http_client_policy",
@@ -567,7 +573,6 @@
         "proxy/services/pdf_table_continuation_service.py",
         "proxy/services/retrieval_quality_service.py",
         "proxy/services/table_retrieval_service.py",
-        "proxy/services/word_evidence_service.py",
         "tests/oracles/bm25_store_779.py",
         "tests/test_light_bm25_index.py",
         "tests/test_light_lexical_v2.py",
@@ -599,10 +604,7 @@
     },
     {
       "inbound": [
-        "proxy/routers/chat.py",
-        "proxy/services/chat_evidence_application_service.py",
-        "proxy/services/chat_inference_service.py",
-        "proxy/services/chat_request_service.py"
+        "proxy/services/chat_inference_service.py"
       ],
       "lines": 212,
       "module": "backend.inference.routing",
@@ -616,8 +618,7 @@
     {
       "inbound": [
         "backend/inference/__init__.py",
-        "lemonade_host.py",
-        "proxy/routers/chat.py"
+        "lemonade_host.py"
       ],
       "lines": 140,
       "module": "backend.inference.validator",
@@ -647,11 +648,9 @@
         "proxy/services/lexical_evidence_service.py",
         "proxy/services/lexical_index_service.py",
         "proxy/services/pdf_page_context_service.py",
-        "proxy/services/pdf_source_evidence_service.py",
         "proxy/services/pdf_table_continuation_service.py",
         "proxy/services/retrieval_service.py",
         "proxy/services/table_retrieval_service.py",
-        "proxy/services/word_evidence_service.py",
         "proxy/services/workbook_total_service.py",
         "tests/oracles/bm25_store_779.py",
         "tests/test_light_audit_regressions.py",
@@ -668,7 +667,6 @@
         "tests/test_light_pipeline_trial.py",
         "tests/test_light_retrieval_quality.py",
         "tests/test_light_table_retrieval.py",
-        "tests/test_light_word_evidence.py",
         "tests/test_model_connection_embeddings_integration.py",
         "tests/test_qdrant_adapter_parse.py",
         "tests/test_retrieval_service.py"
@@ -967,15 +965,11 @@
         "proxy/services/native_research_loop_service.py",
         "proxy/services/native_tool_message_service.py",
         "proxy/services/openai_compatible_transport_service.py",
-        "proxy/services/pdf_source_evidence_service.py",
         "proxy/services/request_memory_service.py",
         "proxy/services/retrieval_quality_service.py",
-        "proxy/services/skill_compute_service.py",
         "proxy/services/source_locator_service.py",
-        "proxy/services/table_document_tool.py",
         "proxy/services/tabular_document_service.py",
         "proxy/services/tool_evidence_service.py",
-        "proxy/services/tool_harness_service.py",
         "proxy/services/trusted_executor_service.py",
         "tests/conftest.py",
         "tests/oracles/job_policy.py",
@@ -1014,7 +1008,6 @@
         "tests/test_light_native_unicode.py",
         "tests/test_light_native_workbook.py",
         "tests/test_light_overview_groups.py",
-        "tests/test_light_pdf_source_tool.py",
         "tests/test_light_resource_memory.py",
         "tests/test_light_section_coverage.py",
         "tools/build_rag_contract_sibling.py"
@@ -1170,7 +1163,6 @@
       "inbound": [
         "backend/qdrant_support.py",
         "proxy/services/bor_service.py",
-        "proxy/services/reconcile_service.py",
         "tests/oracles/table_rows_828.py",
         "tests/test_light_native_format_conversion.py",
         "tests/test_light_native_workbook.py"
@@ -1207,13 +1199,11 @@
         "backend/windows_ocr.py",
         "proxy/services/pdf_contour_service.py",
         "proxy/services/pdf_table_continuation_service.py",
-        "proxy/services/tool_harness_service.py",
         "tests/test_light_native_document.py",
         "tests/test_light_native_index_batch.py",
         "tests/test_light_native_intake.py",
         "tests/test_light_native_preparation.py",
         "tests/test_light_pdf_readers.py",
-        "tests/test_light_pdf_source_tool.py",
         "tools/evaluate_pdf_structure.py"
       ],
       "lines": 196,
@@ -1235,21 +1225,15 @@
         "proxy/routers/dataset_document_ops.py",
         "proxy/routers/dataset_uploads.py",
         "proxy/routers/mail.py",
-        "proxy/routers/settings.py",
-        "proxy/services/answer_form_service.py",
         "proxy/services/chat_attachment_read_service.py",
-        "proxy/services/chat_request_service.py",
         "proxy/services/dataset_deletion_service.py",
         "proxy/services/dataset_parse_service.py",
         "proxy/services/document_explorer_service.py",
-        "proxy/services/document_review_tool.py",
         "proxy/services/evidence_packet_service.py",
         "proxy/services/mail_registry_service.py",
         "proxy/services/prompt_registry_service.py",
         "proxy/services/system_dataset_service.py",
         "proxy/services/table_document_tool.py",
-        "proxy/services/tool_harness_service.py",
-        "proxy/services/web_page_reader_service.py",
         "tests/test_model_connection_embeddings_integration.py",
         "tests/test_product_edition.py"
       ],
@@ -1494,7 +1478,6 @@
         "backend/format_process.py",
         "backend/native_parquet.py",
         "backend/qdrant_support.py",
-        "proxy/routers/chat.py",
         "proxy/routers/dataset_catalog.py",
         "proxy/routers/dataset_external.py",
         "proxy/routers/dataset_parse.py",
@@ -1529,11 +1512,9 @@
         "proxy/services/project_document_registry_service.py",
         "proxy/services/project_pdf_extract_service.py",
         "proxy/services/project_service.py",
-        "proxy/services/project_summary_service.py",
         "proxy/services/rag_readiness_service.py",
         "proxy/services/retrieval_service.py",
         "proxy/services/runtime_dispatcher.py",
-        "proxy/services/semantic_cache.py",
         "proxy/services/system_dataset_service.py",
         "proxy/services/task_service.py",
         "tests/oracles/context_python.py",
@@ -1629,21 +1610,17 @@
         "backend/pdf_reader.py",
         "backend/qdrant_support.py",
         "backend/windows_ocr.py",
-        "proxy/routers/chat.py",
         "proxy/routers/dataset_catalog.py",
         "proxy/routers/mail.py",
         "proxy/routers/runtime.py",
         "proxy/services/bor_service.py",
         "proxy/services/candidate_acceptance_service.py",
         "proxy/services/chat_attachment_service.py",
-        "proxy/services/chat_evidence_application_service.py",
         "proxy/services/chat_folder_service.py",
-        "proxy/services/chat_request_service.py",
         "proxy/services/context_memory_service.py",
         "proxy/services/dataset_contracts.py",
         "proxy/services/dataset_watch_service.py",
         "proxy/services/document_original_service.py",
-        "proxy/services/document_review_tool.py",
         "proxy/services/forms_service.py",
         "proxy/services/installed_skill_service.py",
         "proxy/services/light_update_service.py",
@@ -1652,16 +1629,10 @@
         "proxy/services/mail_sync_service.py",
         "proxy/services/normcontrol_service.py",
         "proxy/services/notebook_service.py",
-        "proxy/services/notebook_study_service.py",
         "proxy/services/project_document_registry_service.py",
         "proxy/services/project_pdf_extract_service.py",
-        "proxy/services/project_summary_service.py",
         "proxy/services/project_table_registry_service.py",
         "proxy/services/rag_advanced_policy_service.py",
-        "proxy/services/reconcile_service.py",
-        "proxy/services/runtime_config_registry_service.py",
-        "proxy/services/skill_compute_service.py",
-        "proxy/services/spec_to_bor_service.py",
         "proxy/services/table_document_tool.py",
         "proxy/storage/file_storage.py"
       ],
@@ -1891,7 +1862,6 @@
         "proxy/services/job_service.py",
         "proxy/services/memory_service.py",
         "proxy/services/model_connection_registry_service.py",
-        "proxy/services/native_storage_http.py",
         "proxy/services/project_service.py",
         "tests/test_light_durable_chat.py",
         "tests/test_light_native_api.py",
@@ -1933,8 +1903,6 @@
         "proxy/memory_core/store.py",
         "proxy/memory_core/validation.py",
         "proxy/routers/__init__.py",
-        "proxy/routers/agent_state.py",
-        "proxy/routers/chat.py",
         "proxy/routers/dataset_catalog.py",
         "proxy/routers/dataset_cloud.py",
         "proxy/routers/dataset_document_ops.py",
@@ -1952,34 +1920,22 @@
         "proxy/routers/model_connections.py",
         "proxy/routers/rerank.py",
         "proxy/routers/runtime.py",
-        "proxy/routers/settings.py",
-        "proxy/routers/workspace_memory.py",
         "proxy/security.py",
         "proxy/services/__init__.py",
         "proxy/services/agent_state_service.py",
-        "proxy/services/agent_workspace_tools.py",
         "proxy/services/answer_contract_service.py",
-        "proxy/services/answer_form_service.py",
-        "proxy/services/artifact_revision_service.py",
         "proxy/services/auto_parse_resume_service.py",
         "proxy/services/background_summary_service.py",
         "proxy/services/bor_service.py",
         "proxy/services/bound_document_tools.py",
         "proxy/services/cad_bim_graph.py",
-        "proxy/services/cad_bim_highlight.py",
         "proxy/services/candidate_acceptance_service.py",
         "proxy/services/canonical_promotion_service.py",
         "proxy/services/canonical_route_service.py",
-        "proxy/services/capability_broker_service.py",
         "proxy/services/chat_attachment_read_service.py",
         "proxy/services/chat_attachment_service.py",
-        "proxy/services/chat_capability_scope_service.py",
         "proxy/services/chat_durability_service.py",
-        "proxy/services/chat_evidence_application_service.py",
         "proxy/services/chat_evidence_context.py",
-        "proxy/services/chat_evidence_contracts.py",
-        "proxy/services/chat_evidence_manifest_service.py",
-        "proxy/services/chat_evidence_tools.py",
         "proxy/services/chat_folder_service.py",
         "proxy/services/chat_inference_service.py",
         "proxy/services/chat_persistence_service.py",
@@ -1987,15 +1943,11 @@
         "proxy/services/chat_prompt_support.py",
         "proxy/services/chat_provider_session_service.py",
         "proxy/services/chat_request_contracts.py",
-        "proxy/services/chat_request_service.py",
         "proxy/services/chat_runtime.py",
         "proxy/services/chat_section_context_service.py",
         "proxy/services/chat_session_service.py",
-        "proxy/services/class_router_service.py",
-        "proxy/services/clause_lookup_service.py",
         "proxy/services/cloud_drive_service.py",
         "proxy/services/command_service.py",
-        "proxy/services/context_expander_service.py",
         "proxy/services/context_governor_service.py",
         "proxy/services/context_memory_service.py",
         "proxy/services/conversation_context_service.py",
@@ -2024,12 +1976,10 @@
         "proxy/services/evidence_contract.py",
         "proxy/services/evidence_packet_service.py",
         "proxy/services/execution_receipt_service.py",
-        "proxy/services/extension_tool_service.py",
         "proxy/services/extract_service.py",
         "proxy/services/field_intake_service.py",
         "proxy/services/file_viewer_service.py",
         "proxy/services/forms_service.py",
-        "proxy/services/freetoken_cache_profile_service.py",
         "proxy/services/generation_guard_service.py",
         "proxy/services/graph_edges_service.py",
         "proxy/services/installed_skill_service.py",
@@ -2065,27 +2015,22 @@
         "proxy/services/model_engine_extension_service.py",
         "proxy/services/model_execution_preset_service.py",
         "proxy/services/model_reasoning_service.py",
-        "proxy/services/model_research_tool_service.py",
         "proxy/services/model_resource_service.py",
         "proxy/services/model_secret_service.py",
         "proxy/services/model_streaming_service.py",
         "proxy/services/native_open_service.py",
         "proxy/services/native_research_loop_service.py",
-        "proxy/services/native_storage_http.py",
         "proxy/services/native_tool_message_service.py",
         "proxy/services/normcontrol_service.py",
         "proxy/services/notebook_service.py",
-        "proxy/services/notebook_study_service.py",
         "proxy/services/ontology_service.py",
         "proxy/services/openai_compatible_transport_service.py",
         "proxy/services/operation_progress_service.py",
         "proxy/services/pd_rd_manifest_service.py",
         "proxy/services/pdf_contour_service.py",
         "proxy/services/pdf_page_context_service.py",
-        "proxy/services/pdf_source_evidence_service.py",
         "proxy/services/pdf_table_continuation_service.py",
         "proxy/services/pdf_viewer_service.py",
-        "proxy/services/preset_service.py",
         "proxy/services/process_status.py",
         "proxy/services/profile_resolver.py",
         "proxy/services/project_document_registry_service.py",
@@ -2093,18 +2038,15 @@
         "proxy/services/project_pdf_table_service.py",
         "proxy/services/project_registry_chat_service.py",
         "proxy/services/project_service.py",
-        "proxy/services/project_summary_service.py",
         "proxy/services/project_table_registry_service.py",
         "proxy/services/prompt_registry_service.py",
         "proxy/services/public_error_service.py",
-        "proxy/services/public_page_reader.py",
         "proxy/services/query_router.py",
         "proxy/services/rag_advanced_policy_service.py",
         "proxy/services/rag_catalog_guard_service.py",
         "proxy/services/rag_catalog_recovery_service.py",
         "proxy/services/rag_pipeline_status_service.py",
         "proxy/services/rag_readiness_service.py",
-        "proxy/services/reconcile_service.py",
         "proxy/services/request_idempotency_service.py",
         "proxy/services/request_memory_service.py",
         "proxy/services/resource_governor.py",
@@ -2115,17 +2057,13 @@
         "proxy/services/review_source_reader.py",
         "proxy/services/review_task_store.py",
         "proxy/services/runtime_admission.py",
-        "proxy/services/runtime_config_registry_service.py",
         "proxy/services/runtime_dispatcher.py",
         "proxy/services/saferag_service.py",
         "proxy/services/scope_service.py",
         "proxy/services/section_evidence_candidate.py",
-        "proxy/services/semantic_cache.py",
         "proxy/services/sidecar_ops_service.py",
-        "proxy/services/skill_compute_service.py",
         "proxy/services/skill_snippet_registry.py",
         "proxy/services/source_locator_service.py",
-        "proxy/services/spec_to_bor_service.py",
         "proxy/services/structured_extract.py",
         "proxy/services/system_dataset_service.py",
         "proxy/services/table_appendix_service.py",
@@ -2137,19 +2075,10 @@
         "proxy/services/title_block_extract_service.py",
         "proxy/services/tool_contract_service.py",
         "proxy/services/tool_evidence_service.py",
-        "proxy/services/tool_harness_service.py",
         "proxy/services/tool_registry_service.py",
-        "proxy/services/tool_trace_policy.py",
         "proxy/services/trusted_executor_service.py",
-        "proxy/services/typed_memory_projection_service.py",
         "proxy/services/version_service.py",
-        "proxy/services/web_page_reader_service.py",
-        "proxy/services/web_research_config_service.py",
-        "proxy/services/web_search_service.py",
-        "proxy/services/word_evidence_service.py",
-        "proxy/services/workbook_tool_service.py",
         "proxy/services/workbook_total_service.py",
-        "proxy/services/workflow_checkpoint_service.py",
         "proxy/services/workflow_plan_service.py",
         "proxy/storage/__init__.py",
         "proxy/storage/file_storage.py"
@@ -2164,7 +2093,6 @@
       "inbound": [
         "backend/embedding_client.py",
         "proxy/memory_core/store.py",
-        "proxy/routers/chat.py",
         "proxy/routers/dataset_cloud.py",
         "proxy/routers/dataset_external.py",
         "proxy/routers/dataset_search.py",
@@ -2172,7 +2100,6 @@
         "proxy/routers/mail.py",
         "proxy/routers/model_connections.py",
         "proxy/routers/runtime.py",
-        "proxy/routers/settings.py",
         "proxy/security.py",
         "proxy/services/chat_inference_service.py",
         "proxy/services/cloud_drive_service.py",
@@ -2206,9 +2133,7 @@
     {
       "inbound": [
         "proxy/config.py",
-        "proxy/routers/chat.py",
         "proxy/routers/runtime.py",
-        "proxy/routers/settings.py",
         "proxy/services/chat_inference_service.py",
         "proxy/services/resource_governor.py"
       ],
@@ -2336,8 +2261,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/agent_state.py",
-        "proxy/routers/chat.py",
         "proxy/routers/dataset_catalog.py",
         "proxy/routers/dataset_cloud.py",
         "proxy/routers/dataset_document_ops.py",
@@ -2354,9 +2277,7 @@
         "proxy/routers/memory.py",
         "proxy/routers/model_connections.py",
         "proxy/routers/rerank.py",
-        "proxy/routers/runtime.py",
-        "proxy/routers/settings.py",
-        "proxy/routers/workspace_memory.py"
+        "proxy/routers/runtime.py"
       ],
       "lines": 2,
       "module": "proxy.routers",
@@ -2364,92 +2285,6 @@
         "proxy/__init__.py"
       ],
       "path": "proxy/routers/__init__.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "tests/test_light_agent_workspace.py"
-      ],
-      "lines": 51,
-      "module": "proxy.routers.agent_state",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/routers/__init__.py",
-        "proxy/security.py",
-        "proxy/services/agent_state_service.py",
-        "proxy/services/native_storage_http.py"
-      ],
-      "path": "proxy/routers/agent_state.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/routers/settings.py",
-        "proxy/routers/workspace_memory.py",
-        "tests/test_light_chat_evidence.py",
-        "tests/test_light_durable_chat.py",
-        "tests/test_light_stream_lifecycle.py",
-        "tests/test_model_connection_chat_integration.py",
-        "tests/test_source_excerpts.py"
-      ],
-      "lines": 469,
-      "module": "proxy.routers.chat",
-      "outbound": [
-        "backend/inference/routing.py",
-        "backend/inference/validator.py",
-        "backend/rag_config.py",
-        "backend/runtime_paths.py",
-        "proxy/__init__.py",
-        "proxy/config.py",
-        "proxy/local_model_registry.py",
-        "proxy/routers/__init__.py",
-        "proxy/security.py",
-        "proxy/services/answer_contract_service.py",
-        "proxy/services/answer_form_service.py",
-        "proxy/services/cad_bim_highlight.py",
-        "proxy/services/candidate_acceptance_service.py",
-        "proxy/services/canonical_promotion_service.py",
-        "proxy/services/canonical_route_service.py",
-        "proxy/services/chat_durability_service.py",
-        "proxy/services/chat_evidence_application_service.py",
-        "proxy/services/chat_inference_service.py",
-        "proxy/services/chat_persistence_service.py",
-        "proxy/services/chat_prompt_support.py",
-        "proxy/services/chat_provider_session_service.py",
-        "proxy/services/chat_request_contracts.py",
-        "proxy/services/chat_request_service.py",
-        "proxy/services/chat_runtime.py",
-        "proxy/services/class_router_service.py",
-        "proxy/services/clause_lookup_service.py",
-        "proxy/services/command_service.py",
-        "proxy/services/context_expander_service.py",
-        "proxy/services/context_memory_service.py",
-        "proxy/services/dataset_memory_service.py",
-        "proxy/services/evidence_packet_service.py",
-        "proxy/services/kot_service.py",
-        "proxy/services/lexical_index_service.py",
-        "proxy/services/llm_transport_profile_service.py",
-        "proxy/services/memory_service.py",
-        "proxy/services/model_capability_service.py",
-        "proxy/services/model_connection_contracts.py",
-        "proxy/services/model_connection_registry_service.py",
-        "proxy/services/model_connection_resolver_service.py",
-        "proxy/services/model_secret_service.py",
-        "proxy/services/notebook_service.py",
-        "proxy/services/notebook_study_service.py",
-        "proxy/services/openai_compatible_transport_service.py",
-        "proxy/services/project_summary_service.py",
-        "proxy/services/prompt_registry_service.py",
-        "proxy/services/public_error_service.py",
-        "proxy/services/query_router.py",
-        "proxy/services/request_idempotency_service.py",
-        "proxy/services/retrieval_service.py",
-        "proxy/services/runtime_admission.py",
-        "proxy/services/runtime_dispatcher.py",
-        "proxy/services/saferag_service.py",
-        "proxy/services/semantic_cache.py"
-      ],
-      "path": "proxy/routers/chat.py",
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
@@ -2860,53 +2695,6 @@
     },
     {
       "inbound": [
-        "tests/test_light_settings_boundary.py"
-      ],
-      "lines": 593,
-      "module": "proxy.routers.settings",
-      "outbound": [
-        "backend/product_edition.py",
-        "proxy/__init__.py",
-        "proxy/config.py",
-        "proxy/local_model_registry.py",
-        "proxy/routers/__init__.py",
-        "proxy/routers/chat.py",
-        "proxy/security.py",
-        "proxy/services/freetoken_cache_profile_service.py",
-        "proxy/services/llm_transport_profile_service.py",
-        "proxy/services/preset_service.py",
-        "proxy/services/runtime_config_registry_service.py",
-        "proxy/services/web_research_config_service.py"
-      ],
-      "path": "proxy/routers/settings.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "tests/test_light_conversation_context.py",
-        "tests/test_workspace_memory_router.py"
-      ],
-      "lines": 140,
-      "module": "proxy.routers.workspace_memory",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/routers/__init__.py",
-        "proxy/routers/chat.py",
-        "proxy/security.py",
-        "proxy/services/chat_session_service.py",
-        "proxy/services/conversation_context_service.py",
-        "proxy/services/memory_service.py",
-        "proxy/services/native_storage_http.py",
-        "proxy/services/project_service.py",
-        "proxy/services/runtime_admission.py"
-      ],
-      "path": "proxy/routers/workspace_memory.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/routers/agent_state.py",
-        "proxy/routers/chat.py",
         "proxy/routers/dataset_catalog.py",
         "proxy/routers/dataset_cloud.py",
         "proxy/routers/dataset_document_ops.py",
@@ -2924,12 +2712,8 @@
         "proxy/routers/model_connections.py",
         "proxy/routers/rerank.py",
         "proxy/routers/runtime.py",
-        "proxy/routers/settings.py",
-        "proxy/routers/workspace_memory.py",
-        "tests/test_light_conversation_context.py",
         "tests/test_memory_api.py",
-        "tests/test_model_connections_router.py",
-        "tests/test_workspace_memory_router.py"
+        "tests/test_model_connections_router.py"
       ],
       "lines": 230,
       "module": "proxy.security",
@@ -2944,29 +2728,19 @@
     {
       "inbound": [
         "proxy/services/agent_state_service.py",
-        "proxy/services/agent_workspace_tools.py",
         "proxy/services/answer_contract_service.py",
-        "proxy/services/answer_form_service.py",
-        "proxy/services/artifact_revision_service.py",
         "proxy/services/auto_parse_resume_service.py",
         "proxy/services/background_summary_service.py",
         "proxy/services/bor_service.py",
         "proxy/services/bound_document_tools.py",
         "proxy/services/cad_bim_graph.py",
-        "proxy/services/cad_bim_highlight.py",
         "proxy/services/candidate_acceptance_service.py",
         "proxy/services/canonical_promotion_service.py",
         "proxy/services/canonical_route_service.py",
-        "proxy/services/capability_broker_service.py",
         "proxy/services/chat_attachment_read_service.py",
         "proxy/services/chat_attachment_service.py",
-        "proxy/services/chat_capability_scope_service.py",
         "proxy/services/chat_durability_service.py",
-        "proxy/services/chat_evidence_application_service.py",
         "proxy/services/chat_evidence_context.py",
-        "proxy/services/chat_evidence_contracts.py",
-        "proxy/services/chat_evidence_manifest_service.py",
-        "proxy/services/chat_evidence_tools.py",
         "proxy/services/chat_folder_service.py",
         "proxy/services/chat_inference_service.py",
         "proxy/services/chat_persistence_service.py",
@@ -2974,15 +2748,11 @@
         "proxy/services/chat_prompt_support.py",
         "proxy/services/chat_provider_session_service.py",
         "proxy/services/chat_request_contracts.py",
-        "proxy/services/chat_request_service.py",
         "proxy/services/chat_runtime.py",
         "proxy/services/chat_section_context_service.py",
         "proxy/services/chat_session_service.py",
-        "proxy/services/class_router_service.py",
-        "proxy/services/clause_lookup_service.py",
         "proxy/services/cloud_drive_service.py",
         "proxy/services/command_service.py",
-        "proxy/services/context_expander_service.py",
         "proxy/services/context_governor_service.py",
         "proxy/services/context_memory_service.py",
         "proxy/services/conversation_context_service.py",
@@ -3011,12 +2781,10 @@
         "proxy/services/evidence_contract.py",
         "proxy/services/evidence_packet_service.py",
         "proxy/services/execution_receipt_service.py",
-        "proxy/services/extension_tool_service.py",
         "proxy/services/extract_service.py",
         "proxy/services/field_intake_service.py",
         "proxy/services/file_viewer_service.py",
         "proxy/services/forms_service.py",
-        "proxy/services/freetoken_cache_profile_service.py",
         "proxy/services/generation_guard_service.py",
         "proxy/services/graph_edges_service.py",
         "proxy/services/installed_skill_service.py",
@@ -3052,27 +2820,22 @@
         "proxy/services/model_engine_extension_service.py",
         "proxy/services/model_execution_preset_service.py",
         "proxy/services/model_reasoning_service.py",
-        "proxy/services/model_research_tool_service.py",
         "proxy/services/model_resource_service.py",
         "proxy/services/model_secret_service.py",
         "proxy/services/model_streaming_service.py",
         "proxy/services/native_open_service.py",
         "proxy/services/native_research_loop_service.py",
-        "proxy/services/native_storage_http.py",
         "proxy/services/native_tool_message_service.py",
         "proxy/services/normcontrol_service.py",
         "proxy/services/notebook_service.py",
-        "proxy/services/notebook_study_service.py",
         "proxy/services/ontology_service.py",
         "proxy/services/openai_compatible_transport_service.py",
         "proxy/services/operation_progress_service.py",
         "proxy/services/pd_rd_manifest_service.py",
         "proxy/services/pdf_contour_service.py",
         "proxy/services/pdf_page_context_service.py",
-        "proxy/services/pdf_source_evidence_service.py",
         "proxy/services/pdf_table_continuation_service.py",
         "proxy/services/pdf_viewer_service.py",
-        "proxy/services/preset_service.py",
         "proxy/services/process_status.py",
         "proxy/services/profile_resolver.py",
         "proxy/services/project_document_registry_service.py",
@@ -3080,18 +2843,15 @@
         "proxy/services/project_pdf_table_service.py",
         "proxy/services/project_registry_chat_service.py",
         "proxy/services/project_service.py",
-        "proxy/services/project_summary_service.py",
         "proxy/services/project_table_registry_service.py",
         "proxy/services/prompt_registry_service.py",
         "proxy/services/public_error_service.py",
-        "proxy/services/public_page_reader.py",
         "proxy/services/query_router.py",
         "proxy/services/rag_advanced_policy_service.py",
         "proxy/services/rag_catalog_guard_service.py",
         "proxy/services/rag_catalog_recovery_service.py",
         "proxy/services/rag_pipeline_status_service.py",
         "proxy/services/rag_readiness_service.py",
-        "proxy/services/reconcile_service.py",
         "proxy/services/request_idempotency_service.py",
         "proxy/services/request_memory_service.py",
         "proxy/services/resource_governor.py",
@@ -3102,17 +2862,13 @@
         "proxy/services/review_source_reader.py",
         "proxy/services/review_task_store.py",
         "proxy/services/runtime_admission.py",
-        "proxy/services/runtime_config_registry_service.py",
         "proxy/services/runtime_dispatcher.py",
         "proxy/services/saferag_service.py",
         "proxy/services/scope_service.py",
         "proxy/services/section_evidence_candidate.py",
-        "proxy/services/semantic_cache.py",
         "proxy/services/sidecar_ops_service.py",
-        "proxy/services/skill_compute_service.py",
         "proxy/services/skill_snippet_registry.py",
         "proxy/services/source_locator_service.py",
-        "proxy/services/spec_to_bor_service.py",
         "proxy/services/structured_extract.py",
         "proxy/services/system_dataset_service.py",
         "proxy/services/table_appendix_service.py",
@@ -3124,19 +2880,10 @@
         "proxy/services/title_block_extract_service.py",
         "proxy/services/tool_contract_service.py",
         "proxy/services/tool_evidence_service.py",
-        "proxy/services/tool_harness_service.py",
         "proxy/services/tool_registry_service.py",
-        "proxy/services/tool_trace_policy.py",
         "proxy/services/trusted_executor_service.py",
-        "proxy/services/typed_memory_projection_service.py",
         "proxy/services/version_service.py",
-        "proxy/services/web_page_reader_service.py",
-        "proxy/services/web_research_config_service.py",
-        "proxy/services/web_search_service.py",
-        "proxy/services/word_evidence_service.py",
-        "proxy/services/workbook_tool_service.py",
         "proxy/services/workbook_total_service.py",
-        "proxy/services/workflow_checkpoint_service.py",
         "proxy/services/workflow_plan_service.py"
       ],
       "lines": 2,
@@ -3149,11 +2896,7 @@
     },
     {
       "inbound": [
-        "proxy/routers/agent_state.py",
-        "proxy/services/agent_workspace_tools.py",
-        "proxy/services/typed_memory_projection_service.py",
-        "tests/test_light_agent_workspace.py",
-        "tests/test_light_native_harness_loop.py"
+        "tests/test_light_agent_workspace.py"
       ],
       "lines": 40,
       "module": "proxy.services.agent_state_service",
@@ -3168,26 +2911,6 @@
     },
     {
       "inbound": [
-        "proxy/services/chat_evidence_application_service.py",
-        "tests/test_light_agent_workspace.py",
-        "tests/test_light_native_harness_loop.py"
-      ],
-      "lines": 57,
-      "module": "proxy.services.agent_workspace_tools",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/agent_state_service.py",
-        "proxy/services/tool_contract_service.py",
-        "proxy/services/tool_harness_service.py",
-        "proxy/services/tool_registry_service.py"
-      ],
-      "path": "proxy/services/agent_workspace_tools.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/routers/chat.py",
         "tests/test_answer_contract_service.py"
       ],
       "lines": 351,
@@ -3198,35 +2921,6 @@
         "proxy/services/workflow_plan_service.py"
       ],
       "path": "proxy/services/answer_contract_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/routers/chat.py",
-        "proxy/services/chat_evidence_application_service.py",
-        "tests/test_light_prompt_boundary.py"
-      ],
-      "lines": 132,
-      "module": "proxy.services.answer_form_service",
-      "outbound": [
-        "backend/product_edition.py",
-        "proxy/__init__.py",
-        "proxy/services/__init__.py"
-      ],
-      "path": "proxy/services/answer_form_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/services/workbook_tool_service.py"
-      ],
-      "lines": 219,
-      "module": "proxy.services.artifact_revision_service",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py"
-      ],
-      "path": "proxy/services/artifact_revision_service.py",
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
@@ -3247,7 +2941,6 @@
     },
     {
       "inbound": [
-        "proxy/services/chat_request_service.py",
         "tests/test_light_native_conversation.py"
       ],
       "lines": 23,
@@ -3262,10 +2955,7 @@
     },
     {
       "inbound": [
-        "proxy/services/normcontrol_service.py",
-        "proxy/services/reconcile_service.py",
-        "proxy/services/spec_to_bor_service.py",
-        "proxy/services/workbook_tool_service.py"
+        "proxy/services/normcontrol_service.py"
       ],
       "lines": 250,
       "module": "proxy.services.bor_service",
@@ -3280,7 +2970,6 @@
     },
     {
       "inbound": [
-        "proxy/services/chat_evidence_application_service.py",
         "tests/test_light_document_review.py"
       ],
       "lines": 19,
@@ -3311,21 +3000,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/chat.py",
-        "proxy/services/chat_evidence_application_service.py"
-      ],
-      "lines": 101,
-      "module": "proxy.services.cad_bim_highlight",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py"
-      ],
-      "path": "proxy/services/cad_bim_highlight.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/routers/chat.py",
         "proxy/routers/dataset_uploads.py",
         "proxy/services/chat_request_contracts.py"
       ],
@@ -3342,7 +3016,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/chat.py",
         "proxy/routers/model_connections.py"
       ],
       "lines": 203,
@@ -3361,14 +3034,10 @@
     },
     {
       "inbound": [
-        "proxy/routers/chat.py",
         "proxy/services/candidate_acceptance_service.py",
         "proxy/services/canonical_promotion_service.py",
-        "proxy/services/chat_evidence_application_service.py",
-        "proxy/services/chat_evidence_tools.py",
         "proxy/services/chat_inference_service.py",
         "tests/test_light_admission.py",
-        "tests/test_model_connection_chat_integration.py",
         "tests/test_model_connections_router.py"
       ],
       "lines": 300,
@@ -3381,21 +3050,6 @@
         "proxy/services/openai_compatible_transport_service.py"
       ],
       "path": "proxy/services/canonical_route_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/services/tool_harness_service.py"
-      ],
-      "lines": 131,
-      "module": "proxy.services.capability_broker_service",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/tool_contract_service.py",
-        "proxy/services/tool_registry_service.py"
-      ],
-      "path": "proxy/services/capability_broker_service.py",
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
@@ -3422,11 +3076,8 @@
       "inbound": [
         "proxy/routers/dataset_uploads.py",
         "proxy/services/chat_attachment_read_service.py",
-        "proxy/services/chat_evidence_application_service.py",
         "proxy/services/chat_folder_service.py",
-        "proxy/services/chat_request_service.py",
         "proxy/services/table_document_tool.py",
-        "proxy/services/workbook_tool_service.py",
         "tests/test_datasets_router.py",
         "tests/test_light_chat_folder.py",
         "tests/test_light_document_tasks.py"
@@ -3444,22 +3095,6 @@
     },
     {
       "inbound": [
-        "proxy/services/chat_evidence_application_service.py",
-        "proxy/services/chat_request_service.py",
-        "tests/test_light_native_web.py"
-      ],
-      "lines": 38,
-      "module": "proxy.services.chat_capability_scope_service",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py"
-      ],
-      "path": "proxy/services/chat_capability_scope_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/routers/chat.py",
         "proxy/services/chat_persistence_service.py",
         "tests/test_light_durable_chat.py"
       ],
@@ -3478,84 +3113,14 @@
     },
     {
       "inbound": [
-        "proxy/routers/chat.py",
-        "proxy/services/chat_request_service.py",
-        "tests/test_light_chat_evidence.py",
-        "tests/test_light_profile_integrity.py",
-        "tests/test_light_prompt_boundary.py",
-        "tests/test_workspace_context.py"
-      ],
-      "lines": 2122,
-      "module": "proxy.services.chat_evidence_application_service",
-      "outbound": [
-        "backend/inference/routing.py",
-        "backend/runtime_paths.py",
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/agent_workspace_tools.py",
-        "proxy/services/answer_form_service.py",
-        "proxy/services/bound_document_tools.py",
-        "proxy/services/cad_bim_highlight.py",
-        "proxy/services/canonical_route_service.py",
-        "proxy/services/chat_attachment_service.py",
-        "proxy/services/chat_capability_scope_service.py",
-        "proxy/services/chat_evidence_context.py",
-        "proxy/services/chat_evidence_contracts.py",
-        "proxy/services/chat_evidence_manifest_service.py",
-        "proxy/services/chat_evidence_tools.py",
-        "proxy/services/chat_inference_service.py",
-        "proxy/services/chat_profile_service.py",
-        "proxy/services/chat_section_context_service.py",
-        "proxy/services/context_governor_service.py",
-        "proxy/services/document_review_tool.py",
-        "proxy/services/evidence_packet_service.py",
-        "proxy/services/execution_receipt_service.py",
-        "proxy/services/generation_guard_service.py",
-        "proxy/services/lexical_index_service.py",
-        "proxy/services/memory_port.py",
-        "proxy/services/memory_service.py",
-        "proxy/services/model_connection_contracts.py",
-        "proxy/services/model_execution_preset_service.py",
-        "proxy/services/model_reasoning_service.py",
-        "proxy/services/model_research_tool_service.py",
-        "proxy/services/native_research_loop_service.py",
-        "proxy/services/notebook_service.py",
-        "proxy/services/notebook_study_service.py",
-        "proxy/services/openai_compatible_transport_service.py",
-        "proxy/services/operation_progress_service.py",
-        "proxy/services/pdf_source_evidence_service.py",
-        "proxy/services/project_summary_service.py",
-        "proxy/services/prompt_registry_service.py",
-        "proxy/services/public_error_service.py",
-        "proxy/services/retrieval_service.py",
-        "proxy/services/runtime_admission.py",
-        "proxy/services/saferag_service.py",
-        "proxy/services/source_locator_service.py",
-        "proxy/services/table_document_tool.py",
-        "proxy/services/table_retrieval_service.py",
-        "proxy/services/tool_evidence_service.py",
-        "proxy/services/tool_harness_service.py",
-        "proxy/services/typed_memory_projection_service.py",
-        "proxy/services/web_research_config_service.py",
-        "proxy/services/word_evidence_service.py",
-        "proxy/services/workbook_total_service.py"
-      ],
-      "path": "proxy/services/chat_evidence_application_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/services/chat_evidence_application_service.py",
-        "tests/test_light_agent_workspace.py",
-        "tests/test_light_chat_evidence.py",
         "tests/test_light_chat_sections.py",
         "tests/test_light_document_review.py",
         "tests/test_light_document_tasks.py",
         "tests/test_light_native_api.py",
         "tests/test_light_native_chat_context.py",
+        "tests/test_light_profile_integrity.py",
         "tests/test_light_rerank_audit.py",
         "tests/test_light_section_coverage.py",
-        "tests/test_workspace_context.py",
         "tools/evaluate_rag_pipeline.py"
       ],
       "lines": 98,
@@ -3568,51 +3133,6 @@
         "proxy/services/prompt_registry_service.py"
       ],
       "path": "proxy/services/chat_evidence_context.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/services/chat_evidence_application_service.py"
-      ],
-      "lines": 96,
-      "module": "proxy.services.chat_evidence_contracts",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py"
-      ],
-      "path": "proxy/services/chat_evidence_contracts.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/services/chat_evidence_application_service.py",
-        "proxy/services/chat_request_service.py"
-      ],
-      "lines": 127,
-      "module": "proxy.services.chat_evidence_manifest_service",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/source_locator_service.py"
-      ],
-      "path": "proxy/services/chat_evidence_manifest_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/services/chat_evidence_application_service.py",
-        "tests/test_light_native_web.py"
-      ],
-      "lines": 256,
-      "module": "proxy.services.chat_evidence_tools",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/canonical_route_service.py",
-        "proxy/services/source_locator_service.py",
-        "proxy/services/web_research_config_service.py"
-      ],
-      "path": "proxy/services/chat_evidence_tools.py",
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
@@ -3636,13 +3156,9 @@
     },
     {
       "inbound": [
-        "proxy/routers/chat.py",
-        "proxy/services/chat_evidence_application_service.py",
         "proxy/services/chat_prompt_support.py",
-        "proxy/services/chat_request_service.py",
         "proxy/services/request_memory_service.py",
-        "tests/test_light_resource_memory.py",
-        "tests/test_model_connection_chat_integration.py"
+        "tests/test_light_resource_memory.py"
       ],
       "lines": 241,
       "module": "proxy.services.chat_inference_service",
@@ -3667,11 +3183,8 @@
     },
     {
       "inbound": [
-        "proxy/routers/chat.py",
-        "proxy/services/chat_request_service.py",
         "tests/test_light_durable_chat.py",
-        "tests/test_light_execution_receipts.py",
-        "tests/test_light_stream_lifecycle.py"
+        "tests/test_light_execution_receipts.py"
       ],
       "lines": 164,
       "module": "proxy.services.chat_persistence_service",
@@ -3691,35 +3204,26 @@
     },
     {
       "inbound": [
-        "proxy/services/chat_evidence_application_service.py",
-        "proxy/services/chat_request_service.py",
-        "tests/test_light_mcp_connections.py",
         "tests/test_light_native_document_review.py",
         "tests/test_light_profile_integrity.py",
-        "tests/test_light_prompt_boundary.py",
-        "tests/test_light_reasoning_761.py",
-        "tests/test_product_edition.py"
+        "tests/test_light_reasoning_761.py"
       ],
-      "lines": 107,
+      "lines": 108,
       "module": "proxy.services.chat_profile_service",
       "outbound": [
         "backend/native_core.py",
         "backend/rag_config.py",
         "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/tool_harness_service.py"
+        "proxy/services/__init__.py"
       ],
       "path": "proxy/services/chat_profile_service.py",
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
       "inbound": [
-        "proxy/routers/chat.py",
-        "proxy/services/chat_request_service.py",
         "tests/test_light_grounding_760.py",
         "tests/test_light_installed_skills.py",
-        "tests/test_light_native_rag_pipeline.py",
-        "tests/test_light_pdf_source_tool.py"
+        "tests/test_light_native_rag_pipeline.py"
       ],
       "lines": 233,
       "module": "proxy.services.chat_prompt_support",
@@ -3736,7 +3240,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/chat.py",
         "proxy/services/chat_inference_service.py",
         "proxy/services/chat_request_contracts.py"
       ],
@@ -3751,10 +3254,7 @@
     },
     {
       "inbound": [
-        "proxy/routers/chat.py",
-        "proxy/services/chat_persistence_service.py",
-        "proxy/services/chat_request_service.py",
-        "tests/test_model_connection_chat_integration.py"
+        "proxy/services/chat_persistence_service.py"
       ],
       "lines": 120,
       "module": "proxy.services.chat_request_contracts",
@@ -3769,63 +3269,7 @@
     },
     {
       "inbound": [
-        "proxy/routers/chat.py",
-        "tests/test_light_durable_chat.py",
-        "tests/test_light_runtime_identity.py",
-        "tests/test_light_stream_lifecycle.py",
-        "tests/test_model_connection_chat_integration.py"
-      ],
-      "lines": 800,
-      "module": "proxy.services.chat_request_service",
-      "outbound": [
-        "backend/inference/routing.py",
-        "backend/product_edition.py",
-        "backend/runtime_paths.py",
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/background_summary_service.py",
-        "proxy/services/chat_attachment_service.py",
-        "proxy/services/chat_capability_scope_service.py",
-        "proxy/services/chat_evidence_application_service.py",
-        "proxy/services/chat_evidence_manifest_service.py",
         "proxy/services/chat_inference_service.py",
-        "proxy/services/chat_persistence_service.py",
-        "proxy/services/chat_profile_service.py",
-        "proxy/services/chat_prompt_support.py",
-        "proxy/services/chat_request_contracts.py",
-        "proxy/services/chat_runtime.py",
-        "proxy/services/class_router_service.py",
-        "proxy/services/command_service.py",
-        "proxy/services/context_expander_service.py",
-        "proxy/services/context_memory_service.py",
-        "proxy/services/dataset_memory_service.py",
-        "proxy/services/kot_service.py",
-        "proxy/services/les_md_service.py",
-        "proxy/services/memory_service.py",
-        "proxy/services/notebook_study_service.py",
-        "proxy/services/openai_compatible_transport_service.py",
-        "proxy/services/operation_progress_service.py",
-        "proxy/services/profile_resolver.py",
-        "proxy/services/project_service.py",
-        "proxy/services/project_summary_service.py",
-        "proxy/services/public_error_service.py",
-        "proxy/services/query_router.py",
-        "proxy/services/request_memory_service.py",
-        "proxy/services/retrieval_service.py",
-        "proxy/services/runtime_admission.py",
-        "proxy/services/scope_service.py",
-        "proxy/services/semantic_cache.py",
-        "proxy/services/typed_memory_projection_service.py",
-        "proxy/services/version_service.py"
-      ],
-      "path": "proxy/services/chat_request_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/routers/chat.py",
-        "proxy/services/chat_inference_service.py",
-        "proxy/services/chat_request_service.py",
         "proxy/services/generation_guard_service.py",
         "proxy/services/request_memory_service.py",
         "tests/oracles/context_python.py",
@@ -3844,15 +3288,11 @@
     {
       "inbound": [
         "proxy/routers/dataset_search.py",
-        "proxy/services/chat_evidence_application_service.py",
         "proxy/services/document_review_tool.py",
         "proxy/services/native_research_loop_service.py",
-        "proxy/services/pdf_source_evidence_service.py",
         "tests/test_light_chat_sections.py",
-        "tests/test_light_document_review.py",
         "tests/test_light_lexical_evidence.py",
         "tests/test_light_native_research.py",
-        "tests/test_light_pdf_source_tool.py",
         "tools/evaluate_light_semantics.py",
         "tools/evaluate_rag_pipeline.py"
       ],
@@ -3872,20 +3312,15 @@
     {
       "inbound": [
         "backend/workspace_native.py",
-        "proxy/routers/workspace_memory.py",
         "proxy/services/chat_durability_service.py",
         "proxy/services/conversation_context_service.py",
-        "proxy/services/typed_memory_projection_service.py",
         "tests/oracles/context_python.py",
         "tests/test_chat_session_service.py",
         "tests/test_light_agent_workspace.py",
         "tests/test_light_conversation_context.py",
         "tests/test_light_durable_chat.py",
-        "tests/test_light_native_harness_loop.py",
         "tests/test_light_native_intake.py",
-        "tests/test_light_native_workspace.py",
-        "tests/test_workspace_context.py",
-        "tests/test_workspace_memory_router.py"
+        "tests/test_light_native_workspace.py"
       ],
       "lines": 25,
       "module": "proxy.services.chat_session_service",
@@ -3897,35 +3332,6 @@
       ],
       "path": "proxy/services/chat_session_service.py",
       "status": "PRODUCT_REACHABLE"
-    },
-    {
-      "inbound": [
-        "proxy/routers/chat.py",
-        "proxy/services/chat_request_service.py"
-      ],
-      "lines": 91,
-      "module": "proxy.services.class_router_service",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py"
-      ],
-      "path": "proxy/services/class_router_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/routers/chat.py"
-      ],
-      "lines": 295,
-      "module": "proxy.services.clause_lookup_service",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/kot_service.py",
-        "proxy/services/lexical_index_service.py"
-      ],
-      "path": "proxy/services/clause_lookup_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
     },
     {
       "inbound": [
@@ -3943,8 +3349,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/chat.py",
-        "proxy/services/chat_request_service.py",
         "tests/test_light_commands_boundary.py"
       ],
       "lines": 14,
@@ -3959,33 +3363,14 @@
     },
     {
       "inbound": [
-        "proxy/routers/chat.py",
-        "proxy/services/chat_request_service.py"
-      ],
-      "lines": 249,
-      "module": "proxy.services.context_expander_service",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/lexical_index_service.py"
-      ],
-      "path": "proxy/services/context_expander_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/services/chat_evidence_application_service.py",
         "proxy/services/chat_evidence_context.py",
         "proxy/services/llm_transport_profile_service.py",
-        "proxy/services/typed_memory_projection_service.py",
         "tests/test_context_governor_service.py",
-        "tests/test_light_agent_workspace.py",
         "tests/test_light_chat_sections.py",
         "tests/test_light_document_tasks.py",
         "tests/test_light_native_rag_harness.py",
         "tests/test_light_rerank_audit.py",
         "tests/test_light_section_coverage.py",
-        "tests/test_workspace_context.py",
         "tools/evaluate_retrieval_candidate.py"
       ],
       "lines": 168,
@@ -4001,13 +3386,9 @@
     },
     {
       "inbound": [
-        "proxy/routers/chat.py",
         "proxy/routers/dataset_catalog.py",
         "proxy/services/chat_persistence_service.py",
-        "proxy/services/chat_request_service.py",
-        "proxy/services/notebook_service.py",
-        "proxy/services/typed_memory_projection_service.py",
-        "tests/test_workspace_context.py"
+        "proxy/services/notebook_service.py"
       ],
       "lines": 1175,
       "module": "proxy.services.context_memory_service",
@@ -4024,18 +3405,14 @@
     },
     {
       "inbound": [
-        "proxy/routers/workspace_memory.py",
         "proxy/services/context_memory_service.py",
         "proxy/services/memory_service.py",
-        "proxy/services/typed_memory_projection_service.py",
         "tests/conftest.py",
         "tests/oracles/memory_python.py",
-        "tests/test_light_agent_workspace.py",
         "tests/test_light_conversation_context.py",
         "tests/test_light_durable_chat.py",
         "tests/test_light_native_catalog.py",
-        "tests/test_light_native_conversation.py",
-        "tests/test_workspace_context.py"
+        "tests/test_light_native_conversation.py"
       ],
       "lines": 83,
       "module": "proxy.services.conversation_context_service",
@@ -4098,12 +3475,9 @@
     {
       "inbound": [
         "backend/qdrant_support.py",
-        "proxy/routers/chat.py",
         "proxy/routers/dataset_catalog.py",
-        "proxy/services/chat_request_service.py",
         "proxy/services/dataset_parse_service.py",
         "proxy/services/notebook_service.py",
-        "proxy/services/project_summary_service.py",
         "tests/test_light_native_dataset_reader.py",
         "tests/test_light_rerank_audit.py"
       ],
@@ -4272,8 +3646,7 @@
     },
     {
       "inbound": [
-        "proxy/routers/documents.py",
-        "proxy/services/tool_harness_service.py"
+        "proxy/routers/documents.py"
       ],
       "lines": 58,
       "module": "proxy.services.document_clause_service",
@@ -4295,7 +3668,6 @@
         "proxy/routers/documents.py",
         "proxy/services/document_clause_service.py",
         "proxy/services/list_office_agent_service.py",
-        "proxy/services/tool_harness_service.py",
         "tests/test_document_explorer_service.py"
       ],
       "lines": 904,
@@ -4316,9 +3688,7 @@
       "inbound": [
         "proxy/routers/documents.py",
         "proxy/services/pdf_table_continuation_service.py",
-        "proxy/services/table_retrieval_service.py",
-        "proxy/services/word_evidence_service.py",
-        "proxy/services/workbook_total_service.py"
+        "proxy/services/table_retrieval_service.py"
       ],
       "lines": 14,
       "module": "proxy.services.document_original_service",
@@ -4333,27 +3703,18 @@
     },
     {
       "inbound": [
-        "proxy/services/chat_evidence_application_service.py",
-        "tests/test_light_document_review.py",
-        "tests/test_light_execution_receipts.py"
+        "tests/test_light_document_review.py"
       ],
-      "lines": 168,
+      "lines": 131,
       "module": "proxy.services.document_review_tool",
       "outbound": [
         "backend/interface.py",
-        "backend/product_edition.py",
-        "backend/runtime_paths.py",
         "proxy/__init__.py",
         "proxy/services/__init__.py",
         "proxy/services/chat_section_context_service.py",
         "proxy/services/document_task_store.py",
         "proxy/services/execution_receipt_service.py",
-        "proxy/services/review_source_reader.py",
-        "proxy/services/review_task_store.py",
-        "proxy/services/tabular_document_service.py",
-        "proxy/services/tool_contract_service.py",
-        "proxy/services/tool_harness_service.py",
-        "proxy/services/tool_registry_service.py"
+        "proxy/services/tabular_document_service.py"
       ],
       "path": "proxy/services/document_review_tool.py",
       "status": "TEST_OR_TOOL_ONLY"
@@ -4380,8 +3741,7 @@
         "proxy/services/table_document_tool.py",
         "proxy/services/table_window_service.py",
         "tests/test_light_document_tasks.py",
-        "tests/test_light_native_document_review.py",
-        "tests/test_light_table_windows.py"
+        "tests/test_light_native_document_review.py"
       ],
       "lines": 73,
       "module": "proxy.services.document_task_store",
@@ -4490,15 +3850,10 @@
     },
     {
       "inbound": [
-        "proxy/routers/chat.py",
-        "proxy/services/chat_evidence_application_service.py",
         "tests/test_evidence_packet_service.py",
         "tests/test_light_chat_sections.py",
-        "tests/test_light_document_review.py",
         "tests/test_light_index_recovery.py",
         "tests/test_light_table_retrieval.py",
-        "tests/test_light_word_evidence.py",
-        "tests/test_light_workbook_totals.py",
         "tools/evaluate_light_semantics.py",
         "tools/evaluate_rag_pipeline.py"
       ],
@@ -4516,11 +3871,9 @@
     },
     {
       "inbound": [
-        "proxy/services/chat_evidence_application_service.py",
         "proxy/services/chat_persistence_service.py",
         "proxy/services/document_review_tool.py",
         "proxy/services/table_document_tool.py",
-        "tests/test_light_agent_workspace.py",
         "tests/test_light_execution_receipts.py"
       ],
       "lines": 41,
@@ -4531,22 +3884,6 @@
         "proxy/services/__init__.py"
       ],
       "path": "proxy/services/execution_receipt_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/services/tool_harness_service.py"
-      ],
-      "lines": 53,
-      "module": "proxy.services.extension_tool_service",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/tool_contract_service.py",
-        "proxy/services/tool_harness_service.py",
-        "proxy/services/tool_registry_service.py"
-      ],
-      "path": "proxy/services/extension_tool_service.py",
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
@@ -4585,8 +3922,7 @@
         "proxy/services/native_open_service.py",
         "tests/test_light_native_document.py",
         "tests/test_light_native_workbook.py",
-        "tests/test_light_table_retrieval.py",
-        "tests/test_light_word_evidence.py"
+        "tests/test_light_table_retrieval.py"
       ],
       "lines": 366,
       "module": "proxy.services.file_viewer_service",
@@ -4621,20 +3957,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/settings.py"
-      ],
-      "lines": 110,
-      "module": "proxy.services.freetoken_cache_profile_service",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py"
-      ],
-      "path": "proxy/services/freetoken_cache_profile_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/services/chat_evidence_application_service.py",
         "proxy/services/model_capability_refresh_service.py",
         "tests/oracles/context_python.py",
         "tests/test_light_admission.py"
@@ -4672,21 +3994,15 @@
     },
     {
       "inbound": [
-        "proxy/services/skill_compute_service.py",
-        "proxy/services/tool_harness_service.py",
-        "tests/test_light_installed_skills.py",
-        "tests/test_light_skill_compute.py"
+        "tests/test_light_installed_skills.py"
       ],
-      "lines": 57,
+      "lines": 24,
       "module": "proxy.services.installed_skill_service",
       "outbound": [
         "backend/native_core.py",
         "backend/runtime_paths.py",
         "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/tool_contract_service.py",
-        "proxy/services/tool_harness_service.py",
-        "proxy/services/tool_registry_service.py"
+        "proxy/services/__init__.py"
       ],
       "path": "proxy/services/installed_skill_service.py",
       "status": "TEST_OR_TOOL_ONLY"
@@ -4741,9 +4057,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/chat.py",
-        "proxy/services/chat_request_service.py",
-        "proxy/services/clause_lookup_service.py",
         "proxy/services/dataset_memory_service.py",
         "proxy/services/lexical_index_service.py",
         "proxy/services/query_router.py",
@@ -4763,7 +4076,6 @@
     },
     {
       "inbound": [
-        "proxy/services/chat_request_service.py",
         "tests/test_datasets_router.py"
       ],
       "lines": 411,
@@ -4813,12 +4125,8 @@
         "backend/document_catalog.py",
         "backend/native_index_store.py",
         "backend/qdrant_integrity.py",
-        "proxy/routers/chat.py",
         "proxy/routers/dataset_catalog.py",
         "proxy/routers/dataset_external.py",
-        "proxy/services/chat_evidence_application_service.py",
-        "proxy/services/clause_lookup_service.py",
-        "proxy/services/context_expander_service.py",
         "proxy/services/context_memory_service.py",
         "proxy/services/document_explorer_service.py",
         "proxy/services/graph_edges_service.py",
@@ -4909,12 +4217,9 @@
     },
     {
       "inbound": [
-        "proxy/routers/chat.py",
-        "proxy/routers/settings.py",
         "proxy/services/chat_prompt_support.py",
         "proxy/services/model_connection_resolver_service.py",
         "proxy/services/openai_compatible_transport_service.py",
-        "proxy/services/runtime_config_registry_service.py",
         "proxy/services/version_service.py"
       ],
       "lines": 300,
@@ -4934,12 +4239,9 @@
         "proxy/services/background_summary_service.py",
         "proxy/services/conversation_context_service.py",
         "proxy/services/openai_compatible_transport_service.py",
-        "proxy/services/web_page_reader_service.py",
-        "proxy/services/web_search_service.py",
         "tests/test_light_native_conversation.py",
         "tests/test_light_native_embedding_inference.py",
         "tests/test_light_native_model_runtime.py",
-        "tests/test_light_native_web.py",
         "tests/test_openai_compatible_transport_service.py"
       ],
       "lines": 243,
@@ -5025,30 +4327,24 @@
     },
     {
       "inbound": [
-        "proxy/services/tool_harness_service.py",
         "tests/test_light_mcp_connections.py",
         "tests/test_light_native_mcp.py"
       ],
-      "lines": 92,
+      "lines": 53,
       "module": "proxy.services.mcp_connection_service",
       "outbound": [
         "backend/native_core.py",
         "backend/rag_config.py",
         "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/tool_contract_service.py",
-        "proxy/services/tool_harness_service.py",
-        "proxy/services/tool_registry_service.py"
+        "proxy/services/__init__.py"
       ],
       "path": "proxy/services/mcp_connection_service.py",
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
       "inbound": [
-        "proxy/services/chat_evidence_application_service.py",
         "proxy/services/memory_rag_adapter.py",
         "proxy/services/memory_runtime_service.py",
-        "proxy/services/typed_memory_projection_service.py",
         "tests/test_memory_core.py"
       ],
       "lines": 84,
@@ -5101,21 +4397,13 @@
     },
     {
       "inbound": [
-        "proxy/routers/chat.py",
-        "proxy/routers/workspace_memory.py",
-        "proxy/services/chat_evidence_application_service.py",
-        "proxy/services/chat_request_service.py",
         "proxy/services/project_service.py",
-        "proxy/services/typed_memory_projection_service.py",
         "tests/conftest.py",
         "tests/oracles/project_python.py",
-        "tests/test_light_agent_workspace.py",
         "tests/test_light_conversation_context.py",
         "tests/test_light_durable_chat.py",
         "tests/test_light_native_catalog.py",
-        "tests/test_workspace_context.py",
-        "tests/test_workspace_memory.py",
-        "tests/test_workspace_memory_router.py"
+        "tests/test_workspace_memory.py"
       ],
       "lines": 418,
       "module": "proxy.services.memory_service",
@@ -5167,7 +4455,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/chat.py",
         "proxy/routers/model_connections.py",
         "proxy/services/chat_inference_service.py",
         "proxy/services/model_connection_resolver_service.py",
@@ -5191,12 +4478,10 @@
     {
       "inbound": [
         "backend/embedding_client.py",
-        "proxy/routers/chat.py",
         "proxy/routers/model_connections.py",
         "proxy/routers/runtime.py",
         "proxy/services/canonical_promotion_service.py",
         "proxy/services/canonical_route_service.py",
-        "proxy/services/chat_evidence_application_service.py",
         "proxy/services/chat_inference_service.py",
         "proxy/services/local_model_http.py",
         "proxy/services/model_capability_refresh_service.py",
@@ -5228,7 +4513,6 @@
         "tests/test_light_resource_memory.py",
         "tests/test_light_runtime_identity.py",
         "tests/test_model_capability_service.py",
-        "tests/test_model_connection_chat_integration.py",
         "tests/test_model_connection_embeddings_integration.py",
         "tests/test_model_connection_registry_service.py",
         "tests/test_model_connection_resolver_service.py",
@@ -5250,7 +4534,6 @@
       "inbound": [
         "backend/embedding_client.py",
         "backend/workspace_native.py",
-        "proxy/routers/chat.py",
         "proxy/routers/model_connections.py",
         "proxy/routers/runtime.py",
         "proxy/services/chat_inference_service.py",
@@ -5289,7 +4572,6 @@
     {
       "inbound": [
         "backend/embedding_client.py",
-        "proxy/routers/chat.py",
         "proxy/routers/model_connections.py",
         "proxy/services/canonical_route_service.py",
         "proxy/services/chat_inference_service.py",
@@ -5300,7 +4582,6 @@
         "tests/oracles/context_python.py",
         "tests/test_light_auto_parse_resume.py",
         "tests/test_light_capability_refresh.py",
-        "tests/test_model_connection_chat_integration.py",
         "tests/test_model_connection_embeddings_integration.py",
         "tests/test_model_connection_resolver_service.py",
         "tests/test_openai_compatible_transport_service.py"
@@ -5358,21 +4639,18 @@
     },
     {
       "inbound": [
-        "proxy/services/chat_evidence_application_service.py",
         "proxy/services/context_governor_service.py",
         "proxy/services/llm_transport_profile_service.py",
         "proxy/services/model_connection_resolver_service.py",
         "proxy/services/model_reasoning_service.py",
         "tests/oracles/context_governor_779.py",
         "tests/test_context_governor_service.py",
-        "tests/test_light_chat_evidence.py",
         "tests/test_light_document_review.py",
         "tests/test_light_document_tasks.py",
         "tests/test_light_native_api.py",
         "tests/test_light_native_model_profiles.py",
         "tests/test_light_reasoning_761.py",
         "tests/test_openai_compatible_transport_service.py",
-        "tests/test_workspace_context.py",
         "tools/evaluate_rag_pipeline.py"
       ],
       "lines": 82,
@@ -5387,7 +4665,6 @@
     },
     {
       "inbound": [
-        "proxy/services/chat_evidence_application_service.py",
         "proxy/services/openai_compatible_transport_service.py",
         "tests/test_light_reasoning_761.py"
       ],
@@ -5400,20 +4677,6 @@
       ],
       "path": "proxy/services/model_reasoning_service.py",
       "status": "PRODUCT_REACHABLE"
-    },
-    {
-      "inbound": [
-        "proxy/services/chat_evidence_application_service.py",
-        "tests/test_light_document_review.py"
-      ],
-      "lines": 226,
-      "module": "proxy.services.model_research_tool_service",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py"
-      ],
-      "path": "proxy/services/model_research_tool_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
     },
     {
       "inbound": [
@@ -5440,7 +4703,6 @@
     {
       "inbound": [
         "backend/embedding_client.py",
-        "proxy/routers/chat.py",
         "proxy/routers/model_connections.py",
         "proxy/services/chat_inference_service.py",
         "proxy/services/model_capability_service.py",
@@ -5496,7 +4758,6 @@
     },
     {
       "inbound": [
-        "proxy/services/chat_evidence_application_service.py",
         "tests/test_light_native_harness_loop.py",
         "tests/test_light_native_research.py"
       ],
@@ -5509,21 +4770,6 @@
         "proxy/services/chat_section_context_service.py"
       ],
       "path": "proxy/services/native_research_loop_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/routers/agent_state.py",
-        "proxy/routers/workspace_memory.py"
-      ],
-      "lines": 14,
-      "module": "proxy.services.native_storage_http",
-      "outbound": [
-        "backend/workspace_native.py",
-        "proxy/__init__.py",
-        "proxy/services/__init__.py"
-      ],
-      "path": "proxy/services/native_storage_http.py",
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
@@ -5558,11 +4804,7 @@
     },
     {
       "inbound": [
-        "proxy/routers/chat.py",
-        "proxy/services/chat_evidence_application_service.py",
-        "proxy/services/notebook_study_service.py",
-        "proxy/services/prompt_registry_service.py",
-        "proxy/services/tool_harness_service.py"
+        "proxy/services/prompt_registry_service.py"
       ],
       "lines": 661,
       "module": "proxy.services.notebook_service",
@@ -5574,24 +4816,6 @@
         "proxy/services/dataset_memory_service.py"
       ],
       "path": "proxy/services/notebook_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/routers/chat.py",
-        "proxy/services/chat_evidence_application_service.py",
-        "proxy/services/chat_request_service.py"
-      ],
-      "lines": 833,
-      "module": "proxy.services.notebook_study_service",
-      "outbound": [
-        "backend/runtime_paths.py",
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/notebook_service.py",
-        "proxy/services/saferag_service.py"
-      ],
-      "path": "proxy/services/notebook_study_service.py",
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
@@ -5615,17 +4839,13 @@
     {
       "inbound": [
         "backend/embedding_client.py",
-        "proxy/routers/chat.py",
         "proxy/services/canonical_route_service.py",
-        "proxy/services/chat_evidence_application_service.py",
-        "proxy/services/chat_request_service.py",
         "proxy/services/model_streaming_service.py",
         "tests/oracles/context_python.py",
         "tests/test_light_admission.py",
         "tests/test_light_embedding_762.py",
         "tests/test_light_native_model_runtime.py",
         "tests/test_light_reasoning_761.py",
-        "tests/test_model_connection_chat_integration.py",
         "tests/test_model_connection_embeddings_integration.py",
         "tests/test_openai_compatible_transport_service.py"
       ],
@@ -5650,8 +4870,6 @@
     },
     {
       "inbound": [
-        "proxy/services/chat_evidence_application_service.py",
-        "proxy/services/chat_request_service.py",
         "proxy/services/generation_guard_service.py",
         "proxy/services/request_memory_service.py"
       ],
@@ -5685,7 +4903,6 @@
       "inbound": [
         "backend/qdrant_nodes.py",
         "proxy/routers/documents.py",
-        "proxy/services/tool_harness_service.py",
         "tests/test_light_native_document.py",
         "tests/test_light_pdf_readers.py"
       ],
@@ -5714,24 +4931,6 @@
         "proxy/services/pdf_table_continuation_service.py"
       ],
       "path": "proxy/services/pdf_page_context_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/services/chat_evidence_application_service.py",
-        "tests/test_light_native_filesystem.py",
-        "tests/test_light_pdf_source_tool.py"
-      ],
-      "lines": 40,
-      "module": "proxy.services.pdf_source_evidence_service",
-      "outbound": [
-        "backend/interface.py",
-        "backend/native_core.py",
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/chat_section_context_service.py"
-      ],
-      "path": "proxy/services/pdf_source_evidence_service.py",
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
@@ -5768,19 +4967,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/settings.py"
-      ],
-      "lines": 126,
-      "module": "proxy.services.preset_service",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py"
-      ],
-      "path": "proxy/services/preset_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
         "proxy/services/runtime_dispatcher.py"
       ],
       "lines": 54,
@@ -5794,10 +4980,9 @@
     },
     {
       "inbound": [
-        "proxy/services/chat_request_service.py",
         "tests/test_answer_contract_service.py"
       ],
-      "lines": 181,
+      "lines": 180,
       "module": "proxy.services.profile_resolver",
       "outbound": [
         "proxy/__init__.py",
@@ -5809,8 +4994,7 @@
     {
       "inbound": [
         "proxy/routers/dataset_document_ops.py",
-        "proxy/services/project_pdf_extract_service.py",
-        "proxy/services/tool_harness_service.py"
+        "proxy/services/project_pdf_extract_service.py"
       ],
       "lines": 853,
       "module": "proxy.services.project_document_registry_service",
@@ -5884,8 +5068,6 @@
     {
       "inbound": [
         "proxy/routers/runtime.py",
-        "proxy/routers/workspace_memory.py",
-        "proxy/services/chat_request_service.py",
         "proxy/services/forms_service.py",
         "proxy/services/graph_edges_service.py",
         "proxy/services/les_md_service.py",
@@ -5895,8 +5077,7 @@
         "tests/test_chat_session_service.py",
         "tests/test_forest_visualizer.py",
         "tests/test_light_agent_workspace.py",
-        "tests/test_light_native_catalog.py",
-        "tests/test_workspace_memory_router.py"
+        "tests/test_light_native_catalog.py"
       ],
       "lines": 181,
       "module": "proxy.services.project_service",
@@ -5918,29 +5099,8 @@
     },
     {
       "inbound": [
-        "proxy/routers/chat.py",
-        "proxy/services/chat_evidence_application_service.py",
-        "proxy/services/chat_request_service.py"
-      ],
-      "lines": 526,
-      "module": "proxy.services.project_summary_service",
-      "outbound": [
-        "backend/rag_config.py",
-        "backend/runtime_paths.py",
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/dataset_memory_service.py",
-        "proxy/services/reconcile_service.py",
-        "proxy/services/spec_to_bor_service.py"
-      ],
-      "path": "proxy/services/project_summary_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
         "proxy/routers/dataset_document_ops.py",
-        "proxy/services/project_pdf_extract_service.py",
-        "proxy/services/tool_harness_service.py"
+        "proxy/services/project_pdf_extract_service.py"
       ],
       "lines": 564,
       "module": "proxy.services.project_table_registry_service",
@@ -5957,12 +5117,9 @@
     },
     {
       "inbound": [
-        "proxy/routers/chat.py",
-        "proxy/services/chat_evidence_application_service.py",
-        "proxy/services/chat_evidence_context.py",
-        "tests/test_light_prompt_boundary.py"
+        "proxy/services/chat_evidence_context.py"
       ],
-      "lines": 647,
+      "lines": 628,
       "module": "proxy.services.prompt_registry_service",
       "outbound": [
         "backend/product_edition.py",
@@ -5977,14 +5134,10 @@
     },
     {
       "inbound": [
-        "proxy/routers/chat.py",
-        "proxy/services/chat_evidence_application_service.py",
-        "proxy/services/chat_request_service.py",
         "proxy/services/dataset_parse_service.py",
         "proxy/services/retrieval_service.py",
         "tests/test_light_chat_sections.py",
         "tests/test_light_native_tables.py",
-        "tests/test_light_pdf_source_tool.py",
         "tests/test_light_rerank_audit.py",
         "tests/test_public_error_service.py"
       ],
@@ -6000,21 +5153,6 @@
     },
     {
       "inbound": [
-        "proxy/services/web_page_reader_service.py"
-      ],
-      "lines": 98,
-      "module": "proxy.services.public_page_reader",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py"
-      ],
-      "path": "proxy/services/public_page_reader.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/routers/chat.py",
-        "proxy/services/chat_request_service.py",
         "proxy/services/retrieval_service.py"
       ],
       "lines": 222,
@@ -6110,23 +5248,6 @@
     },
     {
       "inbound": [
-        "proxy/services/project_summary_service.py"
-      ],
-      "lines": 361,
-      "module": "proxy.services.reconcile_service",
-      "outbound": [
-        "backend/parquet_writer.py",
-        "backend/runtime_paths.py",
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/bor_service.py"
-      ],
-      "path": "proxy/services/reconcile_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/routers/chat.py",
         "proxy/routers/dataset_uploads.py"
       ],
       "lines": 197,
@@ -6140,7 +5261,6 @@
     },
     {
       "inbound": [
-        "proxy/services/chat_request_service.py",
         "proxy/services/generation_guard_service.py",
         "tests/test_light_resource_memory.py"
       ],
@@ -6215,10 +5335,7 @@
     },
     {
       "inbound": [
-        "proxy/routers/chat.py",
         "proxy/routers/dataset_search.py",
-        "proxy/services/chat_evidence_application_service.py",
-        "proxy/services/chat_request_service.py",
         "proxy/services/table_appendix_service.py",
         "tests/test_light_index_recovery.py",
         "tests/test_light_pipeline_trial.py",
@@ -6267,7 +5384,6 @@
     },
     {
       "inbound": [
-        "proxy/services/document_review_tool.py",
         "tests/test_light_document_review.py"
       ],
       "lines": 77,
@@ -6283,9 +5399,7 @@
     },
     {
       "inbound": [
-        "proxy/services/document_review_tool.py",
         "tests/test_light_document_review.py",
-        "tests/test_light_execution_receipts.py",
         "tests/test_light_native_document_review.py"
       ],
       "lines": 42,
@@ -6301,11 +5415,7 @@
     {
       "inbound": [
         "backend/runtime_memory.py",
-        "proxy/routers/chat.py",
         "proxy/routers/runtime.py",
-        "proxy/routers/workspace_memory.py",
-        "proxy/services/chat_evidence_application_service.py",
-        "proxy/services/chat_request_service.py",
         "proxy/services/dataset_parse_service.py",
         "proxy/services/generation_guard_service.py",
         "proxy/services/request_memory_service.py",
@@ -6331,22 +5441,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/settings.py"
-      ],
-      "lines": 398,
-      "module": "proxy.services.runtime_config_registry_service",
-      "outbound": [
-        "backend/runtime_paths.py",
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/llm_transport_profile_service.py"
-      ],
-      "path": "proxy/services/runtime_config_registry_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/routers/chat.py",
         "proxy/routers/jobs.py",
         "proxy/routers/mail.py",
         "proxy/routers/runtime.py",
@@ -6369,17 +5463,13 @@
     },
     {
       "inbound": [
-        "proxy/routers/chat.py",
         "proxy/services/chat_durability_service.py",
-        "proxy/services/chat_evidence_application_service.py",
         "proxy/services/chat_persistence_service.py",
         "proxy/services/evidence_packet_service.py",
-        "proxy/services/notebook_study_service.py",
         "tests/test_light_grounding_760.py",
         "tests/test_light_rerank_audit.py",
         "tests/test_retrieval_service.py",
-        "tests/test_saferag_service.py",
-        "tests/test_source_excerpts.py"
+        "tests/test_saferag_service.py"
       ],
       "lines": 352,
       "module": "proxy.services.saferag_service",
@@ -6393,8 +5483,7 @@
     },
     {
       "inbound": [
-        "proxy/routers/runtime.py",
-        "proxy/services/chat_request_service.py"
+        "proxy/routers/runtime.py"
       ],
       "lines": 299,
       "module": "proxy.services.scope_service",
@@ -6425,21 +5514,6 @@
     },
     {
       "inbound": [
-        "proxy/routers/chat.py",
-        "proxy/services/chat_request_service.py"
-      ],
-      "lines": 286,
-      "module": "proxy.services.semantic_cache",
-      "outbound": [
-        "backend/rag_config.py",
-        "proxy/__init__.py",
-        "proxy/services/__init__.py"
-      ],
-      "path": "proxy/services/semantic_cache.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
         "proxy/routers/dataset_document_ops.py"
       ],
       "lines": 502,
@@ -6451,27 +5525,6 @@
         "proxy/services/doc_type_classifier.py"
       ],
       "path": "proxy/services/sidecar_ops_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/services/tool_harness_service.py",
-        "tests/test_light_skill_compute.py",
-        "tests/test_light_skill_python_asset.py"
-      ],
-      "lines": 94,
-      "module": "proxy.services.skill_compute_service",
-      "outbound": [
-        "backend/native_core.py",
-        "backend/runtime_paths.py",
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/installed_skill_service.py",
-        "proxy/services/tool_contract_service.py",
-        "proxy/services/tool_harness_service.py",
-        "proxy/services/tool_registry_service.py"
-      ],
-      "path": "proxy/services/skill_compute_service.py",
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
@@ -6490,9 +5543,6 @@
     },
     {
       "inbound": [
-        "proxy/services/chat_evidence_application_service.py",
-        "proxy/services/chat_evidence_manifest_service.py",
-        "proxy/services/chat_evidence_tools.py",
         "proxy/services/document_clause_service.py",
         "proxy/services/evidence_packet_service.py",
         "proxy/services/saferag_service.py",
@@ -6506,22 +5556,6 @@
         "proxy/services/__init__.py"
       ],
       "path": "proxy/services/source_locator_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/services/project_summary_service.py",
-        "proxy/services/workbook_tool_service.py"
-      ],
-      "lines": 479,
-      "module": "proxy.services.spec_to_bor_service",
-      "outbound": [
-        "backend/runtime_paths.py",
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/bor_service.py"
-      ],
-      "path": "proxy/services/spec_to_bor_service.py",
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
@@ -6572,14 +5606,11 @@
     },
     {
       "inbound": [
-        "proxy/services/chat_evidence_application_service.py",
-        "tests/test_light_document_tasks.py",
-        "tests/test_light_table_windows.py"
+        "tests/test_light_document_tasks.py"
       ],
-      "lines": 157,
+      "lines": 119,
       "module": "proxy.services.table_document_tool",
       "outbound": [
-        "backend/native_core.py",
         "backend/product_edition.py",
         "backend/runtime_paths.py",
         "proxy/__init__.py",
@@ -6587,19 +5618,14 @@
         "proxy/services/chat_attachment_service.py",
         "proxy/services/document_task_store.py",
         "proxy/services/execution_receipt_service.py",
-        "proxy/services/tabular_document_service.py",
-        "proxy/services/tool_contract_service.py",
-        "proxy/services/tool_harness_service.py",
-        "proxy/services/tool_registry_service.py"
+        "proxy/services/tabular_document_service.py"
       ],
       "path": "proxy/services/table_document_tool.py",
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
       "inbound": [
-        "proxy/services/chat_evidence_application_service.py",
-        "tests/test_light_table_retrieval.py",
-        "tests/test_light_workbook_totals.py"
+        "tests/test_light_table_retrieval.py"
       ],
       "lines": 141,
       "module": "proxy.services.table_retrieval_service",
@@ -6641,8 +5667,7 @@
         "tests/test_light_document_review.py",
         "tests/test_light_document_tasks.py",
         "tests/test_light_native_workbook.py",
-        "tests/test_light_table_windows.py",
-        "tests/test_light_workbook_totals.py"
+        "tests/test_light_table_windows.py"
       ],
       "lines": 184,
       "module": "proxy.services.tabular_document_service",
@@ -6688,20 +5713,8 @@
     },
     {
       "inbound": [
-        "proxy/services/agent_workspace_tools.py",
-        "proxy/services/capability_broker_service.py",
-        "proxy/services/document_review_tool.py",
-        "proxy/services/extension_tool_service.py",
-        "proxy/services/installed_skill_service.py",
-        "proxy/services/mcp_connection_service.py",
-        "proxy/services/skill_compute_service.py",
-        "proxy/services/table_document_tool.py",
-        "proxy/services/tool_harness_service.py",
         "proxy/services/tool_registry_service.py",
         "proxy/services/trusted_executor_service.py",
-        "proxy/services/workbook_tool_service.py",
-        "proxy/services/workbook_total_service.py",
-        "tests/test_light_agent_workspace.py",
         "tests/test_light_native_tool_executor.py"
       ],
       "lines": 131,
@@ -6715,7 +5728,6 @@
     },
     {
       "inbound": [
-        "proxy/services/chat_evidence_application_service.py",
         "tests/test_light_native_rag_pipeline.py"
       ],
       "lines": 27,
@@ -6730,109 +5742,21 @@
     },
     {
       "inbound": [
-        "proxy/services/agent_workspace_tools.py",
-        "proxy/services/chat_evidence_application_service.py",
-        "proxy/services/chat_profile_service.py",
-        "proxy/services/document_review_tool.py",
-        "proxy/services/extension_tool_service.py",
-        "proxy/services/installed_skill_service.py",
-        "proxy/services/mcp_connection_service.py",
-        "proxy/services/skill_compute_service.py",
-        "proxy/services/table_document_tool.py",
-        "proxy/services/tool_registry_service.py",
-        "proxy/services/workbook_total_service.py",
-        "tests/test_light_agent_workspace.py",
-        "tests/test_light_document_review.py",
-        "tests/test_light_document_tasks.py",
-        "tests/test_light_installed_skills.py",
-        "tests/test_light_mcp_connections.py",
-        "tests/test_light_native_filesystem.py",
-        "tests/test_light_native_harness_loop.py",
-        "tests/test_light_native_mcp.py",
-        "tests/test_light_native_web.py",
-        "tests/test_light_pdf_source_tool.py",
-        "tests/test_light_workbook_totals.py",
-        "tests/test_product_edition.py",
-        "tests/test_web_search_service.py"
-      ],
-      "lines": 1275,
-      "module": "proxy.services.tool_harness_service",
-      "outbound": [
-        "backend/converter.py",
-        "backend/native_core.py",
-        "backend/pdf_reader.py",
-        "backend/product_edition.py",
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/capability_broker_service.py",
-        "proxy/services/document_clause_service.py",
-        "proxy/services/document_explorer_service.py",
-        "proxy/services/extension_tool_service.py",
-        "proxy/services/installed_skill_service.py",
-        "proxy/services/mcp_connection_service.py",
-        "proxy/services/notebook_service.py",
-        "proxy/services/pdf_contour_service.py",
-        "proxy/services/project_document_registry_service.py",
-        "proxy/services/project_table_registry_service.py",
-        "proxy/services/skill_compute_service.py",
-        "proxy/services/tool_contract_service.py",
-        "proxy/services/tool_registry_service.py",
-        "proxy/services/tool_trace_policy.py",
         "proxy/services/trusted_executor_service.py",
-        "proxy/services/web_page_reader_service.py",
-        "proxy/services/web_research_config_service.py",
-        "proxy/services/web_search_service.py",
-        "proxy/services/workbook_tool_service.py"
+        "tests/test_light_native_tool_executor.py"
       ],
-      "path": "proxy/services/tool_harness_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/services/agent_workspace_tools.py",
-        "proxy/services/capability_broker_service.py",
-        "proxy/services/document_review_tool.py",
-        "proxy/services/extension_tool_service.py",
-        "proxy/services/installed_skill_service.py",
-        "proxy/services/mcp_connection_service.py",
-        "proxy/services/skill_compute_service.py",
-        "proxy/services/table_document_tool.py",
-        "proxy/services/tool_harness_service.py",
-        "proxy/services/trusted_executor_service.py",
-        "proxy/services/workbook_tool_service.py",
-        "proxy/services/workbook_total_service.py",
-        "tests/test_light_agent_workspace.py",
-        "tests/test_light_native_tool_executor.py",
-        "tests/test_light_router_boundary.py"
-      ],
-      "lines": 82,
+      "lines": 75,
       "module": "proxy.services.tool_registry_service",
       "outbound": [
         "proxy/__init__.py",
         "proxy/services/__init__.py",
-        "proxy/services/tool_contract_service.py",
-        "proxy/services/tool_harness_service.py"
+        "proxy/services/tool_contract_service.py"
       ],
       "path": "proxy/services/tool_registry_service.py",
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
       "inbound": [
-        "proxy/services/tool_harness_service.py"
-      ],
-      "lines": 90,
-      "module": "proxy.services.tool_trace_policy",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py"
-      ],
-      "path": "proxy/services/tool_trace_policy.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/services/tool_harness_service.py",
-        "tests/test_light_agent_workspace.py",
         "tests/test_light_native_tool_executor.py"
       ],
       "lines": 236,
@@ -6849,36 +5773,12 @@
     },
     {
       "inbound": [
-        "proxy/services/chat_evidence_application_service.py",
-        "proxy/services/chat_request_service.py",
-        "tests/test_light_agent_workspace.py",
-        "tests/test_workspace_context.py"
-      ],
-      "lines": 325,
-      "module": "proxy.services.typed_memory_projection_service",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/agent_state_service.py",
-        "proxy/services/chat_session_service.py",
-        "proxy/services/context_governor_service.py",
-        "proxy/services/context_memory_service.py",
-        "proxy/services/conversation_context_service.py",
-        "proxy/services/memory_port.py",
-        "proxy/services/memory_service.py"
-      ],
-      "path": "proxy/services/typed_memory_projection_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
         "proxy/routers/runtime.py",
         "proxy/services/canonical_promotion_service.py",
-        "proxy/services/chat_request_service.py",
         "proxy/services/light_update_service.py",
         "tests/test_software_versions.py"
       ],
-      "lines": 322,
+      "lines": 315,
       "module": "proxy.services.version_service",
       "outbound": [
         "proxy/__init__.py",
@@ -6891,133 +5791,18 @@
     },
     {
       "inbound": [
-        "proxy/services/tool_harness_service.py"
+        "proxy/services/table_retrieval_service.py"
       ],
-      "lines": 235,
-      "module": "proxy.services.web_page_reader_service",
-      "outbound": [
-        "backend/http_client_policy.py",
-        "backend/product_edition.py",
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/local_model_http.py",
-        "proxy/services/public_page_reader.py",
-        "proxy/services/web_research_config_service.py"
-      ],
-      "path": "proxy/services/web_page_reader_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/routers/settings.py",
-        "proxy/services/chat_evidence_application_service.py",
-        "proxy/services/chat_evidence_tools.py",
-        "proxy/services/tool_harness_service.py",
-        "proxy/services/web_page_reader_service.py",
-        "proxy/services/web_search_service.py",
-        "tests/test_light_agent_workspace.py",
-        "tests/test_light_chat_evidence.py",
-        "tests/test_light_native_harness_loop.py",
-        "tests/test_light_native_web.py",
-        "tests/test_web_search_service.py"
-      ],
-      "lines": 122,
-      "module": "proxy.services.web_research_config_service",
-      "outbound": [
-        "backend/http_client_policy.py",
-        "proxy/__init__.py",
-        "proxy/services/__init__.py"
-      ],
-      "path": "proxy/services/web_research_config_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/services/tool_harness_service.py",
-        "tests/test_web_search_service.py"
-      ],
-      "lines": 245,
-      "module": "proxy.services.web_search_service",
-      "outbound": [
-        "backend/http_client_policy.py",
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/local_model_http.py",
-        "proxy/services/web_research_config_service.py"
-      ],
-      "path": "proxy/services/web_search_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/services/chat_evidence_application_service.py",
-        "tests/test_light_word_evidence.py"
-      ],
-      "lines": 192,
-      "module": "proxy.services.word_evidence_service",
-      "outbound": [
-        "backend/inference/lexical_tokens.py",
-        "backend/interface.py",
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/document_original_service.py"
-      ],
-      "path": "proxy/services/word_evidence_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/services/tool_harness_service.py"
-      ],
-      "lines": 478,
-      "module": "proxy.services.workbook_tool_service",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py",
-        "proxy/services/artifact_revision_service.py",
-        "proxy/services/bor_service.py",
-        "proxy/services/chat_attachment_service.py",
-        "proxy/services/spec_to_bor_service.py",
-        "proxy/services/tool_contract_service.py",
-        "proxy/services/tool_registry_service.py",
-        "proxy/services/workflow_checkpoint_service.py"
-      ],
-      "path": "proxy/services/workbook_tool_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/services/chat_evidence_application_service.py",
-        "proxy/services/table_retrieval_service.py",
-        "tests/test_light_workbook_totals.py"
-      ],
-      "lines": 106,
+      "lines": 36,
       "module": "proxy.services.workbook_total_service",
       "outbound": [
         "backend/interface.py",
         "backend/workbook_calculation.py",
         "proxy/__init__.py",
         "proxy/services/__init__.py",
-        "proxy/services/document_original_service.py",
-        "proxy/services/tabular_document_service.py",
-        "proxy/services/tool_contract_service.py",
-        "proxy/services/tool_harness_service.py",
-        "proxy/services/tool_registry_service.py"
+        "proxy/services/tabular_document_service.py"
       ],
       "path": "proxy/services/workbook_total_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [
-        "proxy/services/workbook_tool_service.py"
-      ],
-      "lines": 195,
-      "module": "proxy.services.workflow_checkpoint_service",
-      "outbound": [
-        "proxy/__init__.py",
-        "proxy/services/__init__.py"
-      ],
-      "path": "proxy/services/workflow_checkpoint_service.py",
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
@@ -7293,8 +6078,7 @@
         "tests/test_light_native_retrieval_modes.py",
         "tests/test_light_native_source_presentation.py",
         "tests/test_light_ocr.py",
-        "tests/test_light_pdf_readers.py",
-        "tests/test_light_pdf_source_tool.py"
+        "tests/test_light_pdf_readers.py"
       ],
       "lines": 66,
       "module": "tests.pdf_fixtures",
@@ -7517,25 +6301,12 @@
     },
     {
       "inbound": [],
-      "lines": 196,
+      "lines": 39,
       "module": "tests.test_light_agent_workspace",
       "outbound": [
-        "proxy/routers/agent_state.py",
         "proxy/services/agent_state_service.py",
-        "proxy/services/agent_workspace_tools.py",
-        "proxy/services/chat_evidence_context.py",
         "proxy/services/chat_session_service.py",
-        "proxy/services/context_governor_service.py",
-        "proxy/services/conversation_context_service.py",
-        "proxy/services/execution_receipt_service.py",
-        "proxy/services/memory_service.py",
-        "proxy/services/project_service.py",
-        "proxy/services/tool_contract_service.py",
-        "proxy/services/tool_harness_service.py",
-        "proxy/services/tool_registry_service.py",
-        "proxy/services/trusted_executor_service.py",
-        "proxy/services/typed_memory_projection_service.py",
-        "proxy/services/web_research_config_service.py"
+        "proxy/services/project_service.py"
       ],
       "path": "tests/test_light_agent_workspace.py",
       "status": "TEST_OR_TOOL_ONLY"
@@ -7624,20 +6395,6 @@
         "proxy/services/model_connection_resolver_service.py"
       ],
       "path": "tests/test_light_capability_refresh.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [],
-      "lines": 44,
-      "module": "tests.test_light_chat_evidence",
-      "outbound": [
-        "proxy/routers/chat.py",
-        "proxy/services/chat_evidence_application_service.py",
-        "proxy/services/chat_evidence_context.py",
-        "proxy/services/model_execution_preset_service.py",
-        "proxy/services/web_research_config_service.py"
-      ],
-      "path": "tests/test_light_chat_evidence.py",
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
@@ -7736,13 +6493,11 @@
     },
     {
       "inbound": [],
-      "lines": 138,
+      "lines": 119,
       "module": "tests.test_light_conversation_context",
       "outbound": [
         "backend/qdrant_adapter.py",
         "backend/smart_index.py",
-        "proxy/routers/workspace_memory.py",
-        "proxy/security.py",
         "proxy/services/chat_session_service.py",
         "proxy/services/conversation_context_service.py",
         "proxy/services/memory_service.py"
@@ -7776,29 +6531,25 @@
     },
     {
       "inbound": [],
-      "lines": 457,
+      "lines": 371,
       "module": "tests.test_light_document_review",
       "outbound": [
         "backend/document_catalog.py",
         "backend/interface.py",
         "proxy/services/bound_document_tools.py",
         "proxy/services/chat_evidence_context.py",
-        "proxy/services/chat_section_context_service.py",
         "proxy/services/document_review_tool.py",
-        "proxy/services/evidence_packet_service.py",
         "proxy/services/model_execution_preset_service.py",
-        "proxy/services/model_research_tool_service.py",
         "proxy/services/review_source_reader.py",
         "proxy/services/review_task_store.py",
-        "proxy/services/tabular_document_service.py",
-        "proxy/services/tool_harness_service.py"
+        "proxy/services/tabular_document_service.py"
       ],
       "path": "tests/test_light_document_review.py",
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
       "inbound": [],
-      "lines": 308,
+      "lines": 229,
       "module": "tests.test_light_document_tasks",
       "outbound": [
         "proxy/services/chat_attachment_read_service.py",
@@ -7808,22 +6559,19 @@
         "proxy/services/document_task_store.py",
         "proxy/services/model_execution_preset_service.py",
         "proxy/services/table_document_tool.py",
-        "proxy/services/tabular_document_service.py",
-        "proxy/services/tool_harness_service.py"
+        "proxy/services/tabular_document_service.py"
       ],
       "path": "tests/test_light_document_tasks.py",
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
       "inbound": [],
-      "lines": 123,
+      "lines": 81,
       "module": "tests.test_light_durable_chat",
       "outbound": [
         "backend/workspace_native.py",
-        "proxy/routers/chat.py",
         "proxy/services/chat_durability_service.py",
         "proxy/services/chat_persistence_service.py",
-        "proxy/services/chat_request_service.py",
         "proxy/services/chat_session_service.py",
         "proxy/services/conversation_context_service.py",
         "proxy/services/memory_service.py"
@@ -7873,13 +6621,11 @@
     },
     {
       "inbound": [],
-      "lines": 117,
+      "lines": 69,
       "module": "tests.test_light_execution_receipts",
       "outbound": [
         "proxy/services/chat_persistence_service.py",
-        "proxy/services/document_review_tool.py",
         "proxy/services/execution_receipt_service.py",
-        "proxy/services/review_task_store.py",
         "tests/oracles/execution_receipts_780.py"
       ],
       "path": "tests/test_light_execution_receipts.py",
@@ -7887,7 +6633,7 @@
     },
     {
       "inbound": [],
-      "lines": 38,
+      "lines": 37,
       "module": "tests.test_light_extracted_bindings",
       "outbound": [],
       "path": "tests/test_light_extracted_bindings.py",
@@ -8039,12 +6785,11 @@
     },
     {
       "inbound": [],
-      "lines": 74,
+      "lines": 50,
       "module": "tests.test_light_installed_skills",
       "outbound": [
         "proxy/services/chat_prompt_support.py",
-        "proxy/services/installed_skill_service.py",
-        "proxy/services/tool_harness_service.py"
+        "proxy/services/installed_skill_service.py"
       ],
       "path": "tests/test_light_installed_skills.py",
       "status": "TEST_OR_TOOL_ONLY"
@@ -8108,13 +6853,11 @@
     },
     {
       "inbound": [],
-      "lines": 186,
+      "lines": 161,
       "module": "tests.test_light_mcp_connections",
       "outbound": [
         "backend/native_core.py",
-        "proxy/services/chat_profile_service.py",
-        "proxy/services/mcp_connection_service.py",
-        "proxy/services/tool_harness_service.py"
+        "proxy/services/mcp_connection_service.py"
       ],
       "path": "tests/test_light_mcp_connections.py",
       "status": "TEST_OR_TOOL_ONLY"
@@ -8179,7 +6922,7 @@
         "tests/test_light_native_table_publication.py",
         "tests/test_light_native_word_window.py"
       ],
-      "lines": 911,
+      "lines": 915,
       "module": "tests.test_light_native_api",
       "outbound": [
         "backend/workspace_native.py",
@@ -8273,7 +7016,9 @@
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
-      "inbound": [],
+      "inbound": [
+        "tests/test_light_router_boundary.py"
+      ],
       "lines": 113,
       "module": "tests.test_light_native_chat_profiles",
       "outbound": [],
@@ -8520,12 +7265,10 @@
     },
     {
       "inbound": [],
-      "lines": 91,
+      "lines": 71,
       "module": "tests.test_light_native_filesystem",
       "outbound": [
-        "backend/native_core.py",
-        "proxy/services/pdf_source_evidence_service.py",
-        "proxy/services/tool_harness_service.py"
+        "backend/native_core.py"
       ],
       "path": "tests/test_light_native_filesystem.py",
       "status": "TEST_OR_TOOL_ONLY"
@@ -8593,15 +7336,10 @@
     },
     {
       "inbound": [],
-      "lines": 73,
+      "lines": 54,
       "module": "tests.test_light_native_harness_loop",
       "outbound": [
-        "proxy/services/agent_state_service.py",
-        "proxy/services/agent_workspace_tools.py",
-        "proxy/services/chat_session_service.py",
-        "proxy/services/native_research_loop_service.py",
-        "proxy/services/tool_harness_service.py",
-        "proxy/services/web_research_config_service.py"
+        "proxy/services/native_research_loop_service.py"
       ],
       "path": "tests/test_light_native_harness_loop.py",
       "status": "TEST_OR_TOOL_ONLY"
@@ -8722,11 +7460,10 @@
     },
     {
       "inbound": [],
-      "lines": 119,
+      "lines": 118,
       "module": "tests.test_light_native_mcp",
       "outbound": [
-        "proxy/services/mcp_connection_service.py",
-        "proxy/services/tool_harness_service.py"
+        "proxy/services/mcp_connection_service.py"
       ],
       "path": "tests/test_light_native_mcp.py",
       "status": "TEST_OR_TOOL_ONLY"
@@ -9087,15 +7824,9 @@
     },
     {
       "inbound": [],
-      "lines": 82,
+      "lines": 60,
       "module": "tests.test_light_native_web",
-      "outbound": [
-        "proxy/services/chat_capability_scope_service.py",
-        "proxy/services/chat_evidence_tools.py",
-        "proxy/services/local_model_http.py",
-        "proxy/services/tool_harness_service.py",
-        "proxy/services/web_research_config_service.py"
-      ],
+      "outbound": [],
       "path": "tests/test_light_native_web.py",
       "status": "TEST_OR_TOOL_ONLY"
     },
@@ -9198,23 +7929,6 @@
     },
     {
       "inbound": [],
-      "lines": 139,
-      "module": "tests.test_light_pdf_source_tool",
-      "outbound": [
-        "backend/native_core.py",
-        "backend/pdf_reader.py",
-        "proxy/services/chat_prompt_support.py",
-        "proxy/services/chat_section_context_service.py",
-        "proxy/services/pdf_source_evidence_service.py",
-        "proxy/services/public_error_service.py",
-        "proxy/services/tool_harness_service.py",
-        "tests/pdf_fixtures.py"
-      ],
-      "path": "tests/test_light_pdf_source_tool.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [],
       "lines": 69,
       "module": "tests.test_light_pipeline_trial",
       "outbound": [
@@ -9232,23 +7946,10 @@
       "lines": 119,
       "module": "tests.test_light_profile_integrity",
       "outbound": [
-        "proxy/services/chat_evidence_application_service.py",
+        "proxy/services/chat_evidence_context.py",
         "proxy/services/chat_profile_service.py"
       ],
       "path": "tests/test_light_profile_integrity.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [],
-      "lines": 37,
-      "module": "tests.test_light_prompt_boundary",
-      "outbound": [
-        "proxy/services/answer_form_service.py",
-        "proxy/services/chat_evidence_application_service.py",
-        "proxy/services/chat_profile_service.py",
-        "proxy/services/prompt_registry_service.py"
-      ],
-      "path": "tests/test_light_prompt_boundary.py",
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
@@ -9359,7 +8060,7 @@
       "lines": 8,
       "module": "tests.test_light_router_boundary",
       "outbound": [
-        "proxy/services/tool_registry_service.py"
+        "tests/test_light_native_chat_profiles.py"
       ],
       "path": "tests/test_light_router_boundary.py",
       "status": "TEST_OR_TOOL_ONLY"
@@ -9376,11 +8077,10 @@
     },
     {
       "inbound": [],
-      "lines": 87,
+      "lines": 83,
       "module": "tests.test_light_runtime_identity",
       "outbound": [
         "proxy/routers/runtime.py",
-        "proxy/services/chat_request_service.py",
         "proxy/services/model_connection_contracts.py",
         "proxy/services/model_connection_registry_service.py",
         "proxy/services/model_resource_service.py"
@@ -9423,48 +8123,14 @@
     },
     {
       "inbound": [],
-      "lines": 30,
-      "module": "tests.test_light_settings_boundary",
-      "outbound": [
-        "proxy/routers/settings.py"
-      ],
-      "path": "tests/test_light_settings_boundary.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [],
-      "lines": 55,
-      "module": "tests.test_light_skill_compute",
-      "outbound": [
-        "proxy/services/installed_skill_service.py",
-        "proxy/services/skill_compute_service.py"
-      ],
-      "path": "tests/test_light_skill_compute.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [],
-      "lines": 188,
+      "lines": 172,
       "module": "tests.test_light_skill_python_asset",
       "outbound": [
-        "proxy/services/skill_compute_service.py",
         "tools/build_light_package.py",
         "tools/light_license_audit.py",
         "tools/skill_python_asset.py"
       ],
       "path": "tests/test_light_skill_python_asset.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [],
-      "lines": 60,
-      "module": "tests.test_light_stream_lifecycle",
-      "outbound": [
-        "proxy/routers/chat.py",
-        "proxy/services/chat_persistence_service.py",
-        "proxy/services/chat_request_service.py"
-      ],
-      "path": "tests/test_light_stream_lifecycle.py",
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
@@ -9480,10 +8146,7 @@
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
-      "inbound": [
-        "tests/test_light_word_evidence.py",
-        "tests/test_light_workbook_totals.py"
-      ],
+      "inbound": [],
       "lines": 93,
       "module": "tests.test_light_table_retrieval",
       "outbound": [
@@ -9498,11 +8161,9 @@
     },
     {
       "inbound": [],
-      "lines": 82,
+      "lines": 53,
       "module": "tests.test_light_table_windows",
       "outbound": [
-        "proxy/services/document_task_store.py",
-        "proxy/services/table_document_tool.py",
         "proxy/services/table_window_service.py",
         "proxy/services/tabular_document_service.py"
       ],
@@ -9563,35 +8224,6 @@
       "module": "tests.test_light_webview",
       "outbound": [],
       "path": "tests/test_light_webview.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [],
-      "lines": 70,
-      "module": "tests.test_light_word_evidence",
-      "outbound": [
-        "backend/interface.py",
-        "proxy/services/evidence_packet_service.py",
-        "proxy/services/file_viewer_service.py",
-        "proxy/services/word_evidence_service.py",
-        "tests/test_light_table_retrieval.py"
-      ],
-      "path": "tests/test_light_word_evidence.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [],
-      "lines": 82,
-      "module": "tests.test_light_workbook_totals",
-      "outbound": [
-        "proxy/services/evidence_packet_service.py",
-        "proxy/services/table_retrieval_service.py",
-        "proxy/services/tabular_document_service.py",
-        "proxy/services/tool_harness_service.py",
-        "proxy/services/workbook_total_service.py",
-        "tests/test_light_table_retrieval.py"
-      ],
-      "path": "tests/test_light_workbook_totals.py",
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
@@ -9717,23 +8349,6 @@
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
-      "inbound": [],
-      "lines": 323,
-      "module": "tests.test_model_connection_chat_integration",
-      "outbound": [
-        "proxy/routers/chat.py",
-        "proxy/services/canonical_route_service.py",
-        "proxy/services/chat_inference_service.py",
-        "proxy/services/chat_request_contracts.py",
-        "proxy/services/chat_request_service.py",
-        "proxy/services/model_connection_contracts.py",
-        "proxy/services/model_connection_resolver_service.py",
-        "proxy/services/openai_compatible_transport_service.py"
-      ],
-      "path": "tests/test_model_connection_chat_integration.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
       "inbound": [
         "tests/test_light_native_embeddings.py"
       ],
@@ -9844,12 +8459,10 @@
     },
     {
       "inbound": [],
-      "lines": 30,
+      "lines": 15,
       "module": "tests.test_product_edition",
       "outbound": [
-        "backend/product_edition.py",
-        "proxy/services/chat_profile_service.py",
-        "proxy/services/tool_harness_service.py"
+        "backend/product_edition.py"
       ],
       "path": "tests/test_product_edition.py",
       "status": "TEST_OR_TOOL_ONLY"
@@ -9952,67 +8565,12 @@
     },
     {
       "inbound": [],
-      "lines": 131,
-      "module": "tests.test_source_excerpts",
-      "outbound": [
-        "proxy/routers/chat.py",
-        "proxy/services/saferag_service.py"
-      ],
-      "path": "tests/test_source_excerpts.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [],
-      "lines": 268,
-      "module": "tests.test_web_search_service",
-      "outbound": [
-        "proxy/services/tool_harness_service.py",
-        "proxy/services/web_research_config_service.py",
-        "proxy/services/web_search_service.py"
-      ],
-      "path": "tests/test_web_search_service.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [],
-      "lines": 213,
-      "module": "tests.test_workspace_context",
-      "outbound": [
-        "proxy/services/chat_evidence_application_service.py",
-        "proxy/services/chat_evidence_context.py",
-        "proxy/services/chat_session_service.py",
-        "proxy/services/context_governor_service.py",
-        "proxy/services/context_memory_service.py",
-        "proxy/services/conversation_context_service.py",
-        "proxy/services/memory_service.py",
-        "proxy/services/model_execution_preset_service.py",
-        "proxy/services/typed_memory_projection_service.py"
-      ],
-      "path": "tests/test_workspace_context.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [],
       "lines": 82,
       "module": "tests.test_workspace_memory",
       "outbound": [
         "proxy/services/memory_service.py"
       ],
       "path": "tests/test_workspace_memory.py",
-      "status": "TEST_OR_TOOL_ONLY"
-    },
-    {
-      "inbound": [],
-      "lines": 72,
-      "module": "tests.test_workspace_memory_router",
-      "outbound": [
-        "proxy/routers/workspace_memory.py",
-        "proxy/security.py",
-        "proxy/services/chat_session_service.py",
-        "proxy/services/memory_service.py",
-        "proxy/services/project_service.py"
-      ],
-      "path": "tests/test_workspace_memory_router.py",
       "status": "TEST_OR_TOOL_ONLY"
     },
     {
@@ -10832,9 +9390,9 @@
     "parse_warnings": 0,
     "product_reachable": 101,
     "registered_api_routes": 9,
-    "test_or_tool_only": 478,
-    "tracked_python_files": 579,
-    "tracked_python_lines": 127955
+    "test_or_tool_only": 424,
+    "tracked_python_files": 525,
+    "tracked_python_lines": 112810
   },
   "warnings": []
 }

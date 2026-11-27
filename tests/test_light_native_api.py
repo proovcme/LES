@@ -493,6 +493,7 @@ def test_native_session_history_and_draft_routes_require_authentication(gateway)
             ('GET', sessions), ('POST', sessions), ('GET', session), ('PATCH', session),
             ('GET', f'{session}/draft'), ('PUT', f'{session}/draft'),
             ('GET', '/api/chat/history'), ('GET', '/api/chat/sessions'), ('GET', '/api/chat/learning'),
+            ('GET', '/api/workspace/memory'), ('PATCH', '/api/workspace/memory/1'), ('DELETE', '/api/workspace/memory/1'),
         ]:
             assert anonymous.request(method, path).status_code == 401
     assert not database.exists()
@@ -588,6 +589,9 @@ def test_native_note_scope_update_disable_delete_and_legacy_migration(gateway):
     assert response.status_code==200 and response.headers['x-les-handler']=='rust.catalog'
     assert [row['id'] for row in response.json()['notes']]==[1]
     path='/api/workspace/memory/1'
+    assert client.patch(path, json={'text': 'Missing project scope'}).status_code == 422
+    for text in (' ', 'x' * 2001):
+        assert client.patch(path, json={'project_id': p1, 'text': text}).status_code == 422
     assert client.patch(path,json={'project_id':p2,'text':'leak'}).status_code==404
     changed=client.patch(path,json={'project_id':p1,'text':' 日本語 🌲 ','enabled':False}).json()
     assert changed['text']=='日本語 🌲' and changed['auto']==0 and changed['enabled']==0

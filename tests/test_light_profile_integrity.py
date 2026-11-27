@@ -15,7 +15,7 @@ def test_native_retrieval_limits_preserve_previous_integer_and_unicode_semantics
               'document_diversity_k':previous(value,2,1,32),'rrf_rank_constant':previous(value,10,1,1000)}
     assert profiles.effective_retrieval_policy({'rag_policy':{key:value for key in expected}})==expected
 from proxy.services import chat_profile_service as profiles
-from proxy.services.chat_evidence_application_service import profile_system_prompt
+from proxy.services.chat_evidence_context import profile_system_prompt
 
 
 def test_rrf_policy_has_one_default_and_preserves_an_explicit_profile_choice():

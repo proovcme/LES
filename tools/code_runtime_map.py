@@ -21,7 +21,7 @@ PRODUCT_ENTRYPOINTS = (
     "lemonade_host.py",
     "tools/light_document_worker.py",  # Python compatibility format worker.
 )
-FOCUS_MODULES = ("proxy/routers/chat.py",)
+FOCUS_MODULES = ("proxy/services/retrieval_service.py",)
 ROUTE_METHODS = {"delete", "get", "head", "options", "patch", "post", "put"}
 
 

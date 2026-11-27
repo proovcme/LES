@@ -73,10 +73,3 @@ class ToolRegistry:
 
     def __len__(self) -> int:
         return len(self._registrations)
-
-
-def canonical_tool_registry() -> ToolRegistry:
-    """Build the registry from existing handlers without copying their logic."""
-    from proxy.services.tool_harness_service import _build_canonical_tool_registry
-
-    return _build_canonical_tool_registry()

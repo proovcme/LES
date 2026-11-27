@@ -7,7 +7,6 @@ import pytest
 
 
 @pytest.mark.parametrize("path", [
-    "proxy/services/chat_evidence_application_service.py",
     "proxy/services/dataset_runtime.py",
     "proxy/services/dataset_parse_service.py",
     "proxy/routers/dataset_catalog.py",

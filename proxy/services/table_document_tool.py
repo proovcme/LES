@@ -1,7 +1,6 @@
 """One request-bound tool for literal table reading and resumable row work."""
 from __future__ import annotations
 
-import asyncio
 import json
 from dataclasses import dataclass, field
 from uuid import uuid4
@@ -72,43 +71,6 @@ class TableDocumentTool:
         state = response['state']
         self.task_id, self.current, self.work_requested = state['task_id'], state['current'], state['work_requested']
         return response['payload']
-
-    def register(self, harness):
-        from proxy.services.tool_contract_service import (
-            ToolContract, EffectClass, ResultBudget, RetryPolicy, IdempotencyPolicy)
-        from proxy.services.tool_registry_service import ToolRegistration
-        from proxy.services.tool_harness_service import _result
-        from backend import native_core
-        fields = native_core.required('document_tasks', request={
-            'schema': 'les.document-tasks.v1', 'action': 'contract'})['value']
-        fields['effect'] = EffectClass(fields['effect'])
-        fields['retry'] = RetryPolicy(fields['retry'])
-        fields['idempotency'] = IdempotencyPolicy(fields['idempotency'])
-        fields['result_budget'] = ResultBudget(**fields['result_budget'])
-        contract = ToolContract(**fields)
-
-        async def handler(arguments):
-            call_id = 'table_' + uuid4().hex
-            error = None
-            try:
-                payload = await asyncio.to_thread(self.execute, arguments)
-            except Exception as exc:
-                error = str(exc)
-                raise
-            finally:
-                self.last_exchange = [
-                    {'role': 'assistant', 'content': None, 'tool_calls': [
-                        {'id': call_id, 'type': 'function', 'function': {
-                            'name': TOOL_NAME, 'arguments': encode(arguments)}}]},
-                    {'role': 'tool', 'tool_call_id': call_id, 'name': TOOL_NAME,
-                     'content': encode({'status': 'error' if error else 'ok', 'error': error,
-                                        'document_state': self.context()})}]
-            return _result(tool=TOOL_NAME, operation=arguments['operation'], inputs=[], status='ok',
-                           result=payload, trace='scoped_document_task')
-
-        registration = ToolRegistration(contract=contract, handler=handler)
-        harness._registry.register(registration)
-        return contract.public_payload()
 
 
 def bind_table_tool(req, *, dataset_ids, profile_revision, model_revision, input_budget):

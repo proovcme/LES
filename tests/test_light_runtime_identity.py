@@ -6,7 +6,6 @@ import pytest
 
 from proxy.routers import runtime
 from proxy.services import model_connection_registry_service as registry_module
-from proxy.services.chat_request_service import _version_stamp
 from proxy.services.model_connection_contracts import ConnectionLocality, ConnectionRole
 
 
@@ -21,9 +20,6 @@ def registry(tmp_path, monkeypatch):
 
 def test_unassigned_role_does_not_advertise_environment_model(registry):
     assert runtime._provider_status() == {'provider': 'unassigned', 'base_url': '', 'model': ''}
-    stamp = _version_stamp()
-    assert stamp['llm_model'] == 'unknown'
-    assert 'norm_base' not in stamp
 
 
 def test_status_describes_bound_revision_even_after_connection_edit(registry):

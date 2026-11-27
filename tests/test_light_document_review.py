@@ -9,11 +9,10 @@ import pytest
 
 from proxy.services.review_task_store import ReviewTaskStore
 from proxy.services.review_source_reader import ReviewSourceReader, read_fragment
-from proxy.services.document_review_tool import DocumentReviewTool, bind_review_tool
-from proxy.services.tool_harness_service import ToolHarness
+from proxy.services.document_review_tool import DocumentReviewTool
 from proxy.services.chat_evidence_context import govern_inference_messages
 from proxy.services.model_execution_preset_service import _FACTORY_9B
-from proxy.services.bound_document_tools import document_tool_context, bound_contract_shortlist
+from proxy.services.bound_document_tools import document_tool_context
 
 
 def snapshot(text='Условие: не менее 12 м.', revision='v1'):
@@ -242,94 +241,6 @@ def test_bounded_fragment_cursors_never_skip_unicode():
         read_fragment(snap, offset=True)
 
 
-def test_harness_context_delivery_resume_and_real_source_invalidation(tmp_path, monkeypatch):
-    monkeypatch.setenv('LES_PRODUCT_EDITION', 'light')
-    adapter, path, row, point = backend(tmp_path)
-    store = ReviewTaskStore(tmp_path/'tasks.db')
-    tool = DocumentReviewTool(store, ReviewSourceReader(adapter, ['D']), 'owner', 'Проверить раздел')
-    harness = ToolHarness(); tool.register(harness)
-    def call(arguments):
-        return asyncio.run(harness.call_async('document_review', arguments))
-    started = call({'operation': 'start', 'selectors': [{'dataset_id': 'D', 'file_name': 'source.txt', 'parent_id': 's1'}]})
-    assert started['status'] == 'ok'
-    state = started['result']; unit = state['units'][0]['unit_id']
-    assert tool.context()['next_action']['operation'] == 'read'
-    read = call({'operation': 'read', 'unit_id': unit})['result']
-    assert tool.context()['next_action']['operation'] == 'record'
-    args = {'operation': 'record', 'unit_id': unit, 'request_id': 'one', 'expected_revision': 0,
-            'source_fingerprint': read['source_fingerprint'], 'status': 'reviewed', 'note': 'Указано 12 м',
-            'evidence': [{'fragment_id': read['fragment_id'], 'quote': '12 м'}]}
-    assert call(args)['status'] == 'error'  # A tool call alone is not model delivery.
-    call({'operation': 'read', 'unit_id': unit})
-    messages, _ = govern_inference_messages(preset=_FACTORY_9B, profile_prefix='Read',
-        request_payload='Review', **document_tool_context(tool))
-    tool.acknowledge_model_context(messages)
-    saved = call(args)
-    assert saved['status'] == 'ok' and saved['result']['coverage_complete']
-    assert tool.context()['next_action']['operation'] == 'finish_or_status'
-    assert tool.last_chunks == ()
-    resumed = DocumentReviewTool(ReviewTaskStore(store.path), tool.reader, 'owner', 'Продолжи')
-    status = asyncio.run(resumed.execute({'operation': 'status', 'task_id': state['task_id']}))
-    assert status['reviewed'] == 1
-    path.write_text('Источник изменён', encoding='utf-8')
-    status = asyncio.run(resumed.execute({'operation': 'status', 'task_id': state['task_id']}))
-    assert status['needs_recheck'] == 1 and status['source_errors'] and not status['coverage_complete']
-    assert store.history('owner', state['task_id'])['events'][0]['observation']['note'] == 'Указано 12 м'
-
-
-def test_context_and_profile_binding_do_not_leak_reviews(tmp_path, monkeypatch):
-    monkeypatch.setenv('LES_PRODUCT_EDITION', 'light')
-    monkeypatch.setenv('LES_WINDOWS_STATE_ROOT', str(tmp_path/'state'))
-    adapter, _, _, _ = backend(tmp_path)
-    req = SimpleNamespace(session_id='s1', question='Проверить', project_id='p', scope={})
-    options = {'dataset_ids': ['D'], 'profile_revision': 'p1', 'model_revision': 'm1', 'input_budget': 8192}
-    a = bind_review_tool(req, adapter, **options)
-    asyncio.run(a.execute({'operation': 'start', 'selectors': [{'dataset_id': 'D', 'file_name': 'source.txt'}]}))
-    assert bind_review_tool(req, adapter, **options).store.recent_reviews(a.owner)
-    b = bind_review_tool(req, adapter, **{**options, 'model_revision': 'm2'})
-    assert b.store.recent_reviews(b.owner) == []
-    with pytest.raises(ValueError):
-        b.store.task(b.owner, a.task_id)
-    assert bind_review_tool(req, adapter, **{**options, 'dataset_ids': []}) is None
-    assert bind_review_tool(req, adapter, **options, available_slots=0) is None
-    shortlist = {'tools': [{'name': 'search_sources'}, {'name': 'other'}]}
-    assert bound_contract_shortlist(shortlist, [None, {'name': 'document_review'}], 2) == {'document_review', 'search_sources'}
-    assert len(document_tool_context(a, b)['required_evidence']) == 2
-
-
-def test_review_reads_use_the_main_evidence_reader_and_model_context(tmp_path, monkeypatch):
-    from proxy.services.model_research_tool_service import ModelResearchToolService, ModelResearchToolResult
-    from proxy.services.chat_section_context_service import ChatSectionReader
-    from proxy.services.evidence_packet_service import build_retrieval_evidence_packet, render_retrieval_evidence_for_model
-    monkeypatch.setenv('LES_PRODUCT_EDITION', 'light')
-    adapter, _, _, point = backend(tmp_path)
-    async def retrieve(**kwargs):
-        return [point]
-    adapter.aclient.retrieve = retrieve
-    tool = DocumentReviewTool(ReviewTaskStore(tmp_path/'tasks.db'), ReviewSourceReader(adapter, ['D']), 'owner', 'Проверка')
-    harness = ToolHarness(); tool.register(harness)
-    asyncio.run(harness.call_async('document_review', {'operation': 'start',
-        'selectors': [{'dataset_id': 'D', 'file_name': 'source.txt', 'parent_id': 's1'}]}))
-    async def fallback(name, args):
-        payload = await harness.call_async(name, args)
-        return ModelResearchToolResult(payload, tool.last_chunks)
-    service = ModelResearchToolService(retrieve=retrieve, frozen_dataset_ids=('D',), retrieval_kwargs={}, fallback=fallback)
-    result = asyncio.run(service.execute({'tool': 'document_review', 'args': {'operation': 'read'}}))
-    assert result.payload['status'] == 'ok' and len(result.chunks) == 1
-    sections = asyncio.run(ChatSectionReader(adapter, ['D']).expand(list(result.chunks)))
-    packet = build_retrieval_evidence_packet(question='Проверка', chunks=sections.chunks, retrieval_trace={})
-    rendered = render_retrieval_evidence_for_model(packet, max_chars=6000, include_metadata=True)
-    assert '12 м' in rendered and 'source.txt' in rendered
-    messages, _ = govern_inference_messages(preset=_FACTORY_9B, profile_prefix='Read', request_payload='Проверка',
-                                           **document_tool_context(tool))
-    tool.acknowledge_model_context([])
-    assert tool.delivery_revision == 0  # A clipped/unsent tool pair is never credited.
-    tool.acknowledge_model_context(messages)
-    assert tool.delivery_revision == 1
-    tool.acknowledge_model_context(messages)
-    assert tool.delivery_revision == 1
-
-
 def test_index_generation_cache_reuses_only_verified_unchanged_units(tmp_path):
     adapter, path, row, _ = backend(tmp_path)
     class Journal:
@@ -377,22 +288,25 @@ def test_native_qdrant_review_filters_and_resumes_without_a_model(tmp_path, monk
             reader = ReviewSourceReader(adapter, ['D'])
             store = ReviewTaskStore(tmp_path/'native-tasks.db')
             tool = DocumentReviewTool(store, reader, 'owner', 'Проверить')
-            harness = ToolHarness(); tool.register(harness)
-            started = await harness.call_async('document_review', {'operation': 'start',
+            async def execute(arguments):
+                payload = await tool.execute(arguments)
+                tool.remember(arguments, payload)
+                return payload
+
+            started = await execute({'operation': 'start',
                 'selectors': [{'dataset_id': 'D', 'file_name': 'source.txt'}]})
-            assert started['status'] == 'ok'
-            read = await harness.call_async('document_review', {'operation': 'read'})
-            data = read['result']
+            assert started['task_id']
+            data = await execute({'operation': 'read'})
             assert data['fragment_count'] == 1 and data['text'] == 'Требуется 12 м.'
             messages, _ = govern_inference_messages(preset=_FACTORY_9B, profile_prefix='Read', request_payload='Проверить',
                                                    **document_tool_context(tool))
             tool.acknowledge_model_context(messages)
-            saved = await harness.call_async('document_review', {'operation': 'record', 'request_id': 'save',
+            saved = await execute({'operation': 'record', 'request_id': 'save',
                 'expected_revision': 0, 'unit_id': data['unit_id'], 'source_fingerprint': data['source_fingerprint'],
                 'status': 'reviewed', 'note': 'Модель прочитала требование',
                 'evidence': [{'fragment_id': data['fragment_id'], 'quote': '12 м'}]})
-            assert saved['result']['coverage_complete']
-            task_id = saved['result']['task_id']
+            assert saved['coverage_complete']
+            task_id = saved['task_id']
             restarted = DocumentReviewTool(ReviewTaskStore(store.path), reader, 'owner', 'Продолжить')
             assert (await restarted.execute({'operation': 'status', 'task_id': task_id}))['reviewed'] == 1
             path.write_bytes(b'X' + path.read_bytes()[1:])

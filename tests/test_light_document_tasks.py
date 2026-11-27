@@ -1,7 +1,6 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
-import json
 from types import SimpleNamespace
 
 import pytest
@@ -9,7 +8,7 @@ from openpyxl import Workbook
 
 from proxy.services.document_task_store import DocumentTaskStore
 from proxy.services.tabular_document_service import read_table, preview, encode
-from proxy.services.table_document_tool import bind_table_tool, without_table_replays, TableDocumentTool
+from proxy.services.table_document_tool import bind_table_tool
 
 
 def workbook(path, count=70):
@@ -220,28 +219,6 @@ def test_concurrent_redelivery_does_not_double_count(tmp_path):
     assert store.status('scope', task)['revision'] == 1
 
 
-def test_bound_tool_executes_through_real_harness_and_context_stays_bounded(tmp_path, monkeypatch):
-    monkeypatch.setenv('LES_PRODUCT_EDITION', 'light')
-    monkeypatch.setenv('LES_WINDOWS_STATE_ROOT', str(tmp_path/'state'))
-    from proxy.services.tool_harness_service import ToolHarness
-    doc = workbook(tmp_path/'source.xlsx', 70)
-    store = DocumentTaskStore(tmp_path/'tasks.db'); task = store.open('scope', 'Check', doc)
-    tool = TableDocumentTool(store, 'scope', task, doc, 4000)
-    harness = ToolHarness(); tool.register(harness)
-    logs = []
-    while tool.state()['pending']:
-        payload = asyncio.run(harness.call_async('table_document', {'operation': 'next'}))
-        assert payload['status'] == 'ok', payload
-        packet = payload['result']; logs.append(payload)
-        saved = asyncio.run(harness.call_async('table_document', {
-            'operation': 'record', 'packet_id': packet['packet_id'], 'decisions': decisions(packet)}))
-        assert saved['status'] == 'ok', saved
-        logs.append(saved)
-        assert len(encode(tool.context())) < 2000
-    assert without_table_replays(logs) == []
-    assert tool.state()['coverage_complete']
-
-
 def test_current_packet_is_mandatory_and_never_sliced():
     from proxy.services.chat_evidence_context import govern_inference_messages
     from proxy.services.model_execution_preset_service import _FACTORY_9B
@@ -250,59 +227,3 @@ def test_current_packet_is_mandatory_and_never_sliced():
     with pytest.raises(ContextRequiredSectionOverflow):
         govern_inference_messages(preset=preset, profile_prefix='Read', request_payload='Check',
                                   required_evidence=[{'cell': 'Ж' * 10000}])
-
-
-def test_model_sees_started_task_and_next_action_without_replayed_history(tmp_path):
-    doc = workbook(tmp_path/'table.xlsx', 1)
-    store = DocumentTaskStore(tmp_path/'tasks.db'); task = store.open('scope', 'Check', doc)
-    tool = TableDocumentTool(store, 'scope', task, doc, 4000, question='Check')
-    assert '0 из 2' in tool.coverage_notice()
-    assert tool.context()['task_is_for_current_question'] is True
-    assert tool.context()['next_action_for_active_task'] == 'next'
-    with pytest.raises(ValueError, match='already started'):
-        tool.execute({'operation': 'start'})
-    assert tool.context()['next_action_for_active_task'] == 'next'
-    packet = tool.execute({'operation': 'next'})
-    with pytest.raises(ValueError, match='Use record'):
-        tool.execute({'operation': 'start'})
-    assert tool.context()['current_read']['packet_id'] == packet['packet_id']
-    assert tool.context()['next_action_for_active_task'] == 'record'
-    tool.execute({'operation': 'record', 'packet_id': packet['packet_id'], 'decisions': decisions(packet)})
-    assert tool.context()['next_action_for_active_task'] == 'finish_or_read_results'
-    assert tool.coverage_notice() == ''
-    tool.question = 'Different objective'
-    assert tool.context()['task_is_for_current_question'] is False
-
-
-def test_native_tool_turn_is_bounded_and_record_uses_server_owned_packet(tmp_path, monkeypatch):
-    from proxy.services.tool_harness_service import ToolHarness
-    from proxy.services.chat_evidence_context import govern_inference_messages
-    from proxy.services.model_execution_preset_service import _FACTORY_9B
-    from proxy.services.context_governor_service import ContextRequiredSectionOverflow
-    monkeypatch.setenv('LES_PRODUCT_EDITION', 'light')
-    doc = workbook(tmp_path/'source.xlsx', 1)
-    store = DocumentTaskStore(tmp_path/'tasks.db'); task = store.open('scope', 'Check', doc)
-    tool = TableDocumentTool(store, 'scope', task, doc, 4000, question='Check')
-    harness = ToolHarness(); tool.register(harness)
-    packet = asyncio.run(harness.call_async('table_document', {'operation': 'next'}))['result']
-    messages, _ = govern_inference_messages(preset=_FACTORY_9B, profile_prefix='Read',
-                                            request_payload='Check', **tool.model_context())
-    assert messages[-2]['role'] == 'assistant' and messages[-1]['role'] == 'tool'
-    assert messages[-2]['tool_calls'][0]['id'] == messages[-1]['tool_call_id']
-    assert packet['packet_id'] in messages[-1]['content']
-    wrong = [{**row, 'cells': ['cell content']} for row in decisions(packet)]
-    rejected = asyncio.run(harness.call_async('table_document', {'operation': 'record', 'decisions': wrong}))
-    assert rejected['status'] == 'error'
-    tool.remember_validation_failure({'operation': 'record', 'decisions': wrong}, rejected)
-    assert json.loads(tool.last_exchange[-1]['content'])['status'] == 'error'
-    assert tool.state()['pending'] == 2
-    with pytest.raises(ContextRequiredSectionOverflow):
-        govern_inference_messages(preset=replace(_FACTORY_9B, input_token_limit=100),
-                                  profile_prefix='Read', request_payload='Check', **tool.model_context())
-    failed = asyncio.run(harness.call_async('table_document', {'operation': 'record', 'packet_id': 'fake',
-                                'decisions': decisions(packet)}))
-    assert failed['status'] == 'error' and tool.state()['pending'] == 2
-    assert json.loads(tool.last_exchange[-1]['content'])['status'] == 'error'
-    saved = asyncio.run(harness.call_async('table_document', {'operation': 'record', 'decisions': decisions(packet)}))
-    assert saved['status'] == 'ok' and tool.state()['coverage_complete']
-    assert len(tool.last_exchange) == 2 and 'fake' not in tool.last_exchange[-1]['content']
